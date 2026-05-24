@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  REGISTRY: ghcr.io
+  IMAGE_APP: ghcr.io/ptinkler/pollo-api
+  IMAGE_NGX: ghcr.io/ptinkler/pollo-nginx
+
+jobs:
+  test-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1 libglib2.0-0 libsm6 libxext6
+
+      - name: Install Python deps
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run Python tests
+        run: python -m pytest
+
+  test-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Install deps
+        working-directory: web/frontend
+        run: npm install
+
+      - name: Run frontend tests
+        working-directory: web/frontend
+        run: npm test
+
+  build-and-push:
+    needs: [test-python, test-frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: build-and-push
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Bump version tag
+        id: tag
+        run: |
+          LATEST=$(git tag --sort=-version:refname | head -1 || echo "v0.0.0")
+          PATCH=$(echo "$LATEST" | awk -F. '{print $3+1}')
+          NEXT=$(echo "$LATEST" | awk -F. -v p="$PATCH" '{print $1"."$2"."p}')
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+          git tag "$NEXT"
+          git push origin "$NEXT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push app image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_APP }}:latest
+            ${{ env.IMAGE_APP }}:${{ steps.tag.outputs.version }}
+
+      - name: Build and push nginx image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: nginx/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NGX }}:latest
+            ${{ env.IMAGE_NGX }}:${{ steps.tag.outputs.version }}

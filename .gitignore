@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# IDE
+.vscode/
+.idea/*
+!.idea/runConfigurations/
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.docker
+.coverage
+# Data
+data/
+
+# Projects
+projects/
+assets/
+
+# Claude Code local overrides
+.claude/settings.local.json
+
+# Virtualenv
+.venv/
+
+# Node.js / Vue frontend
+node_modules/
+web/frontend/node_modules/
+web/static/
+*.local
+# Build artifacts
+dist/
+.vite/
+/web/frontend/coverage/

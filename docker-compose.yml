@@ -1,0 +1,79 @@
+name: pollo-api
+
+# Select stack via COMPOSE_PROFILES in .env:
+#   COMPOSE_PROFILES=novpn   — direct, no VPN (default)
+#   COMPOSE_PROFILES=vpn     — all traffic routed through gluetun
+
+services:
+
+  # ── No-VPN stack ────────────────────────────────────────────────────
+  app:
+    profiles: [novpn]
+    image: ghcr.io/ptinkler/pollo-api:latest
+    user: "${PUID}:${PGID}"
+    pull_policy: always
+    restart: unless-stopped
+    volumes:
+      - ${POLLO_HOST_DATA_DIR}:/data
+    env_file:
+      - .env
+
+  nginx:
+    profiles: [novpn]
+    image: ghcr.io/ptinkler/pollo-nginx:latest
+    pull_policy: always
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:80"
+    depends_on:
+      app:
+        condition: service_started
+
+  # ── VPN stack (via gluetun) ─────────────────────────────────────────
+  gluetun:
+    profiles: [vpn]
+    image: qmcgaw/gluetun
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ./gluetun:/gluetun
+    env_file:
+      - .env
+    ports:
+      - "${APP_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "/gluetun-entrypoint", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  app-vpn:
+    profiles: [vpn]
+    image: ghcr.io/ptinkler/pollo-api:latest
+    user: "${PUID}:${PGID}"
+    pull_policy: always
+    restart: unless-stopped
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    volumes:
+      - ${POLLO_HOST_DATA_DIR}:/data
+    env_file:
+      - .env
+
+  nginx-vpn:
+    profiles: [vpn]
+    image: ghcr.io/ptinkler/pollo-nginx:latest
+    pull_policy: always
+    restart: unless-stopped
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+      app-vpn:
+        condition: service_started

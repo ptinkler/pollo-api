@@ -1,0 +1,37 @@
+# Version control
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+.env
+.coverage
+
+# IDE
+.vscode/
+.idea/
+
+# Data (mounted as volume)
+data/
+assets/
+cache/
+
+# Node
+web/frontend/node_modules/
+web/static/
+
+# Build artifacts
+dist/
+.vite/
+
+# Tests
+tests/
+pytest.ini
+
+# Docker
+Dockerfile
+docker-compose.yml
+
