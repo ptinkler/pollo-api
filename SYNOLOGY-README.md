@@ -80,7 +80,6 @@ WIREGUARD_PRIVATE_KEY=your_wireguard_key_here
 WIREGUARD_ADDRESSES=10.x.x.x/16
 SERVER_COUNTRIES=your_country
 GLUETUN_API_KEY=your_gluetun_api_key_here
-HTTP_CONTROL_SERVER_AUTH_DEFAULT_ROLE={"auth":"apikey","apikey":"your_gluetun_api_key_here"}
 TZ=UTC
 ```
 
@@ -116,7 +115,7 @@ The repository includes `synology-boot.sh` which is designed to be used with DSM
 
 - Installs an HTTP→HTTPS redirect into DSM's nginx for the project's hostname (so plain HTTP is redirected to HTTPS).
 - Waits for the Docker daemon then stops any half-started containers belonging to project `pollo-api` that Docker's restart policy might have left in a broken state.
-- Runs `docker compose up -d` (or `docker compose -f docker-compose.vpn.yml up -d` for VPN mode) to bring the stack up respecting `depends_on` and `healthcheck` ordering.
+- Runs `docker compose up -d`, respecting `COMPOSE_PROFILES` from `.env` (`novpn` or `vpn`), to bring the stack up respecting `depends_on` and `healthcheck` ordering.
 
 Before using the script:
 

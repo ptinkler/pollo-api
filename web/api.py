@@ -17,7 +17,9 @@ from typing import Any, Callable, Optional, TypedDict
 from contextlib import asynccontextmanager
 
 import requests as _requests
-from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Cookie
+import io as _io
+from PIL import Image as _PILImage
+from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Cookie, Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -262,17 +264,18 @@ COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
 
 
 @app.post("/api/auth/login")
-async def api_auth_login(data: LoginRequest, response: Response):
+async def api_auth_login(data: LoginRequest, response: Response, request: Request):
     key = data.key.strip()
     auth_keys = get_api_keys()
     if auth_keys and key not in auth_keys:
         raise HTTPException(status_code=401, detail="Invalid API key")
+    is_https = request.headers.get("x-forwarded-proto", "").lower() == "https"
     response.set_cookie(
         key=COOKIE_NAME,
         value=key,
         httponly=True,
         samesite="strict",
-        secure=True,
+        secure=is_https,
         max_age=COOKIE_MAX_AGE,
     )
     return {"ok": True}
@@ -1099,7 +1102,7 @@ def _download_recovered_job(job_id: str, video_url: str):
 
 
 @app.get("/api/jobs/{job_id}")
-def api_job_status(job_id: str):
+def api_job_status(job_id: str, _api_key: str = Depends(verify_api_key)):
     job = get_db().get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -1247,7 +1250,7 @@ def api_download_job_video(job_id: str, _api_key: str = Depends(verify_api_key))
 
 
 @app.get("/api/jobs")
-def api_jobs(status: str | None = None, project: str | None = None, active: bool | None = None):
+def api_jobs(status: str | None = None, project: str | None = None, active: bool | None = None, _api_key: str = Depends(verify_api_key)):
     """All jobs (optionally filter by status, project, or active state)."""
     db = get_db()
     if active:
@@ -1367,7 +1370,7 @@ def api_unarchive_job(job_id: str, _api_key: str = Depends(verify_api_key)):
 # ── Projects ────────────────────────────────────────────────────────
 
 @app.get("/api/projects")
-def api_list_projects(archived: bool | None = None):
+def api_list_projects(archived: bool | None = None, _api_key: str = Depends(verify_api_key)):
     db = get_db()
     projects = db.get_all_projects(archived=archived)
     result = []
@@ -1412,7 +1415,7 @@ def api_list_projects(archived: bool | None = None):
 
 
 @app.get("/api/projects/{project}")
-def api_get_project(project: str, archived: bool | None = None):
+def api_get_project(project: str, archived: bool | None = None, _api_key: str = Depends(verify_api_key)):
     db = get_db()
     proj = db.get_project_by_slug(project)
     if not proj:
@@ -2019,6 +2022,13 @@ async def _save_uploaded_image(project: str, file: UploadFile, prefix: str) -> d
             detail=f"Image too large ({len(data) // 1024 // 1024}MB). Max: {SOURCE_IMAGE_MAX_SIZE // 1024 // 1024}MB",
         )
 
+    # Validate actual file content regardless of client-supplied content-type
+    try:
+        img = _PILImage.open(_io.BytesIO(data))
+        img.verify()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid image file — could not be parsed as an image")
+
     assets_path = ASSETS_DIR / proj.assets_folder
     assets_path.mkdir(parents=True, exist_ok=True)
 
@@ -2060,7 +2070,7 @@ async def api_upload_source_image(project: str, file: UploadFile = File(...), _a
 
 
 @app.get("/api/projects/{project}/source-image")
-def api_get_source_image(project: str, f: str | None = None):
+def api_get_source_image(project: str, f: str | None = None, _api_key: str = Depends(verify_api_key)):
     """Serve a project's uploaded source image.
 
     If ?f=filename is given, serve that specific file.
@@ -2182,16 +2192,14 @@ def resume_polling_job(job):
         results = _poll_task(job.job_id, job.task_id, api_key,
                              on_poll=_check_already_resolved)
 
-        # Check if we aborted because the job was recovered to done-without-file
         if results is None:
+            # Polling aborted — check if job was recovered to done-without-file
             current = db.get_job(job.job_id)
-            if current and current.status == "done" and current.video_url and not current.video_path:
-                url = current.video_url
-                print(f"[Job {job.job_id}] Recovered to done without video, downloading...", flush=True)
-            else:
-                return  # Error already recorded or job resolved by another path
-
-        if results is not None:
+            if not (current and current.status == "done" and current.video_url and not current.video_path):
+                return  # Error already recorded or job fully resolved by another path
+            url = current.video_url
+            print(f"[Job {job.job_id}] Recovered to done without video, downloading...", flush=True)
+        else:
             video_urls = [r[2] for r in results if r[0] in SUCCESS_STATUSES and r[2]]
             if not video_urls:
                 db.update_job(job.job_id, status="error", message="No video URL in result")
@@ -2247,7 +2255,7 @@ def _gluetun_put(path: str, body: dict, timeout: int = 5):
 
 
 @app.get("/api/vpn/status")
-def vpn_status():
+def vpn_status(_api_key: str = Depends(verify_api_key)):
     """Get current VPN status, public IP, and settings from Gluetun."""
     out: dict[str, Any] = {}
     # VPN tunnel status
