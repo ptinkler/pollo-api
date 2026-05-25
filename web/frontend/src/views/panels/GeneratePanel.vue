@@ -71,8 +71,21 @@ async function handleFileUpload(event) {
 
   isUploading.value = true
   try {
-    const result = await uploadSourceImage(props.project, file)
+    const [result, bitmap] = await Promise.all([
+      uploadSourceImage(props.project, file),
+      createImageBitmap(file),
+    ])
     settings.value.image_url = result.image_url  // "local:src-abc123.jpg"
+    if (modelRatios.value.length) {
+      const { width, height } = bitmap
+      bitmap.close()
+      const imageRatio = width / height
+      settings.value.aspect_ratio = modelRatios.value.reduce((best, r) => {
+        const [a, b] = r.split(':').map(Number)
+        const [ba, bb] = best.split(':').map(Number)
+        return Math.abs(a / b - imageRatio) < Math.abs(ba / bb - imageRatio) ? r : best
+      })
+    }
     showToast('Source image uploaded', 'success')
   } catch (err) {
     showToast('Upload failed: ' + err.message, 'error')
