@@ -1906,35 +1906,26 @@ def _get_local_image_path(assets_path: Path, image_url: str) -> Path | None:
 
 def _upload_to_litterbox(filepath: Path) -> str:
     """Upload a file to litterbox.catbox.moe and return the public URL.
-    Retries once on SSL errors, then raises ValueError with a clear cause."""
-    max_retries = 2
-    last_exc: Exception | None = None
+    Fails fast (12 s timeout, no retry) so VPN/Cloudflare blocks surface immediately."""
+    try:
+        with open(filepath, "rb") as f:
+            resp = _requests.post(
+                LITTERBOX_URL,
+                data={"reqtype": "fileupload", "time": LITTERBOX_EXPIRY},
+                files={"fileToUpload": (filepath.name, f)},
+                timeout=(8, 60),  # (connect, read) — connect fails fast on VPN block, read allows large uploads
+            )
 
-    for attempt in range(max_retries):
-        try:
-            with open(filepath, "rb") as f:
-                resp = _requests.post(
-                    LITTERBOX_URL,
-                    data={"reqtype": "fileupload", "time": LITTERBOX_EXPIRY},
-                    files={"fileToUpload": (filepath.name, f)},
-                    timeout=60,
-                )
+        if resp.status_code != 200 or not resp.text.startswith("https://"):
+            raise ValueError(f"Litterbox upload failed (HTTP {resp.status_code})")
 
-            if resp.status_code != 200 or not resp.text.startswith("https://"):
-                raise ValueError(f"Litterbox upload failed (HTTP {resp.status_code})")
-
-            return resp.text.strip()
-        except (
-            _requests.exceptions.SSLError,
-            _requests.exceptions.ConnectionError,
-        ) as exc:
-            last_exc = exc
-            if attempt < max_retries - 1:
-                time.sleep(2)
-
-    raise ValueError(
-        f"Litterbox upload failed — SSL/connection error: {last_exc}"
-    )
+        return resp.text.strip()
+    except (
+        _requests.exceptions.SSLError,
+        _requests.exceptions.ConnectionError,
+        _requests.exceptions.Timeout,
+    ) as exc:
+        raise ValueError(f"Litterbox upload failed — {exc}") from exc
 
 
 def _parse_litterbox_expiry(expiry: str) -> int:
