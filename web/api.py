@@ -1913,19 +1913,27 @@ def _upload_to_litterbox(filepath: Path) -> str:
                 LITTERBOX_URL,
                 data={"reqtype": "fileupload", "time": LITTERBOX_EXPIRY},
                 files={"fileToUpload": (filepath.name, f)},
-                timeout=(8, 60),  # (connect, read) — connect fails fast on VPN block, read allows large uploads
+                timeout=(8, 15),  # (connect, read) — read is server response time only, not upload duration
             )
 
         if resp.status_code != 200 or not resp.text.startswith("https://"):
-            raise ValueError(f"Litterbox upload failed (HTTP {resp.status_code})")
+            body = resp.text[:200].strip()
+            reason = f"HTTP {resp.status_code}" + (f" — {body}" if body else "")
+            print(f"[Litterbox] Upload failed — {reason}")
+            raise ValueError(f"Litterbox upload failed — {reason}")
 
         return resp.text.strip()
+    except _requests.exceptions.Timeout as exc:
+        reason = f"timed out ({exc})"
+        print(f"[Litterbox] Upload failed — {reason}")
+        raise ValueError(f"Litterbox upload timed out — cycle VPN if blocked") from exc
     except (
         _requests.exceptions.SSLError,
         _requests.exceptions.ConnectionError,
-        _requests.exceptions.Timeout,
     ) as exc:
-        raise ValueError(f"Litterbox upload failed — {exc}") from exc
+        reason = f"{type(exc).__name__}: {exc}"
+        print(f"[Litterbox] Upload failed — {reason}")
+        raise ValueError(f"Litterbox upload failed — {reason}") from exc
 
 
 def _parse_litterbox_expiry(expiry: str) -> int:
