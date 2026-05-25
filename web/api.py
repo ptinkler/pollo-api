@@ -805,6 +805,7 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
     # can prefer the uploaded URL while it's still valid and fall back to the local file afterwards.
     uploaded_image_url = None
     local_image_ref = None
+    source_image_path: Path | None = None
     if image_url and image_url.startswith("local:"):
         assets_path = ASSETS_DIR / project.assets_folder
         source = _get_local_image_path(assets_path, image_url)
@@ -815,6 +816,7 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
             print(f"[Generate] Uploaded source image to litterbox: {uploaded_image_url}")
             # Keep the local ref for the project and for long-term storage
             local_image_ref = image_url
+            source_image_path = source
             # For the generator use the uploaded public URL
             image_url = uploaded_image_url
         except ValueError as exc:
@@ -837,6 +839,11 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
                       audio_url=audio_url or project.audio_url)
 
     aspect_ratio = data.aspect_ratio
+    if source_image_path:
+        supported_ratios = MODEL_INFO.get(model, {}).get("ratios", [])
+        if supported_ratios:
+            aspect_ratio = _closest_aspect_ratio(source_image_path, supported_ratios)
+            print(f"[Generate] Auto-selected aspect ratio {aspect_ratio} from image dimensions")
     resolution = data.resolution
     length = data.length
     generate_audio = data.generate_audio
@@ -1902,6 +1909,17 @@ def _get_local_image_path(assets_path: Path, image_url: str) -> Path | None:
         return None
     p = assets_path / filename
     return p if p.exists() else None
+
+
+def _closest_aspect_ratio(image_path: Path, ratios: list[str]) -> str:
+    """Return the ratio string from *ratios* whose aspect ratio is closest to the image's."""
+    with _PILImage.open(image_path) as img:
+        w, h = img.size
+    image_ratio = w / h
+    def _ratio_float(r: str) -> float:
+        a, b = r.split(":")
+        return int(a) / int(b)
+    return min(ratios, key=lambda r: abs(_ratio_float(r) - image_ratio))
 
 
 def _upload_to_litterbox(filepath: Path) -> str:
