@@ -8,7 +8,9 @@ from img2vid.pollo.pollo_img2vid import get_video_generator, create_video, GENER
 class TestGeneratorsMap:
     def test_all_models_present(self):
         expected = {"pollo20", "pollodance20", "pollodance20fast",
-                    "pollodanceref", "pollodancereffast"}
+                    "pollodanceref", "pollodancereffast",
+                    "seedance20", "seedance20fast",
+                    "seedanceref", "seedancereffast"}
         assert set(GENERATORS.keys()) == expected
 
     def test_default_model(self):
