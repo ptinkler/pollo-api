@@ -109,6 +109,8 @@ export const downloadJobVideo = (jobId) => apiPost(`/api/jobs/${jobId}/download`
 export const deleteJob = (jobId) => apiDelete(`/api/jobs/${jobId}`)
 export const archiveJob = (jobId) => apiPost(`/api/jobs/${jobId}/archive`)
 export const unarchiveJob = (jobId) => apiPost(`/api/jobs/${jobId}/unarchive`)
+export const bulkMoveJobs = (jobIds, targetProject) =>
+  apiPost('/api/jobs/bulk-move', { job_ids: jobIds, target_project: targetProject })
 
 // Generate API
 export const generateVideo = (data) => apiPost('/api/generate', data)

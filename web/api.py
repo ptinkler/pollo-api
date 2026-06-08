@@ -255,6 +255,11 @@ class GenerateRequest(BaseModel):
     image_meta: list | None = None  # ref2video: array of {url, order, name?, cropper?}
 
 
+class BulkMoveRequest(BaseModel):
+    job_ids: list[str]
+    target_project: str
+
+
 class ProjectCreate(BaseModel):
     name: str  # Display name
     prompt: str | None = None
@@ -1125,6 +1130,68 @@ def _download_recovered_job(job_id: str, video_url: str):
                             message=f"Recovery download failed: {e}")
 
 
+@app.post("/api/jobs/bulk-move")
+def api_bulk_move_jobs(body: BulkMoveRequest, _api_key: str = Depends(verify_api_key)):
+    """Move a batch of jobs (and their video files) to a different project."""
+    db = get_db()
+    target = db.get_project_by_slug(body.target_project)
+    if not target:
+        raise HTTPException(status_code=404, detail=f"Project '{body.target_project}' not found")
+
+    target_assets = ASSETS_DIR / target.assets_folder
+    target_assets.mkdir(parents=True, exist_ok=True)
+
+    moved, not_found = 0, []
+    # Track source folders by physical path so we handle half-moved jobs correctly
+    # (job.project may already equal target if a previous partial move updated the DB
+    # but not the file — using the actual folder is always reliable)
+    affected_source_folders: set[Path] = set()
+
+    for job_id in body.job_ids:
+        job = db.get_job(job_id)
+        if not job:
+            not_found.append(job_id)
+            continue
+
+        new_video_path = job.video_path
+
+        if job.video_path:
+            src = Path(job.video_path)
+            dst = target_assets / src.name
+            if src.exists() and src != dst:
+                affected_source_folders.add(src.parent)
+                shutil.move(str(src), str(dst))
+                new_video_path = str(dst)
+                db.update_download_by_local_path(
+                    src.name,
+                    local_path=str(dst),
+                    project=body.target_project,
+                )
+            elif dst.exists():
+                # File already in target (previous partial move)
+                new_video_path = str(dst)
+
+        if job.project != body.target_project:
+            affected_source_folders.add(
+                ASSETS_DIR / (db.get_project_by_slug(job.project) or target).assets_folder
+            )
+
+        db.update_job(job_id, project=body.target_project, video_path=new_video_path)
+        moved += 1
+
+    if moved:
+        _invalidate_project_caches()
+        for folder in affected_source_folders:
+            if folder == target_assets:
+                continue
+            proj = db.get_project_by_assets_folder(folder.name)
+            slug = proj.slug if proj else None
+            _update_project_thumbnail(folder, project_slug=slug, force=True)
+        _update_project_thumbnail(target_assets, project_slug=body.target_project, force=True)
+
+    return {"moved": moved, "not_found": not_found, "target_project": body.target_project}
+
+
 @app.get("/api/jobs/{job_id}")
 def api_job_status(job_id: str, _api_key: str = Depends(verify_api_key)):
     job = get_db().get_job(job_id)
@@ -1350,12 +1417,10 @@ def api_delete_job(job_id: str, _api_key: str = Depends(verify_api_key)):
     # Delete the job record
     db.delete_job(job_id)
 
-    # Invalidate caches if we deleted a video
+    # Invalidate caches and regenerate thumbnail if we deleted a video
     if video_deleted and proj:
         _invalidate_project_caches()
-
-    # Clean up orphaned thumbnail cache
-    if video_deleted:
+        _update_project_thumbnail(ASSETS_DIR / proj.assets_folder, project_slug=job.project, force=True)
         _cleanup_thumb_cache()
 
     return {"deleted": True, "job_id": job_id, "video_deleted": video_deleted}
@@ -1458,6 +1523,18 @@ def api_get_project(project: str, archived: bool | None = None, _api_key: str = 
         if j.video_path:
             filename = Path(j.video_path).name
             job_by_filename[filename] = j
+
+    # Fallback: for any video files on disk that didn't match a job above,
+    # search all jobs whose video_path filename lands in this folder.
+    # This recovers half-moved jobs (DB project updated but file not yet moved).
+    unmatched_filenames = {v.name for v, _ in videos_with_mtime} - set(job_by_filename)
+    if unmatched_filenames:
+        for j in db.get_all_jobs_with_video_in_folder(str(assets_path)):
+            filename = Path(j.video_path).name
+            if filename in unmatched_filenames:
+                job_by_filename[filename] = j
+                # Repair: realign job.project to match where the file actually lives
+                db.update_job(j.job_id, project=project, video_path=str(assets_path / filename))
 
     # Build video list with associated job info, filtering by archived status
     video_list = []

@@ -6,10 +6,13 @@ const props = defineProps({
   video: { type: Object, required: true },
   project: { type: String, required: true },
   showArchive: { type: Boolean, default: true },
-  showUnarchive: { type: Boolean, default: false }
+  showUnarchive: { type: Boolean, default: false },
+  showMove: { type: Boolean, default: true },
+  selectable: { type: Boolean, default: false },
+  selected: { type: Boolean, default: false },
 })
 
-defineEmits(['click', 'regenerate', 'use-as-ref', 'archive', 'unarchive', 'delete'])
+defineEmits(['click', 'regenerate', 'use-as-ref', 'archive', 'unarchive', 'move', 'delete', 'toggle-select'])
 
 const job = computed(() => props.video.job || {})
 const model = computed(() => job.value.model || 'Unknown')
@@ -25,8 +28,15 @@ function handleThumbError() {
 </script>
 
 <template>
-  <div class="gallery-card">
-    <div class="card-clickable" @click="$emit('click', video)">
+  <div :class="['gallery-card', { 'card-selected': selected }]">
+    <label
+      v-if="selectable"
+      class="select-checkbox"
+      @click.stop
+    >
+      <input type="checkbox" :checked="selected" @change="$emit('toggle-select', video)" />
+    </label>
+    <div class="card-clickable" @click="selectable ? $emit('toggle-select', video) : $emit('click', video)">
       <img
         v-if="!thumbError"
         class="gallery-thumb"
@@ -95,6 +105,17 @@ function handleThumbError() {
         </svg>
       </button>
       <button
+        v-if="showMove"
+        class="action-btn"
+        title="Move to project"
+        @click.stop="$emit('move', video)"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M5 12h14"/>
+          <path d="M12 5l7 7-7 7"/>
+        </svg>
+      </button>
+      <button
         class="action-btn action-btn-danger"
         title="Delete"
         @click.stop="$emit('delete', video)"
@@ -124,6 +145,30 @@ function handleThumbError() {
 .gallery-card:hover {
   border-color: var(--accent);
   transform: translateY(-2px);
+}
+
+.card-selected {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px rgba(108, 92, 231, 0.35);
+}
+
+.select-checkbox {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  cursor: pointer;
+  background: rgba(0,0,0,0.55);
+  border-radius: 4px;
+  padding: 2px;
+  display: flex;
+}
+
+.select-checkbox input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--accent);
 }
 
 .card-clickable {

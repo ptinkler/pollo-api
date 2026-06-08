@@ -450,6 +450,14 @@ class MetadataDB:
                 session.expunge(j)
             return jobs
 
+    def get_all_jobs_with_video_in_folder(self, folder: str) -> list[Job]:
+        """Return jobs whose video_path starts with the given folder path."""
+        with self._session() as session:
+            jobs = session.query(Job).filter(Job.video_path.startswith(folder)).all()
+            for j in jobs:
+                session.expunge(j)
+            return jobs
+
     def get_active_jobs(self) -> list[Job]:
         with self._session() as session:
             jobs = session.query(Job).filter(
@@ -494,6 +502,18 @@ class MetadataDB:
                 session.commit()
                 return True
             return False
+
+    def update_download_by_local_path(self, old_path: str, **fields) -> bool:
+        """Update fields on a download record matched by local_path filename."""
+        with self._session() as session:
+            download = session.query(Download).filter(Download.local_path.contains(old_path)).first()
+            if not download:
+                return False
+            for key, value in fields.items():
+                if hasattr(download, key):
+                    setattr(download, key, value)
+            session.commit()
+            return True
 
     def delete_download_by_path(self, local_path: str) -> bool:
         """Delete a download record by local_path (filename match)."""
