@@ -108,7 +108,7 @@ async function removeSourceImage() {
 const modelSelectOptions = computed(() => {
   return Object.entries(props.models).map(([key, info]) => ({
     value: key,
-    label: `${info.label}${info.type === 'ref' ? ' (ref)' : ''}`
+    label: `${info.label}${info.type === 'ref' ? ' (ref)' : ''}${info.deprecated ? ' (deprecated)' : ''}`
   }))
 })
 
@@ -133,7 +133,7 @@ watch(() => props.regenerateJob, (job) => {
 // Watch for use-as-ref - switch to ref model and prefill refs
 watch(() => props.useAsRef, (data) => {
   if (data) {
-    settings.value.model = 'pollodanceref'
+    settings.value.model = 'seedanceref'
     settings.value.refs = data.refs || []
     if (data.prompt) {
       prompt.value = data.prompt

@@ -32,7 +32,7 @@ GENERATORS = {
     "seedancereffast": SeedanceRefFastVideoGenerator,
 }
 
-DEFAULT_MODEL = "pollodance20"
+DEFAULT_MODEL = "seedance20fast"
 
 
 def get_video_generator(model: str, **kwargs):

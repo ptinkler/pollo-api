@@ -10,7 +10,7 @@ def main():
         epilog=f"Available models: {', '.join(GENERATORS)}",
     )
     parser.add_argument("-m", "--model", default=None,
-                        help="Model to use (default: pollodance20)")
+                        help="Model to use (default: seedance20fast)")
     parser.add_argument("-p", "--project", default=None,
                         help="Project folder name under projects/")
     parser.add_argument("-r", "--ratio", dest="aspect_ratio", default=None,

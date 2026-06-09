@@ -73,12 +73,14 @@ MODEL_INFO = {
         "lengths": list(range(4, 16)),
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "web_search", "seed", "image_tail"],
+        "deprecated": True,
     },
     "pollodance20fast": {
         "label": "Pollo Dance 2.0 Fast", "type": "img2vid",
         "lengths": list(range(4, 16)),
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "web_search", "seed", "image_tail"],
+        "deprecated": True,
     },
     "pollo20": {
         "label": "Pollo 2.0", "type": "img2vid",
@@ -91,12 +93,14 @@ MODEL_INFO = {
         "lengths": list(range(4, 16)),
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "video_num", "refs", "image_meta"],
+        "deprecated": True,
     },
     "pollodancereffast": {
         "label": "Pollo Dance Ref Fast", "type": "ref",
         "lengths": list(range(4, 16)),
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "video_num", "refs", "image_meta"],
+        "deprecated": True,
     },
     "seedance20": {
         "label": "Seedance 2.0", "type": "img2vid",

@@ -14,7 +14,7 @@ class TestGeneratorsMap:
         assert set(GENERATORS.keys()) == expected
 
     def test_default_model(self):
-        assert DEFAULT_MODEL == "pollodance20"
+        assert DEFAULT_MODEL == "seedance20fast"
 
 
 class TestGetVideoGenerator:

@@ -13,7 +13,7 @@ describe('useProjectSettings', () => {
   it('returns default settings', () => {
     const projectName = ref('test')
     const { settings } = useProjectSettings(projectName)
-    expect(settings.value.model).toBe('pollodance20')
+    expect(settings.value.model).toBe('seedance20fast')
     expect(settings.value.aspect_ratio).toBe('9:16')
     expect(settings.value.resolution).toBe('480p')
     expect(settings.value.length).toBe(10)
@@ -127,7 +127,7 @@ describe('useProjectSettings', () => {
     const projectName = ref('corrupt')
     const { settings } = useProjectSettings(projectName)
     // Should fall back to defaults
-    expect(settings.value.model).toBe('pollodance20')
+    expect(settings.value.model).toBe('seedance20fast')
   })
 })
 
