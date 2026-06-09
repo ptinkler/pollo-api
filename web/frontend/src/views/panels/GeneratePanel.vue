@@ -44,6 +44,7 @@ const showImageTailOption = computed(() => modelOptions.value.includes('image_ta
 const showSeedOption = computed(() => modelOptions.value.includes('seed'))
 const showRefFields = computed(() => modelType.value === 'ref')
 const showVideoNumOption = computed(() => modelOptions.value.includes('video_num'))
+const isDeprecatedModel = computed(() => !!selectedModel.value.deprecated)
 
 const resolutions = ['480p', '720p', '1080p']
 
@@ -104,12 +105,22 @@ async function removeSourceImage() {
   }
 }
 
-// Format models for SleekSelect
+// Map deprecated pollo models to their seedance equivalents
+const DEPRECATED_REMAP = {
+  pollodance20: 'seedance20fast',
+  pollodance20fast: 'seedance20fast',
+  pollodanceref: 'seedanceref',
+  pollodancereffast: 'seedancereffast',
+}
+
+// Format models for SleekSelect — hide deprecated models
 const modelSelectOptions = computed(() => {
-  return Object.entries(props.models).map(([key, info]) => ({
-    value: key,
-    label: `${info.label}${info.type === 'ref' ? ' (ref)' : ''}${info.deprecated ? ' (deprecated)' : ''}`
-  }))
+  return Object.entries(props.models)
+    .filter(([, info]) => !info.deprecated)
+    .map(([key, info]) => ({
+      value: key,
+      label: `${info.label}${info.type === 'ref' ? ' (ref)' : ''}`
+    }))
 })
 
 // Watch for project data changes
@@ -125,6 +136,8 @@ watch(() => props.regenerateJob, (job) => {
   if (job) {
     prompt.value = job.prompt || ''
     applyJobSettings(job)
+    const remapped = DEPRECATED_REMAP[settings.value.model]
+    if (remapped) settings.value.model = remapped
     emit('regenerate-applied')
     showToast('Settings loaded from video', 'success')
   }
@@ -678,8 +691,12 @@ async function handleSubmit() {
         </div>
       </div>
 
+      <div v-if="isDeprecatedModel" class="deprecated-warning">
+        ⚠️ This model's API endpoint has been removed and generation will likely fail. Are you sure?
+      </div>
+
       <div class="actions">
-        <button type="submit" class="btn btn-primary" :disabled="isSubmitting">
+        <button type="submit" :class="['btn', isDeprecatedModel ? 'btn-deprecated' : 'btn-primary']" :disabled="isSubmitting">
           <span v-if="isSubmitting" class="btn-spinner"></span>
           {{ submitButtonText }}
         </button>
@@ -1125,11 +1142,39 @@ async function handleSubmit() {
   font-weight: 600;
 }
 
+.deprecated-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  margin-top: 16px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 10px;
+  font-size: 0.8rem;
+  color: rgba(251, 191, 36, 0.9);
+  line-height: 1.4;
+}
+
 .actions {
   display: flex;
   gap: 12px;
-  margin-top: 24px;
+  margin-top: 16px;
   justify-content: flex-end;
+}
+
+.btn-deprecated {
+  background: linear-gradient(135deg, rgba(180, 110, 0, 0.7), rgba(160, 90, 0, 0.8));
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: rgba(251, 191, 36, 0.95);
+  box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+  transition: all 0.2s;
+}
+
+.btn-deprecated:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(200, 130, 0, 0.8), rgba(180, 110, 0, 0.9));
+  border-color: rgba(245, 158, 11, 0.6);
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.2);
 }
 </style>
 
