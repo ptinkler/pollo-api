@@ -22,7 +22,7 @@ async function fetchWithRetry(url, options = {}, retries = RETRY_CONFIG.maxRetri
         promptForKey()
         throw new Error('API key required')
       }
-      if (response.ok || response.status < 500) {
+      if (response.ok || response.status < 500 || attempt === retries) {
         return response
       }
       lastError = new Error(`API error: ${response.status}`)
