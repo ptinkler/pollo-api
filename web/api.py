@@ -440,6 +440,66 @@ def _poll_task(job_id: str, task_id: str, api_key: str,
                 return results
 
 
+def _send_and_extract_task(generator, job_id: str, db) -> tuple[str, str] | None:
+    """Send a generation request with retries, updating DB on error.
+
+    Handles 5xx retries and accepts non-200 responses that carry a taskId.
+    Returns (task_id, api_status) on success, or None if an error occurred
+    (the job's DB record is already updated with status="error" in that case).
+    """
+    response = None
+    resp_json = None
+    last_exc: Exception | None = None
+
+    for attempt in range(SEND_RETRIES):
+        try:
+            response = generator.send_request()
+        except ConnectionError as exc:
+            last_exc = exc
+            db.update_job(job_id, message=f"Send attempt {attempt+1}/{SEND_RETRIES} failed: {exc}")
+            if attempt < SEND_RETRIES - 1:
+                time.sleep(SEND_RETRY_BACKOFF)
+                continue
+            db.update_job(job_id, status="error", message=str(exc))
+            return None
+
+        try:
+            resp_json = response.json()
+        except Exception:
+            resp_json = None
+
+        if response.status_code == 200 and resp_json and resp_json.get("code") == "SUCCESS":
+            break
+        if resp_json and isinstance(resp_json.get("data"), dict) and resp_json.get("data", {}).get("taskId"):
+            break
+        if 500 <= response.status_code < 600 and attempt < SEND_RETRIES - 1:
+            db.update_job(job_id, message=f"API responded HTTP {response.status_code}, retrying ({attempt+1}/{SEND_RETRIES})...")
+            time.sleep(SEND_RETRY_BACKOFF)
+            continue
+        break
+
+    if response is None:
+        db.update_job(job_id, status="error", message=str(last_exc or "No response from API"))
+        return None
+    if resp_json is None:
+        body_preview = response.text[:200] if response.text else "(empty)"
+        db.update_job(job_id, status="error",
+                      message=f"API returned non-JSON (HTTP {response.status_code}): {body_preview}")
+        return None
+    if response.status_code != 200 and not resp_json.get("data", {}).get("taskId"):
+        db.update_job(job_id, status="error",
+                      message=resp_json.get("message", f"API request failed (HTTP {response.status_code})"))
+        return None
+
+    task_id = resp_json.get("data", {}).get("taskId")
+    api_status = resp_json.get("data", {}).get("status")
+    if not task_id or not api_status:
+        db.update_job(job_id, status="error", message="No task ID returned from API")
+        return None
+
+    return task_id, api_status
+
+
 def run_generation(job_id: str, model: str, kwargs: dict):
     """Run video generation in a background thread, updating the DB."""
     db = get_db()
@@ -460,76 +520,10 @@ def run_generation(job_id: str, model: str, kwargs: dict):
 
         db.update_job(job_id, status="sending", message="Sending request to API...")
 
-        # Attempt to send the initial request with a few retries for 5xx or transient
-        # errors. The Pollo API may occasionally return 502/5xx while still creating
-        # a remote task; in that case the response JSON sometimes contains a
-        # taskId even though the HTTP status is not 200. We try a few times and
-        # accept a response that contains a taskId.
-        response = None
-        resp_json = None
-        last_exc: Exception | None = None
-        for attempt in range(SEND_RETRIES):
-            try:
-                response = generator.send_request()
-            except ConnectionError as exc:
-                # Network-level issue (VPN down, Cloudflare, timeout) — retry a few times
-                last_exc = exc
-                db.update_job(job_id, message=f"Send attempt {attempt+1}/{SEND_RETRIES} failed: {exc}")
-                if attempt < SEND_RETRIES - 1:
-                    time.sleep(SEND_RETRY_BACKOFF)
-                    continue
-                else:
-                    db.update_job(job_id, status="error", message=str(exc))
-                    return
-
-            # Try to parse JSON if present
-            try:
-                resp_json = response.json()
-            except Exception:
-                resp_json = None
-
-            # If we got a 200+SUCCESS response, proceed
-            if response.status_code == 200 and resp_json and resp_json.get("code") == "SUCCESS":
-                break
-
-            # If non-200 but JSON includes a taskId, accept it and continue
-            if resp_json and isinstance(resp_json.get("data"), dict) and resp_json.get("data", {}).get("taskId"):
-                break
-
-            # If server 5xx, retry a few times
-            if 500 <= response.status_code < 600 and attempt < SEND_RETRIES - 1:
-                db.update_job(job_id, message=f"API responded HTTP {response.status_code}, retrying ({attempt+1}/{SEND_RETRIES})...")
-                time.sleep(SEND_RETRY_BACKOFF)
-                continue
-
-            # Otherwise, break and handle as an error below
-            break
-
-        if response is None:
-            # Shouldn't happen due to above handling, but guard anyway
-            db.update_job(job_id, status="error", message=str(last_exc or "No response from API"))
+        result = _send_and_extract_task(generator, job_id, db)
+        if result is None:
             return
-
-        # If the response was non-JSON and non-200, surface a useful message
-        if resp_json is None:
-            body_preview = response.text[:200] if response.text else "(empty)"
-            db.update_job(job_id, status="error",
-                          message=f"API returned non-JSON (HTTP {response.status_code}): {body_preview}")
-            return
-
-        # If the API explicitly failed (and didn't provide a taskId), mark error
-        if response.status_code != 200 and not resp_json.get("data", {}).get("taskId"):
-            db.update_job(job_id, status="error",
-                          message=resp_json.get("message", f"API request failed (HTTP {response.status_code})"))
-            return
-
-        # At this point we either have a normal SUCCESS response or a non-200
-        # response that contains a taskId. Extract the task info and continue.
-        task_id = resp_json.get("data", {}).get("taskId")
-        api_status = resp_json.get("data", {}).get("status")
-        if not task_id or not api_status:
-            db.update_job(job_id, status="error", message="No task ID returned from API")
-            return
+        task_id, api_status = result
 
         db.update_job(job_id, status="processing", task_id=task_id,
                        message=f"Task {task_id} processing...")
@@ -733,8 +727,7 @@ def _update_project_thumbnail(assets_path: Path, project_slug: str | None = None
         thumb_path.parent.mkdir(parents=True, exist_ok=True)
         if latest_media == latest_image and not latest_video:
             # For image-only projects, copy the image directly
-            import shutil as _shutil
-            _shutil.copy2(str(latest_media), str(thumb_path))
+            shutil.copy2(str(latest_media), str(thumb_path))
             print(f"[Thumbnail] Updated {thumb_path.name} from image {latest_media.name}", flush=True)
             return True
 
@@ -1055,60 +1048,10 @@ def run_image_generation(job_id: str, model: str, kwargs: dict):
 
         db.update_job(job_id, status="sending", message="Sending request to API...")
 
-        response = None
-        resp_json = None
-        last_exc: Exception | None = None
-        for attempt in range(SEND_RETRIES):
-            try:
-                response = generator.send_request()
-            except ConnectionError as exc:
-                last_exc = exc
-                db.update_job(job_id, message=f"Send attempt {attempt+1}/{SEND_RETRIES} failed: {exc}")
-                if attempt < SEND_RETRIES - 1:
-                    time.sleep(SEND_RETRY_BACKOFF)
-                    continue
-                else:
-                    db.update_job(job_id, status="error", message=str(exc))
-                    return
-
-            try:
-                resp_json = response.json()
-            except Exception:
-                resp_json = None
-
-            if response.status_code == 200 and resp_json and resp_json.get("code") == "SUCCESS":
-                break
-
-            if resp_json and isinstance(resp_json.get("data"), dict) and resp_json.get("data", {}).get("taskId"):
-                break
-
-            if 500 <= response.status_code < 600 and attempt < SEND_RETRIES - 1:
-                db.update_job(job_id, message=f"API responded HTTP {response.status_code}, retrying ({attempt+1}/{SEND_RETRIES})...")
-                time.sleep(SEND_RETRY_BACKOFF)
-                continue
-
-            break
-
-        if response is None:
-            db.update_job(job_id, status="error", message=str(last_exc or "No response from API"))
+        result = _send_and_extract_task(generator, job_id, db)
+        if result is None:
             return
-
-        if resp_json is None:
-            body_preview = response.text[:200] if response.text else "(empty)"
-            db.update_job(job_id, status="error",
-                          message=f"API returned non-JSON (HTTP {response.status_code}): {body_preview}")
-            return
-
-        if response.status_code != 200 and not resp_json.get("data", {}).get("taskId"):
-            db.update_job(job_id, status="error",
-                          message=resp_json.get("message", f"API request failed (HTTP {response.status_code})"))
-            return
-
-        task_id = resp_json.get("data", {}).get("taskId")
-        api_status = resp_json.get("data", {}).get("status")
-        if not task_id or not api_status:
-            db.update_job(job_id, status="error", message="No task ID returned from API")
-            return
+        task_id, api_status = result
 
         db.update_job(job_id, status="processing", task_id=task_id,
                       message=f"Task {task_id} processing...")
@@ -2438,7 +2381,6 @@ def _choose_preferred_image_url_from_job_dict(job_dict: dict) -> str | None:
         except Exception:
             pass
 
-
     # Fallback to job.image_url
     # If the job.image_url looks like a litterbox/catbox temporary URL, prefer the project's
     # stored image_url if that is a local: reference (this covers older jobs where the job
@@ -2507,8 +2449,6 @@ async def _save_uploaded_image(project: str, file: UploadFile, prefix: str) -> d
         "filename": filename,
         "size": len(data),
         "image_url": local_ref,
-        "_proj": proj,
-        "_project_slug": project,
     }
 
 
@@ -2526,9 +2466,6 @@ async def api_upload_source_image(project: str, file: UploadFile = File(...), _a
     db.update_project(project, image_url=result["image_url"])
     _invalidate_project_caches()
 
-    # Strip internal keys before returning
-    result.pop("_proj", None)
-    result.pop("_project_slug", None)
     return result
 
 
@@ -2581,12 +2518,7 @@ async def api_upload_ref_image(project: str, file: UploadFile = File(...), _api_
     Does NOT update the project's image_url.
     Returns the local reference (local:filename) to use in a ref's url field.
     """
-    result = await _save_uploaded_image(project, file, prefix="ref")
-
-    # Strip internal keys before returning
-    result.pop("_proj", None)
-    result.pop("_project_slug", None)
-    return result
+    return await _save_uploaded_image(project, file, prefix="ref")
 
 
 @app.delete("/api/projects/{project}/source-image")

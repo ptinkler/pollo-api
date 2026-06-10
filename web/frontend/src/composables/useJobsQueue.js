@@ -63,7 +63,7 @@ function addJob(jobId, model, prompt, project) {
 function startPolling(jobId) {
   if (pollIntervals[jobId]) return
 
-  // Poll immediately, then every 3 seconds for responsive status updates
+  // Poll immediately, then every 10 seconds
   pollJob(jobId)
   pollIntervals[jobId] = setInterval(() => pollJob(jobId), 10000)
 }

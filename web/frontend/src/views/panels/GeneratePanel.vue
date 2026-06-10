@@ -232,15 +232,26 @@ function removeSubjectImage(refItem, imgIndex) {
 
 // Ref image upload
 const refFileInputRefs = ref({})
+const subjectFileInputRefs = ref({})
 const uploadingRefIndex = ref(null)
 
 function triggerRefFileInput(index) {
-  const input = refFileInputRefs.value[index]
-  if (input) input.click()
+  refFileInputRefs.value[index]?.click()
 }
 
 function setRefFileInput(index, el) {
   if (el) refFileInputRefs.value[index] = el
+  else delete refFileInputRefs.value[index]
+}
+
+function triggerSubjectFileInput(index, imgIdx) {
+  subjectFileInputRefs.value[`${index}_${imgIdx}`]?.click()
+}
+
+function setSubjectFileInput(index, imgIdx, el) {
+  const key = `${index}_${imgIdx}`
+  if (el) subjectFileInputRefs.value[key] = el
+  else delete subjectFileInputRefs.value[key]
 }
 
 async function handleRefFileUpload(event, index) {
@@ -673,7 +684,7 @@ async function handleSubmit() {
                     type="button"
                     class="btn-upload btn-upload-small"
                     :disabled="uploadingRefIndex === `subject-${imgIdx}`"
-                    @click="$refs[`subjectFileInput_${index}_${imgIdx}`]?.[0]?.click()"
+                    @click="triggerSubjectFileInput(index, imgIdx)"
                     title="Upload local image"
                   >
                     <span v-if="uploadingRefIndex === `subject-${imgIdx}`" class="btn-spinner"></span>
@@ -681,7 +692,7 @@ async function handleSubmit() {
                   </button>
                 </template>
                 <input
-                  :ref="`subjectFileInput_${index}_${imgIdx}`"
+                  :ref="(el) => setSubjectFileInput(index, imgIdx, el)"
                   type="file"
                   accept="image/jpeg,image/png,image/webp,image/gif"
                   style="display: none"
