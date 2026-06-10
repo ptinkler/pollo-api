@@ -12,6 +12,7 @@ const emit = defineEmits(['close', 'regenerate', 'use-as-ref', 'archive', 'unarc
 const showToast = inject('showToast')
 
 const isArchived = computed(() => !!props.video?.job?.archived)
+const isImageJob = computed(() => job.value.media_type === 'image' || job.value.job_type === 'image')
 
 const videoEl = ref(null)
 
@@ -78,7 +79,14 @@ onUnmounted(() => {
     <div v-if="visible && video" class="modal-overlay">
       <div class="modal-content">
         <button class="modal-close" @click="close">&times;</button>
+        <img
+          v-if="isImageJob"
+          class="modal-image"
+          :src="videoUrl"
+          alt=""
+        />
         <video
+          v-else
           ref="videoEl"
           class="modal-video"
           :src="videoUrl"
@@ -95,7 +103,7 @@ onUnmounted(() => {
           <div class="modal-actions">
             <button class="btn btn-primary" @click="$emit('regenerate', video)">🔄 Regenerate</button>
             <button class="btn btn-primary" @click="$emit('use-as-ref', video)">🎯 Use as Ref</button>
-            <button class="btn btn-secondary" @click="$emit(isArchived ? 'unarchive' : 'archive', video)">
+<button class="btn btn-secondary" @click="$emit(isArchived ? 'unarchive' : 'archive', video)">
               📦 {{ isArchived ? 'Unarchive' : 'Archive' }}
             </button>
             <button class="btn btn-danger" @click="handleDelete">🗑️ Delete</button>
@@ -152,6 +160,14 @@ onUnmounted(() => {
   object-fit: contain;
   display: block;
   background: #000;
+}
+
+.modal-image {
+  width: 100%;
+  max-height: 60vh;
+  object-fit: contain;
+  display: block;
+  background: var(--surface2);
 }
 
 .modal-body {

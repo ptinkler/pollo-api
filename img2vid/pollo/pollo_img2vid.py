@@ -15,6 +15,9 @@ from .generators import (
     Seedance20FastVideoGenerator,
     SeedanceRefVideoGenerator,
     SeedanceRefFastVideoGenerator,
+    NanoBanana2ImageGenerator,
+    PolloJourneyImageGenerator,
+    SeedreamImageGenerator,
     SUCCESS_STATUSES,
     ERROR_STATUSES,
 )
@@ -34,12 +37,25 @@ GENERATORS = {
 
 DEFAULT_MODEL = "seedance20fast"
 
+IMAGE_GENERATORS = {
+    "pollojourney": PolloJourneyImageGenerator,
+    "seedream": SeedreamImageGenerator,
+    "nanobanana2": NanoBanana2ImageGenerator,
+}
+
 
 def get_video_generator(model: str, **kwargs):
     try:
         return GENERATORS[model](**kwargs)
     except KeyError:
         raise ValueError(f"Unsupported model: {model}. Available: {', '.join(GENERATORS)}")
+
+
+def get_image_generator(model: str, **kwargs):
+    try:
+        return IMAGE_GENERATORS[model](**kwargs)
+    except KeyError:
+        raise ValueError(f"Unsupported image model: {model}. Available: {', '.join(IMAGE_GENERATORS)}")
 
 
 def create_video(

@@ -115,9 +115,9 @@ function handleUseAsRef(video) {
   const refs = []
   let order = 1
 
-  // Add the video's CDN URL as a video ref
+  const isImage = job.media_type === 'image' || job.job_type === 'image'
   if (job.video_url) {
-    refs.push({ type: 'video', name: 'source video', url: job.video_url, order: order++ })
+    refs.push({ type: isImage ? 'image' : 'video', name: isImage ? 'imgref1' : 'ref1', url: job.video_url, order: order++ })
   }
 
   useAsRefData.value = {

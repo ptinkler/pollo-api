@@ -112,6 +112,7 @@ class Job(Base):
     resolution: Mapped[str | None] = mapped_column(String(20), nullable=True)
     length: Mapped[int | None] = mapped_column(Integer, nullable=True)
     generate_audio: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    job_type: Mapped[str] = mapped_column(String(20), default="video", index=True)
     archived: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     credits_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
     params_json: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -140,6 +141,7 @@ class Job(Base):
             "resolution": self.resolution,
             "length": self.length,
             "generate_audio": self.generate_audio,
+            "job_type": self.job_type,
             "archived": self.archived,
             "credits_used": self.credits_used,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -400,6 +402,7 @@ class MetadataDB:
         length: int | None = None,
         generate_audio: bool | None = None,
         params: dict[str, Any] | None = None,
+        job_type: str = "video",
     ) -> int:
         """Create a new job record."""
         with self._session() as session:
@@ -417,6 +420,7 @@ class MetadataDB:
                 length=length,
                 generate_audio=generate_audio,
                 params_json=json.dumps(params) if params else None,
+                job_type=job_type,
             )
             session.add(job)
             session.commit()

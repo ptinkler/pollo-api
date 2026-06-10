@@ -114,6 +114,7 @@ export const bulkMoveJobs = (jobIds, targetProject) =>
 
 // Generate API
 export const generateVideo = (data) => apiPost('/api/generate', data)
+export const generateImage = (data) => apiPost('/api/generate-image', data)
 
 // Source image upload
 export async function uploadSourceImage(project, file) {

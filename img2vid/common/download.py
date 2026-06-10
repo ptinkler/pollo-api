@@ -65,6 +65,63 @@ def get_unique_filepath(folder_path: str, filename: str) -> str:
         counter += 1
 
 
+def _get_image_extension_from_url(url: str) -> str:
+    """Extract image extension from URL, defaulting to .jpg."""
+    try:
+        parsed = urlparse(url)
+        path = unquote(parsed.path).split('?')[0]
+        ext = os.path.splitext(path)[1].lower()
+        if ext in ('.jpg', '.jpeg', '.png', '.webp', '.gif'):
+            return '.jpg' if ext == '.jpeg' else ext
+    except Exception:
+        pass
+    return '.jpg'
+
+
+def download_generated_image(
+    url: str,
+    dest_path: str,
+    task_id: str | None = None,
+    model: str | None = None,
+    prompt: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    record: bool = True,
+) -> str:
+    """Download a generated image to the project assets folder with a unique filename."""
+    if task_id and record:
+        existing = get_db().get_downloads_by_task_id(task_id)
+        if existing:
+            path = existing[0].local_path
+            if os.path.isfile(path):
+                print(f"Generated image already downloaded for task {task_id}: {path}")
+                return path
+
+    folder_path = ASSETS_DIR / dest_path
+    folder_path.mkdir(parents=True, exist_ok=True)
+
+    ext = _get_image_extension_from_url(url)
+    base = task_id if task_id else uuid.uuid4().hex[:8]
+    filename = f"{base}{ext}"
+    filepath = get_unique_filepath(str(folder_path), filename)
+
+    download_file(url, filepath)
+
+    if record:
+        record_download(
+            url=url,
+            local_path=filepath,
+            file_type="image_result",
+            project=dest_path,
+            task_id=task_id,
+            model=model,
+            prompt=prompt,
+            metadata=metadata,
+        )
+
+    print(f"Generated image downloaded: {filepath}")
+    return filepath
+
+
 def download_image(image_url: str, project: str, record: bool = True) -> str:
     folder_path = ASSETS_DIR / project
     folder_path.mkdir(parents=True, exist_ok=True)

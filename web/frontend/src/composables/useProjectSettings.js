@@ -15,6 +15,8 @@ export function useProjectSettings(projectName) {
     seed: '',
     refs: [],
     video_num: 1,
+    max_images: '1',
+    thinking_level: 'minimal',
   })
 
   function load() {
@@ -63,6 +65,7 @@ export function useProjectSettings(projectName) {
     settings.value.image_tail = params.image_tail || ''
     settings.value.seed = params.seed !== null && params.seed !== undefined ? String(params.seed) : ''
     settings.value.video_num = params.video_num || 1
+    settings.value.max_images = params.max_images ? String(params.max_images) : ''
     // Map stored ref format back to UI format (stored: image/video/audio key, UI: url key)
     settings.value.refs = (params.refs || []).map(r => {
       if (r.type === 'subject') {

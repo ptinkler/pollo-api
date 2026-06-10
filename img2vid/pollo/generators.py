@@ -435,3 +435,161 @@ class SeedanceRefFastVideoGenerator(PolloDanceRefVideoGenerator):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_BASE}/bytedance/seedance-2-0-fast/ref2video"
+
+
+class PolloJourneyImageGenerator(BaseVideoGenerator):
+    """Image generator using the Pollo Journey v7 model.
+
+    Supports three modes determined by which inputs are provided:
+    - Text-to-Image: prompt only (+ optional style)
+    - Image-to-Image: prompt + imageUrl
+    - Multi-Image-to-Image: prompt + images[] (+ optional imageUrl)
+    """
+    VALID_RATIOS: ClassVar[tuple] = ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16")
+
+    aspect_ratio: str
+    seed: int | None
+    images: list[str] | None
+    style: str
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.model_url = f"{POLLO_API_BASE}/pollojourney/pollojourney-v7-image/image"
+        self.aspect_ratio = kwargs.get('aspect_ratio') or self.get_aspect_ratio(
+            os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "square")
+        )
+        self.seed = kwargs.get('seed') or (int(os.getenv("SEED")) if os.getenv("SEED") else None)
+        self.images = kwargs.get('images') or None
+        self.style = kwargs.get('style') or os.getenv("STYLE", "")
+
+    @property
+    def is_text_only(self) -> bool:
+        return self.image_url is None and not self.images
+
+    def get_payload(self) -> dict[str, Any]:
+        input_payload: dict[str, Any] = {
+            "prompt": self.prompt,
+            "aspectRatio": self.aspect_ratio,
+        }
+        if self.images:
+            input_payload["images"] = self.images
+            if self.image_url:
+                input_payload["imageUrl"] = self.image_url
+        elif self.image_url:
+            input_payload["imageUrl"] = self.image_url
+        else:
+            if self.style:
+                input_payload["style"] = self.style
+        if self.seed is not None:
+            input_payload["seed"] = self.seed
+
+        self.payload_attrs = input_payload
+        return {"input": input_payload}
+
+
+class NanoBanana2ImageGenerator(BaseVideoGenerator):
+    """Image generator using the Nano Banana 2 model.
+
+    Supports text-to-image, image-to-image, and multi-image-to-image.
+    """
+    VALID_RATIOS: ClassVar[tuple] = ("1:1", "9:16", "16:9", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9")
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("1K", "2K", "4K")
+    VALID_THINKING_LEVELS: ClassVar[tuple] = ("minimal", "high")
+
+    aspect_ratio: str
+    resolution: str | None
+    thinking_level: str | None
+    max_images: int | None
+    images: list[str] | None
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.model_url = f"{POLLO_API_BASE}/google/nano-banana-2/image"
+        self.aspect_ratio = kwargs.get('aspect_ratio') or self.get_aspect_ratio(
+            os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "square")
+        )
+        resolution = kwargs.get('resolution') or os.getenv("RESOLUTION")
+        self.resolution = resolution if resolution in self.VALID_RESOLUTIONS else None
+        thinking_level = kwargs.get('thinking_level') or os.getenv("THINKING_LEVEL")
+        self.thinking_level = thinking_level if thinking_level in self.VALID_THINKING_LEVELS else None
+        max_images = kwargs.get('max_images')
+        if max_images is None:
+            env_val = os.getenv("MAX_IMAGES")
+            max_images = int(env_val) if env_val else None
+        self.max_images = max(1, min(4, int(max_images))) if max_images is not None else None
+        self.images = kwargs.get('images') or None
+
+    @property
+    def is_text_only(self) -> bool:
+        return self.image_url is None and not self.images
+
+    def get_payload(self) -> dict[str, Any]:
+        input_payload: dict[str, Any] = {
+            "prompt": self.prompt,
+            "aspectRatio": self.aspect_ratio,
+        }
+        if self.images:
+            input_payload["images"] = self.images
+            if self.image_url:
+                input_payload["imageUrl"] = self.image_url
+        elif self.image_url:
+            input_payload["imageUrl"] = self.image_url
+        if self.resolution:
+            input_payload["resolution"] = self.resolution
+        if self.thinking_level:
+            input_payload["thinkingLevel"] = self.thinking_level
+        if self.max_images is not None:
+            input_payload["maxImages"] = self.max_images
+
+        self.payload_attrs = input_payload
+        return {"input": input_payload}
+
+
+class SeedreamImageGenerator(BaseVideoGenerator):
+    """Image generator using the Seedream 5.0 Lite model.
+
+    Supports text-to-image and image-to-image (single or multi-image reference).
+    Returns 1–4 images per request. No seed or style fields.
+    """
+    VALID_RATIOS: ClassVar[tuple] = ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16", "21:9")
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("2K", "3K", "4K")
+
+    aspect_ratio: str
+    resolution: str | None
+    max_images: int | None
+    images: list[str] | None
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.model_url = f"{POLLO_API_BASE}/seedream/seedream-5-0-lite/image"
+        self.aspect_ratio = kwargs.get('aspect_ratio') or self.get_aspect_ratio(
+            os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "square")
+        )
+        resolution = kwargs.get('resolution') or os.getenv("RESOLUTION")
+        self.resolution = resolution if resolution in self.VALID_RESOLUTIONS else None
+        max_images = kwargs.get('max_images')
+        if max_images is None:
+            env_val = os.getenv("MAX_IMAGES")
+            max_images = int(env_val) if env_val else None
+        self.max_images = max(1, min(4, int(max_images))) if max_images is not None else None
+        self.images = kwargs.get('images') or None
+
+    def get_payload(self) -> dict[str, Any]:
+        input_payload: dict[str, Any] = {
+            "prompt": self.prompt,
+            "aspectRatio": self.aspect_ratio,
+            "responseFormat": "url",
+        }
+        if self.images:
+            input_payload["images"] = self.images
+            if self.image_url:
+                input_payload["imageUrl"] = self.image_url
+        elif self.image_url:
+            input_payload["imageUrl"] = self.image_url
+        if self.resolution:
+            input_payload["resolution"] = self.resolution
+        if self.max_images is not None:
+            input_payload["maxImages"] = self.max_images
+
+        self.payload_attrs = input_payload
+        return {"input": input_payload}

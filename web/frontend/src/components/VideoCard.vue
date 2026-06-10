@@ -15,6 +15,7 @@ const props = defineProps({
 defineEmits(['click', 'regenerate', 'use-as-ref', 'archive', 'unarchive', 'move', 'delete', 'toggle-select'])
 
 const job = computed(() => props.video.job || {})
+const isImageJob = computed(() => job.value.media_type === 'image' || job.value.job_type === 'image')
 const model = computed(() => job.value.model || 'Unknown')
 const prompt = computed(() => (job.value.prompt || '').substring(0, 100))
 const date = computed(() => job.value.created_at ? new Date(job.value.created_at).toLocaleDateString() : '')
@@ -45,7 +46,7 @@ function handleThumbError() {
         loading="lazy"
         @error="handleThumbError"
       />
-      <div v-else class="gallery-thumb-placeholder">🎬</div>
+      <div v-else class="gallery-thumb-placeholder">{{ isImageJob ? '🖼️' : '🎬' }}</div>
       <div class="gallery-card-body">
         <div class="video-model">{{ model }}</div>
         <div class="video-prompt">{{ prompt }}</div>
@@ -79,7 +80,7 @@ function handleThumbError() {
           <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
         </svg>
       </button>
-      <button
+<button
         v-if="showArchive"
         class="action-btn"
         title="Archive"

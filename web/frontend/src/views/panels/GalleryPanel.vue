@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import VideoCard from '../../components/VideoCard.vue'
 import MoveToProjectModal from '../../components/MoveToProjectModal.vue'
 import { archiveJob, bulkMoveJobs, deleteJob } from '../../composables/useApi'
@@ -17,6 +17,15 @@ const {
   handleDelete, openVideo, handleRegenerate,
   getVideoByFilename, removeVideo, showToast,
 } = useVideoList(props, { archived: false, emit })
+
+// Filter state
+const showVideos = ref(true)
+const showImages = ref(true)
+const filteredVideos = computed(() => videos.value.filter(v => {
+  const mt = v.media_type || v.job?.media_type || v.job?.job_type || 'video'
+  if (mt === 'image') return showImages.value
+  return showVideos.value
+}))
 
 // Selection state
 const selectMode = ref(false)
@@ -118,6 +127,14 @@ defineExpose({ refresh, getVideoByFilename, removeVideo, addVideo })
 
     <template v-else-if="videos.length">
       <div class="panel-toolbar">
+        <div class="filter-checks">
+          <label class="filter-check">
+            <input type="checkbox" v-model="showVideos" /> Videos
+          </label>
+          <label class="filter-check">
+            <input type="checkbox" v-model="showImages" /> Images
+          </label>
+        </div>
         <button class="btn btn-secondary toolbar-btn" @click="toggleSelectMode">
           {{ selectMode ? 'Cancel' : 'Select' }}
         </button>
@@ -133,7 +150,7 @@ defineExpose({ refresh, getVideoByFilename, removeVideo, addVideo })
 
       <div class="gallery-grid">
         <VideoCard
-          v-for="video in videos"
+          v-for="video in filteredVideos"
           :key="video.filename"
           :video="video"
           :project="project"
@@ -154,8 +171,8 @@ defineExpose({ refresh, getVideoByFilename, removeVideo, addVideo })
     </template>
 
     <div v-else class="empty-state">
-      <h3>No videos yet</h3>
-      <p>Generate one first</p>
+      <h3>Nothing here yet</h3>
+      <p>Generate something first</p>
     </div>
 
     <MoveToProjectModal
@@ -171,8 +188,29 @@ defineExpose({ refresh, getVideoByFilename, removeVideo, addVideo })
 <style scoped>
 .panel-toolbar {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 12px;
+}
+
+.filter-checks {
+  display: flex;
+  gap: 12px;
+}
+
+.filter-check {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.85rem;
+  color: var(--text2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.filter-check input {
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .toolbar-btn {

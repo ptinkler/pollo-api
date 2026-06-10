@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch, inject } from 'vue'
 import { RatioPicker, LengthSlider, ToggleSwitch, SleekTextarea, SleekSelect, SleekInput } from '../../components/form'
-import { generateVideo, uploadSourceImage, deleteSourceImage, getSourceImageUrl, uploadRefImage, getRefImageUrl } from '../../composables/useApi'
+import { generateVideo, generateImage, uploadSourceImage, deleteSourceImage, getSourceImageUrl, uploadRefImage, getRefImageUrl } from '../../composables/useApi'
 import { useProjectSettings } from '../../composables/useProjectSettings'
 import { useJobsQueue } from '../../composables/useJobsQueue'
 
@@ -10,7 +10,7 @@ const props = defineProps({
   projectData: { type: Object, default: null },
   models: { type: Object, default: () => ({}) },
   regenerateJob: { type: Object, default: null },
-  useAsRef: { type: Object, default: null }
+  useAsRef: { type: Object, default: null },
 })
 
 const emit = defineEmits(['regenerate-applied', 'use-as-ref-applied'])
@@ -34,7 +34,7 @@ const submitButtonText = computed(() => {
 // Model options
 const selectedModel = computed(() => props.models[settings.value.model] || {})
 const modelType = computed(() => selectedModel.value.type || 'img2vid')
-const modelLengths = computed(() => selectedModel.value.lengths || [5, 10])
+const modelLengths = computed(() => selectedModel.value.lengths || [])
 const modelRatios = computed(() => selectedModel.value.ratios || ['9:16', '16:9'])
 const modelOptions = computed(() => selectedModel.value.options || [])
 
@@ -42,11 +42,14 @@ const showAudioOption = computed(() => modelOptions.value.includes('generate_aud
 const showWebSearchOption = computed(() => modelOptions.value.includes('web_search'))
 const showImageTailOption = computed(() => modelOptions.value.includes('image_tail'))
 const showSeedOption = computed(() => modelOptions.value.includes('seed'))
+const showMaxImagesOption = computed(() => modelOptions.value.includes('max_images'))
 const showRefFields = computed(() => modelType.value === 'ref')
+const modelResolutions = computed(() => selectedModel.value.resolutions || null)
+const showResolution = computed(() => modelType.value !== 'image' || !!modelResolutions.value)
+const resolutions = computed(() => modelResolutions.value || ['480p', '720p', '1080p'])
 const showVideoNumOption = computed(() => modelOptions.value.includes('video_num'))
+const showThinkingLevelOption = computed(() => modelOptions.value.includes('thinking_level'))
 const isDeprecatedModel = computed(() => !!selectedModel.value.deprecated)
-
-const resolutions = ['480p', '720p', '1080p']
 
 // Source image upload
 const isUploading = ref(false)
@@ -167,6 +170,13 @@ watch(modelLengths, (lengths) => {
 watch(modelRatios, (ratios) => {
   if (ratios.length && !ratios.includes(settings.value.aspect_ratio)) {
     settings.value.aspect_ratio = ratios[0]
+  }
+})
+
+// Ensure resolution is valid when model changes, defaulting to lowest
+watch(resolutions, (res) => {
+  if (res.length && !res.includes(settings.value.resolution)) {
+    settings.value.resolution = res[0]
   }
 })
 
@@ -317,6 +327,16 @@ async function handleSubmit() {
     data.seed = parseInt(settings.value.seed, 10) || undefined
   }
 
+  // Max images (optional, 1–4)
+  if (showMaxImagesOption.value && settings.value.max_images) {
+    const n = parseInt(settings.value.max_images, 10)
+    if (n >= 1 && n <= 4) data.max_images = n
+  }
+
+  if (showThinkingLevelOption.value) {
+    data.thinking_level = settings.value.thinking_level
+  }
+
   if (showRefFields.value) {
     // Build refs payload per type
     let order = 1
@@ -366,7 +386,7 @@ async function handleSubmit() {
       submitStatus.value = 'starting'
     }
 
-    const result = await generateVideo(data)
+    const result = await (modelType.value === 'image' ? generateImage(data) : generateVideo(data))
 
     // Add to global jobs queue
     addJob(result.job_id, settings.value.model, prompt.value, props.project)
@@ -455,14 +475,34 @@ async function handleSubmit() {
         </div>
 
         <LengthSlider
+          v-if="modelLengths.length > 0"
           v-model="settings.length"
           :lengths="modelLengths"
         />
 
         <SleekSelect
+          v-if="showResolution"
           v-model="settings.resolution"
           label="Resolution"
           :options="resolutions"
+          class="compact"
+        />
+
+        <SleekInput
+          v-if="showMaxImagesOption"
+          v-model="settings.max_images"
+          label="Images"
+          hint="1–4"
+          type="number"
+          placeholder="1"
+          class="compact"
+        />
+
+        <SleekSelect
+          v-if="showThinkingLevelOption"
+          v-model="settings.thinking_level"
+          label="Thinking"
+          :options="[{ value: 'minimal', label: 'Minimal' }, { value: 'high', label: 'High' }]"
           class="compact"
         />
 
@@ -845,7 +885,7 @@ async function handleSubmit() {
   display: flex;
   gap: 20px;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: center;
   padding: 16px 20px 28px;
   background: linear-gradient(145deg, rgba(22, 22, 28, 0.95), rgba(18, 18, 22, 0.98));
   border-radius: 14px;
@@ -880,6 +920,7 @@ async function handleSubmit() {
 .settings-row :deep(.compact) {
   min-width: 100px;
   width: 100px;
+  margin-bottom: 0;
 }
 
 /* --- Ref --- */

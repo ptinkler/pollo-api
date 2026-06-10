@@ -35,10 +35,10 @@ sys.path.insert(0, str(ROOT_DIR))
 os.chdir(ROOT_DIR)
 load_dotenv(override=True)
 
-from img2vid.pollo.pollo_img2vid import get_video_generator, GENERATORS
+from img2vid.pollo.pollo_img2vid import get_video_generator, GENERATORS, get_image_generator, IMAGE_GENERATORS
 from img2vid.pollo.generators import SUCCESS_STATUSES, ERROR_STATUSES
 from img2vid.common.get_task import get_task_status, get_credit_balance
-from img2vid.common.download import download_video, download_image, get_filename_from_url
+from img2vid.common.download import download_video, download_image, download_generated_image, get_filename_from_url
 from img2vid.common.metadata import get_db
 
 # ── Authentication ───────────────────────────────────────────────────
@@ -125,6 +125,23 @@ MODEL_INFO = {
         "lengths": list(range(4, 16)),
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "video_num", "refs", "image_meta"],
+    },
+    "pollojourney": {
+        "label": "Pollo Journey", "type": "image",
+        "ratios": ["1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16"],
+        "options": ["seed", "style", "images"],
+    },
+    "seedream": {
+        "label": "Seedream 5.0", "type": "image",
+        "ratios": ["1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16", "21:9"],
+        "resolutions": ["2K", "3K", "4K"],
+        "options": ["images", "max_images"],
+    },
+    "nanobanana2": {
+        "label": "Nano Banana 2", "type": "image",
+        "ratios": ["1:1", "9:16", "16:9", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9"],
+        "resolutions": ["1K", "2K", "4K"],
+        "options": ["images", "max_images", "thinking_level"],
     },
 }
 
@@ -262,6 +279,20 @@ class GenerateRequest(BaseModel):
 class BulkMoveRequest(BaseModel):
     job_ids: list[str]
     target_project: str
+
+
+class GenerateImageRequest(BaseModel):
+    model: str = "pollojourney"
+    project: str | None = None
+    prompt: str
+    image_url: str | None = None
+    images: list[str] | None = None
+    aspect_ratio: str | None = None
+    seed: int | None = None
+    style: str | None = None
+    resolution: str | None = None
+    max_images: int | None = None
+    thinking_level: str | None = None
 
 
 class ProjectCreate(BaseModel):
@@ -557,7 +588,7 @@ def _get_assets_path(project_slug: str) -> Path | None:
 
 
 def _enrich_job_result(result: dict, job, assets_path: Path | None = None) -> dict:
-    """Add video_exists, update video_path if found elsewhere, and add filename.
+    """Add video_exists, update video_path if found elsewhere, add filename, and add media_type.
     Modifies result dict in-place and returns it."""
     exists, found_path = _find_video_for_job(job, assets_path)
     result["video_exists"] = exists
@@ -569,6 +600,14 @@ def _enrich_job_result(result: dict, job, assets_path: Path | None = None) -> di
     video_path = result.get("video_path") or found_path
     if video_path:
         result["filename"] = Path(video_path).name
+
+    # media_type: prefer the stored job_type column; fall back to MODEL_INFO for older rows
+    stored_type = result.get("job_type") or getattr(job, "job_type", None)
+    if stored_type and stored_type in ("video", "image"):
+        result["media_type"] = stored_type
+    else:
+        model_entry = MODEL_INFO.get(result.get("model", ""), {})
+        result["media_type"] = "image" if model_entry.get("type") == "image" else "video"
 
     return result
 
@@ -646,16 +685,33 @@ def _get_archived_filenames(project_slug: str) -> set[str]:
     }
 
 
+def _get_latest_image_uncached(assets_dir: Path, exclude_filenames: set[str] | None = None) -> Path | None:
+    """Get the most recent generated image file from disk (no cache)."""
+    if not assets_dir.exists():
+        return None
+    IMAGE_EXTS = ('*.jpg', '*.jpeg', '*.png', '*.webp')
+    images = [p for ext in IMAGE_EXTS for p in assets_dir.glob(ext)
+              if p.name != 'thumb.jpg' and p.name != 'image.jpg']
+    if exclude_filenames:
+        images = [p for p in images if p.name not in exclude_filenames]
+    if not images:
+        return None
+    images.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return images[0]
+
+
 def _update_project_thumbnail(assets_path: Path, project_slug: str | None = None, force: bool = False) -> bool:
-    """Update the project thumbnail (thumb.jpg) from the latest non-archived video.
-    Only updates if thumb.jpg doesn't exist or is older than the latest video.
+    """Update the project thumbnail (thumb.jpg) from the latest non-archived video or image.
+    Only updates if thumb.jpg doesn't exist or is older than the latest media file.
     Set force=True to always regenerate.
     Returns True if thumbnail was created/updated."""
-    # Exclude archived videos if we know the project slug
     exclude = _get_archived_filenames(project_slug) if project_slug else None
     latest_video = _get_latest_video_uncached(assets_path, exclude_filenames=exclude)
-    if not latest_video:
-        # No non-archived videos — remove stale thumbnail
+    latest_image = _get_latest_image_uncached(assets_path, exclude_filenames=exclude)
+
+    # Prefer video over image; fall back to image if no video exists
+    latest_media = latest_video or latest_image
+    if not latest_media:
         thumb_path = assets_path / "thumb.jpg"
         if thumb_path.exists():
             try:
@@ -666,24 +722,29 @@ def _update_project_thumbnail(assets_path: Path, project_slug: str | None = None
 
     thumb_path = assets_path / "thumb.jpg"
 
-    # Check if thumbnail already exists and is up-to-date
     if not force and thumb_path.exists():
         try:
-            if thumb_path.stat().st_mtime >= latest_video.stat().st_mtime:
-                return True  # Already up-to-date
+            if thumb_path.stat().st_mtime >= latest_media.stat().st_mtime:
+                return True
         except Exception:
-            pass  # If stat fails, regenerate
-
-    # Extract frame from latest video
-    frame_data = _extract_first_frame_uncached(latest_video)
-    if not frame_data:
-        print(f"[Thumbnail] Failed to extract frame from {latest_video.name}", flush=True)
-        return False
+            pass
 
     try:
         thumb_path.parent.mkdir(parents=True, exist_ok=True)
+        if latest_media == latest_image and not latest_video:
+            # For image-only projects, copy the image directly
+            import shutil as _shutil
+            _shutil.copy2(str(latest_media), str(thumb_path))
+            print(f"[Thumbnail] Updated {thumb_path.name} from image {latest_media.name}", flush=True)
+            return True
+
+        # Extract frame from latest video
+        frame_data = _extract_first_frame_uncached(latest_media)
+        if not frame_data:
+            print(f"[Thumbnail] Failed to extract frame from {latest_media.name}", flush=True)
+            return False
         thumb_path.write_bytes(frame_data)
-        print(f"[Thumbnail] Updated {thumb_path.name} from {latest_video.name}", flush=True)
+        print(f"[Thumbnail] Updated {thumb_path.name} from {latest_media.name}", flush=True)
         return True
     except Exception as e:
         print(f"[Thumbnail] Failed to save: {e}", flush=True)
@@ -980,6 +1041,248 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
 
     threading.Thread(target=run_generation, args=(job_id, model, kwargs),
                      daemon=True).start()
+
+    return {"job_id": job_id, "project": project_slug}
+
+
+def run_image_generation(job_id: str, model: str, kwargs: dict):
+    """Run image generation in a background thread, updating the DB."""
+    db = get_db()
+    try:
+        db.update_job(job_id, status="creating", message="Creating generator...")
+        generator = get_image_generator(model, **kwargs)
+        project = generator.project
+
+        db.update_job(job_id, status="sending", message="Sending request to API...")
+
+        response = None
+        resp_json = None
+        last_exc: Exception | None = None
+        for attempt in range(SEND_RETRIES):
+            try:
+                response = generator.send_request()
+            except ConnectionError as exc:
+                last_exc = exc
+                db.update_job(job_id, message=f"Send attempt {attempt+1}/{SEND_RETRIES} failed: {exc}")
+                if attempt < SEND_RETRIES - 1:
+                    time.sleep(SEND_RETRY_BACKOFF)
+                    continue
+                else:
+                    db.update_job(job_id, status="error", message=str(exc))
+                    return
+
+            try:
+                resp_json = response.json()
+            except Exception:
+                resp_json = None
+
+            if response.status_code == 200 and resp_json and resp_json.get("code") == "SUCCESS":
+                break
+
+            if resp_json and isinstance(resp_json.get("data"), dict) and resp_json.get("data", {}).get("taskId"):
+                break
+
+            if 500 <= response.status_code < 600 and attempt < SEND_RETRIES - 1:
+                db.update_job(job_id, message=f"API responded HTTP {response.status_code}, retrying ({attempt+1}/{SEND_RETRIES})...")
+                time.sleep(SEND_RETRY_BACKOFF)
+                continue
+
+            break
+
+        if response is None:
+            db.update_job(job_id, status="error", message=str(last_exc or "No response from API"))
+            return
+
+        if resp_json is None:
+            body_preview = response.text[:200] if response.text else "(empty)"
+            db.update_job(job_id, status="error",
+                          message=f"API returned non-JSON (HTTP {response.status_code}): {body_preview}")
+            return
+
+        if response.status_code != 200 and not resp_json.get("data", {}).get("taskId"):
+            db.update_job(job_id, status="error",
+                          message=resp_json.get("message", f"API request failed (HTTP {response.status_code})"))
+            return
+
+        task_id = resp_json.get("data", {}).get("taskId")
+        api_status = resp_json.get("data", {}).get("status")
+        if not task_id or not api_status:
+            db.update_job(job_id, status="error", message="No task ID returned from API")
+            return
+
+        db.update_job(job_id, status="processing", task_id=task_id,
+                      message=f"Task {task_id} processing...")
+
+        results = _poll_task(job_id, task_id, generator.api_key)
+        if results is None:
+            return
+
+        credits_used = sum(r[3] for r in results if r[3] is not None) or None
+        image_urls = [r[2] for r in results if r[0] in SUCCESS_STATUSES and r[2]]
+
+        if not image_urls:
+            db.update_job(job_id, status="error", message="No image URL in result")
+            return
+
+        db.update_job(job_id, status="downloading",
+                      message=f"Downloading {len(image_urls)} image(s)...",
+                      video_url=image_urls[0])
+
+        all_filepaths: list[str] = []
+        dl_metadata = generator.build_download_metadata()
+        for idx, url in enumerate(image_urls):
+            dl_task_id = task_id if idx == 0 else f"{task_id}_{idx}"
+            try:
+                fp = download_generated_image(
+                    url, project,
+                    task_id=dl_task_id, model=model,
+                    prompt=generator.prompt, metadata=dl_metadata,
+                )
+                all_filepaths.append(fp)
+            except Exception as exc:
+                print(f"Failed to download image {idx} for job {job_id}: {exc}")
+
+        if not all_filepaths:
+            db.update_job(job_id, status="error", message="Failed to download any images")
+            return
+
+        primary_path = all_filepaths[0]
+        done_msg = f"{len(all_filepaths)} images ready!" if len(all_filepaths) > 1 else "Image ready!"
+
+        # Store all paths in params_json so the gallery can show each image separately
+        if len(all_filepaths) > 1:
+            job_record = db.get_job(job_id)
+            current_params: dict = {}
+            if job_record and job_record.params_json:
+                try:
+                    current_params = json.loads(job_record.params_json)
+                except Exception:
+                    pass
+            current_params["result_paths"] = all_filepaths
+            db.update_job(job_id, status="done", message=done_msg,
+                          video_path=primary_path, credits_used=credits_used,
+                          params_json=json.dumps(current_params))
+        else:
+            db.update_job(job_id, status="done", message=done_msg,
+                          video_path=primary_path, credits_used=credits_used)
+
+        _invalidate_project_caches()
+
+        job_rec = db.get_job(job_id)
+        project_slug = job_rec.project if job_rec else None
+        _update_project_thumbnail(ASSETS_DIR / project, project_slug=project_slug, force=True)
+
+    except Exception as e:
+        db.update_job(job_id, status="error", message=str(e))
+
+
+@app.post("/api/generate-image")
+def api_generate_image(data: GenerateImageRequest, _api_key: str = Depends(verify_api_key)):
+    model = data.model
+    if model not in IMAGE_GENERATORS:
+        raise HTTPException(status_code=400, detail=f"Unknown image model: {model}. Available: {', '.join(IMAGE_GENERATORS)}")
+
+    prompt = (data.prompt or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt is required")
+
+    db = get_db()
+    project_slug = (data.project or "").strip()
+
+    if project_slug:
+        project = db.get_project_by_slug(project_slug)
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Project not found: {project_slug}")
+    else:
+        project = db.create_project(name=f"Generation {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        project_slug = project.slug
+
+    assets_path = ASSETS_DIR / project.assets_folder
+    assets_path.mkdir(parents=True, exist_ok=True)
+
+    image_url = (data.image_url or "").strip() or None
+
+    # Handle local source image: upload to litterbox to get a public URL
+    uploaded_image_url = None
+    local_image_ref = None
+    if image_url and image_url.startswith("local:"):
+        source = _get_local_image_path(assets_path, image_url)
+        if not source:
+            raise HTTPException(status_code=400, detail="Source image not found — it may have been deleted")
+        try:
+            uploaded_image_url = _upload_to_litterbox(source)
+            local_image_ref = image_url
+            image_url = uploaded_image_url
+        except ValueError as exc:
+            raise HTTPException(status_code=502, detail=f"Failed to upload image: {exc}")
+
+    # Resolve local: refs in images list
+    images = data.images or None
+    if images:
+        resolved = []
+        for img_url in images:
+            img_url = img_url.strip()
+            if img_url.startswith("local:"):
+                source = _get_local_image_path(assets_path, img_url)
+                if not source:
+                    raise HTTPException(status_code=400, detail=f"Image not found: {img_url}")
+                try:
+                    public_url = _upload_to_litterbox(source)
+                    resolved.append(public_url)
+                except ValueError as exc:
+                    raise HTTPException(status_code=502, detail=f"Failed to upload image: {exc}")
+            else:
+                resolved.append(img_url)
+        images = resolved
+
+    kwargs = {
+        "api_key": os.getenv("POLLO_API_KEY"),
+        "project": project.assets_folder,
+        "prompt": prompt,
+        "image_url": image_url,
+        "aspect_ratio": data.aspect_ratio,
+        "seed": data.seed,
+    }
+    if images:
+        kwargs["images"] = images
+    if data.style is not None:
+        kwargs["style"] = data.style
+    if data.resolution is not None:
+        kwargs["resolution"] = data.resolution
+    if data.max_images is not None:
+        kwargs["max_images"] = data.max_images
+    if data.thinking_level is not None:
+        kwargs["thinking_level"] = data.thinking_level
+
+    job_id = str(uuid.uuid4())[:8]
+    extra_params: dict = {
+        "seed": data.seed,
+        "style": data.style or "",
+        "images": images or [],
+    }
+    if data.resolution:
+        extra_params["resolution"] = data.resolution
+    if data.max_images:
+        extra_params["max_images"] = data.max_images
+    if data.thinking_level:
+        extra_params["thinking_level"] = data.thinking_level
+    if local_image_ref and uploaded_image_url:
+        extra_params["source_local"] = local_image_ref
+        extra_params["source_uploaded"] = uploaded_image_url
+        try:
+            extra_params["source_uploaded_at"] = int(time.time())
+        except Exception:
+            extra_params["source_uploaded_at"] = None
+
+    db.create_job(
+        job_id=job_id, project=project_slug, model=model, prompt=prompt,
+        image_url=local_image_ref or image_url,
+        aspect_ratio=data.aspect_ratio,
+        params=extra_params,
+        job_type="image",
+    )
+
+    threading.Thread(target=run_image_generation, args=(job_id, model, kwargs), daemon=True).start()
 
     return {"job_id": job_id, "project": project_slug}
 
@@ -1516,7 +1819,7 @@ def api_get_project(project: str, archived: bool | None = None, _api_key: str = 
 
     assets_path = ASSETS_DIR / proj.assets_folder
 
-    # Use cached video list (sorted by mtime — returns (path, mtime) tuples)
+    # Video files (.mp4) from disk
     videos_with_mtime = _get_video_list(assets_path, sort_by_mtime=True)
 
     jobs = db.get_jobs_by_project(project)
@@ -1527,6 +1830,16 @@ def api_get_project(project: str, archived: bool | None = None, _api_key: str = 
         if j.video_path:
             filename = Path(j.video_path).name
             job_by_filename[filename] = j
+        # Also index extra result_paths from multi-image jobs
+        if getattr(j, 'job_type', 'video') == 'image' and j.params_json:
+            try:
+                params = json.loads(j.params_json)
+                for extra_path in params.get('result_paths', []):
+                    extra_name = Path(extra_path).name
+                    if extra_name not in job_by_filename:
+                        job_by_filename[extra_name] = j
+            except Exception:
+                pass
 
     # Fallback: for any video files on disk that didn't match a job above,
     # search all jobs whose video_path filename lands in this folder.
@@ -1537,18 +1850,50 @@ def api_get_project(project: str, archived: bool | None = None, _api_key: str = 
             filename = Path(j.video_path).name
             if filename in unmatched_filenames:
                 job_by_filename[filename] = j
-                # Repair: realign job.project to match where the file actually lives
                 db.update_job(j.job_id, project=project, video_path=str(assets_path / filename))
 
-    # Build video list with associated job info, filtering by archived status
+    # Image generation results — sourced from job records (not disk glob, to avoid
+    # confusing source/ref images with generated outputs)
+    image_media: list[tuple[Path, float]] = []
+    seen_image_filenames: set[str] = set()
+    for j in jobs:
+        if getattr(j, 'job_type', 'video') != 'image' or j.status != 'done':
+            continue
+        # Use result_paths if present (multi-image jobs), else fall back to video_path
+        paths_to_add: list[Path] = []
+        if j.params_json:
+            try:
+                params = json.loads(j.params_json)
+                result_paths = params.get('result_paths', [])
+                if result_paths:
+                    paths_to_add = [Path(p) for p in result_paths]
+            except Exception:
+                pass
+        if not paths_to_add and j.video_path:
+            paths_to_add = [Path(j.video_path)]
+        for p in paths_to_add:
+            if p.exists() and p.name not in seen_image_filenames:
+                try:
+                    image_media.append((p, p.stat().st_mtime))
+                    seen_image_filenames.add(p.name)
+                except Exception:
+                    pass
+
+    # Merge video and image results, sorted newest-first
+    all_media = list(videos_with_mtime) + image_media
+    all_media.sort(key=lambda x: x[1], reverse=True)
+
+    # Build media list with associated job info, filtering by archived status
     video_list = []
-    for v, mtime in videos_with_mtime:
+    for v, mtime in all_media:
         video_info = {"filename": v.name, "mtime": mtime}
 
-        # Find the job that created this video using lookup dict
         matched_job = job_by_filename.get(v.name)
         if matched_job:
-            video_info["job"] = matched_job.to_dict()
+            jd = matched_job.to_dict()
+            video_info["job"] = jd
+            job_type = getattr(matched_job, 'job_type', 'video') or 'video'
+            video_info["media_type"] = "image" if job_type == "image" else "video"
 
         # Filter by archived status if specified
         if archived is not None:
@@ -1709,46 +2054,60 @@ def _safe_filename(filename: str) -> str:
     return filename
 
 
+_MEDIA_TYPES = {
+    "mp4": "video/mp4",
+    "jpg": "image/jpeg", "jpeg": "image/jpeg",
+    "png": "image/png", "webp": "image/webp",
+    "gif": "image/gif",
+}
+
+
 @app.get("/video/{project}/{filename}")
 def serve_video(project: str, filename: str):
-    """Serve a video file. Project can be slug or assets_folder."""
+    """Serve a video or generated image file. Project can be slug or assets_folder."""
     _safe_filename(filename)
-    # Use cached lookup first
     assets_folder = _get_project_assets_folder(project)
     if not assets_folder:
-        # Fall back to assuming it's already an assets folder (backward compat)
         assets_folder = project
 
     video_path = ASSETS_DIR / assets_folder / filename
     if not video_path.exists():
-        raise HTTPException(status_code=404, detail="Video not found")
+        raise HTTPException(status_code=404, detail="File not found")
 
-    # Videos are immutable, cache for a long time
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    media_type = _MEDIA_TYPES.get(ext, "video/mp4")
     return FileResponse(
-        video_path, 
-        media_type="video/mp4",
+        video_path,
+        media_type=media_type,
         headers={"Cache-Control": "public, max-age=31536000, immutable"}
     )
 
 
 @app.get("/video-thumb/{project}/{filename}")
 def serve_video_thumb(project: str, filename: str):
-    """Serve a thumbnail (first frame) of a specific video."""
+    """Serve a thumbnail for a video (first frame) or image file (directly)."""
     _safe_filename(filename)
-    # Use cached lookup first
     assets_folder = _get_project_assets_folder(project)
     if not assets_folder:
-        # Fall back to assuming it's already an assets folder (backward compat)
         assets_folder = project
 
-    video_path = ASSETS_DIR / assets_folder / filename
-    if not video_path.exists():
-        raise HTTPException(status_code=404, detail="Video not found")
-    frame_data = _extract_first_frame(video_path)
+    media_path = ASSETS_DIR / assets_folder / filename
+    if not media_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext in ("jpg", "jpeg", "png", "webp", "gif"):
+        media_type = _MEDIA_TYPES.get(ext, "image/jpeg")
+        return FileResponse(
+            media_path,
+            media_type=media_type,
+            headers={"Cache-Control": "public, max-age=31536000, immutable"}
+        )
+
+    frame_data = _extract_first_frame(media_path)
     if frame_data:
-        # Thumbnails are derived from immutable videos, cache for a long time
         return Response(
-            content=frame_data, 
+            content=frame_data,
             media_type="image/jpeg",
             headers={"Cache-Control": "public, max-age=31536000, immutable"}
         )
