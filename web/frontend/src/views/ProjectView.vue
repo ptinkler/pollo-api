@@ -117,7 +117,7 @@ function handleUseAsRef(video) {
 
   const isImage = job.media_type === 'image' || job.job_type === 'image'
   if (job.video_url) {
-    refs.push({ type: isImage ? 'image' : 'video', name: isImage ? 'imgref1' : 'ref1', url: job.video_url, order: order++ })
+    refs.push({ type: isImage ? 'image' : 'video', name: isImage ? 'imgref1' : 'vidref1', url: job.video_url, order: order++ })
   }
 
   useAsRefData.value = {
