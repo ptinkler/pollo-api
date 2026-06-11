@@ -898,7 +898,7 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
         if not source:
             raise HTTPException(status_code=400, detail="Source image not found — it may have been deleted")
         try:
-            uploaded_image_url = _upload_to_litterbox(source)
+            uploaded_image_url = _upload_image(source)
             print(f"[Generate] Uploaded source image to litterbox: {uploaded_image_url}")
             # Keep the local ref for the project and for long-term storage
             local_image_ref = image_url
@@ -966,7 +966,7 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
                         if not source:
                             raise HTTPException(status_code=400, detail=f"Ref image not found: {url}")
                         try:
-                            public_url = _upload_to_litterbox(source)
+                            public_url = _upload_image(source)
                             print(f"[Generate] Uploaded ref image to litterbox: {public_url}")
                         except ValueError as exc:
                             raise HTTPException(status_code=502, detail=f"Failed to upload ref image: {exc}")
@@ -986,7 +986,7 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
                             if not source:
                                 raise HTTPException(status_code=400, detail=f"Subject ref image not found: {url}")
                             try:
-                                public_url = _upload_to_litterbox(source)
+                                public_url = _upload_image(source)
                                 print(f"[Generate] Uploaded subject ref image to litterbox: {public_url}")
                             except ValueError as exc:
                                 raise HTTPException(status_code=502, detail=f"Failed to upload subject ref image: {exc}")
@@ -1153,7 +1153,7 @@ def api_generate_image(data: GenerateImageRequest, _api_key: str = Depends(verif
         if not source:
             raise HTTPException(status_code=400, detail="Source image not found — it may have been deleted")
         try:
-            uploaded_image_url = _upload_to_litterbox(source)
+            uploaded_image_url = _upload_image(source)
             local_image_ref = image_url
             image_url = uploaded_image_url
         except ValueError as exc:
@@ -1170,7 +1170,7 @@ def api_generate_image(data: GenerateImageRequest, _api_key: str = Depends(verif
                 if not source:
                     raise HTTPException(status_code=400, detail=f"Image not found: {img_url}")
                 try:
-                    public_url = _upload_to_litterbox(source)
+                    public_url = _upload_image(source)
                     resolved.append(public_url)
                 except ValueError as exc:
                     raise HTTPException(status_code=502, detail=f"Failed to upload image: {exc}")
@@ -2341,6 +2341,50 @@ def _upload_to_litterbox(filepath: Path) -> str:
         reason = f"{type(exc).__name__}: {exc}"
         print(f"[Litterbox] Upload failed — {reason}")
         raise ValueError(f"Litterbox upload failed — {reason}") from exc
+
+
+def _upload_to_tmpfiles(filepath: Path) -> str:
+    """Upload a file to tmpfiles.org and return the public URL."""
+    try:
+        expiry_secs = _parse_litterbox_expiry(LITTERBOX_EXPIRY)
+        with open(filepath, "rb") as f:
+            resp = _requests.post(
+                "https://tmpfiles.org/api/v1/upload",
+                data={"expire": expiry_secs},
+                files={"file": (filepath.name, f)},
+                timeout=(8, 30),
+            )
+
+        if resp.status_code != 200:
+            body = resp.text[:200].strip()
+            raise ValueError(f"tmpfiles.org upload failed — HTTP {resp.status_code}" + (f" — {body}" if body else ""))
+
+        data = resp.json()
+        if data.get("status") != "success":
+            raise ValueError(f"tmpfiles.org upload failed — {data}")
+
+        url = data["data"]["url"]
+        # tmpfiles returns https://tmpfiles.org/XXXX/filename — convert to direct download URL
+        url = url.replace("https://tmpfiles.org/", "https://tmpfiles.org/dl/")
+        return url
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f"tmpfiles.org upload failed — {exc}") from exc
+
+
+def _upload_image(filepath: Path) -> str:
+    """Upload a file, falling back to tmpfiles.org if litterbox fails."""
+    try:
+        return _upload_to_litterbox(filepath)
+    except ValueError as primary_exc:
+        print(f"[Upload] Litterbox failed ({primary_exc}), trying tmpfiles.org…")
+        try:
+            url = _upload_to_tmpfiles(filepath)
+            print(f"[Upload] tmpfiles.org succeeded: {url}")
+            return url
+        except ValueError as fallback_exc:
+            raise ValueError(f"All upload hosts failed — litterbox: {primary_exc}; tmpfiles: {fallback_exc}") from fallback_exc
 
 
 def _parse_litterbox_expiry(expiry: str) -> int:
