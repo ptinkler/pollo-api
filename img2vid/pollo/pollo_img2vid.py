@@ -13,8 +13,10 @@ from .generators import (
     PolloDanceRefFastVideoGenerator,
     Seedance20VideoGenerator,
     Seedance20FastVideoGenerator,
+    Seedance20MiniVideoGenerator,
     SeedanceRefVideoGenerator,
     SeedanceRefFastVideoGenerator,
+    SeedanceMiniRefVideoGenerator,
     NanoBanana2ImageGenerator,
     PolloJourneyImageGenerator,
     SeedreamImageGenerator,
@@ -31,8 +33,10 @@ GENERATORS = {
     "pollodancereffast": PolloDanceRefFastVideoGenerator,
     "seedance20": Seedance20VideoGenerator,
     "seedance20fast": Seedance20FastVideoGenerator,
+    "seedance20mini": Seedance20MiniVideoGenerator,
     "seedanceref": SeedanceRefVideoGenerator,
     "seedancereffast": SeedanceRefFastVideoGenerator,
+    "seedanceminiref": SeedanceMiniRefVideoGenerator,
 }
 
 DEFAULT_MODEL = "seedance20fast"

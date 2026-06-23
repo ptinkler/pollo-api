@@ -211,6 +211,12 @@ class Seedance20FastVideoGenerator(PolloDance20VideoGenerator):
         self.model_url = f"{POLLO_API_BASE}/bytedance/seedance-2-0-fast"
 
 
+class Seedance20MiniVideoGenerator(PolloDance20VideoGenerator):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.model_url = f"{POLLO_API_BASE}/bytedance/seedance-2-0-mini"
+
+
 class PolloDanceRefVideoGenerator(BaseVideoGenerator):
     """
     Ref2Video generator using the pollodance-2-0/ref2video endpoint.
@@ -435,6 +441,12 @@ class SeedanceRefFastVideoGenerator(PolloDanceRefVideoGenerator):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_BASE}/bytedance/seedance-2-0-fast/ref2video"
+
+
+class SeedanceMiniRefVideoGenerator(PolloDanceRefVideoGenerator):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.model_url = f"{POLLO_API_BASE}/bytedance/seedance-2-0-mini/ref2video"
 
 
 class PolloJourneyImageGenerator(BaseVideoGenerator):

@@ -899,7 +899,7 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
             raise HTTPException(status_code=400, detail="Source image not found — it may have been deleted")
         try:
             uploaded_image_url = _upload_image(source)
-            print(f"[Generate] Uploaded source image to litterbox: {uploaded_image_url}")
+            print(f"[Generate] Uploaded source image: {uploaded_image_url}")
             # Keep the local ref for the project and for long-term storage
             local_image_ref = image_url
             # For the generator use the uploaded public URL
@@ -967,7 +967,7 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
                             raise HTTPException(status_code=400, detail=f"Ref image not found: {url}")
                         try:
                             public_url = _upload_image(source)
-                            print(f"[Generate] Uploaded ref image to litterbox: {public_url}")
+                            print(f"[Generate] Uploaded ref image: {public_url}")
                         except ValueError as exc:
                             raise HTTPException(status_code=502, detail=f"Failed to upload ref image: {exc}")
                         # Preserve the original local reference so regenerations can fall back to it
@@ -987,7 +987,7 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
                                 raise HTTPException(status_code=400, detail=f"Subject ref image not found: {url}")
                             try:
                                 public_url = _upload_image(source)
-                                print(f"[Generate] Uploaded subject ref image to litterbox: {public_url}")
+                                print(f"[Generate] Uploaded subject ref image: {public_url}")
                             except ValueError as exc:
                                 raise HTTPException(status_code=502, detail=f"Failed to upload subject ref image: {exc}")
                             # Preserve local reference for regen fallback
@@ -2289,7 +2289,7 @@ def api_cleanup_thumbnails(_api_key: str = Depends(verify_api_key)):
     return {"removed": removed, "message": f"Removed {removed} orphaned thumbnail(s)"}
 
 
-# ── Source image upload & litterbox relay ────────────────────────────
+# ── Source image upload (tmpfiles.org primary, litterbox fallback) ────
 
 SOURCE_IMAGE_ALLOWED_TYPES = {
     "image/jpeg": ".jpg",
@@ -2374,17 +2374,17 @@ def _upload_to_tmpfiles(filepath: Path) -> str:
 
 
 def _upload_image(filepath: Path) -> str:
-    """Upload a file, falling back to tmpfiles.org if litterbox fails."""
+    """Upload a file to tmpfiles.org, falling back to litterbox if that fails."""
     try:
-        return _upload_to_litterbox(filepath)
+        url = _upload_to_tmpfiles(filepath)
+        print(f"[Upload] tmpfiles.org succeeded: {url}")
+        return url
     except ValueError as primary_exc:
-        print(f"[Upload] Litterbox failed ({primary_exc}), trying tmpfiles.org…")
+        print(f"[Upload] tmpfiles.org failed ({primary_exc}), trying litterbox…")
         try:
-            url = _upload_to_tmpfiles(filepath)
-            print(f"[Upload] tmpfiles.org succeeded: {url}")
-            return url
+            return _upload_to_litterbox(filepath)
         except ValueError as fallback_exc:
-            raise ValueError(f"All upload hosts failed — litterbox: {primary_exc}; tmpfiles: {fallback_exc}") from fallback_exc
+            raise ValueError(f"All upload hosts failed — tmpfiles: {primary_exc}; litterbox: {fallback_exc}") from fallback_exc
 
 
 def _parse_litterbox_expiry(expiry: str) -> int:
