@@ -114,14 +114,26 @@ MODEL_INFO = {
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "web_search", "seed", "image_tail"],
     },
+    "seedance20mini": {
+        "label": "Seedance 2.0 Mini", "type": "img2vid",
+        "lengths": list(range(4, 16)),
+        "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
+        "options": ["generate_audio", "web_search", "seed", "image_tail"],
+    },
     "seedanceref": {
-        "label": "Seedance Ref", "type": "ref",
+        "label": "Seedance 2.0 Ref", "type": "ref",
         "lengths": list(range(4, 16)),
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "video_num", "refs", "image_meta"],
     },
     "seedancereffast": {
-        "label": "Seedance Ref Fast", "type": "ref",
+        "label": "Seedance 2.0 Ref Fast", "type": "ref",
+        "lengths": list(range(4, 16)),
+        "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
+        "options": ["generate_audio", "video_num", "refs", "image_meta"],
+    },
+    "seedanceminiref": {
+        "label": "Seedance 2.0 Mini Ref", "type": "ref",
         "lengths": list(range(4, 16)),
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "video_num", "refs", "image_meta"],
