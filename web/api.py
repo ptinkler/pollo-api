@@ -17,6 +17,7 @@ from typing import Any, Callable, Optional, TypedDict
 from contextlib import asynccontextmanager
 
 import requests as _requests
+from bs4 import BeautifulSoup as _BeautifulSoup
 import io as _io
 from PIL import Image as _PILImage
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Cookie, Request
@@ -2375,10 +2376,17 @@ def _upload_to_tmpfiles(filepath: Path) -> str:
         if data.get("status") != "success":
             raise ValueError(f"tmpfiles.org upload failed — {data}")
 
-        url = data["data"]["url"]
-        # tmpfiles returns https://tmpfiles.org/XXXX/filename — convert to direct download URL
-        url = url.replace("https://tmpfiles.org/", "https://tmpfiles.org/dl/")
-        return url
+        page_url = data["data"]["url"]
+        # tmpfiles.org's dl/ URLs now require a {timestamp}.{hash} segment that
+        # isn't returned by the upload API — scrape it from the file's HTML page.
+        page_resp = _requests.get(page_url, timeout=(8, 30))
+        page_resp.raise_for_status()
+        soup = _BeautifulSoup(page_resp.text, "html.parser")
+        link = soup.find("a", class_="download") or soup.find("img", id="img_preview")
+        direct_url = link.get("href") or link.get("src") if link else None
+        if not direct_url:
+            raise ValueError(f"tmpfiles.org upload succeeded but no direct download link found on {page_url}")
+        return direct_url
     except ValueError:
         raise
     except Exception as exc:
