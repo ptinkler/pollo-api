@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from img2vid.pollo.generators import (
-    BaseVideoGenerator, Pollo20VideoGenerator,
+    BaseVideoGenerator, Pollo20VideoGenerator, Pollo25VideoGenerator,
     PolloDance20VideoGenerator, PolloDance20FastVideoGenerator,
     PolloDanceRefVideoGenerator, PolloDanceRefFastVideoGenerator,
     Hailuo03VideoGenerator,
@@ -270,6 +270,44 @@ class TestHailuo03VideoGenerator:
         payload = gen.get_payload()
         assert payload["input"]["image"] == "https://img.com/i.jpg"
         assert payload["input"]["imageTail"] == "https://img.com/tail.jpg"
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_default_resolution(self, *mocks):
+        # Confirmed against the live API: "2K" is the only accepted enum value.
+        gen = Hailuo03VideoGenerator(api_key="k", project="p", prompt="x")
+        assert gen.resolution == "2K"
+        assert Hailuo03VideoGenerator.VALID_RESOLUTIONS == ("2K",)
+
+
+class TestPollo25VideoGenerator:
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_model_url(self, *mocks):
+        gen = Pollo25VideoGenerator(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/generation/pollo/pollo-v2-5"
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_default_resolution(self, *mocks):
+        # Confirmed against the live API: "480p" is rejected, only 720p/1080p accepted.
+        gen = Pollo25VideoGenerator(api_key="k", project="p", prompt="x")
+        assert gen.resolution == "1080p"
+        assert Pollo25VideoGenerator.VALID_RESOLUTIONS == ("720p", "1080p")
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_payload(self, *mocks):
+        gen = Pollo25VideoGenerator(
+            api_key="k", project="p", prompt="hello", resolution="720p", length=5,
+        )
+        payload = gen.get_payload()
+        assert payload["input"]["resolution"] == "720p"
+        assert payload["input"]["length"] == 5
 
 
 class TestPolloDance20FastVideoGenerator:

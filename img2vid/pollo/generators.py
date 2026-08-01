@@ -169,9 +169,12 @@ class Pollo20VideoGenerator(BaseVideoGenerator):
 
 
 class Pollo25VideoGenerator(Pollo20VideoGenerator):
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("720p", "1080p")
+
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_BASE}/pollo/pollo-v2-5"
+        self.resolution = kwargs.get('resolution') or os.getenv("RESOLUTION", "1080p")
 
 
 class PolloDance20VideoGenerator(Pollo20VideoGenerator):
@@ -230,12 +233,14 @@ class Hailuo03VideoGenerator(BaseVideoGenerator):
     The route is live on Pollo's platform (confirmed via direct probe: it
     returns 403 "This model is not enabled for API access" rather than the
     404 every nonexistent slug returns), but is not yet enabled for this
-    account's API key — Pollo needs to flip that on their end. Payload
-    shape is inferred from the sibling minimax-hailuo-02 endpoint since H3
-    isn't publicly documented yet; adjust field names once Pollo grants
-    access and real responses/docs are available.
+    account's API key — Pollo needs to flip that on their end. Field names
+    are inferred from the sibling minimax-hailuo-02 endpoint since H3
+    isn't publicly documented yet; resolution="2K" is confirmed directly
+    from the live API's validation error (it's the only accepted enum
+    value). Re-verify other fields once Pollo grants access.
     """
     VALID_LENGTHS: ClassVar[tuple] = tuple(range(5, 16))
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("2K",)
 
     resolution: str
     length: int
@@ -245,7 +250,7 @@ class Hailuo03VideoGenerator(BaseVideoGenerator):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_BASE}/minimax/minimax-hailuo-03"
-        self.resolution = kwargs.get('resolution') or os.getenv("RESOLUTION", "1080p")
+        self.resolution = kwargs.get('resolution') or os.getenv("RESOLUTION", "2K")
         self.length = self._get_valid_length(str(kwargs.get('length') or os.getenv("LENGTH", "10")))
         self.image_tail = kwargs.get('image_tail') or os.getenv("IMAGE_TAIL")
         self.prompt_optimizer = (

@@ -96,7 +96,10 @@ def create_video(
         if aspect_ratio not in gen_cls.VALID_RATIOS:
             raise ValueError(f"Invalid ratio {aspect_ratio} for {model}. Valid: {', '.join(gen_cls.VALID_RATIOS)}")
 
-    if resolution and resolution not in ("480p", "720p", "1080p"):
+    if resolution and hasattr(gen_cls, "VALID_RESOLUTIONS") and gen_cls.VALID_RESOLUTIONS:
+        if resolution not in gen_cls.VALID_RESOLUTIONS:
+            raise ValueError(f"Invalid resolution {resolution} for {model}. Valid: {', '.join(gen_cls.VALID_RESOLUTIONS)}")
+    elif resolution and resolution not in ("480p", "720p", "1080p"):
         raise ValueError(f"Invalid resolution {resolution}. Valid: 480p, 720p, 1080p")
 
     # Build kwargs from whatever was explicitly provided

@@ -93,6 +93,7 @@ MODEL_INFO = {
         "label": "Pollo 2.5", "type": "img2vid",
         "lengths": [5, 10],
         "ratios": ["9:16", "16:9"],
+        "resolutions": ["720p", "1080p"],
         "options": ["generate_audio", "web_search"],
     },
     "pollodanceref": {
@@ -148,6 +149,7 @@ MODEL_INFO = {
     "hailuo03": {
         "label": "Hailuo 03 (H3)", "type": "img2vid",
         "lengths": list(range(5, 16)),
+        "resolutions": ["2K"],
         "options": ["resolution", "image_tail", "prompt_optimizer"],
         "note": "Endpoint exists on Pollo but returns 403 (not enabled for this API key) as of 2026-08-01.",
     },
