@@ -7,7 +7,7 @@ from img2vid.pollo.pollo_img2vid import get_video_generator, create_video, GENER
 
 class TestGeneratorsMap:
     def test_all_models_present(self):
-        expected = {"pollo20", "pollodance20", "pollodance20fast",
+        expected = {"pollo20", "pollo25", "pollodance20", "pollodance20fast",
                     "pollodanceref", "pollodancereffast",
                     "seedance20", "seedance20fast", "seedance20mini",
                     "seedanceref", "seedancereffast", "seedanceminiref",
