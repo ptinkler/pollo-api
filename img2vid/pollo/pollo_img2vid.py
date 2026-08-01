@@ -7,6 +7,7 @@ from ..common.spinner import Spinner
 from ..common.metadata import get_db
 from .generators import (
     Pollo20VideoGenerator,
+    Pollo25VideoGenerator,
     PolloDance20VideoGenerator,
     PolloDance20FastVideoGenerator,
     PolloDanceRefVideoGenerator,
@@ -27,6 +28,7 @@ from .generators import (
 
 GENERATORS = {
     "pollo20": Pollo20VideoGenerator,
+    "pollo25": Pollo25VideoGenerator,
     "pollodance20": PolloDance20VideoGenerator,
     "pollodance20fast": PolloDance20FastVideoGenerator,
     "pollodanceref": PolloDanceRefVideoGenerator,

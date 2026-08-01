@@ -89,6 +89,12 @@ MODEL_INFO = {
         "ratios": ["9:16", "16:9"],
         "options": ["generate_audio", "web_search"],
     },
+    "pollo25": {
+        "label": "Pollo 2.5", "type": "img2vid",
+        "lengths": [5, 10],
+        "ratios": ["9:16", "16:9"],
+        "options": ["generate_audio", "web_search"],
+    },
     "pollodanceref": {
         "label": "Pollo Dance Ref", "type": "ref",
         "lengths": list(range(4, 16)),

@@ -168,6 +168,12 @@ class Pollo20VideoGenerator(BaseVideoGenerator):
         return {"input": self.payload_attrs}
 
 
+class Pollo25VideoGenerator(Pollo20VideoGenerator):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.model_url = f"{POLLO_API_BASE}/pollo/pollo-v2-5"
+
+
 class PolloDance20VideoGenerator(Pollo20VideoGenerator):
     VALID_LENGTHS: ClassVar[tuple] = tuple(range(4, 16))
     VALID_RATIOS: ClassVar[tuple] = ("4:3", "3:4", "1:1", "16:9", "9:16", "21:9")
