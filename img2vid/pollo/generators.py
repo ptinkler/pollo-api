@@ -223,6 +223,51 @@ class Seedance20MiniVideoGenerator(PolloDance20VideoGenerator):
         self.model_url = f"{POLLO_API_BASE}/bytedance/seedance-2-0-mini"
 
 
+class Hailuo03VideoGenerator(BaseVideoGenerator):
+    """
+    MiniMax Hailuo 03 (H3) video generator.
+
+    The route is live on Pollo's platform (confirmed via direct probe: it
+    returns 403 "This model is not enabled for API access" rather than the
+    404 every nonexistent slug returns), but is not yet enabled for this
+    account's API key — Pollo needs to flip that on their end. Payload
+    shape is inferred from the sibling minimax-hailuo-02 endpoint since H3
+    isn't publicly documented yet; adjust field names once Pollo grants
+    access and real responses/docs are available.
+    """
+    VALID_LENGTHS: ClassVar[tuple] = tuple(range(5, 16))
+
+    resolution: str
+    length: int
+    image_tail: str | None
+    prompt_optimizer: bool
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.model_url = f"{POLLO_API_BASE}/minimax/minimax-hailuo-03"
+        self.resolution = kwargs.get('resolution') or os.getenv("RESOLUTION", "1080p")
+        self.length = self._get_valid_length(str(kwargs.get('length') or os.getenv("LENGTH", "10")))
+        self.image_tail = kwargs.get('image_tail') or os.getenv("IMAGE_TAIL")
+        self.prompt_optimizer = (
+            kwargs.get('prompt_optimizer')
+            if kwargs.get('prompt_optimizer') is not None
+            else _parse_bool_env("PROMPT_OPTIMIZER", True)
+        )
+
+    def get_payload(self) -> dict[str, Any]:
+        self.payload_attrs = {
+            "prompt": self.prompt,
+            "resolution": self.resolution,
+            "length": self.length,
+            "promptOptimizer": self.prompt_optimizer,
+        }
+        if not self.is_text_only:
+            self.payload_attrs["image"] = self.image_url
+        if self.image_tail:
+            self.payload_attrs["imageTail"] = self.image_tail
+        return {"input": self.payload_attrs}
+
+
 class PolloDanceRefVideoGenerator(BaseVideoGenerator):
     """
     Ref2Video generator using the pollodance-2-0/ref2video endpoint.

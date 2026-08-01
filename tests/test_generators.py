@@ -8,6 +8,7 @@ from img2vid.pollo.generators import (
     BaseVideoGenerator, Pollo20VideoGenerator,
     PolloDance20VideoGenerator, PolloDance20FastVideoGenerator,
     PolloDanceRefVideoGenerator, PolloDanceRefFastVideoGenerator,
+    Hailuo03VideoGenerator,
     _parse_bool_env, SUCCESS_STATUSES, ERROR_STATUSES,
 )
 
@@ -227,6 +228,48 @@ class TestPolloDance20VideoGenerator:
     def test_auto_aspect_ratio_from_image(self, mock_dims, *mocks):
         gen = PolloDance20VideoGenerator(api_key="k", project="p", prompt="x")
         assert gen.aspect_ratio == "16:9"
+
+
+class TestHailuo03VideoGenerator:
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_model_url(self, *mocks):
+        gen = Hailuo03VideoGenerator(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/generation/minimax/minimax-hailuo-03"
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_valid_lengths(self, *mocks):
+        assert Hailuo03VideoGenerator.VALID_LENGTHS == tuple(range(5, 16))
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_text_to_video_payload(self, *mocks):
+        gen = Hailuo03VideoGenerator(
+            api_key="k", project="p", prompt="hello",
+            image_url=None, length=8, resolution="1080p", prompt_optimizer=False,
+        )
+        payload = gen.get_payload()
+        assert payload["input"]["prompt"] == "hello"
+        assert payload["input"]["length"] == 8
+        assert payload["input"]["resolution"] == "1080p"
+        assert payload["input"]["promptOptimizer"] is False
+        assert "image" not in payload["input"]
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_image_to_video_payload(self, *mocks):
+        gen = Hailuo03VideoGenerator(
+            api_key="k", project="p", prompt="hello",
+            image_url="https://img.com/i.jpg", image_tail="https://img.com/tail.jpg",
+        )
+        payload = gen.get_payload()
+        assert payload["input"]["image"] == "https://img.com/i.jpg"
+        assert payload["input"]["imageTail"] == "https://img.com/tail.jpg"
 
 
 class TestPolloDance20FastVideoGenerator:

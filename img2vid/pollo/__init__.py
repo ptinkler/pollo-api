@@ -12,6 +12,7 @@ from .generators import (
     SeedanceRefVideoGenerator,
     SeedanceRefFastVideoGenerator,
     SeedanceMiniRefVideoGenerator,
+    Hailuo03VideoGenerator,
     SUCCESS_STATUSES,
     ERROR_STATUSES,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "SeedanceRefVideoGenerator",
     "SeedanceRefFastVideoGenerator",
     "SeedanceMiniRefVideoGenerator",
+    "Hailuo03VideoGenerator",
     "SUCCESS_STATUSES",
     "ERROR_STATUSES",
     "create_video",
