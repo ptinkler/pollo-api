@@ -10,7 +10,8 @@ class TestGeneratorsMap:
         expected = {"pollo20", "pollodance20", "pollodance20fast",
                     "pollodanceref", "pollodancereffast",
                     "seedance20", "seedance20fast", "seedance20mini",
-                    "seedanceref", "seedancereffast", "seedanceminiref"}
+                    "seedanceref", "seedancereffast", "seedanceminiref",
+                    "hailuo03"}
         assert set(GENERATORS.keys()) == expected
 
     def test_default_model(self):

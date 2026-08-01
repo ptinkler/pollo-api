@@ -18,6 +18,7 @@ from .generators import (
     SeedanceRefVideoGenerator,
     SeedanceRefFastVideoGenerator,
     SeedanceMiniRefVideoGenerator,
+    Hailuo03VideoGenerator,
     NanoBanana2ImageGenerator,
     PolloJourneyImageGenerator,
     SeedreamImageGenerator,
@@ -39,6 +40,7 @@ GENERATORS = {
     "seedanceref": SeedanceRefVideoGenerator,
     "seedancereffast": SeedanceRefFastVideoGenerator,
     "seedanceminiref": SeedanceMiniRefVideoGenerator,
+    "hailuo03": Hailuo03VideoGenerator,
 }
 
 DEFAULT_MODEL = "seedance20fast"
