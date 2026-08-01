@@ -139,6 +139,12 @@ MODEL_INFO = {
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "video_num", "refs", "image_meta"],
     },
+    "hailuo03": {
+        "label": "Hailuo 03 (H3)", "type": "img2vid",
+        "lengths": list(range(5, 16)),
+        "options": ["resolution", "image_tail", "prompt_optimizer"],
+        "note": "Endpoint exists on Pollo but returns 403 (not enabled for this API key) as of 2026-08-01.",
+    },
     "pollojourney": {
         "label": "Pollo Journey", "type": "image",
         "ratios": ["1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16"],
