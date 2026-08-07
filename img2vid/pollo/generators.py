@@ -226,6 +226,31 @@ class Seedance20MiniVideoGenerator(PolloDance20VideoGenerator):
         self.model_url = f"{POLLO_API_BASE}/bytedance/seedance-2-0-mini"
 
 
+class Seedance25VideoGenerator(PolloDance20VideoGenerator):
+    """
+    ByteDance Seedance 2.5 video generator.
+
+    Confirmed live via direct probe against bytedance/seedance-2-5: valid
+    enums for resolution, aspectRatio, and length were read directly from
+    the API's validation error responses.
+    """
+    VALID_LENGTHS: ClassVar[tuple] = tuple(range(4, 31))
+    VALID_RATIOS: ClassVar[tuple] = ("4:3", "3:4", "1:1", "16:9", "9:16", "21:9", "adaptive")
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "720p")
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.model_url = f"{POLLO_API_BASE}/bytedance/seedance-2-5"
+
+    def get_aspect_ratio_from_image(self) -> str | None:
+        """Closest-ratio matching, skipping the non-numeric "adaptive" option."""
+        ratios = tuple(r for r in self.VALID_RATIOS if ":" in r)
+        if not ratios or not self.image_path:
+            return None
+        width, height = self.get_image_dimensions(self.image_path)
+        return self.get_closest_aspect_ratio(width, height, ratios)
+
+
 class Hailuo03VideoGenerator(BaseVideoGenerator):
     """
     MiniMax Hailuo 03 (H3) video generator.

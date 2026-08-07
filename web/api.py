@@ -128,6 +128,13 @@ MODEL_INFO = {
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "web_search", "seed", "image_tail"],
     },
+    "seedance25": {
+        "label": "Seedance 2.5", "type": "img2vid",
+        "lengths": list(range(4, 31)),
+        "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9", "adaptive"],
+        "resolutions": ["480p", "720p"],
+        "options": ["generate_audio", "web_search", "seed", "image_tail"],
+    },
     "seedanceref": {
         "label": "Seedance 2.0 Ref", "type": "ref",
         "lengths": list(range(4, 16)),

@@ -8,7 +8,7 @@ from img2vid.pollo.generators import (
     BaseVideoGenerator, Pollo20VideoGenerator, Pollo25VideoGenerator,
     PolloDance20VideoGenerator, PolloDance20FastVideoGenerator,
     PolloDanceRefVideoGenerator, PolloDanceRefFastVideoGenerator,
-    Hailuo03VideoGenerator,
+    Seedance25VideoGenerator, Hailuo03VideoGenerator,
     _parse_bool_env, SUCCESS_STATUSES, ERROR_STATUSES,
 )
 
@@ -227,6 +227,55 @@ class TestPolloDance20VideoGenerator:
     @patch.object(BaseVideoGenerator, "get_image_dimensions", return_value=(1920, 1080))
     def test_auto_aspect_ratio_from_image(self, mock_dims, *mocks):
         gen = PolloDance20VideoGenerator(api_key="k", project="p", prompt="x")
+        assert gen.aspect_ratio == "16:9"
+
+
+class TestSeedance25VideoGenerator:
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_model_url(self, *mocks):
+        gen = Seedance25VideoGenerator(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/generation/bytedance/seedance-2-5"
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_valid_lengths_and_ratios(self, *mocks):
+        # Confirmed against the live API's validation error responses.
+        assert Seedance25VideoGenerator.VALID_LENGTHS == tuple(range(4, 31))
+        assert Seedance25VideoGenerator.VALID_RATIOS == (
+            "4:3", "3:4", "1:1", "16:9", "9:16", "21:9", "adaptive",
+        )
+        assert Seedance25VideoGenerator.VALID_RESOLUTIONS == ("480p", "720p")
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_default_resolution(self, *mocks):
+        gen = Seedance25VideoGenerator(api_key="k", project="p", prompt="x")
+        assert gen.resolution == "480p"
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_payload(self, *mocks):
+        gen = Seedance25VideoGenerator(
+            api_key="k", project="p", prompt="hello",
+            image_url=None, length=20, resolution="720p", aspect_ratio="adaptive",
+        )
+        payload = gen.get_payload()
+        assert payload["input"]["length"] == 20
+        assert payload["input"]["resolution"] == "720p"
+        assert payload["input"]["aspectRatio"] == "adaptive"
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=Path("/fake/image.jpg"))
+    @patch.object(BaseVideoGenerator, "get_image_dimensions", return_value=(1920, 1080))
+    def test_auto_aspect_ratio_from_image_skips_adaptive(self, mock_dims, *mocks):
+        # "adaptive" has no ":" and must be excluded from closest-ratio matching.
+        gen = Seedance25VideoGenerator(api_key="k", project="p", prompt="x")
         assert gen.aspect_ratio == "16:9"
 
 

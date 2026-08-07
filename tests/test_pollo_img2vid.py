@@ -9,7 +9,7 @@ class TestGeneratorsMap:
     def test_all_models_present(self):
         expected = {"pollo20", "pollo25", "pollodance20", "pollodance20fast",
                     "pollodanceref", "pollodancereffast",
-                    "seedance20", "seedance20fast", "seedance20mini",
+                    "seedance20", "seedance20fast", "seedance20mini", "seedance25",
                     "seedanceref", "seedancereffast", "seedanceminiref",
                     "hailuo03"}
         assert set(GENERATORS.keys()) == expected
