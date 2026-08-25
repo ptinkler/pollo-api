@@ -3,7 +3,7 @@ import os
 from typing import Any, ClassVar
 from pathlib import Path
 from PIL import Image
-from ..common.get_inputs import get_prompt, get_image_url, get_image_path, get_subject_url
+from ..common.get_inputs import get_prompt, get_image_url, get_image_path, get_subject_url, get_audio_url
 from ..common.cloudflare import is_cloudflare_block
 from ..common.config import POLLO_API_BASE, POLLO_API_TIMEOUT
 
@@ -295,6 +295,115 @@ class Hailuo03VideoGenerator(BaseVideoGenerator):
             self.payload_attrs["image"] = self.image_url
         if self.image_tail:
             self.payload_attrs["imageTail"] = self.image_tail
+        return {"input": self.payload_attrs}
+
+
+class Wan27VideoGenerator(BaseVideoGenerator):
+    """
+    Alibaba Wan 2.7 (wanx/wan-v2-7) video generator.
+
+    Image-to-video: input.image is required by the API. Supports an
+    optional tail image, negative prompt, seed, and audio-driven
+    generation via audioUrl. Resolution enum values are uppercase
+    ("720P", "1080P") per the API docs, unlike other models' lowercase.
+    """
+    VALID_LENGTHS: ClassVar[tuple] = tuple(range(2, 16))
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("720P", "1080P")
+
+    resolution: str
+    length: int
+    image_tail: str | None
+    negative_prompt: str | None
+    seed: int | None
+    audio_url: str | None
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.model_url = f"{POLLO_API_BASE}/wanx/wan-v2-7"
+        self.resolution = kwargs.get('resolution') or os.getenv("RESOLUTION", "1080P")
+        self.length = self._get_valid_length(str(kwargs.get('length') or os.getenv("LENGTH", "5")), default=5)
+        self.image_tail = kwargs.get('image_tail') or os.getenv("IMAGE_TAIL")
+        self.negative_prompt = kwargs.get('negative_prompt') or os.getenv("NEGATIVE_PROMPT")
+        self.seed = kwargs.get('seed') or (int(os.getenv("SEED")) if os.getenv("SEED") else None)
+        audio_url = kwargs.get('audio_url', _UNSET)
+        if audio_url is _UNSET:
+            audio_url = get_audio_url(self.project)
+        self.audio_url = audio_url
+
+    def get_payload(self) -> dict[str, Any]:
+        self.payload_attrs = {
+            "prompt": self.prompt,
+            "resolution": self.resolution,
+            "length": self.length,
+        }
+        if not self.is_text_only:
+            self.payload_attrs["image"] = self.image_url
+        if self.image_tail:
+            self.payload_attrs["imageTail"] = self.image_tail
+        if self.negative_prompt:
+            self.payload_attrs["negativePrompt"] = self.negative_prompt
+        if self.seed is not None:
+            self.payload_attrs["seed"] = self.seed
+        if self.audio_url:
+            self.payload_attrs["audioUrl"] = self.audio_url
+        return {"input": self.payload_attrs}
+
+
+class Wan30VideoGenerator(BaseVideoGenerator):
+    """
+    Alibaba Wan 3.0 (wanx/wan-v3-0) video generator.
+
+    The route is live on Pollo's platform (confirmed via direct probe: a
+    minimal {"prompt": ...} payload returns 403 "This model is not enabled
+    for API access" rather than the 404 every nonexistent slug returns),
+    but is not yet enabled for this account's API key, and isn't yet listed
+    on docs.pollo.ai as of 2026-08-25 ("Wan 3.0 is coming soon to Pollo AI"
+    per their own marketing copy). resolution ("480P"/"720P"/"1080P") and
+    length (2-30) enums, and generateAudio's boolean type, are all confirmed
+    directly from the live API's validation error responses. numOutputs's
+    field name is inferred/unconfirmed — no sibling Pollo model in this
+    codebase exposes an output-count field on a direct (non-ref2video)
+    endpoint to compare against, and a minimal valid payload short-circuits
+    straight to the enablement 403 before any check on an unrecognized key
+    would surface. Re-verify numOutputs once Pollo grants access. The live
+    API also validates an aspectRatio enum on the text-only branch, but
+    it's intentionally omitted here per product spec.
+    """
+    VALID_LENGTHS: ClassVar[tuple] = tuple(range(2, 31))
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("480P", "720P", "1080P")
+    VALID_NUM_OUTPUTS: ClassVar[tuple] = (1, 2, 3, 4)
+
+    resolution: str
+    length: int
+    generate_audio: bool
+    num_outputs: int
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.model_url = f"{POLLO_API_BASE}/wanx/wan-v3-0"
+        self.resolution = kwargs.get('resolution') or os.getenv("RESOLUTION", "1080P")
+        self.length = self._get_valid_length(str(kwargs.get('length') or os.getenv("LENGTH", "5")), default=5)
+        self.generate_audio = (
+            kwargs.get('generate_audio')
+            if kwargs.get('generate_audio') is not None
+            else _parse_bool_env("GENERATE_AUDIO", True)
+        )
+        num_outputs = kwargs.get('num_outputs')
+        if num_outputs is None:
+            env_val = os.getenv("NUM_OUTPUTS")
+            num_outputs = int(env_val) if env_val else 1
+        self.num_outputs = max(1, min(4, int(num_outputs)))
+
+    def get_payload(self) -> dict[str, Any]:
+        self.payload_attrs = {
+            "prompt": self.prompt,
+            "resolution": self.resolution,
+            "length": self.length,
+            "generateAudio": self.generate_audio,
+            "numOutputs": self.num_outputs,
+        }
+        if not self.is_text_only:
+            self.payload_attrs["image"] = self.image_url
         return {"input": self.payload_attrs}
 
 

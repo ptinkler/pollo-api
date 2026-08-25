@@ -11,7 +11,7 @@ class TestGeneratorsMap:
                     "pollodanceref", "pollodancereffast",
                     "seedance20", "seedance20fast", "seedance20mini", "seedance25",
                     "seedanceref", "seedancereffast", "seedanceminiref",
-                    "hailuo03"}
+                    "hailuo03", "wan27", "wan30"}
         assert set(GENERATORS.keys()) == expected
 
     def test_default_model(self):

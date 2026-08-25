@@ -20,6 +20,8 @@ from .generators import (
     SeedanceRefFastVideoGenerator,
     SeedanceMiniRefVideoGenerator,
     Hailuo03VideoGenerator,
+    Wan27VideoGenerator,
+    Wan30VideoGenerator,
     NanoBanana2ImageGenerator,
     PolloJourneyImageGenerator,
     SeedreamImageGenerator,
@@ -43,6 +45,8 @@ GENERATORS = {
     "seedancereffast": SeedanceRefFastVideoGenerator,
     "seedanceminiref": SeedanceMiniRefVideoGenerator,
     "hailuo03": Hailuo03VideoGenerator,
+    "wan27": Wan27VideoGenerator,
+    "wan30": Wan30VideoGenerator,
 }
 
 DEFAULT_MODEL = "seedance20fast"
@@ -79,9 +83,12 @@ def create_video(
     subject_url: str | None = None,
     seed: int | None = None,
     image_tail: str | None = None,
+    negative_prompt: str | None = None,
+    audio_url: str | None = None,
     refs: list | None = None,
     video_num: int | None = None,
     image_meta: list | None = None,
+    num_outputs: int | None = None,
 ) -> None:
     model = model or DEFAULT_MODEL
 
@@ -124,6 +131,12 @@ def create_video(
         kwargs["seed"] = seed
     if image_tail is not None:
         kwargs["image_tail"] = image_tail
+    if negative_prompt is not None:
+        kwargs["negative_prompt"] = negative_prompt
+    if audio_url is not None:
+        kwargs["audio_url"] = audio_url
+    if num_outputs is not None:
+        kwargs["num_outputs"] = num_outputs
     if refs is not None:
         kwargs["refs"] = refs
     if video_num is not None:

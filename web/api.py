@@ -160,6 +160,19 @@ MODEL_INFO = {
         "options": ["resolution", "image_tail", "prompt_optimizer"],
         "note": "Endpoint exists on Pollo but returns 403 (not enabled for this API key) as of 2026-08-01.",
     },
+    "wan27": {
+        "label": "Wan 2.7", "type": "img2vid",
+        "lengths": list(range(2, 16)),
+        "resolutions": ["720P", "1080P"],
+        "options": ["seed", "image_tail", "negative_prompt", "audio_url"],
+    },
+    "wan30": {
+        "label": "Wan 3.0", "type": "img2vid",
+        "lengths": list(range(2, 31)),
+        "resolutions": ["480P", "720P", "1080P"],
+        "options": ["generate_audio", "num_outputs"],
+        "note": "Endpoint exists on Pollo but returns 403 (not enabled for this API key) as of 2026-08-25. numOutputs field name is unconfirmed.",
+    },
     "pollojourney": {
         "label": "Pollo Journey", "type": "image",
         "ratios": ["1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16"],
@@ -305,6 +318,8 @@ class GenerateRequest(BaseModel):
     web_search: bool | None = None
     image_tail: str | None = None
     seed: int | None = None
+    negative_prompt: str | None = None
+    num_outputs: int | None = None
     refs: list | None = None  # ref2video: array of {type, name, image, order, avatarId?}
     video_num: int | None = None  # ref2video: 1-4
     image_meta: list | None = None  # ref2video: array of {url, order, name?, cropper?}
@@ -983,6 +998,14 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
             kwargs["image_tail"] = image_tail
     if "seed" in model_opts and data.seed is not None:
         kwargs["seed"] = data.seed
+    if "negative_prompt" in model_opts:
+        negative_prompt = (data.negative_prompt or "").strip() or None
+        if negative_prompt:
+            kwargs["negative_prompt"] = negative_prompt
+    if "audio_url" in model_opts and audio_url:
+        kwargs["audio_url"] = audio_url
+    if "num_outputs" in model_opts and data.num_outputs is not None:
+        kwargs["num_outputs"] = data.num_outputs
 
     if MODEL_INFO.get(model, {}).get("type") == "ref":
         # ref uses refs array
@@ -1045,6 +1068,8 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
         "web_search": kwargs.get("web_search", False),
         "image_tail": kwargs.get("image_tail", ""),
         "seed": kwargs.get("seed", None),
+        "negative_prompt": kwargs.get("negative_prompt", ""),
+        "num_outputs": kwargs.get("num_outputs", None),
         "video_num": kwargs.get("video_num", None),
         "refs": kwargs.get("refs", []) or [],
     }
