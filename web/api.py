@@ -127,6 +127,7 @@ MODEL_INFO = {
         "lengths": list(range(4, 16)),
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "web_search", "seed", "image_tail"],
+        "deprecated": True,
     },
     "seedance25": {
         "label": "Seedance 2.5", "type": "img2vid",
@@ -152,6 +153,7 @@ MODEL_INFO = {
         "lengths": list(range(4, 16)),
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "video_num", "refs", "image_meta"],
+        "deprecated": True,
     },
     "hailuo03": {
         "label": "Hailuo 03 (H3)", "type": "img2vid",
@@ -159,12 +161,14 @@ MODEL_INFO = {
         "resolutions": ["2K"],
         "options": ["resolution", "image_tail", "prompt_optimizer"],
         "note": "Endpoint exists on Pollo but returns 403 (not enabled for this API key) as of 2026-08-01.",
+        "deprecated": True,
     },
     "wan27": {
         "label": "Wan 2.7", "type": "img2vid",
         "lengths": list(range(2, 16)),
         "resolutions": ["720P", "1080P"],
         "options": ["seed", "image_tail", "negative_prompt", "audio_url"],
+        "deprecated": True,
     },
     "wan30": {
         "label": "Wan 3.0", "type": "img2vid",
@@ -177,6 +181,7 @@ MODEL_INFO = {
         "label": "Pollo Journey", "type": "image",
         "ratios": ["1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16"],
         "options": ["seed", "style", "images"],
+        "deprecated": True,
     },
     "seedream": {
         "label": "Seedream 5.0", "type": "image",
@@ -189,6 +194,7 @@ MODEL_INFO = {
         "ratios": ["1:1", "9:16", "16:9", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9"],
         "resolutions": ["1K", "2K", "4K"],
         "options": ["images", "max_images", "thinking_level"],
+        "deprecated": True,
     },
 }
 
