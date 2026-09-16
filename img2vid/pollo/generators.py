@@ -169,12 +169,29 @@ class Pollo20VideoGenerator(BaseVideoGenerator):
 
 
 class Pollo25VideoGenerator(Pollo20VideoGenerator):
+    """
+    Pollo 2.5 video generator.
+
+    Confirmed live via direct probe against pollo/pollo-v2-5: length enum is
+    4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 15 (not the (5, 10) inherited from
+    Pollo 2.0 — notably 13 and 14 are absent while 15 is present), resolution
+    is "720p" | "1080p" (not "480p"), and aspectRatio is optional and accepts
+    "16:9" | "9:16" — but per user report the generated video ignores it
+    regardless of value, so it's dropped from the payload rather than
+    exposed as a user-facing setting.
+    """
+    VALID_LENGTHS: ClassVar[tuple] = (4, 5, 6, 7, 8, 9, 10, 11, 12, 15)
     VALID_RESOLUTIONS: ClassVar[tuple] = ("720p", "1080p")
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_BASE}/pollo/pollo-v2-5"
         self.resolution = kwargs.get('resolution') or os.getenv("RESOLUTION", "1080p")
+
+    def get_payload(self) -> dict[str, Any]:
+        payload = super().get_payload()
+        payload["input"].pop("aspectRatio", None)
+        return payload
 
 
 class PolloDance20VideoGenerator(Pollo20VideoGenerator):
@@ -255,17 +272,16 @@ class Hailuo03VideoGenerator(BaseVideoGenerator):
     """
     MiniMax Hailuo 03 (H3) video generator.
 
-    The route is live on Pollo's platform (confirmed via direct probe: it
-    returns 403 "This model is not enabled for API access" rather than the
-    404 every nonexistent slug returns), but is not yet enabled for this
-    account's API key — Pollo needs to flip that on their end. Field names
-    are inferred from the sibling minimax-hailuo-02 endpoint since H3
-    isn't publicly documented yet; resolution="2K" is confirmed directly
-    from the live API's validation error (it's the only accepted enum
-    value). Re-verify other fields once Pollo grants access.
+    Enabled for this account's API key as of 2026-08-25. The slug is
+    "minimax/hailuo-03" (not "minimax/minimax-hailuo-03" — that older guess,
+    inferred from the sibling minimax-hailuo-02 endpoint before H3 was
+    publicly documented, now 404s). Re-probed live 2026-09-16: resolution
+    enum is "480P" | "768P" | "2K" (previously only "2K" showed up, before
+    the account had access), length is 4-15, and promptOptimizer is
+    confirmed against a live successful task response.
     """
-    VALID_LENGTHS: ClassVar[tuple] = tuple(range(5, 16))
-    VALID_RESOLUTIONS: ClassVar[tuple] = ("2K",)
+    VALID_LENGTHS: ClassVar[tuple] = tuple(range(4, 16))
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("480P", "768P", "2K")
 
     resolution: str
     length: int
@@ -274,7 +290,7 @@ class Hailuo03VideoGenerator(BaseVideoGenerator):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.model_url = f"{POLLO_API_BASE}/minimax/minimax-hailuo-03"
+        self.model_url = f"{POLLO_API_BASE}/minimax/hailuo-03"
         self.resolution = kwargs.get('resolution') or os.getenv("RESOLUTION", "2K")
         self.length = self._get_valid_length(str(kwargs.get('length') or os.getenv("LENGTH", "10")))
         self.image_tail = kwargs.get('image_tail') or os.getenv("IMAGE_TAIL")
@@ -356,18 +372,19 @@ class Wan30VideoGenerator(BaseVideoGenerator):
     The route is live on Pollo's platform (confirmed via direct probe: a
     minimal {"prompt": ...} payload returns 403 "This model is not enabled
     for API access" rather than the 404 every nonexistent slug returns),
-    but is not yet enabled for this account's API key, and isn't yet listed
-    on docs.pollo.ai as of 2026-08-25 ("Wan 3.0 is coming soon to Pollo AI"
-    per their own marketing copy). resolution ("480P"/"720P"/"1080P") and
-    length (2-30) enums, and generateAudio's boolean type, are all confirmed
-    directly from the live API's validation error responses. numOutputs's
-    field name is inferred/unconfirmed — no sibling Pollo model in this
-    codebase exposes an output-count field on a direct (non-ref2video)
-    endpoint to compare against, and a minimal valid payload short-circuits
-    straight to the enablement 403 before any check on an unrecognized key
-    would surface. Re-verify numOutputs once Pollo grants access. The live
-    API also validates an aspectRatio enum on the text-only branch, but
-    it's intentionally omitted here per product spec.
+    but is not yet enabled for API access as of 2026-08-25 — Pollo already
+    offers Wan 3.0 through their own web UI, the API rollout is just lagging
+    behind it. Not yet listed on docs.pollo.ai either. resolution
+    ("480P"/"720P"/"1080P") and length (2-30) enums, and generateAudio's
+    boolean type, are all confirmed directly from the live API's validation
+    error responses. numOutputs's field name is inferred/unconfirmed — no
+    sibling Pollo model in this codebase exposes an output-count field on a
+    direct (non-ref2video) endpoint to compare against, and a minimal valid
+    payload short-circuits straight to the enablement 403 before any check
+    on an unrecognized key would surface. Re-verify numOutputs once Pollo
+    enables API access. The live API also validates an aspectRatio enum on
+    the text-only branch, but it's intentionally omitted here per product
+    spec.
     """
     VALID_LENGTHS: ClassVar[tuple] = tuple(range(2, 31))
     VALID_RESOLUTIONS: ClassVar[tuple] = ("480P", "720P", "1080P")

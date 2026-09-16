@@ -11,6 +11,7 @@ import uuid
 import threading
 import hashlib
 import time
+from collections import Counter
 from pathlib import Path
 from datetime import datetime
 from typing import Any, Callable, Optional, TypedDict
@@ -91,8 +92,7 @@ MODEL_INFO = {
     },
     "pollo25": {
         "label": "Pollo 2.5", "type": "img2vid",
-        "lengths": [5, 10],
-        "ratios": ["9:16", "16:9"],
+        "lengths": [4, 5, 6, 7, 8, 9, 10, 11, 12, 15],
         "resolutions": ["720p", "1080p"],
         "options": ["generate_audio", "web_search"],
     },
@@ -157,11 +157,9 @@ MODEL_INFO = {
     },
     "hailuo03": {
         "label": "Hailuo 03 (H3)", "type": "img2vid",
-        "lengths": list(range(5, 16)),
-        "resolutions": ["2K"],
+        "lengths": list(range(4, 16)),
+        "resolutions": ["480P", "768P", "2K"],
         "options": ["resolution", "image_tail", "prompt_optimizer"],
-        "note": "Endpoint exists on Pollo but returns 403 (not enabled for this API key) as of 2026-08-01.",
-        "deprecated": True,
     },
     "wan27": {
         "label": "Wan 2.7", "type": "img2vid",
@@ -175,7 +173,7 @@ MODEL_INFO = {
         "lengths": list(range(2, 31)),
         "resolutions": ["480P", "720P", "1080P"],
         "options": ["generate_audio", "num_outputs"],
-        "note": "Endpoint exists on Pollo but returns 403 (not enabled for this API key) as of 2026-08-25. numOutputs field name is unconfirmed.",
+        "note": "Endpoint exists on Pollo but returns 403 (not enabled for API access) as of 2026-08-25 — Pollo offers Wan 3.0 on their own site's UI already, API rollout is lagging. numOutputs field name is unconfirmed.",
     },
     "pollojourney": {
         "label": "Pollo Journey", "type": "image",
@@ -2336,6 +2334,37 @@ def api_usage_project_details(project_slug: str, days: int = 30, _api_key: str =
         result.append(d)
 
     return result
+
+
+@app.get("/api/usage/estimate")
+def api_usage_estimate(
+    model: str,
+    resolution: Optional[str] = None,
+    length: Optional[int] = None,
+    generate_audio: Optional[bool] = None,
+    _api_key: str = Depends(verify_api_key),
+):
+    """Estimate the credit cost for a generation from past jobs with identical settings.
+
+    Pollo's API only reports credit cost after a task is submitted (no pre-flight
+    pricing endpoint exists), so this looks up prior jobs that used the exact same
+    model/resolution/length/generate_audio and reports the most common cost seen.
+    Returns credits=None when there's no matching history yet.
+    """
+    db = get_db()
+    matches = [
+        j for j in db.get_all_jobs(limit=10000)
+        if j.model == model
+        and j.credits_used is not None
+        and j.resolution == resolution
+        and j.length == length
+        and j.generate_audio == generate_audio
+    ]
+    if not matches:
+        return {"credits": None, "samples": 0}
+
+    credits, _count = Counter(j.credits_used for j in matches).most_common(1)[0]
+    return {"credits": credits, "samples": len(matches)}
 
 
 # ── Cache management ────────────────────────────────────────────────

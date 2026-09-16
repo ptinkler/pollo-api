@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch, inject } from 'vue'
 import { RatioPicker, LengthSlider, ToggleSwitch, SleekTextarea, SleekSelect, SleekInput } from '../../components/form'
-import { generateVideo, generateImage, uploadSourceImage, deleteSourceImage, getSourceImageUrl, uploadRefImage, getRefImageUrl } from '../../composables/useApi'
+import { generateVideo, generateImage, uploadSourceImage, deleteSourceImage, getSourceImageUrl, uploadRefImage, getRefImageUrl, fetchCreditEstimate } from '../../composables/useApi'
 import { useProjectSettings } from '../../composables/useProjectSettings'
 import { useJobsQueue } from '../../composables/useJobsQueue'
 
@@ -26,16 +26,18 @@ const prompt = ref('')
 const isSubmitting = ref(false)
 const submitStatus = ref('')  // '', 'uploading', 'starting'
 const submitButtonText = computed(() => {
-  if (submitStatus.value === 'uploading') return 'Uploading'
-  if (submitStatus.value === 'starting') return 'Starting'
-  return '🚀 Generate'
+  let text = '🚀 Generate'
+  if (submitStatus.value === 'uploading') text = 'Uploading'
+  else if (submitStatus.value === 'starting') text = 'Starting'
+  if (creditEstimate.value?.credits != null) text += ` (~${creditEstimate.value.credits} credits)`
+  return text
 })
 
 // Model options
 const selectedModel = computed(() => props.models[settings.value.model] || {})
 const modelType = computed(() => selectedModel.value.type || 'img2vid')
 const modelLengths = computed(() => selectedModel.value.lengths || [])
-const modelRatios = computed(() => selectedModel.value.ratios || ['9:16', '16:9'])
+const modelRatios = computed(() => selectedModel.value.ratios || [])
 const modelOptions = computed(() => selectedModel.value.options || [])
 
 const showAudioOption = computed(() => modelOptions.value.includes('generate_audio'))
@@ -50,6 +52,34 @@ const resolutions = computed(() => modelResolutions.value || ['480p', '720p', '1
 const showVideoNumOption = computed(() => modelOptions.value.includes('video_num'))
 const showThinkingLevelOption = computed(() => modelOptions.value.includes('thinking_level'))
 const isDeprecatedModel = computed(() => !!selectedModel.value.deprecated)
+
+// Credit cost estimate — Pollo has no pre-flight pricing API, so this looks up
+// what identical past generations actually cost and shows that on the button.
+const creditEstimate = ref(null)
+const estimateParams = computed(() => ({
+  model: settings.value.model,
+  resolution: showResolution.value ? settings.value.resolution : null,
+  length: modelLengths.value.length > 0 ? settings.value.length : null,
+  generate_audio: showAudioOption.value ? settings.value.generate_audio : null,
+}))
+let estimateDebounce = null
+let estimateToken = 0
+watch(estimateParams, (params) => {
+  clearTimeout(estimateDebounce)
+  if (!params.model) {
+    creditEstimate.value = null
+    return
+  }
+  const token = ++estimateToken
+  estimateDebounce = setTimeout(async () => {
+    try {
+      const result = await fetchCreditEstimate(params)
+      if (token === estimateToken) creditEstimate.value = result
+    } catch {
+      if (token === estimateToken) creditEstimate.value = null
+    }
+  }, 300)
+}, { immediate: true, deep: true })
 
 // Source image upload
 const isUploading = ref(false)
@@ -477,7 +507,7 @@ async function handleSubmit() {
 
       <!-- Video Settings Row -->
       <div class="form-section settings-row">
-        <div class="setting-group">
+        <div class="setting-group" v-if="modelRatios.length > 0">
           <label>Aspect</label>
           <RatioPicker
             v-model="settings.aspect_ratio"

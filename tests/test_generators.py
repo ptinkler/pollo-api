@@ -286,13 +286,13 @@ class TestHailuo03VideoGenerator:
     @patch("img2vid.pollo.generators.get_image_path", return_value=None)
     def test_model_url(self, *mocks):
         gen = Hailuo03VideoGenerator(api_key="k", project="p", prompt="x")
-        assert gen.model_url == "https://pollo.ai/api/platform/generation/minimax/minimax-hailuo-03"
+        assert gen.model_url == "https://pollo.ai/api/platform/generation/minimax/hailuo-03"
 
     @patch("img2vid.pollo.generators.get_prompt", return_value="p")
     @patch("img2vid.pollo.generators.get_image_url", return_value=None)
     @patch("img2vid.pollo.generators.get_image_path", return_value=None)
     def test_valid_lengths(self, *mocks):
-        assert Hailuo03VideoGenerator.VALID_LENGTHS == tuple(range(5, 16))
+        assert Hailuo03VideoGenerator.VALID_LENGTHS == tuple(range(4, 16))
 
     @patch("img2vid.pollo.generators.get_prompt", return_value="p")
     @patch("img2vid.pollo.generators.get_image_url", return_value=None)
@@ -325,10 +325,10 @@ class TestHailuo03VideoGenerator:
     @patch("img2vid.pollo.generators.get_image_url", return_value=None)
     @patch("img2vid.pollo.generators.get_image_path", return_value=None)
     def test_default_resolution(self, *mocks):
-        # Confirmed against the live API: "2K" is the only accepted enum value.
+        # Confirmed against the live API: "480P" | "768P" | "2K" are accepted, default stays "2K".
         gen = Hailuo03VideoGenerator(api_key="k", project="p", prompt="x")
         assert gen.resolution == "2K"
-        assert Hailuo03VideoGenerator.VALID_RESOLUTIONS == ("2K",)
+        assert Hailuo03VideoGenerator.VALID_RESOLUTIONS == ("480P", "768P", "2K")
 
 
 class TestWan27VideoGenerator:
@@ -480,6 +480,14 @@ class TestPollo25VideoGenerator:
     @patch("img2vid.pollo.generators.get_prompt", return_value="p")
     @patch("img2vid.pollo.generators.get_image_url", return_value=None)
     @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_valid_lengths(self, *mocks):
+        # Confirmed against the live API: not the (5, 10) inherited from Pollo 2.0 —
+        # 13/14 are absent while 15 is present.
+        assert Pollo25VideoGenerator.VALID_LENGTHS == (4, 5, 6, 7, 8, 9, 10, 11, 12, 15)
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
     def test_payload(self, *mocks):
         gen = Pollo25VideoGenerator(
             api_key="k", project="p", prompt="hello", resolution="720p", length=5,
@@ -487,6 +495,8 @@ class TestPollo25VideoGenerator:
         payload = gen.get_payload()
         assert payload["input"]["resolution"] == "720p"
         assert payload["input"]["length"] == 5
+        # aspectRatio has no effect on Pollo 2.5's output per user report — dropped, not sent.
+        assert "aspectRatio" not in payload["input"]
 
 
 class TestPolloDance20FastVideoGenerator:

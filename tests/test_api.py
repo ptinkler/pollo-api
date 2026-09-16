@@ -2028,6 +2028,43 @@ class TestCleanupThumbCacheUnlinkFail:
         assert isinstance(result, int)
 
 
+# ── API: Credit estimate ─────────────────────────────────────────────
+
+class TestCreditEstimateEndpoint:
+    def _job(self, db, proj, job_id, model, resolution, length, generate_audio, credits_used):
+        db.create_job(
+            job_id=job_id, project=proj.slug, model=model, prompt="x",
+            resolution=resolution, length=length, generate_audio=generate_audio,
+        )
+        db.update_job(job_id, credits_used=credits_used)
+
+    def test_no_history_returns_none(self, client, db):
+        resp = client.get("/api/usage/estimate?model=pollo25")
+        assert resp.status_code == 200
+        assert resp.json() == {"credits": None, "samples": 0}
+
+    def test_matches_exact_settings(self, client, db):
+        proj = db.create_project(name="EstimateTest")
+        self._job(db, proj, "ce1", "pollo25", "1080p", 10, False, 40)
+        self._job(db, proj, "ce2", "pollo25", "1080p", 10, False, 40)
+        # A different settings combo for the same model shouldn't be counted.
+        self._job(db, proj, "ce3", "pollo25", "720p", 10, False, 20)
+
+        resp = client.get("/api/usage/estimate?model=pollo25&resolution=1080p&length=10&generate_audio=false")
+        assert resp.status_code == 200
+        assert resp.json() == {"credits": 40, "samples": 2}
+
+    def test_most_common_value_wins(self, client, db):
+        proj = db.create_project(name="EstimateTest2")
+        self._job(db, proj, "ce4", "seedance25", None, 8, True, 30)
+        self._job(db, proj, "ce5", "seedance25", None, 8, True, 30)
+        self._job(db, proj, "ce6", "seedance25", None, 8, True, 99)  # noisy outlier
+
+        resp = client.get("/api/usage/estimate?model=seedance25&length=8&generate_audio=true")
+        assert resp.status_code == 200
+        assert resp.json() == {"credits": 30, "samples": 3}
+
+
 # ── Lifespan (startup_resume_jobs) ──────────────────────────────────
 
 class TestLifespan:

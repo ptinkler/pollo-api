@@ -155,6 +155,13 @@ export const fetchModels = () => apiGet('/api/models')
 export const fetchUsage = (days = 30) => apiGet(`/api/usage?days=${days}`)
 export const fetchBalance = () => apiGet('/api/usage/balance')
 export const fetchUsageProjectDetails = (project, days = 30) => apiGet(`/api/usage/project/${encodeURIComponent(project)}?days=${days}`)
+export const fetchCreditEstimate = ({ model, resolution, length, generate_audio }) => {
+  const params = new URLSearchParams({ model })
+  if (resolution != null) params.set('resolution', resolution)
+  if (length != null) params.set('length', length)
+  if (generate_audio != null) params.set('generate_audio', generate_audio)
+  return apiGet(`/api/usage/estimate?${params.toString()}`)
+}
 
 // Video APIs
 export const deleteVideo = (project, filename) =>
