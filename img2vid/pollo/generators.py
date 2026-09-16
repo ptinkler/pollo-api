@@ -657,48 +657,54 @@ class SeedanceMiniRefVideoGenerator(PolloDanceRefVideoGenerator):
 
 
 class PolloJourneyImageGenerator(BaseVideoGenerator):
-    """Image generator using the Pollo Journey v7 model.
+    """
+    Image generator using the Pollo Journey v8.2 model.
 
-    Supports three modes determined by which inputs are provided:
-    - Text-to-Image: prompt only (+ optional style)
-    - Image-to-Image: prompt + imageUrl
-    - Multi-Image-to-Image: prompt + images[] (+ optional imageUrl)
+    Confirmed live via direct probe against pollojourney/pollojourney-v8-2-image:
+    the slug follows the same "pollojourney/pollojourney-v8-2-image/image"
+    pattern v7 used. aspectRatio enum (same seven values as v7) and resolution
+    enum ("1K"/"2K", default "1K") are confirmed from the live API's
+    validation error responses. Unlike v7, there's no documented "style"
+    field, and image input goes through "images" only — there's no separate
+    "imageUrl" for a single reference image.
+
+    Two modes: Text-to-Image (prompt only) and Image-to-Image (images[],
+    prompt optional).
     """
     VALID_RATIOS: ClassVar[tuple] = ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16")
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("1K", "2K")
 
     aspect_ratio: str
+    resolution: str | None
     seed: int | None
     images: list[str] | None
-    style: str
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.model_url = f"{POLLO_API_BASE}/pollojourney/pollojourney-v7-image/image"
+        self.model_url = f"{POLLO_API_BASE}/pollojourney/pollojourney-v8-2-image/image"
         self.aspect_ratio = kwargs.get('aspect_ratio') or self.get_aspect_ratio(
             os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "square")
         )
+        resolution = kwargs.get('resolution') or os.getenv("RESOLUTION")
+        self.resolution = resolution if resolution in self.VALID_RESOLUTIONS else None
         self.seed = kwargs.get('seed') or (int(os.getenv("SEED")) if os.getenv("SEED") else None)
         self.images = kwargs.get('images') or None
-        self.style = kwargs.get('style') or os.getenv("STYLE", "")
 
     @property
     def is_text_only(self) -> bool:
         return self.image_url is None and not self.images
 
     def get_payload(self) -> dict[str, Any]:
+        images = ([self.image_url] if self.image_url else []) + (self.images or [])
+
         input_payload: dict[str, Any] = {
             "prompt": self.prompt,
             "aspectRatio": self.aspect_ratio,
         }
-        if self.images:
-            input_payload["images"] = self.images
-            if self.image_url:
-                input_payload["imageUrl"] = self.image_url
-        elif self.image_url:
-            input_payload["imageUrl"] = self.image_url
-        else:
-            if self.style:
-                input_payload["style"] = self.style
+        if images:
+            input_payload["images"] = images
+        if self.resolution:
+            input_payload["resolution"] = self.resolution
         if self.seed is not None:
             input_payload["seed"] = self.seed
 

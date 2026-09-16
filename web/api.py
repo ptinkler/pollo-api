@@ -176,10 +176,10 @@ MODEL_INFO = {
         "note": "Endpoint exists on Pollo but returns 403 (not enabled for API access) as of 2026-08-25 — Pollo offers Wan 3.0 on their own site's UI already, API rollout is lagging. numOutputs field name is unconfirmed.",
     },
     "pollojourney": {
-        "label": "Pollo Journey", "type": "image",
+        "label": "Pollo Journey 8.2", "type": "image",
         "ratios": ["1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16"],
-        "options": ["seed", "style", "images"],
-        "deprecated": True,
+        "resolutions": ["1K", "2K"],
+        "options": ["seed", "images"],
     },
     "seedream": {
         "label": "Seedream 5.0", "type": "image",
