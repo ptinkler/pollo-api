@@ -69,6 +69,12 @@ app.add_middleware(
 )
 
 # ── Constants ───────────────────────────────────────────────────────
+# "legacy": True marks a model as living on Pollo's pre-v1 API
+# (POLLO_API_BASE, no "/v1/" in the URL) — see BaseV1VideoGenerator's
+# docstring in img2vid/pollo/generators.py. These are hidden from the model
+# dropdown unless the frontend's "legacy mode" toggle is on (GET
+# /api/models filters them out by default; see get_models() below).
+# Models with no "legacy" key are on the current v1 API and always shown.
 MODEL_INFO = {
     "pollodance20": {
         "label": "Pollo Dance 2.0", "type": "img2vid",
@@ -76,6 +82,7 @@ MODEL_INFO = {
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "web_search", "seed", "image_tail"],
         "deprecated": True,
+        "legacy": True,
     },
     "pollodance20fast": {
         "label": "Pollo Dance 2.0 Fast", "type": "img2vid",
@@ -83,18 +90,21 @@ MODEL_INFO = {
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "web_search", "seed", "image_tail"],
         "deprecated": True,
+        "legacy": True,
     },
     "pollo20": {
         "label": "Pollo 2.0", "type": "img2vid",
         "lengths": [5, 10],
         "ratios": ["9:16", "16:9"],
         "options": ["generate_audio", "web_search"],
+        "legacy": True,
     },
     "pollo25": {
         "label": "Pollo 2.5", "type": "img2vid",
         "lengths": [4, 5, 6, 7, 8, 9, 10, 11, 12, 15],
         "resolutions": ["720p", "1080p"],
         "options": ["generate_audio", "web_search"],
+        "legacy": True,
     },
     "pollodanceref": {
         "label": "Pollo Dance Ref", "type": "ref",
@@ -102,6 +112,7 @@ MODEL_INFO = {
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "video_num", "refs", "image_meta"],
         "deprecated": True,
+        "legacy": True,
     },
     "pollodancereffast": {
         "label": "Pollo Dance Ref Fast", "type": "ref",
@@ -109,18 +120,21 @@ MODEL_INFO = {
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "video_num", "refs", "image_meta"],
         "deprecated": True,
+        "legacy": True,
     },
     "seedance20": {
         "label": "Seedance 2.0", "type": "img2vid",
         "lengths": list(range(4, 16)),
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "web_search", "seed", "image_tail"],
+        "legacy": True,
     },
     "seedance20fast": {
         "label": "Seedance 2.0 Fast", "type": "img2vid",
         "lengths": list(range(4, 16)),
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "web_search", "seed", "image_tail"],
+        "legacy": True,
     },
     "seedance20mini": {
         "label": "Seedance 2.0 Mini", "type": "img2vid",
@@ -128,6 +142,7 @@ MODEL_INFO = {
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "web_search", "seed", "image_tail"],
         "deprecated": True,
+        "legacy": True,
     },
     "seedance25": {
         "label": "Seedance 2.5", "type": "img2vid",
@@ -135,18 +150,21 @@ MODEL_INFO = {
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9", "adaptive"],
         "resolutions": ["480p", "720p"],
         "options": ["generate_audio", "web_search", "seed", "image_tail"],
+        "legacy": True,
     },
     "seedanceref": {
         "label": "Seedance 2.0 Ref", "type": "ref",
         "lengths": list(range(4, 16)),
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "video_num", "refs", "image_meta"],
+        "legacy": True,
     },
     "seedancereffast": {
         "label": "Seedance 2.0 Ref Fast", "type": "ref",
         "lengths": list(range(4, 16)),
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "video_num", "refs", "image_meta"],
+        "legacy": True,
     },
     "seedanceminiref": {
         "label": "Seedance 2.0 Mini Ref", "type": "ref",
@@ -154,12 +172,14 @@ MODEL_INFO = {
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
         "options": ["generate_audio", "video_num", "refs", "image_meta"],
         "deprecated": True,
+        "legacy": True,
     },
-    "hailuo03": {
-        "label": "Hailuo 03 (H3)", "type": "img2vid",
+    "minimaxh3": {
+        "label": "MiniMax H3", "type": "img2vid",
         "lengths": list(range(4, 16)),
         "resolutions": ["480P", "768P", "2K"],
         "options": ["resolution", "image_tail", "prompt_optimizer"],
+        "legacy": True,
     },
     "wan27": {
         "label": "Wan 2.7", "type": "img2vid",
@@ -167,25 +187,37 @@ MODEL_INFO = {
         "resolutions": ["720P", "1080P"],
         "options": ["seed", "image_tail", "negative_prompt", "audio_url"],
         "deprecated": True,
+        "legacy": True,
     },
     "wan30": {
         "label": "Wan 3.0", "type": "img2vid",
         "lengths": list(range(2, 31)),
         "resolutions": ["480P", "720P", "1080P"],
         "options": ["generate_audio", "num_outputs"],
-        "note": "Endpoint exists on Pollo but returns 403 (not enabled for API access) as of 2026-08-25 — Pollo offers Wan 3.0 on their own site's UI already, API rollout is lagging. numOutputs field name is unconfirmed.",
+        "note": "numOutputs field name is unconfirmed (inferred, not yet verified against a live response).",
+        "legacy": True,
+    },
+    "wan30prime": {
+        "label": "Wan 3.0 Prime", "type": "img2vid",
+        "lengths": list(range(2, 31)),
+        "resolutions": ["480P", "720P", "1080P"],
+        "options": ["generate_audio", "num_outputs"],
+        "note": "numOutputs field name is unconfirmed (inferred, not yet verified against a live response).",
+        "legacy": True,
     },
     "pollojourney": {
         "label": "Pollo Journey 8.2", "type": "image",
         "ratios": ["1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16"],
         "resolutions": ["1K", "2K"],
         "options": ["seed", "images"],
+        "legacy": True,
     },
     "seedream": {
         "label": "Seedream 5.0", "type": "image",
         "ratios": ["1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16", "21:9"],
         "resolutions": ["2K", "3K", "4K"],
         "options": ["images", "max_images"],
+        "legacy": True,
     },
     "nanobanana2": {
         "label": "Nano Banana 2", "type": "image",
@@ -193,6 +225,120 @@ MODEL_INFO = {
         "resolutions": ["1K", "2K", "4K"],
         "options": ["images", "max_images", "thinking_level"],
         "deprecated": True,
+        "legacy": True,
+    },
+
+    # ── v1 API (current — https://docs.pollo.ai) ─────────────────────
+    "pollo20v1": {
+        "label": "Pollo 2.0", "type": "img2vid",
+        "lengths": [5, 10],
+        "resolutions": ["480p", "720p", "1080p"],
+        "ratios": ["16:9", "9:16", "4:3", "3:4", "1:1"],
+        "options": ["generate_audio", "seed", "refs"],
+    },
+    "pollo25v1": {
+        "label": "Pollo 2.5", "type": "img2vid",
+        "lengths": [4, 5, 6, 7, 8, 9, 10, 11, 12, 15],
+        "resolutions": ["720p", "1080p"],
+        "ratios": ["16:9", "9:16"],
+        "options": ["generate_audio", "mode"],
+    },
+    "pollodance20v1": {
+        "label": "Pollo Dance 2.0", "type": "img2vid",
+        "lengths": list(range(4, 16)),
+        "resolutions": ["480p", "720p", "1080p"],
+        "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
+        "options": ["generate_audio", "web_search", "seed", "image_tail", "refs"],
+    },
+    "pollodance20fastv1": {
+        "label": "Pollo Dance 2.0 Fast", "type": "img2vid",
+        "lengths": list(range(4, 16)),
+        "resolutions": ["480p", "720p"],
+        "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
+        "options": ["generate_audio", "web_search", "seed", "image_tail", "refs"],
+    },
+    "seedance20v1": {
+        "label": "Seedance 2.0", "type": "img2vid",
+        "lengths": list(range(4, 16)),
+        "resolutions": ["480p", "720p", "1080p", "4K"],
+        "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
+        "options": ["generate_audio", "web_search", "seed", "image_tail", "refs"],
+    },
+    "seedance20fastv1": {
+        "label": "Seedance 2.0 Fast", "type": "img2vid",
+        "lengths": list(range(4, 16)),
+        "resolutions": ["480p", "720p"],
+        "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
+        "options": ["generate_audio", "web_search", "seed", "image_tail", "refs"],
+    },
+    "seedance20miniv1": {
+        "label": "Seedance 2.0 Mini", "type": "img2vid",
+        "lengths": list(range(4, 16)),
+        "resolutions": ["480p", "720p"],
+        "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
+        "options": ["generate_audio", "web_search", "seed", "image_tail", "refs"],
+    },
+    "seedance25v1": {
+        "label": "Seedance 2.5", "type": "img2vid",
+        "lengths": list(range(4, 31)),
+        "resolutions": ["480p", "720p", "1080p"],
+        "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
+        "options": ["generate_audio", "web_search", "seed", "image_tail", "refs"],
+    },
+    "minimaxh3v1": {
+        "label": "MiniMax H3", "type": "img2vid",
+        "lengths": list(range(4, 16)),
+        "resolutions": ["480p", "768p", "2K"],
+        "ratios": ["auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],
+        "options": ["image_tail", "refs"],
+    },
+    "minimaxh3max": {
+        "label": "MiniMax H3 Max", "type": "img2vid",
+        "lengths": [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+        "resolutions": ["480p", "768p", "1080p"],
+        "ratios": ["auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],
+        "options": ["image_tail", "refs"],
+    },
+    "wan27v1": {
+        "label": "Wan 2.7", "type": "img2vid",
+        "lengths": list(range(2, 16)),
+        "resolutions": ["720p", "1080p"],
+        "ratios": ["16:9", "1:1", "4:3", "3:4", "9:16"],
+        "options": ["seed", "image_tail", "negative_prompt", "audio_url", "refs"],
+        "deprecated": True,
+    },
+    "wan30v1": {
+        "label": "Wan 3.0", "type": "img2vid",
+        "lengths": list(range(2, 31)),
+        "resolutions": ["480p", "720p", "1080p"],
+        "ratios": ["adaptive", "16:9", "9:16", "4:3", "3:4", "1:1"],
+        "options": ["generate_audio", "seed", "image_tail", "refs"],
+    },
+    "wan30primev1": {
+        "label": "Wan 3.0 Prime", "type": "img2vid",
+        "lengths": list(range(2, 31)),
+        "resolutions": ["480p", "720p", "1080p"],
+        "ratios": ["adaptive", "16:9", "9:16", "4:3", "3:4", "1:1"],
+        "options": ["generate_audio", "seed", "image_tail", "refs"],
+    },
+    "pollojourneyv1": {
+        "label": "Pollo Journey 8.2", "type": "image",
+        "ratios": ["1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16"],
+        "resolutions": ["1K", "2K"],
+        "options": ["seed", "images"],
+    },
+    "seedreamv1": {
+        "label": "Seedream 5.0", "type": "image",
+        "ratios": ["1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16", "21:9"],
+        "resolutions": ["2K", "3K", "4K"],
+        "options": ["images"],
+    },
+    "nanobanana2v1": {
+        "label": "Nano Banana 2", "type": "image",
+        "ratios": ["1:1", "9:16", "16:9", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5",
+                   "21:9", "1:4", "4:1", "8:1", "1:8"],
+        "resolutions": ["0.5K", "1K", "2K", "4K"],
+        "options": ["images"],
     },
 }
 
@@ -2199,8 +2345,14 @@ def serve_image(project: str):
 # ── Models info ─────────────────────────────────────────────────────
 
 @app.get("/api/models")
-def api_models():
-    return MODEL_INFO
+def api_models(legacy: bool = False):
+    """
+    Model dropdown contents. `legacy=false` (default) returns the current
+    v1-API models; `legacy=true` returns the pre-v1 "legacy mode" fallback
+    models instead — the two sets are disjoint, not merged, matching the
+    frontend's legacy-mode toggle (one list or the other, not both at once).
+    """
+    return {name: info for name, info in MODEL_INFO.items() if bool(info.get("legacy")) == legacy}
 
 
 # ── Usage / Credit tracking ─────────────────────────────────────────

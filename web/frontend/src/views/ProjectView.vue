@@ -22,6 +22,13 @@ const { onJobComplete } = useJobsQueue()
 const projectData = ref(null)
 const models = ref({})
 
+// "legacy mode" toggles between Pollo's current (v1) API models and the
+// pre-v1 "legacy" ones kept as a fallback — see MODEL_INFO in web/api.py.
+// Sticky across sessions (not per-project) since it's a developer-facing
+// escape hatch, not a per-project preference.
+const LEGACY_MODE_STORAGE_KEY = 'pollo_legacy_mode'
+const legacyMode = ref(localStorage.getItem(LEGACY_MODE_STORAGE_KEY) === '1')
+
 // Modal state
 const selectedVideo = ref(null)
 const modalVisible = ref(false)
@@ -72,10 +79,20 @@ async function loadProject() {
 
 async function loadModels() {
   try {
-    models.value = await fetchModels()
+    models.value = await fetchModels(legacyMode.value)
   } catch (err) {
     showToast('Failed to load models', 'error')
   }
+}
+
+function setLegacyMode(value) {
+  legacyMode.value = value
+  try {
+    localStorage.setItem(LEGACY_MODE_STORAGE_KEY, value ? '1' : '0')
+  } catch (e) {
+    console.warn('Failed to persist legacy mode:', e)
+  }
+  loadModels()
 }
 
 
@@ -320,10 +337,12 @@ onUnmounted(() => {
       :project="project"
       :project-data="projectData"
       :models="models"
+      :legacy-mode="legacyMode"
       :regenerate-job="regenerateJob"
       :use-as-ref="useAsRefData"
       @regenerate-applied="regenerateJob = null"
       @use-as-ref-applied="useAsRefData = null"
+      @update:legacy-mode="setLegacyMode"
     />
 
     <GalleryPanel

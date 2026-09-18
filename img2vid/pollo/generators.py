@@ -5,7 +5,7 @@ from pathlib import Path
 from PIL import Image
 from ..common.get_inputs import get_prompt, get_image_url, get_image_path, get_subject_url, get_audio_url
 from ..common.cloudflare import is_cloudflare_block
-from ..common.config import POLLO_API_BASE, POLLO_API_TIMEOUT
+from ..common.config import POLLO_API_BASE, POLLO_API_V1_BASE, POLLO_API_TIMEOUT
 
 # Sentinel for distinguishing "not passed" from None
 _UNSET = object()
@@ -134,6 +134,162 @@ class BaseVideoGenerator:
     def build_download_metadata(self) -> dict[str, Any]:
         """Build metadata dict for download records."""
         return {"payload": self.payload_attrs}
+
+
+class BaseV1VideoGenerator(BaseVideoGenerator):
+    """
+    Shared behavior for Pollo's newer "v1" generation API
+    (https://pollo.ai/api/platform/v1/generation/{provider}/{model}/video),
+    as documented at https://docs.pollo.ai and its OpenAPI spec
+    (https://docs.pollo.ai/openapi.json, fetched 2026-09-18) — the source
+    of truth for every v1 subclass in this file, in preference to live
+    probing (which risks triggering real, billed generations on fields the
+    API doesn't strictly validate; see MinimaxH3MaxVideoGenerator's
+    docstring for a concrete instance of that happening).
+
+    v1 unifies what the legacy API split across separate endpoints/URLs —
+    text-to-video, image-to-video, and reference-to-video — into one
+    endpoint whose `input` is a `oneOf` of three shapes, selected by
+    which of image/refs/neither is present. It also renames "length" to
+    "duration", and for most (not all — see each model's VALID_RESOLUTIONS)
+    models lowercases the resolution enum compared to its legacy
+    counterpart. Confirmed directly from the spec: every duration
+    range/enum and resolution enum checked this way was otherwise
+    unchanged from the legacy endpoint's own live-probed values, so the
+    move to v1 is mostly a reshaping of the same underlying capability
+    rather than a capability change — except where a subclass's docstring
+    notes an addition (e.g. wan30's new `seed`) or removal (e.g. wan30's
+    dropped, never-confirmed `numOutputs`).
+
+    refs items are `{"url": str, "type": "image"|"video"|"audio"|...}` —
+    notably simpler than the legacy ref2video endpoints' `{"type", "name",
+    "image"/"video"/"audio", "order", ...}` shape (see
+    PolloDanceRefVideoGenerator below); this class does not attempt to
+    reuse that legacy ref-normalization logic since the two shapes aren't
+    compatible.
+
+    Subclasses configure themselves via the V1_PROVIDER/V1_MODEL slugs and
+    the VALID_*/DEFAULT_*/HAS_* class attributes below rather than
+    overriding get_payload(), unless their schema has a genuinely bespoke
+    field (as wan27's negativePrompt/audio-driven-generation does).
+    """
+    V1_PROVIDER: ClassVar[str] = ""
+    V1_MODEL: ClassVar[str] = ""
+
+    VALID_LENGTHS: ClassVar[tuple] = ()
+    VALID_RESOLUTIONS: ClassVar[tuple] = ()
+    VALID_RATIOS: ClassVar[tuple] = ()
+    DEFAULT_RESOLUTION: ClassVar[str] = ""
+    DEFAULT_LENGTH: ClassVar[int] = 5
+
+    HAS_GENERATE_AUDIO: ClassVar[bool] = False
+    HAS_WEB_SEARCH: ClassVar[bool] = False
+    HAS_SEED: ClassVar[bool] = False
+    HAS_IMAGE_TAIL: ClassVar[bool] = False
+    HAS_REFS: ClassVar[bool] = False
+    HAS_MODE: ClassVar[bool] = False
+    # Wan 2.7's bespoke pair: negativePrompt, and a separate "audio" field
+    # for audio-driven generation (distinct from the generateAudio boolean
+    # other models use — wan27 has no generateAudio at all).
+    HAS_NEGATIVE_PROMPT_AUDIO: ClassVar[bool] = False
+
+    resolution: str
+    length: int
+    aspect_ratio: str
+    generate_audio: bool | None
+    web_search: bool | None
+    seed: int | None
+    image_tail: str | None
+    refs: list[dict[str, Any]] | None
+    mode: str | None
+    negative_prompt: str | None
+    audio_url: str | None
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.model_url = f"{POLLO_API_V1_BASE}/{self.V1_PROVIDER}/{self.V1_MODEL}/video"
+        self.resolution = kwargs.get('resolution') or os.getenv("RESOLUTION", self.DEFAULT_RESOLUTION)
+        self.length = self._get_valid_length(
+            str(kwargs.get('length') or os.getenv("LENGTH", str(self.DEFAULT_LENGTH))),
+            default=self.DEFAULT_LENGTH,
+        )
+        self.aspect_ratio = kwargs.get('aspect_ratio') or self.get_aspect_ratio(
+            os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "portrait")
+        )
+        self.image_tail = (kwargs.get('image_tail') or os.getenv("IMAGE_TAIL")) if self.HAS_IMAGE_TAIL else None
+        self.refs = kwargs.get('refs') if self.HAS_REFS else None
+        self.seed = (
+            kwargs.get('seed') or (int(os.getenv("SEED")) if os.getenv("SEED") else None)
+        ) if self.HAS_SEED else None
+        self.generate_audio = (
+            kwargs.get('generate_audio') if kwargs.get('generate_audio') is not None
+            else _parse_bool_env("GENERATE_AUDIO", True)
+        ) if self.HAS_GENERATE_AUDIO else None
+        self.web_search = (
+            kwargs.get('web_search') if kwargs.get('web_search') is not None
+            else _parse_bool_env("WEBSEARCH", False)
+        ) if self.HAS_WEB_SEARCH else None
+        self.mode = (kwargs.get('mode') or os.getenv("MODE")) if self.HAS_MODE else None
+        self.negative_prompt = None
+        self.audio_url = None
+        if self.HAS_NEGATIVE_PROMPT_AUDIO:
+            self.negative_prompt = kwargs.get('negative_prompt') or os.getenv("NEGATIVE_PROMPT")
+            audio_url = kwargs.get('audio_url', _UNSET)
+            if audio_url is _UNSET:
+                audio_url = get_audio_url(self.project)
+            self.audio_url = audio_url
+
+    @staticmethod
+    def _normalize_refs(refs: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+        """Normalize refs to the v1 shape: {"url": str, "type"?: str}."""
+        if not refs:
+            return None
+        normalized: list[dict[str, Any]] = []
+        for ref in refs:
+            url = str(ref.get("url") or ref.get("image") or ref.get("video") or ref.get("audio") or "").strip()
+            if not url:
+                continue
+            item: dict[str, Any] = {"url": url}
+            ref_type = ref.get("type")
+            if ref_type:
+                item["type"] = ref_type
+            normalized.append(item)
+        return normalized or None
+
+    def get_payload(self) -> dict[str, Any]:
+        refs = self._normalize_refs(self.refs)
+        attrs: dict[str, Any] = {"prompt": self.prompt}
+
+        if refs:
+            attrs["refs"] = refs
+        elif not self.is_text_only:
+            attrs["image"] = self.image_url
+
+        attrs["duration"] = self.length
+        attrs["resolution"] = self.resolution
+
+        # aspectRatio only exists on the text/ref branches of the v1 schema —
+        # the image branch has no such field (the input image dictates it).
+        if refs or self.is_text_only:
+            attrs["aspectRatio"] = self.aspect_ratio
+
+        if self.HAS_IMAGE_TAIL and self.image_tail and not refs and not self.is_text_only:
+            attrs["imageTail"] = self.image_tail
+        if self.generate_audio is not None:
+            attrs["generateAudio"] = self.generate_audio
+        if self.web_search is not None:
+            attrs["webSearch"] = self.web_search
+        if self.seed is not None:
+            attrs["seed"] = self.seed
+        if self.mode:
+            attrs["mode"] = self.mode
+        if self.negative_prompt:
+            attrs["negativePrompt"] = self.negative_prompt
+        if self.audio_url:
+            attrs["audio"] = self.audio_url
+
+        self.payload_attrs = attrs
+        return {"input": attrs}
 
 
 class Pollo20VideoGenerator(BaseVideoGenerator):
@@ -268,17 +424,17 @@ class Seedance25VideoGenerator(PolloDance20VideoGenerator):
         return self.get_closest_aspect_ratio(width, height, ratios)
 
 
-class Hailuo03VideoGenerator(BaseVideoGenerator):
+class MinimaxH3VideoGenerator(BaseVideoGenerator):
     """
-    MiniMax Hailuo 03 (H3) video generator.
+    MiniMax H3 (Hailuo 03) video generator.
 
-    Enabled for this account's API key as of 2026-08-25. The slug is
-    "minimax/hailuo-03" (not "minimax/minimax-hailuo-03" — that older guess,
-    inferred from the sibling minimax-hailuo-02 endpoint before H3 was
-    publicly documented, now 404s). Re-probed live 2026-09-16: resolution
-    enum is "480P" | "768P" | "2K" (previously only "2K" showed up, before
-    the account had access), length is 4-15, and promptOptimizer is
-    confirmed against a live successful task response.
+    Enabled for this account's API key as of 2026-08-25. Confirmed from
+    Pollo's OpenAPI spec (2026-09-18): the current slug is "minimax/minimax-h3"
+    — "minimax/hailuo-03" also exists in the legacy API (same schema) but
+    "minimax/minimax-h3" is the one the v1 API keeps as non-deprecated, so
+    it's used here for consistency. Resolution enum is "480P" | "768P" | "2K",
+    length is 4-15, and promptOptimizer is confirmed against a live
+    successful task response.
     """
     VALID_LENGTHS: ClassVar[tuple] = tuple(range(4, 16))
     VALID_RESOLUTIONS: ClassVar[tuple] = ("480P", "768P", "2K")
@@ -290,7 +446,7 @@ class Hailuo03VideoGenerator(BaseVideoGenerator):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.model_url = f"{POLLO_API_BASE}/minimax/hailuo-03"
+        self.model_url = f"{POLLO_API_BASE}/minimax/minimax-h3"
         self.resolution = kwargs.get('resolution') or os.getenv("RESOLUTION", "2K")
         self.length = self._get_valid_length(str(kwargs.get('length') or os.getenv("LENGTH", "10")))
         self.image_tail = kwargs.get('image_tail') or os.getenv("IMAGE_TAIL")
@@ -312,6 +468,38 @@ class Hailuo03VideoGenerator(BaseVideoGenerator):
         if self.image_tail:
             self.payload_attrs["imageTail"] = self.image_tail
         return {"input": self.payload_attrs}
+
+
+class MinimaxH3MaxVideoGenerator(BaseV1VideoGenerator):
+    """
+    MiniMax H3 Max video generator (v1 API only — no legacy-API
+    counterpart exists for this model in this codebase).
+
+    Initially probed live on 2026-09-18, before this codebase started
+    using Pollo's OpenAPI spec (https://docs.pollo.ai/openapi.json) as the
+    source of truth for v1 generators — that live probe found a "duration"
+    field (not "length"), resolution enum "480p"|"768p"|"1080p", and no
+    working promptOptimizer/imageTail (a wrong-typed promptOptimizer was
+    silently accepted rather than rejected — exactly what an unvalidated
+    field looks like). Reconfirmed against the spec: duration range is
+    5-15 (the probe just hadn't tried 4, which the spec's minimum:5
+    confirms is actually invalid), and — unlike the initial probe's
+    conclusion — imageTail, aspectRatio ("auto"|"21:9"|"16:9"|"4:3"|"1:1"|
+    "3:4"|"9:16", default "auto"), and refs (up to 12: max 9 images, 3
+    videos, 3 audios, at least one image/video) ARE all present in the
+    spec's schema, so they're included here after all. No generateAudio,
+    webSearch, seed, or mode fields exist for this model.
+    """
+    V1_PROVIDER: ClassVar[str] = "minimax"
+    V1_MODEL: ClassVar[str] = "minimax-h3-max"
+
+    VALID_LENGTHS: ClassVar[tuple] = tuple(range(5, 16))
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "768p", "1080p")
+    VALID_RATIOS: ClassVar[tuple] = ("auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16")
+    DEFAULT_RESOLUTION: ClassVar[str] = "480p"
+
+    HAS_IMAGE_TAIL: ClassVar[bool] = True
+    HAS_REFS: ClassVar[bool] = True
 
 
 class Wan27VideoGenerator(BaseVideoGenerator):
@@ -369,20 +557,15 @@ class Wan30VideoGenerator(BaseVideoGenerator):
     """
     Alibaba Wan 3.0 (wanx/wan-v3-0) video generator.
 
-    The route is live on Pollo's platform (confirmed via direct probe: a
-    minimal {"prompt": ...} payload returns 403 "This model is not enabled
-    for API access" rather than the 404 every nonexistent slug returns),
-    but is not yet enabled for API access as of 2026-08-25 — Pollo already
-    offers Wan 3.0 through their own web UI, the API rollout is just lagging
-    behind it. Not yet listed on docs.pollo.ai either. resolution
+    Enabled for API access as of 2026-09-18 (previously returned 403 "This
+    model is not enabled for API access" as of 2026-08-25). resolution
     ("480P"/"720P"/"1080P") and length (2-30) enums, and generateAudio's
     boolean type, are all confirmed directly from the live API's validation
-    error responses. numOutputs's field name is inferred/unconfirmed — no
-    sibling Pollo model in this codebase exposes an output-count field on a
-    direct (non-ref2video) endpoint to compare against, and a minimal valid
-    payload short-circuits straight to the enablement 403 before any check
-    on an unrecognized key would surface. Re-verify numOutputs once Pollo
-    enables API access. The live API also validates an aspectRatio enum on
+    error responses. numOutputs's field name is still inferred/unconfirmed —
+    no sibling Pollo model in this codebase exposes an output-count field on
+    a direct (non-ref2video) endpoint to compare against, and probing it
+    further risks triggering a real (billed) generation rather than a
+    validation error. The live API also validates an aspectRatio enum on
     the text-only branch, but it's intentionally omitted here per product
     spec.
     """
@@ -422,6 +605,283 @@ class Wan30VideoGenerator(BaseVideoGenerator):
         if not self.is_text_only:
             self.payload_attrs["image"] = self.image_url
         return {"input": self.payload_attrs}
+
+
+class Wan30PrimeVideoGenerator(Wan30VideoGenerator):
+    """
+    Alibaba Wan 3.0 Prime — LEGACY endpoint (wanx/wan-v3-0-prime).
+
+    Confirmed live via direct probe on 2026-09-18: the slug exists (unlike
+    several other guessed "-prime"/"-pro"/"-turbo" variants, which 404) and
+    its validation error responses show the exact same schema as
+    wan-v3-0 — resolution ("480P"/"720P"/"1080P"), length (2-30), and
+    generateAudio (boolean) enums/types are identical. Same numOutputs
+    caveat as the base class applies.
+
+    This turned out to be Pollo's pre-v1 "legacy" endpoint for the same
+    model docs.pollo.ai/alibaba/wan-v3-0-prime describes — see
+    Wan30PrimeVideoGeneratorV1 below for the current one docs.pollo.ai
+    actually points to. Kept as a fallback per product decision (toggled
+    via "legacy mode" in the web UI) in case the v1 endpoint misbehaves.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.model_url = f"{POLLO_API_BASE}/wanx/wan-v3-0-prime"
+
+
+class Pollo20VideoGeneratorV1(BaseV1VideoGenerator):
+    """
+    Pollo 2.0 — v1 API (pollo-ai/pollo-v2/video).
+
+    Confirmed from Pollo's OpenAPI spec: duration enum (5, 10) and
+    resolution enum ("480p"/"720p"/"1080p") are unchanged from the legacy
+    endpoint. webSearch does NOT exist in the v1 schema (dropped — legacy
+    Pollo20VideoGenerator has it, this doesn't). seed and refs are new
+    capabilities the legacy endpoint didn't have. No imageTail, mode, or
+    negativePrompt/audio fields.
+    """
+    V1_PROVIDER: ClassVar[str] = "pollo-ai"
+    V1_MODEL: ClassVar[str] = "pollo-v2"
+
+    VALID_LENGTHS: ClassVar[tuple] = (5, 10)
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "720p", "1080p")
+    VALID_RATIOS: ClassVar[tuple] = ("16:9", "9:16", "4:3", "3:4", "1:1")
+    DEFAULT_RESOLUTION: ClassVar[str] = "480p"
+
+    HAS_SEED: ClassVar[bool] = True
+    HAS_GENERATE_AUDIO: ClassVar[bool] = True
+    HAS_REFS: ClassVar[bool] = True
+
+
+class Pollo25VideoGeneratorV1(BaseV1VideoGenerator):
+    """
+    Pollo 2.5 — v1 API (pollo-ai/pollo-v2-5/video).
+
+    Confirmed from Pollo's OpenAPI spec: duration enum (4,5,6,7,8,9,10,11,
+    12,15) and resolution enum ("720p"/"1080p") are unchanged from the
+    legacy endpoint. Gains a new "mode" field (enum "basic"/"pro", default
+    "basic") that the legacy endpoint doesn't have. No seed, webSearch,
+    imageTail, or refs (no Reference-To-Video branch exists for this
+    model in the spec).
+    """
+    V1_PROVIDER: ClassVar[str] = "pollo-ai"
+    V1_MODEL: ClassVar[str] = "pollo-v2-5"
+
+    VALID_LENGTHS: ClassVar[tuple] = (4, 5, 6, 7, 8, 9, 10, 11, 12, 15)
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("720p", "1080p")
+    VALID_RATIOS: ClassVar[tuple] = ("16:9", "9:16")
+    DEFAULT_RESOLUTION: ClassVar[str] = "720p"
+
+    HAS_GENERATE_AUDIO: ClassVar[bool] = True
+    HAS_MODE: ClassVar[bool] = True
+
+    mode: str | None
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.mode = kwargs.get('mode') or os.getenv("MODE", "basic")
+
+
+class PolloDance20VideoGeneratorV1(BaseV1VideoGenerator):
+    """
+    Pollo Dance 2.0 — v1 API (pollo-ai/pollo-dance-2-0/video).
+
+    Confirmed from Pollo's OpenAPI spec: duration range (4-30... actually
+    4-15, matches legacy's range(4,16) exactly) and resolution enum
+    ("480p"/"720p"/"1080p") are unchanged from the legacy endpoint.
+    seed, imageTail, webSearch, and generateAudio all carry over from the
+    legacy schema; refs are now supported directly on this endpoint
+    instead of needing the separate pollodanceref legacy endpoint.
+    """
+    V1_PROVIDER: ClassVar[str] = "pollo-ai"
+    V1_MODEL: ClassVar[str] = "pollo-dance-2-0"
+
+    VALID_LENGTHS: ClassVar[tuple] = tuple(range(4, 16))
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "720p", "1080p")
+    VALID_RATIOS: ClassVar[tuple] = ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive")
+    DEFAULT_RESOLUTION: ClassVar[str] = "480p"
+
+    HAS_SEED: ClassVar[bool] = True
+    HAS_GENERATE_AUDIO: ClassVar[bool] = True
+    HAS_WEB_SEARCH: ClassVar[bool] = True
+    HAS_IMAGE_TAIL: ClassVar[bool] = True
+    HAS_REFS: ClassVar[bool] = True
+
+
+class PolloDance20FastVideoGeneratorV1(PolloDance20VideoGeneratorV1):
+    """Fast variant — v1 API (pollo-ai/pollo-dance-2-0-fast/video). Same schema, minus 1080p resolution."""
+    V1_MODEL: ClassVar[str] = "pollo-dance-2-0-fast"
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "720p")
+
+
+class Seedance20VideoGeneratorV1(BaseV1VideoGenerator):
+    """
+    Seedance 2.0 — v1 API (bytedance/seedance-2-0/video).
+
+    Confirmed from Pollo's OpenAPI spec: duration range 4-15 (matches
+    legacy's range(4,16)) and resolution enum ("480p"/"720p"/"1080p"/"4K"
+    — note the new "4K" option) are otherwise unchanged/expanded from the
+    legacy endpoint. seed, imageTail, webSearch, generateAudio carry over;
+    refs now supported directly instead of via the separate
+    seedanceref legacy endpoint.
+    """
+    V1_PROVIDER: ClassVar[str] = "bytedance"
+    V1_MODEL: ClassVar[str] = "seedance-2-0"
+
+    VALID_LENGTHS: ClassVar[tuple] = tuple(range(4, 16))
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "720p", "1080p", "4K")
+    VALID_RATIOS: ClassVar[tuple] = ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9")
+    DEFAULT_RESOLUTION: ClassVar[str] = "480p"
+
+    HAS_SEED: ClassVar[bool] = True
+    HAS_GENERATE_AUDIO: ClassVar[bool] = True
+    HAS_WEB_SEARCH: ClassVar[bool] = True
+    HAS_IMAGE_TAIL: ClassVar[bool] = True
+    HAS_REFS: ClassVar[bool] = True
+
+
+class Seedance20FastVideoGeneratorV1(Seedance20VideoGeneratorV1):
+    """Fast variant — v1 API (bytedance/seedance-2-0-fast/video). Same schema, minus 1080p/4K resolution."""
+    V1_MODEL: ClassVar[str] = "seedance-2-0-fast"
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "720p")
+
+
+class Seedance20MiniVideoGeneratorV1(Seedance20VideoGeneratorV1):
+    """Mini variant — v1 API (bytedance/seedance-2-0-mini/video). Same schema, minus 1080p/4K resolution."""
+    V1_MODEL: ClassVar[str] = "seedance-2-0-mini"
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "720p")
+
+
+class Seedance25VideoGeneratorV1(BaseV1VideoGenerator):
+    """
+    Seedance 2.5 — v1 API (bytedance/seedance-2-5/video).
+
+    Confirmed from Pollo's OpenAPI spec: duration range 4-30 (matches
+    legacy's range(4,31)) and resolution enum ("480p"/"720p"/"1080p") are
+    unchanged from the legacy endpoint. aspectRatio adds "adaptive" as its
+    default (matching legacy behavior of dropping aspectRatio from the
+    payload — here we instead just let it default). seed, imageTail,
+    webSearch, generateAudio carry over; refs now supported directly
+    instead of via the separate seedanceref legacy endpoints.
+    """
+    V1_PROVIDER: ClassVar[str] = "bytedance"
+    V1_MODEL: ClassVar[str] = "seedance-2-5"
+
+    VALID_LENGTHS: ClassVar[tuple] = tuple(range(4, 31))
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "720p", "1080p")
+    VALID_RATIOS: ClassVar[tuple] = ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive")
+    DEFAULT_RESOLUTION: ClassVar[str] = "480p"
+
+    HAS_SEED: ClassVar[bool] = True
+    HAS_GENERATE_AUDIO: ClassVar[bool] = True
+    HAS_WEB_SEARCH: ClassVar[bool] = True
+    HAS_IMAGE_TAIL: ClassVar[bool] = True
+    HAS_REFS: ClassVar[bool] = True
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        if not kwargs.get('aspect_ratio') and not os.getenv("ASPECT_RATIO") and not os.getenv("RATIO"):
+            self.aspect_ratio = "adaptive"
+
+
+class MinimaxH3VideoGeneratorV1(BaseV1VideoGenerator):
+    """
+    MiniMax H3 (Hailuo 03) — v1 API (minimax/minimax-h3/video).
+
+    Confirmed from Pollo's OpenAPI spec (2026-09-18): duration range 4-15
+    (matches legacy's range(4,16)) and resolution enum is lowercase
+    "480p"/"768p" plus uppercase "2K" as the top tier (same tiers as legacy,
+    just lowercased below 2K). "minimax/hailuo-03/video" is the same schema
+    but marked deprecated in the spec, so "minimax/minimax-h3/video" is used
+    instead. No seed, webSearch, or generateAudio fields exist for this
+    model (matches legacy, which also lacked seed/webSearch/generateAudio
+    for MinimaxH3). imageTail and refs carry over from legacy; aspectRatio
+    is new (legacy didn't expose it for this model).
+    """
+    V1_PROVIDER: ClassVar[str] = "minimax"
+    V1_MODEL: ClassVar[str] = "minimax-h3"
+
+    VALID_LENGTHS: ClassVar[tuple] = tuple(range(4, 16))
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "768p", "2K")
+    VALID_RATIOS: ClassVar[tuple] = ("auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16")
+    DEFAULT_RESOLUTION: ClassVar[str] = "480p"
+
+    HAS_IMAGE_TAIL: ClassVar[bool] = True
+    HAS_REFS: ClassVar[bool] = True
+
+
+class Wan27VideoGeneratorV1(BaseV1VideoGenerator):
+    """
+    Wan 2.7 — v1 API (alibaba/wan-v2-7/video) — note the provider slug
+    changed from "wanx" (legacy) to "alibaba" (v1).
+
+    Confirmed from Pollo's OpenAPI spec: duration range 2-15 (matches
+    legacy's range(2,16)) but resolution enum is now lowercase
+    "720p"/"1080p" (legacy: "720P"/"1080P"). negativePrompt and the
+    audio-driven-generation "audio" field carry over from legacy (mapped
+    here via HAS_NEGATIVE_PROMPT_AUDIO, same negative_prompt/audio_url
+    kwargs as the legacy class). aspectRatio and refs are new capabilities
+    the legacy endpoint didn't expose. No generateAudio, seed IS present
+    (legacy also had it).
+    """
+    V1_PROVIDER: ClassVar[str] = "alibaba"
+    V1_MODEL: ClassVar[str] = "wan-v2-7"
+
+    VALID_LENGTHS: ClassVar[tuple] = tuple(range(2, 16))
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("720p", "1080p")
+    VALID_RATIOS: ClassVar[tuple] = ("16:9", "1:1", "4:3", "3:4", "9:16")
+    DEFAULT_RESOLUTION: ClassVar[str] = "720p"
+
+    HAS_SEED: ClassVar[bool] = True
+    HAS_IMAGE_TAIL: ClassVar[bool] = True
+    HAS_REFS: ClassVar[bool] = True
+    HAS_NEGATIVE_PROMPT_AUDIO: ClassVar[bool] = True
+
+
+class Wan30VideoGeneratorV1(BaseV1VideoGenerator):
+    """
+    Wan 3.0 — v1 API (alibaba/wan-v3-0/video) — note the provider slug
+    changed from "wanx" (legacy) to "alibaba" (v1).
+
+    Confirmed from Pollo's OpenAPI spec: duration range 2-30 (matches
+    legacy's range(2,31)) but resolution enum is now lowercase
+    "480p"/"720p"/"1080p" (legacy: "480P"/"720P"/"1080P"). generateAudio
+    and seed carry over (seed is new vs. legacy — legacy's Wan30 had no
+    seed field). numOutputs, which the legacy endpoint's docstring already
+    flagged as an unconfirmed/inferred field name, does NOT exist anywhere
+    in the v1 schema — it's dropped here rather than guessed again.
+    aspectRatio and refs are new capabilities the legacy endpoint didn't
+    expose (aside from refs going through a wholly separate ref2video URL).
+    """
+    V1_PROVIDER: ClassVar[str] = "alibaba"
+    V1_MODEL: ClassVar[str] = "wan-v3-0"
+
+    VALID_LENGTHS: ClassVar[tuple] = tuple(range(2, 31))
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "720p", "1080p")
+    VALID_RATIOS: ClassVar[tuple] = ("adaptive", "16:9", "9:16", "4:3", "3:4", "1:1")
+    DEFAULT_RESOLUTION: ClassVar[str] = "480p"
+
+    HAS_SEED: ClassVar[bool] = True
+    HAS_GENERATE_AUDIO: ClassVar[bool] = True
+    HAS_IMAGE_TAIL: ClassVar[bool] = True
+    HAS_REFS: ClassVar[bool] = True
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        if not kwargs.get('aspect_ratio') and not os.getenv("ASPECT_RATIO") and not os.getenv("RATIO"):
+            self.aspect_ratio = "adaptive"
+
+
+class Wan30PrimeVideoGeneratorV1(Wan30VideoGeneratorV1):
+    """
+    Wan 3.0 Prime — v1 API (alibaba/wan-v3-0-prime/video). This is the
+    model the user pointed at (docs.pollo.ai/alibaba/wan-v3-0-prime) that
+    started this whole v1 migration. Confirmed from the OpenAPI spec to
+    have an identical schema to wan-v3-0 v1, so it only overrides the
+    model slug.
+    """
+    V1_MODEL: ClassVar[str] = "wan-v3-0-prime"
 
 
 class PolloDanceRefVideoGenerator(BaseVideoGenerator):
@@ -656,6 +1116,71 @@ class SeedanceMiniRefVideoGenerator(PolloDanceRefVideoGenerator):
         self.model_url = f"{POLLO_API_BASE}/bytedance/seedance-2-0-mini/ref2video"
 
 
+class BaseV1ImageGenerator(BaseVideoGenerator):
+    """
+    Shared behavior for Pollo's v1 image-generation endpoints
+    (https://pollo.ai/api/platform/v1/generation/{provider}/{model}/image).
+    Confirmed from Pollo's OpenAPI spec (https://docs.pollo.ai/openapi.json,
+    fetched 2026-09-18) — see BaseV1VideoGenerator's docstring for why the
+    spec is used instead of live probing.
+
+    Unlike the video endpoints, image endpoints take a plural "images"
+    array (not a singular "imageUrl"/"image") for image-to-image mode, and
+    none of the three v1 image models in this codebase (PolloJourney 8.2,
+    Seedream 5.0 Lite, Nano Banana 2) expose maxImages, thinkingLevel, or
+    responseFormat in their v1 schema even where the legacy endpoint had
+    them — those fields are simply dropped for v1 subclasses rather than
+    guessed at.
+    """
+    V1_PROVIDER: ClassVar[str] = ""
+    V1_MODEL: ClassVar[str] = ""
+
+    VALID_RATIOS: ClassVar[tuple] = ()
+    VALID_RESOLUTIONS: ClassVar[tuple] = ()
+    DEFAULT_RATIO_KEYWORD: ClassVar[str] = "square"
+    HAS_SEED: ClassVar[bool] = False
+    IMAGES_REQUIRED_FOR_IMAGE_TO_IMAGE: ClassVar[bool] = False
+
+    aspect_ratio: str
+    resolution: str | None
+    seed: int | None
+    images: list[str] | None
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.model_url = f"{POLLO_API_V1_BASE}/{self.V1_PROVIDER}/{self.V1_MODEL}/image"
+        self.aspect_ratio = kwargs.get('aspect_ratio') or self.get_aspect_ratio(
+            os.getenv("ASPECT_RATIO") or os.getenv("RATIO", self.DEFAULT_RATIO_KEYWORD)
+        )
+        resolution = kwargs.get('resolution') or os.getenv("RESOLUTION")
+        self.resolution = resolution if resolution in self.VALID_RESOLUTIONS else None
+        self.seed = (
+            kwargs.get('seed') or (int(os.getenv("SEED")) if os.getenv("SEED") else None)
+        ) if self.HAS_SEED else None
+        self.images = kwargs.get('images') or None
+
+    @property
+    def is_text_only(self) -> bool:
+        return self.image_url is None and not self.images
+
+    def get_payload(self) -> dict[str, Any]:
+        images = ([self.image_url] if self.image_url else []) + (self.images or [])
+
+        input_payload: dict[str, Any] = {
+            "prompt": self.prompt,
+            "aspectRatio": self.aspect_ratio,
+        }
+        if images:
+            input_payload["images"] = images
+        if self.resolution:
+            input_payload["resolution"] = self.resolution
+        if self.seed is not None:
+            input_payload["seed"] = self.seed
+
+        self.payload_attrs = input_payload
+        return {"input": input_payload}
+
+
 class PolloJourneyImageGenerator(BaseVideoGenerator):
     """
     Image generator using the Pollo Journey v8.2 model.
@@ -710,6 +1235,22 @@ class PolloJourneyImageGenerator(BaseVideoGenerator):
 
         self.payload_attrs = input_payload
         return {"input": input_payload}
+
+
+class PolloJourneyImageGeneratorV1(BaseV1ImageGenerator):
+    """
+    Pollo Journey 8.2 — v1 API (pollo-ai/pollojourney-v8-2-image/image).
+
+    Confirmed from Pollo's OpenAPI spec: same aspectRatio (seven values,
+    default "1:1") and resolution ("1K"/"2K", default "1K") enums as the
+    legacy endpoint. seed carries over unchanged.
+    """
+    V1_PROVIDER: ClassVar[str] = "pollo-ai"
+    V1_MODEL: ClassVar[str] = "pollojourney-v8-2-image"
+
+    VALID_RATIOS: ClassVar[tuple] = ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16")
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("1K", "2K")
+    HAS_SEED: ClassVar[bool] = True
 
 
 class NanoBanana2ImageGenerator(BaseVideoGenerator):
@@ -770,6 +1311,30 @@ class NanoBanana2ImageGenerator(BaseVideoGenerator):
         return {"input": input_payload}
 
 
+class NanoBanana2ImageGeneratorV1(BaseV1ImageGenerator):
+    """
+    Nano Banana 2 — v1 API (google/nano-banana-2/image).
+
+    Confirmed from Pollo's OpenAPI spec: aspectRatio gains four new
+    ultra-wide/tall ratios ("1:4"/"4:1"/"8:1"/"1:8") vs. the legacy
+    endpoint's ten. resolution replaces the legacy "1K"/"2K"/"4K" with
+    "0.5K"/"1K"/"2K"/"4K" (new default tier "0.5K", not "1K"). thinkingLevel
+    and maxImages do NOT exist in the v1 schema — dropped, matching
+    BaseV1ImageGenerator's shared behavior of not guessing at fields
+    the spec doesn't list. images (not imageUrl) is how a reference image
+    is passed, and is REQUIRED for image-to-image per the spec (no
+    seed field either).
+    """
+    V1_PROVIDER: ClassVar[str] = "google"
+    V1_MODEL: ClassVar[str] = "nano-banana-2"
+
+    VALID_RATIOS: ClassVar[tuple] = (
+        "1:1", "9:16", "16:9", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9",
+        "1:4", "4:1", "8:1", "1:8",
+    )
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("0.5K", "1K", "2K", "4K")
+
+
 class SeedreamImageGenerator(BaseVideoGenerator):
     """Image generator using the Seedream 5.0 Lite model.
 
@@ -818,3 +1383,21 @@ class SeedreamImageGenerator(BaseVideoGenerator):
 
         self.payload_attrs = input_payload
         return {"input": input_payload}
+
+
+class SeedreamImageGeneratorV1(BaseV1ImageGenerator):
+    """
+    Seedream 5.0 Lite — v1 API (bytedance/seedream-5-0-lite/image) — note
+    the provider slug changed from "seedream" (legacy) to "bytedance" (v1).
+
+    Confirmed from Pollo's OpenAPI spec: same aspectRatio (eight values,
+    default "1:1") and resolution ("2K"/"3K"/"4K", default "2K") enums as
+    the legacy endpoint. maxImages and responseFormat do NOT exist in the
+    v1 schema — dropped, matching BaseV1ImageGenerator's shared behavior
+    of not guessing at fields the spec doesn't list. No seed field either.
+    """
+    V1_PROVIDER: ClassVar[str] = "bytedance"
+    V1_MODEL: ClassVar[str] = "seedream-5-0-lite"
+
+    VALID_RATIOS: ClassVar[tuple] = ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16", "21:9")
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("2K", "3K", "4K")

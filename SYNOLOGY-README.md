@@ -167,6 +167,16 @@ Troubleshooting
 
 - Use `docker compose logs -f <service>` to tail logs for suspect services (e.g. `docker compose logs -f gluetun`).
 
+- Container Manager "Project" won't stop / random-prefixed container it doesn't recognize
+  - Container Manager's Project wizard names the compose project after the folder you point it at, not the `name: pollo-api` set in `docker-compose.yml`. If that folder ever got auto-suffixed by DSM (e.g. re-uploading/re-extracting the project into a new folder instead of updating files in place), re-importing creates a *new* project with a new random-prefixed set of containers, and the old ones become orphaned — Container Manager's GUI can fail to stop/remove containers it no longer associates with a tracked project.
+  - Fix the immediate problem via SSH, bypassing the GUI entirely:
+    ```bash
+    docker ps -a | grep -i pollo   # find the orphaned container(s) by image name
+    docker stop <container_id>
+    docker rm <container_id>
+    ```
+  - Prevent recurrence: keep the project in one stable folder (edit files in place rather than re-uploading/re-extracting), and when creating/re-creating the Project in Container Manager, explicitly set its "Project Name" field to `pollo-api` rather than accepting whatever it auto-fills from the folder path.
+
 Advanced options
 ----------------
 - If you prefer a GUI approach, Portainer (installed on the NAS) can manage stacks and respects compose files. However, verify Portainer allows passing device mappings and capability flags needed by `gluetun`.

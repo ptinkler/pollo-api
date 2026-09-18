@@ -20,5 +20,11 @@ DB_PATH = ROOT_DIR / "data" / "metadata.db"
 
 # Pollo API settings
 POLLO_API_BASE = "https://pollo.ai/api/platform/generation"
+# Newer "v1" API surface (https://docs.pollo.ai) — same account/key, but a
+# different URL shape (/v1/generation/{provider}/{model}/video|image) and,
+# per model, a different provider slug (e.g. "wanx" -> "alibaba",
+# "seedream" -> "bytedance") and payload schema than the pre-v1 endpoints
+# under POLLO_API_BASE, which Pollo now calls the "legacy" API.
+POLLO_API_V1_BASE = "https://pollo.ai/api/platform/v1/generation"
 POLLO_API_TIMEOUT = 30  # per-request timeout in seconds for individual HTTP calls
 

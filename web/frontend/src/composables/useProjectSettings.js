@@ -4,7 +4,7 @@ const STORAGE_PREFIX = 'pollo_settings_'
 
 export function useProjectSettings(projectName) {
   const settings = ref({
-    model: 'seedance20fast',
+    model: 'seedance20fastv1',
     aspect_ratio: '9:16',
     resolution: '480p',
     length: 10,

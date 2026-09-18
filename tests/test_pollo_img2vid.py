@@ -2,20 +2,28 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from img2vid.pollo.pollo_img2vid import get_video_generator, create_video, GENERATORS, DEFAULT_MODEL
+from img2vid.pollo.pollo_img2vid import (
+    get_video_generator, create_video, GENERATORS, GENERATORS_LEGACY, GENERATORS_V1, DEFAULT_MODEL,
+)
 
 
 class TestGeneratorsMap:
     def test_all_models_present(self):
-        expected = {"pollo20", "pollo25", "pollodance20", "pollodance20fast",
-                    "pollodanceref", "pollodancereffast",
-                    "seedance20", "seedance20fast", "seedance20mini", "seedance25",
-                    "seedanceref", "seedancereffast", "seedanceminiref",
-                    "hailuo03", "wan27", "wan30"}
-        assert set(GENERATORS.keys()) == expected
+        legacy = {"pollo20", "pollo25", "pollodance20", "pollodance20fast",
+                  "pollodanceref", "pollodancereffast",
+                  "seedance20", "seedance20fast", "seedance20mini", "seedance25",
+                  "seedanceref", "seedancereffast", "seedanceminiref",
+                  "minimaxh3", "wan27", "wan30", "wan30prime"}
+        v1 = {"pollo20v1", "pollo25v1", "pollodance20v1", "pollodance20fastv1",
+              "seedance20v1", "seedance20fastv1", "seedance20miniv1", "seedance25v1",
+              "minimaxh3v1", "minimaxh3max", "wan27v1", "wan30v1", "wan30primev1"}
+        assert set(GENERATORS_LEGACY.keys()) == legacy
+        assert set(GENERATORS_V1.keys()) == v1
+        assert set(GENERATORS.keys()) == legacy | v1
 
     def test_default_model(self):
-        assert DEFAULT_MODEL == "seedance20fast"
+        assert DEFAULT_MODEL == "seedance20fastv1"
+        assert DEFAULT_MODEL in GENERATORS_V1
 
 
 class TestGetVideoGenerator:

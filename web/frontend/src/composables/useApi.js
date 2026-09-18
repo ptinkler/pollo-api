@@ -149,7 +149,7 @@ async function _uploadImage(project, file, endpoint) {
 }
 
 // Models API
-export const fetchModels = () => apiGet('/api/models')
+export const fetchModels = (legacy = false) => apiGet(`/api/models?legacy=${legacy ? 'true' : 'false'}`)
 
 // Usage / Credits API
 export const fetchUsage = (days = 30) => apiGet(`/api/usage?days=${days}`)

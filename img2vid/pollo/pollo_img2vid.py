@@ -19,18 +19,38 @@ from .generators import (
     SeedanceRefVideoGenerator,
     SeedanceRefFastVideoGenerator,
     SeedanceMiniRefVideoGenerator,
-    Hailuo03VideoGenerator,
+    MinimaxH3VideoGenerator,
+    MinimaxH3MaxVideoGenerator,
     Wan27VideoGenerator,
     Wan30VideoGenerator,
+    Wan30PrimeVideoGenerator,
+    Pollo20VideoGeneratorV1,
+    Pollo25VideoGeneratorV1,
+    PolloDance20VideoGeneratorV1,
+    PolloDance20FastVideoGeneratorV1,
+    Seedance20VideoGeneratorV1,
+    Seedance20FastVideoGeneratorV1,
+    Seedance20MiniVideoGeneratorV1,
+    Seedance25VideoGeneratorV1,
+    MinimaxH3VideoGeneratorV1,
+    Wan27VideoGeneratorV1,
+    Wan30VideoGeneratorV1,
+    Wan30PrimeVideoGeneratorV1,
     NanoBanana2ImageGenerator,
     PolloJourneyImageGenerator,
     SeedreamImageGenerator,
+    PolloJourneyImageGeneratorV1,
+    SeedreamImageGeneratorV1,
+    NanoBanana2ImageGeneratorV1,
     SUCCESS_STATUSES,
     ERROR_STATUSES,
 )
 
 
-GENERATORS = {
+# Legacy (pre-v1) endpoints — kept as a fallback, only shown in the web UI
+# behind the "legacy mode" toggle. See BaseV1VideoGenerator's docstring in
+# generators.py for why v1 exists and how it differs.
+GENERATORS_LEGACY = {
     "pollo20": Pollo20VideoGenerator,
     "pollo25": Pollo25VideoGenerator,
     "pollodance20": PolloDance20VideoGenerator,
@@ -44,18 +64,46 @@ GENERATORS = {
     "seedanceref": SeedanceRefVideoGenerator,
     "seedancereffast": SeedanceRefFastVideoGenerator,
     "seedanceminiref": SeedanceMiniRefVideoGenerator,
-    "hailuo03": Hailuo03VideoGenerator,
+    "minimaxh3": MinimaxH3VideoGenerator,
     "wan27": Wan27VideoGenerator,
     "wan30": Wan30VideoGenerator,
+    "wan30prime": Wan30PrimeVideoGenerator,
 }
 
-DEFAULT_MODEL = "seedance20fast"
+# Current (v1) endpoints — shown by default in the web UI.
+GENERATORS_V1 = {
+    "pollo20v1": Pollo20VideoGeneratorV1,
+    "pollo25v1": Pollo25VideoGeneratorV1,
+    "pollodance20v1": PolloDance20VideoGeneratorV1,
+    "pollodance20fastv1": PolloDance20FastVideoGeneratorV1,
+    "seedance20v1": Seedance20VideoGeneratorV1,
+    "seedance20fastv1": Seedance20FastVideoGeneratorV1,
+    "seedance20miniv1": Seedance20MiniVideoGeneratorV1,
+    "seedance25v1": Seedance25VideoGeneratorV1,
+    "minimaxh3v1": MinimaxH3VideoGeneratorV1,
+    "minimaxh3max": MinimaxH3MaxVideoGenerator,  # v1-API-only; no legacy counterpart
+    "wan27v1": Wan27VideoGeneratorV1,
+    "wan30v1": Wan30VideoGeneratorV1,
+    "wan30primev1": Wan30PrimeVideoGeneratorV1,
+}
 
-IMAGE_GENERATORS = {
+GENERATORS = {**GENERATORS_LEGACY, **GENERATORS_V1}
+
+DEFAULT_MODEL = "seedance20fastv1"
+
+IMAGE_GENERATORS_LEGACY = {
     "pollojourney": PolloJourneyImageGenerator,
     "seedream": SeedreamImageGenerator,
     "nanobanana2": NanoBanana2ImageGenerator,
 }
+
+IMAGE_GENERATORS_V1 = {
+    "pollojourneyv1": PolloJourneyImageGeneratorV1,
+    "seedreamv1": SeedreamImageGeneratorV1,
+    "nanobanana2v1": NanoBanana2ImageGeneratorV1,
+}
+
+IMAGE_GENERATORS = {**IMAGE_GENERATORS_LEGACY, **IMAGE_GENERATORS_V1}
 
 
 def get_video_generator(model: str, **kwargs):
@@ -166,8 +214,11 @@ def create_video(
     if hasattr(generator, 'is_video_edit') and generator.is_video_edit:
         print(f'Creating video edit from project: {generator.project}...')
         print(f'Source video: {generator.video_url}')
-    elif hasattr(generator, 'refs'):
-        # Ref2video mode — refs are URLs, no local image download needed
+    elif getattr(generator, 'refs', None):
+        # Ref2video mode — refs are URLs, no local image download needed.
+        # A truthy check (not hasattr) matters here: BaseV1VideoGenerator
+        # subclasses always define `refs`, even ones that don't support it
+        # or weren't given any, leaving it None rather than absent.
         print(f'Creating ref2video from project: {generator.project}...')
         print(f'  {len(generator.refs)} reference(s)')
     elif generator.is_text_only:

@@ -100,13 +100,23 @@ class TestTTLCache:
 # ── API: Models ──────────────────────────────────────────────────────
 
 class TestModelsEndpoint:
-    def test_get_models(self, client):
+    def test_get_models_defaults_to_v1(self, client):
         resp = client.get("/api/models")
         assert resp.status_code == 200
         data = resp.json()
-        assert "pollodance20" in data
+        assert "seedance20fastv1" in data
+        assert data["seedance20fastv1"]["label"] == "Seedance 2.0 Fast"
+        # Legacy models are excluded by default
+        assert "pollodance20" not in data
+
+    def test_get_models_legacy_mode(self, client):
+        resp = client.get("/api/models?legacy=true")
+        assert resp.status_code == 200
+        data = resp.json()
         assert "pollodance20" in data
         assert data["pollodance20"]["label"] == "Pollo Dance 2.0"
+        # v1 models are excluded in legacy mode
+        assert "seedance20fastv1" not in data
 
 
 # ── API: Projects ────────────────────────────────────────────────────

@@ -220,10 +220,16 @@ describe('Generate API', () => {
 // ── Models API ──────────────────────────────────────────────────────
 
 describe('Models API', () => {
-  it('fetchModels calls correct endpoint', async () => {
+  it('fetchModels defaults to the current (non-legacy) models', async () => {
     mockFetch.mockReturnValueOnce(mockOkResponse({}))
     await fetchModels()
-    expect(mockFetch.mock.calls[0][0]).toBe('/api/models')
+    expect(mockFetch.mock.calls[0][0]).toBe('/api/models?legacy=false')
+  })
+
+  it('fetchModels(true) requests legacy models', async () => {
+    mockFetch.mockReturnValueOnce(mockOkResponse({}))
+    await fetchModels(true)
+    expect(mockFetch.mock.calls[0][0]).toBe('/api/models?legacy=true')
   })
 })
 

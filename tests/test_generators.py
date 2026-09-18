@@ -8,8 +8,14 @@ from img2vid.pollo.generators import (
     BaseVideoGenerator, Pollo20VideoGenerator, Pollo25VideoGenerator,
     PolloDance20VideoGenerator, PolloDance20FastVideoGenerator,
     PolloDanceRefVideoGenerator, PolloDanceRefFastVideoGenerator,
-    Seedance25VideoGenerator, Hailuo03VideoGenerator, Wan27VideoGenerator,
-    Wan30VideoGenerator,
+    Seedance25VideoGenerator, MinimaxH3VideoGenerator, Wan27VideoGenerator,
+    Wan30VideoGenerator, Wan30PrimeVideoGenerator, MinimaxH3MaxVideoGenerator,
+    BaseV1VideoGenerator, Pollo20VideoGeneratorV1, Pollo25VideoGeneratorV1,
+    PolloDance20VideoGeneratorV1, PolloDance20FastVideoGeneratorV1,
+    Seedance20VideoGeneratorV1, Seedance20FastVideoGeneratorV1,
+    Seedance20MiniVideoGeneratorV1, Seedance25VideoGeneratorV1,
+    MinimaxH3VideoGeneratorV1, Wan27VideoGeneratorV1, Wan30VideoGeneratorV1,
+    Wan30PrimeVideoGeneratorV1,
     _parse_bool_env, SUCCESS_STATUSES, ERROR_STATUSES,
 )
 
@@ -280,25 +286,25 @@ class TestSeedance25VideoGenerator:
         assert gen.aspect_ratio == "16:9"
 
 
-class TestHailuo03VideoGenerator:
+class TestMinimaxH3VideoGenerator:
     @patch("img2vid.pollo.generators.get_prompt", return_value="p")
     @patch("img2vid.pollo.generators.get_image_url", return_value=None)
     @patch("img2vid.pollo.generators.get_image_path", return_value=None)
     def test_model_url(self, *mocks):
-        gen = Hailuo03VideoGenerator(api_key="k", project="p", prompt="x")
-        assert gen.model_url == "https://pollo.ai/api/platform/generation/minimax/hailuo-03"
+        gen = MinimaxH3VideoGenerator(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/generation/minimax/minimax-h3"
 
     @patch("img2vid.pollo.generators.get_prompt", return_value="p")
     @patch("img2vid.pollo.generators.get_image_url", return_value=None)
     @patch("img2vid.pollo.generators.get_image_path", return_value=None)
     def test_valid_lengths(self, *mocks):
-        assert Hailuo03VideoGenerator.VALID_LENGTHS == tuple(range(4, 16))
+        assert MinimaxH3VideoGenerator.VALID_LENGTHS == tuple(range(4, 16))
 
     @patch("img2vid.pollo.generators.get_prompt", return_value="p")
     @patch("img2vid.pollo.generators.get_image_url", return_value=None)
     @patch("img2vid.pollo.generators.get_image_path", return_value=None)
     def test_text_to_video_payload(self, *mocks):
-        gen = Hailuo03VideoGenerator(
+        gen = MinimaxH3VideoGenerator(
             api_key="k", project="p", prompt="hello",
             image_url=None, length=8, resolution="1080p", prompt_optimizer=False,
         )
@@ -313,7 +319,7 @@ class TestHailuo03VideoGenerator:
     @patch("img2vid.pollo.generators.get_image_url", return_value=None)
     @patch("img2vid.pollo.generators.get_image_path", return_value=None)
     def test_image_to_video_payload(self, *mocks):
-        gen = Hailuo03VideoGenerator(
+        gen = MinimaxH3VideoGenerator(
             api_key="k", project="p", prompt="hello",
             image_url="https://img.com/i.jpg", image_tail="https://img.com/tail.jpg",
         )
@@ -326,9 +332,9 @@ class TestHailuo03VideoGenerator:
     @patch("img2vid.pollo.generators.get_image_path", return_value=None)
     def test_default_resolution(self, *mocks):
         # Confirmed against the live API: "480P" | "768P" | "2K" are accepted, default stays "2K".
-        gen = Hailuo03VideoGenerator(api_key="k", project="p", prompt="x")
+        gen = MinimaxH3VideoGenerator(api_key="k", project="p", prompt="x")
         assert gen.resolution == "2K"
-        assert Hailuo03VideoGenerator.VALID_RESOLUTIONS == ("480P", "768P", "2K")
+        assert MinimaxH3VideoGenerator.VALID_RESOLUTIONS == ("480P", "768P", "2K")
 
 
 class TestWan27VideoGenerator:
@@ -458,6 +464,90 @@ class TestWan30VideoGenerator:
         assert gen.num_outputs == 4
         gen2 = Wan30VideoGenerator(api_key="k", project="p", prompt="x", num_outputs=0)
         assert gen2.num_outputs == 1
+
+
+class TestWan30PrimeVideoGenerator:
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_model_url(self, *mocks):
+        gen = Wan30PrimeVideoGenerator(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/generation/wanx/wan-v3-0-prime"
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_inherits_wan30_schema(self, *mocks):
+        # Confirmed against the live API: same enums/types as wan-v3-0.
+        assert Wan30PrimeVideoGenerator.VALID_LENGTHS == tuple(range(2, 31))
+        assert Wan30PrimeVideoGenerator.VALID_RESOLUTIONS == ("480P", "720P", "1080P")
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_text_to_video_payload(self, *mocks):
+        gen = Wan30PrimeVideoGenerator(
+            api_key="k", project="p", prompt="hello",
+            image_url=None, length=30, resolution="480P",
+            generate_audio=False, num_outputs=4,
+        )
+        payload = gen.get_payload()
+        assert payload["input"]["prompt"] == "hello"
+        assert payload["input"]["length"] == 30
+        assert payload["input"]["resolution"] == "480P"
+        assert payload["input"]["generateAudio"] is False
+        assert payload["input"]["numOutputs"] == 4
+        assert "image" not in payload["input"]
+
+
+class TestMinimaxH3MaxVideoGenerator:
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_model_url(self, *mocks):
+        gen = MinimaxH3MaxVideoGenerator(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/v1/generation/minimax/minimax-h3-max/video"
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_valid_lengths_and_resolutions(self, *mocks):
+        # Confirmed against the live API's validation error responses.
+        assert MinimaxH3MaxVideoGenerator.VALID_LENGTHS == (5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
+        assert MinimaxH3MaxVideoGenerator.VALID_RESOLUTIONS == ("480p", "768p", "1080p")
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_text_to_video_payload_uses_duration_key(self, *mocks):
+        gen = MinimaxH3MaxVideoGenerator(
+            api_key="k", project="p", prompt="hello",
+            image_url=None, length=8, resolution="768p",
+        )
+        payload = gen.get_payload()
+        assert payload["input"]["prompt"] == "hello"
+        assert payload["input"]["duration"] == 8
+        assert payload["input"]["resolution"] == "768p"
+        assert "length" not in payload["input"]
+        assert "image" not in payload["input"]
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_image_to_video_payload(self, *mocks):
+        gen = MinimaxH3MaxVideoGenerator(
+            api_key="k", project="p", prompt="hello", image_url="https://img.com/i.jpg",
+        )
+        payload = gen.get_payload()
+        assert payload["input"]["image"] == "https://img.com/i.jpg"
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_default_resolution(self, *mocks):
+        # Matches the OpenAPI spec's own default ("480p"), not an arbitrary choice.
+        gen = MinimaxH3MaxVideoGenerator(api_key="k", project="p", prompt="x")
+        assert gen.resolution == "480p"
 
 
 class TestPollo25VideoGenerator:
@@ -610,3 +700,275 @@ class TestPolloDanceRefFastVideoGenerator:
         assert payload["input"]["duration"] == 10
 
 
+
+
+# ── v1 API generators ────────────────────────────────────────────────
+
+class TestPollo20VideoGeneratorV1:
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_model_url(self, *mocks):
+        gen = Pollo20VideoGeneratorV1(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/v1/generation/pollo-ai/pollo-v2/video"
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_text_to_video_payload_uses_duration(self, *mocks):
+        gen = Pollo20VideoGeneratorV1(
+            api_key="k", project="p", prompt="hello", image_url=None, length=10,
+            resolution="1080p", aspect_ratio="4:3", seed=7,
+        )
+        payload = gen.get_payload()
+        assert payload["input"]["prompt"] == "hello"
+        assert payload["input"]["duration"] == 10
+        assert "length" not in payload["input"]
+        assert payload["input"]["resolution"] == "1080p"
+        assert payload["input"]["aspectRatio"] == "4:3"
+        assert payload["input"]["seed"] == 7
+        assert payload["input"]["generateAudio"] is True
+        assert "webSearch" not in payload["input"]  # v1 pollo-v2 has no webSearch field
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_image_to_video_payload_omits_aspect_ratio(self, *mocks):
+        gen = Pollo20VideoGeneratorV1(
+            api_key="k", project="p", prompt="hello", image_url="https://img.com/i.jpg",
+        )
+        payload = gen.get_payload()
+        assert payload["input"]["image"] == "https://img.com/i.jpg"
+        assert "aspectRatio" not in payload["input"]
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_refs_payload(self, *mocks):
+        gen = Pollo20VideoGeneratorV1(
+            api_key="k", project="p", prompt="hello", image_url=None,
+            refs=[{"url": "https://img.com/a.jpg", "type": "image"}, {"url": "  "}],
+        )
+        payload = gen.get_payload()
+        assert payload["input"]["refs"] == [{"url": "https://img.com/a.jpg", "type": "image"}]
+        assert "image" not in payload["input"]
+        assert payload["input"]["aspectRatio"]  # refs branch includes aspectRatio too
+
+
+class TestPollo25VideoGeneratorV1:
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_model_url_and_mode(self, *mocks):
+        gen = Pollo25VideoGeneratorV1(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/v1/generation/pollo-ai/pollo-v2-5/video"
+        assert gen.mode == "basic"
+        payload = gen.get_payload()
+        assert payload["input"]["mode"] == "basic"
+        assert "seed" not in payload["input"]  # no seed field for pollo25 v1
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_custom_mode(self, *mocks):
+        gen = Pollo25VideoGeneratorV1(api_key="k", project="p", prompt="x", mode="pro")
+        payload = gen.get_payload()
+        assert payload["input"]["mode"] == "pro"
+
+
+class TestPolloDance20VideoGeneratorV1:
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_model_url(self, *mocks):
+        gen = PolloDance20VideoGeneratorV1(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/v1/generation/pollo-ai/pollo-dance-2-0/video"
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_image_to_video_with_tail(self, *mocks):
+        gen = PolloDance20VideoGeneratorV1(
+            api_key="k", project="p", prompt="hello",
+            image_url="https://img.com/i.jpg", image_tail="https://img.com/tail.jpg",
+            web_search=True, seed=3,
+        )
+        payload = gen.get_payload()
+        assert payload["input"]["imageTail"] == "https://img.com/tail.jpg"
+        assert payload["input"]["webSearch"] is True
+        assert payload["input"]["seed"] == 3
+
+
+class TestPolloDance20FastVideoGeneratorV1:
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_model_url_and_resolutions(self, *mocks):
+        gen = PolloDance20FastVideoGeneratorV1(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/v1/generation/pollo-ai/pollo-dance-2-0-fast/video"
+        assert PolloDance20FastVideoGeneratorV1.VALID_RESOLUTIONS == ("480p", "720p")
+
+
+class TestSeedance20VideoGeneratorV1:
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_model_url_and_resolutions(self, *mocks):
+        gen = Seedance20VideoGeneratorV1(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/v1/generation/bytedance/seedance-2-0/video"
+        assert Seedance20VideoGeneratorV1.VALID_RESOLUTIONS == ("480p", "720p", "1080p", "4K")
+
+
+class TestSeedance20FastAndMiniVideoGeneratorV1:
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_fast_model_url(self, *mocks):
+        gen = Seedance20FastVideoGeneratorV1(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/v1/generation/bytedance/seedance-2-0-fast/video"
+        assert Seedance20FastVideoGeneratorV1.VALID_RESOLUTIONS == ("480p", "720p")
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_mini_model_url(self, *mocks):
+        gen = Seedance20MiniVideoGeneratorV1(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/v1/generation/bytedance/seedance-2-0-mini/video"
+        assert Seedance20MiniVideoGeneratorV1.VALID_RESOLUTIONS == ("480p", "720p")
+
+
+class TestSeedance25VideoGeneratorV1:
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_model_url(self, *mocks):
+        gen = Seedance25VideoGeneratorV1(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/v1/generation/bytedance/seedance-2-5/video"
+        assert Seedance25VideoGeneratorV1.VALID_LENGTHS == tuple(range(4, 31))
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_default_aspect_ratio_is_adaptive(self, *mocks):
+        gen = Seedance25VideoGeneratorV1(api_key="k", project="p", prompt="x", image_url=None)
+        assert gen.aspect_ratio == "adaptive"
+        payload = gen.get_payload()
+        assert payload["input"]["aspectRatio"] == "adaptive"
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_explicit_aspect_ratio_overrides_default(self, *mocks):
+        gen = Seedance25VideoGeneratorV1(
+            api_key="k", project="p", prompt="x", image_url=None, aspect_ratio="16:9",
+        )
+        assert gen.aspect_ratio == "16:9"
+
+
+class TestMinimaxH3VideoGeneratorV1:
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_model_url_and_resolutions(self, *mocks):
+        gen = MinimaxH3VideoGeneratorV1(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/v1/generation/minimax/minimax-h3/video"
+        # Lowercase below 2K in v1, same tiers as legacy MinimaxH3VideoGenerator's "480P"/"768P"/"2K"
+        assert MinimaxH3VideoGeneratorV1.VALID_RESOLUTIONS == ("480p", "768p", "2K")
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_no_generate_audio_or_web_search(self, *mocks):
+        gen = MinimaxH3VideoGeneratorV1(api_key="k", project="p", prompt="x", image_url=None)
+        payload = gen.get_payload()
+        assert "generateAudio" not in payload["input"]
+        assert "webSearch" not in payload["input"]
+        assert "seed" not in payload["input"]
+
+
+class TestWan27VideoGeneratorV1:
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    @patch("img2vid.pollo.generators.get_audio_url", return_value=None)
+    def test_model_url_uses_alibaba_provider(self, *mocks):
+        gen = Wan27VideoGeneratorV1(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/v1/generation/alibaba/wan-v2-7/video"
+        assert Wan27VideoGeneratorV1.VALID_RESOLUTIONS == ("720p", "1080p")
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    @patch("img2vid.pollo.generators.get_audio_url", return_value=None)
+    def test_negative_prompt_and_audio_driven_generation(self, *mocks):
+        gen = Wan27VideoGeneratorV1(
+            api_key="k", project="p", prompt="hello", image_url=None,
+            negative_prompt="blurry", audio_url="https://a.com/audio.mp3",
+        )
+        payload = gen.get_payload()
+        assert payload["input"]["negativePrompt"] == "blurry"
+        assert payload["input"]["audio"] == "https://a.com/audio.mp3"
+        assert "generateAudio" not in payload["input"]  # wan27 has no generateAudio field
+
+
+class TestWan30VideoGeneratorV1:
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_model_url_uses_alibaba_provider(self, *mocks):
+        gen = Wan30VideoGeneratorV1(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/v1/generation/alibaba/wan-v3-0/video"
+        assert Wan30VideoGeneratorV1.VALID_RESOLUTIONS == ("480p", "720p", "1080p")
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_num_outputs_dropped_and_seed_gained(self, *mocks):
+        # v1's schema has no numOutputs field at all (legacy's was already
+        # flagged unconfirmed) but does gain `seed`, unlike legacy Wan30.
+        gen = Wan30VideoGeneratorV1(api_key="k", project="p", prompt="x", image_url=None, seed=99)
+        assert not hasattr(gen, "num_outputs")
+        payload = gen.get_payload()
+        assert "numOutputs" not in payload["input"]
+        assert payload["input"]["seed"] == 99
+
+
+class TestWan30PrimeVideoGeneratorV1:
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_model_url(self, *mocks):
+        gen = Wan30PrimeVideoGeneratorV1(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/v1/generation/alibaba/wan-v3-0-prime/video"
+        # Inherits wan30's schema unchanged
+        assert Wan30PrimeVideoGeneratorV1.VALID_LENGTHS == tuple(range(2, 31))
+        assert Wan30PrimeVideoGeneratorV1.VALID_RESOLUTIONS == ("480p", "720p", "1080p")
+
+
+class TestBaseV1VideoGeneratorRefsNormalization:
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_refs_without_has_refs_flag_are_ignored(self, *mocks):
+        # Pollo 2.5 v1 has no Reference-To-Video branch (HAS_REFS=False),
+        # so a refs kwarg must be silently dropped rather than sent.
+        gen = Pollo25VideoGeneratorV1(
+            api_key="k", project="p", prompt="hello", image_url=None,
+            refs=[{"url": "https://img.com/a.jpg"}],
+        )
+        assert gen.refs is None
+        payload = gen.get_payload()
+        assert "refs" not in payload["input"]
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_refs_fallback_to_legacy_shaped_dicts(self, *mocks):
+        # A legacy-shaped ref dict ({"image": url}) still yields a valid
+        # v1-shaped ref ({"url": url}) via the image/video/audio fallback.
+        gen = Pollo20VideoGeneratorV1(
+            api_key="k", project="p", prompt="hello", image_url=None,
+            refs=[{"type": "image", "image": "https://img.com/a.jpg"}],
+        )
+        payload = gen.get_payload()
+        assert payload["input"]["refs"] == [{"url": "https://img.com/a.jpg", "type": "image"}]

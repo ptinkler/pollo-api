@@ -9,11 +9,12 @@ const props = defineProps({
   project: { type: String, required: true },
   projectData: { type: Object, default: null },
   models: { type: Object, default: () => ({}) },
+  legacyMode: { type: Boolean, default: false },
   regenerateJob: { type: Object, default: null },
   useAsRef: { type: Object, default: null },
 })
 
-const emit = defineEmits(['regenerate-applied', 'use-as-ref-applied'])
+const emit = defineEmits(['regenerate-applied', 'use-as-ref-applied', 'update:legacy-mode'])
 
 const showToast = inject('showToast')
 const { addJob } = useJobsQueue()
@@ -146,13 +147,23 @@ const DEPRECATED_REMAP = {
   pollodancereffast: 'seedancereffast',
 }
 
-// Format models for SleekSelect — hide deprecated models
+// Two-word brand prefixes that shouldn't be split at the first space when
+// deriving a dropdown group from a model's label (e.g. "Nano Banana 2").
+const MULTI_WORD_BRANDS = ['Nano Banana']
+
+function modelGroup(label) {
+  const brand = MULTI_WORD_BRANDS.find((b) => label.startsWith(b))
+  return brand || label.split(' ')[0]
+}
+
+// Format models for SleekSelect — hide deprecated models, grouped by brand
 const modelSelectOptions = computed(() => {
   return Object.entries(props.models)
     .filter(([, info]) => !info.deprecated)
     .map(([key, info]) => ({
       value: key,
-      label: `${info.label}${info.type === 'ref' ? ' (ref)' : ''}`
+      label: `${info.label}${info.type === 'ref' ? ' (ref)' : ''}`,
+      group: modelGroup(info.label)
     }))
 })
 
@@ -188,6 +199,17 @@ watch(() => props.useAsRef, (data) => {
     showToast('Video added as reference', 'success')
   }
 }, { immediate: true })
+
+// Toggling legacy mode swaps the entire models list (legacy and v1 model
+// keys are disjoint — see MODEL_INFO in web/api.py) — fall back to
+// whatever model comes first in the new list if the current selection
+// no longer exists in it.
+watch(() => props.models, (newModels) => {
+  const keys = Object.keys(newModels || {})
+  if (keys.length && !newModels[settings.value.model]) {
+    settings.value.model = keys[0]
+  }
+})
 
 // Ensure length is valid when model changes
 watch(modelLengths, (lengths) => {
@@ -452,6 +474,19 @@ async function handleSubmit() {
           placeholder="Describe what you want to generate..."
           :rows="4"
         />
+      </div>
+
+      <!-- Legacy mode toggle -->
+      <div class="form-section legacy-mode-row">
+        <ToggleSwitch
+          id="legacy_mode"
+          :model-value="legacyMode"
+          label="Legacy mode"
+          @update:model-value="$emit('update:legacy-mode', $event)"
+        />
+        <span class="legacy-mode-hint">
+          {{ legacyMode ? 'Showing old (pre-v1) API models' : 'Showing current (v1) API models' }}
+        </span>
       </div>
 
       <!-- Source Image & Model Row -->
@@ -956,6 +991,17 @@ async function handleSubmit() {
   margin-left: auto;
   padding-left: 20px;
   border-left: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.legacy-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.legacy-mode-hint {
+  font-size: 0.78rem;
+  color: var(--text2);
 }
 
 .settings-row :deep(.compact) {

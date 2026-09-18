@@ -20,6 +20,28 @@ function getOptionValue(opt) {
 function getOptionLabel(opt) {
   return typeof opt === 'object' ? opt.label : opt
 }
+
+// Options may optionally carry a `group` field, grouping them under an
+// <optgroup> in encounter order. Options without a group render ungrouped.
+const groupedOptions = computed(() => {
+  const groups = []
+  const byName = new Map()
+  for (const opt of props.options) {
+    const name = typeof opt === 'object' ? opt.group : null
+    if (!name) {
+      groups.push({ group: null, options: [opt] })
+      continue
+    }
+    let bucket = byName.get(name)
+    if (!bucket) {
+      bucket = { group: name, options: [] }
+      byName.set(name, bucket)
+      groups.push(bucket)
+    }
+    bucket.options.push(opt)
+  }
+  return groups
+})
 </script>
 
 <template>
@@ -35,9 +57,16 @@ function getOptionLabel(opt) {
         @focus="focused = true"
         @blur="focused = false"
       >
-        <option v-for="opt in options" :key="getOptionValue(opt)" :value="getOptionValue(opt)">
-          {{ getOptionLabel(opt) }}
-        </option>
+        <template v-for="group in groupedOptions" :key="group.group ?? getOptionValue(group.options[0])">
+          <optgroup v-if="group.group" :label="group.group">
+            <option v-for="opt in group.options" :key="getOptionValue(opt)" :value="getOptionValue(opt)">
+              {{ getOptionLabel(opt) }}
+            </option>
+          </optgroup>
+          <option v-else v-for="opt in group.options" :key="getOptionValue(opt)" :value="getOptionValue(opt)">
+            {{ getOptionLabel(opt) }}
+          </option>
+        </template>
       </select>
       <div class="select-arrow">
         <svg width="10" height="6" viewBox="0 0 10 6" fill="none">
@@ -106,6 +135,13 @@ select option {
   background: #1e1e23;
   color: var(--text);
   padding: 8px 14px;
+}
+
+select optgroup {
+  background: #1e1e23;
+  color: var(--text2);
+  font-weight: 600;
+  font-style: normal;
 }
 
 select:hover {
