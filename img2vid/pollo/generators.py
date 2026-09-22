@@ -192,6 +192,12 @@ class BaseV1VideoGenerator(BaseVideoGenerator):
     # for audio-driven generation (distinct from the generateAudio boolean
     # other models use — wan27 has no generateAudio at all).
     HAS_NEGATIVE_PROMPT_AUDIO: ClassVar[bool] = False
+    # Most v1 image-to-video branches have no aspectRatio field at all (the
+    # input image dictates it) — but pollo-dance-2-0(-fast) and
+    # seedance-2-0(-fast/-mini) are exceptions: their image branch DOES take
+    # aspectRatio, defaulting to "16:9" server-side when omitted. Confirmed
+    # per-model from the OpenAPI spec, not assumed — see each subclass.
+    HAS_ASPECT_RATIO_ON_IMAGE: ClassVar[bool] = False
 
     resolution: str
     length: int
@@ -268,9 +274,11 @@ class BaseV1VideoGenerator(BaseVideoGenerator):
         attrs["duration"] = self.length
         attrs["resolution"] = self.resolution
 
-        # aspectRatio only exists on the text/ref branches of the v1 schema —
-        # the image branch has no such field (the input image dictates it).
-        if refs or self.is_text_only:
+        # aspectRatio usually only exists on the text/ref branches of the v1
+        # schema — the image branch has no such field on most models (the
+        # input image dictates it). A few models are exceptions and do take
+        # it on the image branch too; see HAS_ASPECT_RATIO_ON_IMAGE.
+        if refs or self.is_text_only or self.HAS_ASPECT_RATIO_ON_IMAGE:
             attrs["aspectRatio"] = self.aspect_ratio
 
         if self.HAS_IMAGE_TAIL and self.image_tail and not refs and not self.is_text_only:
@@ -693,6 +701,11 @@ class PolloDance20VideoGeneratorV1(BaseV1VideoGenerator):
     seed, imageTail, webSearch, and generateAudio all carry over from the
     legacy schema; refs are now supported directly on this endpoint
     instead of needing the separate pollodanceref legacy endpoint.
+
+    Unlike most v1 image-to-video branches, this model's image branch DOES
+    accept aspectRatio (enum matches the text branch, including "adaptive";
+    server-side default "16:9" if omitted) — confirmed from the spec, hence
+    HAS_ASPECT_RATIO_ON_IMAGE.
     """
     V1_PROVIDER: ClassVar[str] = "pollo-ai"
     V1_MODEL: ClassVar[str] = "pollo-dance-2-0"
@@ -707,6 +720,7 @@ class PolloDance20VideoGeneratorV1(BaseV1VideoGenerator):
     HAS_WEB_SEARCH: ClassVar[bool] = True
     HAS_IMAGE_TAIL: ClassVar[bool] = True
     HAS_REFS: ClassVar[bool] = True
+    HAS_ASPECT_RATIO_ON_IMAGE: ClassVar[bool] = True
 
 
 class PolloDance20FastVideoGeneratorV1(PolloDance20VideoGeneratorV1):
@@ -725,6 +739,13 @@ class Seedance20VideoGeneratorV1(BaseV1VideoGenerator):
     legacy endpoint. seed, imageTail, webSearch, generateAudio carry over;
     refs now supported directly instead of via the separate
     seedanceref legacy endpoint.
+
+    Unlike most v1 image-to-video branches (and unlike its own successor,
+    seedance-2-5 — see that class), this model's image branch DOES accept
+    aspectRatio, same enum as the text branch minus "adaptive", server-side
+    default "16:9" if omitted. Confirmed from the spec, hence
+    HAS_ASPECT_RATIO_ON_IMAGE. Also inherited by the Fast/Mini subclasses
+    below, whose image branches carry the same field.
     """
     V1_PROVIDER: ClassVar[str] = "bytedance"
     V1_MODEL: ClassVar[str] = "seedance-2-0"
@@ -739,6 +760,7 @@ class Seedance20VideoGeneratorV1(BaseV1VideoGenerator):
     HAS_WEB_SEARCH: ClassVar[bool] = True
     HAS_IMAGE_TAIL: ClassVar[bool] = True
     HAS_REFS: ClassVar[bool] = True
+    HAS_ASPECT_RATIO_ON_IMAGE: ClassVar[bool] = True
 
 
 class Seedance20FastVideoGeneratorV1(Seedance20VideoGeneratorV1):

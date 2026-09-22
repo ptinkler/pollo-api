@@ -8,17 +8,21 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue'])
 
-// Long contiguous ranges (e.g. 4-30s) render as a slider instead of a button per value.
-const isRange = computed(() => props.lengths.length > 15)
-const min = computed(() => props.lengths[0])
-const max = computed(() => props.lengths[props.lengths.length - 1])
+// Unique id so multiple sliders on one page don't share tick marks.
+const ticksId = `length-ticks-${Math.random().toString(36).slice(2)}`
 
-function selectLength(len) {
-  emit('update:modelValue', len)
-}
+// The slider steps through indices into `lengths`, not raw seconds — this
+// keeps every stop a valid value even when lengths has gaps (e.g. pollo25's
+// [4,5,...,12,15] skips 13 and 14) or as few as two entries (e.g. [5, 10]).
+const maxIndex = computed(() => props.lengths.length - 1)
+
+const currentIndex = computed(() => {
+  const i = props.lengths.indexOf(props.modelValue)
+  return i === -1 ? 0 : i
+})
 
 function onSlide(event) {
-  emit('update:modelValue', Number(event.target.value))
+  emit('update:modelValue', props.lengths[Number(event.target.value)])
 }
 </script>
 
@@ -26,30 +30,22 @@ function onSlide(event) {
   <div class="length-picker-group">
     <label class="field-label">
       Length
-      <span v-if="isRange" class="length-value">{{ modelValue }}s</span>
+      <span class="length-value">{{ modelValue }}s</span>
     </label>
 
     <input
-      v-if="isRange"
       type="range"
       class="length-range"
-      :min="min"
-      :max="max"
+      min="0"
+      :max="maxIndex"
       step="1"
-      :value="modelValue"
+      :list="ticksId"
+      :value="currentIndex"
       @input="onSlide"
     />
-    <div v-else class="length-picker">
-      <button
-        v-for="len in lengths"
-        :key="len"
-        type="button"
-        :class="['length-btn', { active: modelValue === len }]"
-        @click="selectLength(len)"
-      >
-        {{ len }}s
-      </button>
-    </div>
+    <datalist :id="ticksId">
+      <option v-for="(len, i) in lengths" :key="len" :value="i" :label="`${len}s`" />
+    </datalist>
   </div>
 </template>
 
@@ -126,41 +122,5 @@ function onSlide(event) {
     0 2px 8px rgba(108, 92, 231, 0.4),
     inset 0 1px 1px rgba(255, 255, 255, 0.15);
   border: none;
-}
-
-.length-picker {
-  display: flex;
-  background: linear-gradient(145deg, rgba(25, 25, 30, 0.95), rgba(20, 20, 25, 0.98));
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  border-radius: 10px;
-  padding: 4px;
-  gap: 2px;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
-}
-
-.length-btn {
-  padding: 7px 12px;
-  background: transparent;
-  border: none;
-  border-radius: 7px;
-  color: var(--text2);
-  font-size: 0.8rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  white-space: nowrap;
-}
-
-.length-btn:hover {
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.length-btn.active {
-  background: linear-gradient(145deg, var(--accent), #5a4bd1);
-  color: white;
-  box-shadow:
-    0 2px 8px rgba(108, 92, 231, 0.3),
-    inset 0 1px 1px rgba(255, 255, 255, 0.1);
 }
 </style>

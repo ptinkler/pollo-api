@@ -798,6 +798,20 @@ class TestPolloDance20VideoGeneratorV1:
         assert payload["input"]["webSearch"] is True
         assert payload["input"]["seed"] == 3
 
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_image_to_video_includes_aspect_ratio(self, *mocks):
+        # Unlike most v1 models, pollo-dance-2-0's image branch does accept
+        # aspectRatio (spec-confirmed) — omitting it silently falls back to
+        # Pollo's server-side "16:9" default regardless of the source image.
+        gen = PolloDance20VideoGeneratorV1(
+            api_key="k", project="p", prompt="hello",
+            image_url="https://img.com/i.jpg", aspect_ratio="9:16",
+        )
+        payload = gen.get_payload()
+        assert payload["input"]["aspectRatio"] == "9:16"
+
 
 class TestPolloDance20FastVideoGeneratorV1:
     @patch("img2vid.pollo.generators.get_prompt", return_value="p")
@@ -818,6 +832,21 @@ class TestSeedance20VideoGeneratorV1:
         assert gen.model_url == "https://pollo.ai/api/platform/v1/generation/bytedance/seedance-2-0/video"
         assert Seedance20VideoGeneratorV1.VALID_RESOLUTIONS == ("480p", "720p", "1080p", "4K")
 
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_image_to_video_includes_aspect_ratio(self, *mocks):
+        # Regression test: seedance-2-0's image branch does accept
+        # aspectRatio (spec-confirmed) even though most v1 image branches
+        # don't — dropping it silently falls back to Pollo's "16:9" default
+        # regardless of the uploaded image's actual aspect ratio.
+        gen = Seedance20VideoGeneratorV1(
+            api_key="k", project="p", prompt="hello",
+            image_url="https://img.com/i.jpg", aspect_ratio="9:16",
+        )
+        payload = gen.get_payload()
+        assert payload["input"]["aspectRatio"] == "9:16"
+
 
 class TestSeedance20FastAndMiniVideoGeneratorV1:
     @patch("img2vid.pollo.generators.get_prompt", return_value="p")
@@ -836,6 +865,20 @@ class TestSeedance20FastAndMiniVideoGeneratorV1:
         assert gen.model_url == "https://pollo.ai/api/platform/v1/generation/bytedance/seedance-2-0-mini/video"
         assert Seedance20MiniVideoGeneratorV1.VALID_RESOLUTIONS == ("480p", "720p")
 
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_fast_and_mini_inherit_aspect_ratio_on_image(self, *mocks):
+        # HAS_ASPECT_RATIO_ON_IMAGE isn't re-declared on these subclasses —
+        # confirm it's still inherited from Seedance20VideoGeneratorV1.
+        for cls in (Seedance20FastVideoGeneratorV1, Seedance20MiniVideoGeneratorV1):
+            gen = cls(
+                api_key="k", project="p", prompt="hello",
+                image_url="https://img.com/i.jpg", aspect_ratio="1:1",
+            )
+            payload = gen.get_payload()
+            assert payload["input"]["aspectRatio"] == "1:1", cls.__name__
+
 
 class TestSeedance25VideoGeneratorV1:
     @patch("img2vid.pollo.generators.get_prompt", return_value="p")
@@ -845,6 +888,19 @@ class TestSeedance25VideoGeneratorV1:
         gen = Seedance25VideoGeneratorV1(api_key="k", project="p", prompt="x")
         assert gen.model_url == "https://pollo.ai/api/platform/v1/generation/bytedance/seedance-2-5/video"
         assert Seedance25VideoGeneratorV1.VALID_LENGTHS == tuple(range(4, 31))
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_image_to_video_omits_aspect_ratio(self, *mocks):
+        # Unlike seedance-2-0, seedance-2-5's image branch has no
+        # aspectRatio field at all in the spec — must stay omitted.
+        gen = Seedance25VideoGeneratorV1(
+            api_key="k", project="p", prompt="hello",
+            image_url="https://img.com/i.jpg", aspect_ratio="9:16",
+        )
+        payload = gen.get_payload()
+        assert "aspectRatio" not in payload["input"]
 
     @patch("img2vid.pollo.generators.get_prompt", return_value="p")
     @patch("img2vid.pollo.generators.get_image_url", return_value=None)

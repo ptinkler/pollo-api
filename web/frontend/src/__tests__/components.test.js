@@ -324,31 +324,49 @@ describe('JobCard', () => {
 import LengthSlider from '../components/form/LengthSlider.vue'
 
 describe('LengthSlider', () => {
-  it('renders all length options', () => {
+  it('renders a stop per valid length', () => {
     const wrapper = mount(LengthSlider, {
       props: { modelValue: 10, lengths: [5, 10, 15] },
     })
-    const btns = wrapper.findAll('.length-btn')
-    expect(btns).toHaveLength(3)
-    expect(btns[0].text()).toBe('5s')
-    expect(btns[1].text()).toBe('10s')
+    const opts = wrapper.findAll('datalist option')
+    expect(opts).toHaveLength(3)
+    expect(opts.map((o) => o.attributes('label'))).toEqual(['5s', '10s', '15s'])
   })
 
-  it('marks active length', () => {
+  it('positions the slider at the index of the current value', () => {
     const wrapper = mount(LengthSlider, {
       props: { modelValue: 10, lengths: [5, 10, 15] },
     })
-    const active = wrapper.find('.length-btn.active')
-    expect(active.text()).toBe('10s')
+    const input = wrapper.find('input[type=range]')
+    expect(input.element.value).toBe('1')
+    expect(input.attributes('max')).toBe('2')
   })
 
-  it('emits on click', async () => {
+  it('shows the current value', () => {
     const wrapper = mount(LengthSlider, {
       props: { modelValue: 10, lengths: [5, 10, 15] },
     })
-    await wrapper.findAll('.length-btn')[0].trigger('click')
+    expect(wrapper.find('.length-value').text()).toBe('10s')
+  })
+
+  it('emits the mapped length on slide, not the raw index', async () => {
+    const wrapper = mount(LengthSlider, {
+      props: { modelValue: 10, lengths: [5, 10, 15] },
+    })
+    const input = wrapper.find('input[type=range]')
+    await input.setValue('0')
     expect(wrapper.emitted('update:modelValue')).toBeTruthy()
     expect(wrapper.emitted('update:modelValue')[0]).toEqual([5])
+  })
+
+  it('only ever exposes valid stops, even for a gappy list', async () => {
+    const wrapper = mount(LengthSlider, {
+      props: { modelValue: 12, lengths: [4, 5, 6, 7, 8, 9, 10, 11, 12, 15] },
+    })
+    const input = wrapper.find('input[type=range]')
+    expect(input.attributes('max')).toBe('9')
+    await input.setValue('9')
+    expect(wrapper.emitted('update:modelValue')[0]).toEqual([15])
   })
 })
 
