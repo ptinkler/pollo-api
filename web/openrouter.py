@@ -103,6 +103,10 @@ def list_text_models() -> list[dict[str, Any]]:
 
 
 def list_image_models() -> list[dict[str, Any]]:
+    """Image models from the Images API, plus the *conversational* ones: chat
+    models that output both text and images (Gemini image, GPT-5 Image). Those
+    are marked `conversational` — they can be given the whole conversation,
+    as the Gemini app does, instead of a lone prompt."""
     data = _get("/images/models").get("data", [])
     models = []
     for m in data:
@@ -115,7 +119,27 @@ def list_image_models() -> list[dict[str, Any]]:
             "aspect_ratios": (params.get("aspect_ratio") or {}).get("values"),
             "resolutions": (params.get("resolution") or {}).get("values"),
             "created": m.get("created"),
+            "conversational": False,
         })
+    by_id = {m["id"]: m for m in models}
+    for m in _get("/models", {"output_modalities": "image"}).get("data", []):
+        arch = m.get("architecture") or {}
+        if not {"text", "image"} <= set(arch.get("output_modalities") or []):
+            continue
+        if m["id"].startswith("openrouter/"):
+            continue  # general-purpose routers (openrouter/auto), not image models
+        if m["id"] in by_id:
+            by_id[m["id"]]["conversational"] = True
+        else:
+            models.append({
+                "id": m["id"],
+                "name": m.get("name") or m["id"],
+                "input_modalities": arch.get("input_modalities") or ["text"],
+                "aspect_ratios": None,
+                "resolutions": None,
+                "created": m.get("created"),
+                "conversational": True,
+            })
     return models
 
 
@@ -218,6 +242,37 @@ def generate_image(model: str, prompt: str, aspect_ratio: str | None = None,
     ]
     if not images:
         raise OpenRouterError("Image model returned no images")
+    return images, (data.get("usage") or {}).get("cost")
+
+
+def generate_image_chat(model: str, messages: list[dict], aspect_ratio: str | None = None,
+                        session_id: str | None = None) -> tuple[list[tuple[bytes, str]], float | None]:
+    """Generate images with a conversational image model via /chat/completions
+    (modalities image+text), giving it the conversation as context.
+    Returns ([(image_bytes, media_type), ...], cost_usd)."""
+    body: dict[str, Any] = {"model": model, "messages": messages, "modalities": ["image", "text"]}
+    if aspect_ratio:
+        body["image_config"] = {"aspect_ratio": aspect_ratio}
+    if session_id:
+        body["session_id"] = session_id
+    resp = httpx.post(f"{OPENROUTER_BASE}/chat/completions", headers=_headers(), json=body, timeout=IMAGE_TIMEOUT)
+    _raise_for_response(resp)
+    data = resp.json()
+    message = ((data.get("choices") or [{}])[0].get("message") or {})
+    images = []
+    for part in message.get("images") or []:
+        url = (part.get("image_url") or {}).get("url") or ""
+        if url.startswith("data:"):
+            header, _, b64 = url.partition(",")
+            images.append((base64.b64decode(b64), header[5:].split(";")[0] or "image/png"))
+        elif url:
+            r = httpx.get(url, timeout=IMAGE_TIMEOUT, follow_redirects=True)
+            r.raise_for_status()
+            images.append((r.content, r.headers.get("content-type", "image/png").split(";")[0]))
+    if not images:
+        # e.g. the model declined — its text says why
+        said = (message.get("content") or "").strip()
+        raise OpenRouterError("The image model returned no image" + (f": {said[:300]}" if said else ""))
     return images, (data.get("usage") or {}).get("cost")
 
 

@@ -67,7 +67,8 @@ function badges(m) {
     const c = perMillion(m.completion_price)
     if (p) out.push({ t: p === 'free' ? 'free' : `${p}/${c}`, title: 'Input/output price per million tokens' })
   } else if (props.kind === 'image') {
-    if (m.input_modalities?.includes('image')) out.push({ t: 'edits', title: 'Accepts reference images' })
+    if (m.conversational) out.push({ t: 'context', title: 'Sees the conversation (text and earlier images), like the Gemini app' })
+    else if (m.input_modalities?.includes('image')) out.push({ t: 'edits', title: 'Takes reference images (tends to edit them)' })
   } else if (props.kind === 'video') {
     if (m.frame_images?.includes('first_frame')) out.push({ t: 'img→vid', title: 'Can animate an image' })
     if (m.durations?.length) out.push({ t: `${Math.min(...m.durations)}–${Math.max(...m.durations)}s`, title: 'Durations' })

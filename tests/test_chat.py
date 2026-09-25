@@ -312,15 +312,40 @@ class TestTurns:
         msgs = client.get(f"/api/chat/conversations/{conv['id']}").json()["messages"]
         assert [(m["role"], m["content"]) for m in msgs] == [("user", "hi"), ("assistant", "second")]
 
-    def test_history_includes_media_notes(self, client, conv, chat, db, monkeypatch):
+    def test_history_records_past_media_as_tool_calls(self, client, conv, chat, db, monkeypatch):
+        db.add_chat_message(conv["id"], "user", "draw a fox")
+        db.add_chat_message(conv["id"], "assistant", "Here!", media=[
+            {"id": "a", "kind": "image", "source": "generated", "status": "done", "file": "x.png", "prompt": "a fox",
+             "params": {"aspect_ratio": "16:9"}},
+            {"id": "b", "kind": "image", "source": "generated", "status": "error", "error": "flagged",
+             "prompt": "another fox"}])
+        seen = {}
+        monkeypatch.setattr(chat.openrouter, "stream_chat",
+                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1])
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "nice", **SETTINGS}))
+        m = seen["msgs"]
+        assert m[2] == {"role": "assistant", "content": "Here!", "tool_calls": [
+            {"id": "call_a", "type": "function",
+             "function": {"name": "generate_image", "arguments": json.dumps({"prompt": "a fox", "aspect_ratio": "16:9"})}},
+            {"id": "call_b", "type": "function",
+             "function": {"name": "generate_image", "arguments": json.dumps({"prompt": "another fox"})}}]}
+        assert m[3] == {"role": "tool", "tool_call_id": "call_a",
+                        "content": json.dumps({"ok": True, "result": chat.IMAGE_TOOL_RESULT})}
+        assert m[4] == {"role": "tool", "tool_call_id": "call_b", "content": json.dumps({"ok": False, "error": "flagged"})}
+        assert m[5]["role"] == "user"
+        assert not any("[generated image" in json.dumps(x) for x in m[1:])
+
+    def test_history_uses_notes_when_no_tools_are_offered(self, client, conv, chat, db, monkeypatch):
         db.add_chat_message(conv["id"], "user", "draw a fox")
         db.add_chat_message(conv["id"], "assistant", "Here!", media=[
             {"id": "a", "kind": "image", "source": "generated", "status": "done", "file": "x.png", "prompt": "a fox"}])
         seen = {}
         monkeypatch.setattr(chat.openrouter, "stream_chat",
                             lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1])
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "nice", **SETTINGS}))
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                            json={"content": "nice", "mode": "text", **SETTINGS}))
         assert seen["msgs"][2] == {"role": "assistant", "content": "Here!\n\n[generated image: a fox]"}
+        assert not any("tool_calls" in x for x in seen["msgs"])
 
 
 class TestStartupResume:
@@ -660,8 +685,9 @@ class TestContext:
         assert "images you generated" in last["content"][0]["text"]
         assert last["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
         assert last["content"][2]["text"] == "what is she wearing?"
-        # the assistant turn itself stays text-only
-        assert seen["msgs"][-2] == {"role": "assistant", "content": "Here she is.\n\n[generated image: g1.png]"}
+        # the image appears in history as the tool call that made it
+        assert seen["msgs"][-3]["tool_calls"][0]["function"]["name"] == "generate_image"
+        assert seen["msgs"][-2]["role"] == "tool"
 
     def test_only_most_recent_images_as_pixels(self, client, conv, chat, db, monkeypatch):
         for i in range(6):
@@ -837,3 +863,138 @@ class TestModelDecides:
                             json={"content": "hi", "history_limit": 3, **SETTINGS}))
         from datetime import datetime
         assert seen["msgs"][0]["content"] == chat.SYSTEM_PROMPT.format(today=datetime.now().strftime("%A %d %B %Y"))
+
+
+class TestConversationalImageModels:
+    """Gemini-style image models get the conversation, not a lone prompt."""
+
+    CATALOGUE = {"text": [], "video": [], "image": [
+        {"id": "i/model", "input_modalities": ["text", "image"], "conversational": True}]}
+
+    def _setup(self, chat, db, conv, with_prior_image=True):
+        chat._models_cache.update(at=9e18, data=self.CATALOGUE)
+        db.add_chat_message(conv["id"], "user", "write a story about Linh, with a photo")
+        media = []
+        if with_prior_image:
+            (chat._conv_dir(conv["id"]) / "g0.png").write_bytes(_png_bytes())
+            media = [{"id": "g0", "kind": "image", "source": "generated", "status": "done", "file": "g0.png",
+                      "prompt": "Linh in the gym"}]
+        db.add_chat_message(conv["id"], "assistant", "Linh lifted.", media=media)
+
+    def _fake_chat_image(self, chat, monkeypatch):
+        got = {}
+        monkeypatch.setattr(chat.openrouter, "generate_image_chat",
+                            lambda model, messages, **kw: (got.update(model=model, messages=messages, **kw),
+                                                           ([(_png_bytes(), "image/png")], 0.04))[1])
+        monkeypatch.setattr(chat.openrouter, "generate_image", lambda *a, **k: pytest.fail("Images API not used"))
+        return got
+
+    def test_auto_mode_sends_conversation_reply_and_prompt(self, client, conv, chat, db, monkeypatch):
+        self._setup(chat, db, conv)
+        replies = iter([_tool_chunks("generate_image", {"prompt": "Linh turns around", "aspect_ratio": "3:4"},
+                                     text="She turned around."),
+                        _text_chunks("Done.")])
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+        got = self._fake_chat_image(chat, monkeypatch)
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                                 json={"content": "can I see your muscles? (continue, with an image)", **SETTINGS}))
+        msgs = got["messages"]
+        assert got["model"] == "i/model" and got["aspect_ratio"] == "3:4"
+        assert [m["role"] for m in msgs] == ["user", "assistant", "user", "assistant", "user"]
+        assert msgs[0]["content"][0]["text"] == "write a story about Linh, with a photo"
+        # the earlier generated image is in the context as pixels
+        assert any(p["type"] == "image_url" for p in msgs[2]["content"])
+        assert msgs[3] == {"role": "assistant", "content": "She turned around."}      # this reply so far
+        assert msgs[4] == {"role": "user", "content": [{"type": "text", "text": "Linh turns around"}]}  # verbatim
+        assert all(m["role"] != "system" for m in msgs)
+        item = ev[-1]["message"]["media"][0]
+        assert item["status"] == "done" and item["params"]["context"] is True
+
+    def test_image_mode_sends_conversation_ending_with_users_message(self, client, conv, chat, db, monkeypatch):
+        self._setup(chat, db, conv)
+        got = self._fake_chat_image(chat, monkeypatch)
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                            json={"content": "Linh and Marcus high-five", "mode": "image", **SETTINGS}))
+        last = got["messages"][-1]
+        assert last["role"] == "user" and last["content"][-1] == {"type": "text", "text": "Linh and Marcus high-five"}
+        assert len(got["messages"]) == 3
+
+    def test_memory_slider_applies_to_image_context(self, client, conv, chat, db, monkeypatch):
+        self._setup(chat, db, conv, with_prior_image=False)
+        for i in range(3):
+            db.add_chat_message(conv["id"], "user", f"q{i}")
+            db.add_chat_message(conv["id"], "assistant", f"a{i}")
+        got = self._fake_chat_image(chat, monkeypatch)
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                            json={"content": "draw it", "mode": "image", "history_limit": 3, **SETTINGS}))
+        assert [m["role"] for m in got["messages"]] == ["user", "assistant", "user"]
+
+    def test_non_conversational_models_still_use_images_api(self, client, conv, chat, db, monkeypatch):
+        chat._models_cache.update(at=9e18, data={"text": [], "video": [], "image": [
+            {"id": "i/model", "input_modalities": ["text", "image"], "conversational": False}]})
+        monkeypatch.setattr(chat.openrouter, "generate_image_chat", lambda *a, **k: pytest.fail("chat path not used"))
+        monkeypatch.setattr(chat.openrouter, "generate_image",
+                            lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None))
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                                 json={"content": "a dog", "mode": "image", **SETTINGS}))
+        assert "context" not in ev[-1]["message"]["media"][0]["params"]
+
+    def test_retry_of_failed_image_rebuilds_context(self, client, conv, chat, db, monkeypatch):
+        chat._models_cache.update(at=9e18, data=self.CATALOGUE)
+        db.add_chat_message(conv["id"], "user", "story please, with a photo")
+        msg = db.add_chat_message(conv["id"], "assistant", "Linh lifted.", media=[{
+            "id": "m1", "kind": "image", "source": "generated", "status": "error", "error": "timeout",
+            "prompt": "Linh lifting", "model": "i/model",
+            "params": {"aspect_ratio": None, "resolution": None, "refs": [], "context": True, "direct": False}}])
+
+        class Inline:
+            def __init__(self, target, args, **kw): self.target, self.args = target, args
+            def start(self): self.target(*self.args)
+        monkeypatch.setattr(chat.threading, "Thread", Inline)
+        got = self._fake_chat_image(chat, monkeypatch)
+        client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={})
+        assert [m["role"] for m in got["messages"]] == ["user", "assistant", "user"]
+        assert got["messages"][1] == {"role": "assistant", "content": "Linh lifted."}
+        assert got["messages"][2]["content"][0]["text"] == "Linh lifting"
+        assert db.get_chat_message(msg.id).media[0]["status"] == "done"
+
+
+class TestOpenRouterChatImages:
+    def _resp(self, body):
+        import httpx
+        return httpx.Response(200, json=body)
+
+    def test_parses_data_url_images_and_sends_modalities(self, chat, monkeypatch):
+        import base64
+        sent = {}
+        b64 = base64.b64encode(_png_bytes()).decode()
+        monkeypatch.setattr(chat.openrouter.httpx, "post", lambda url, **kw: (sent.update(kw["json"]), self._resp({
+            "choices": [{"message": {"content": "Here", "images": [
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}]}}],
+            "usage": {"cost": 0.039}}))[1])
+        images, cost = chat.openrouter.generate_image_chat("g/img", [{"role": "user", "content": "hi"}], aspect_ratio="16:9")
+        assert sent["modalities"] == ["image", "text"] and sent["image_config"] == {"aspect_ratio": "16:9"}
+        assert images == [(_png_bytes(), "image/png")] and cost == 0.039
+
+    def test_no_image_reports_models_text(self, chat, monkeypatch):
+        monkeypatch.setattr(chat.openrouter.httpx, "post", lambda url, **kw: self._resp(
+            {"choices": [{"message": {"content": "I can't draw that."}}]}))
+        with pytest.raises(chat.openrouter.OpenRouterError) as e:
+            chat.openrouter.generate_image_chat("g/img", [])
+        assert "I can't draw that." in str(e.value)
+
+    def test_catalogue_marks_and_adds_conversational_models(self, chat, monkeypatch):
+        def fake_get(path, params=None):
+            if path == "/images/models":
+                return {"data": [{"id": "google/gem-img", "name": "Gem"}, {"id": "seed/dream", "name": "Seed"}]}
+            return {"data": [
+                {"id": "google/gem-img", "architecture": {"output_modalities": ["image", "text"]}},
+                {"id": "openai/gpt-img", "name": "GPT Image", "architecture": {"output_modalities": ["image", "text"],
+                                                                               "input_modalities": ["text", "image"]}},
+                {"id": "seed/dream", "architecture": {"output_modalities": ["image"]}},
+            ]}
+        monkeypatch.setattr(chat.openrouter, "_get", fake_get)
+        models = {m["id"]: m for m in chat.openrouter.list_image_models()}
+        assert models["google/gem-img"]["conversational"] is True
+        assert models["seed/dream"]["conversational"] is False
+        assert models["openai/gpt-img"]["conversational"] is True and models["openai/gpt-img"]["name"] == "GPT Image"

@@ -207,6 +207,7 @@ function fmtCost(c) {
             <div v-if="item.model || item.prompt" class="media-caption">
               <span class="caption-text" :title="item.model">
                 {{ item.kind === 'image' ? '🖼' : '🎬' }} {{ shortModel(item.model) }}<template v-if="item.cost"> · {{ fmtCost(item.cost) }}</template><template
+                  v-if="item.params?.context"> · <span title="The image model was given the conversation">💬 context</span></template><template
                   v-if="item.params?.refs?.length"> · <span :title="'Based on earlier image(s): ' + item.params.refs.join(', ')">🔗 {{ item.params.refs.length }} ref{{ item.params.refs.length === 1 ? '' : 's' }}</span></template>
               </span>
               <button

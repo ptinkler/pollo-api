@@ -67,10 +67,13 @@ SYSTEM_PROMPT = """You are an assistant in a chat app. You have generate_image a
 tools, which create media with the image and video models the user has selected; the result is shown \
 to the user in the chat.
 
-In the conversation history, notes in square brackets such as "[generated image: …]" record media \
-that was produced and the prompt used for it.
+When tools aren't available, bracketed notes in the conversation history record media that was \
+produced earlier.
 
 Today's date is {today}."""
+
+IMAGE_TOOL_RESULT = "Image generated; it is shown to the user."
+VIDEO_TOOL_RESULT = "Video job started; it is shown to the user once rendering finishes."
 
 TOOLS_IMAGE = {
     "type": "function",
@@ -580,7 +583,7 @@ class Turn:
             if self.s.video_model:
                 tools.append(TOOLS_VIDEO)
         vision = info is None or "image" in (info.get("input_modalities") or [])
-        messages = self._build_llm_messages(vision)
+        messages = self._build_llm_messages(vision, as_tool_calls=bool(tools))
 
         for round_no in range(MAX_TOOL_ROUNDS):
             # Last round: withhold tools so the loop can't run forever
@@ -661,11 +664,11 @@ class Turn:
         try:
             if name == "generate_image":
                 self._generate_image(prompt, ratio, self._image_refs(args, source))
-                return {"ok": True, "result": "Image generated; it is shown to the user."}
+                return {"ok": True, "result": IMAGE_TOOL_RESULT}
             if name == "generate_video":
                 duration = self.s.options.duration or args.get("duration")
                 self._generate_video(prompt, duration, ratio, source)
-                return {"ok": True, "result": "Video job started; it is shown to the user once rendering finishes."}
+                return {"ok": True, "result": VIDEO_TOOL_RESULT}
         except openrouter.OpenRouterError as e:
             return {"ok": False, "error": str(e), "moderated": _is_moderation_error(e)}
         return {"ok": False, "error": f"Unknown tool {name}"}
@@ -720,10 +723,17 @@ class Turn:
         params = {"aspect_ratio": aspect_ratio,
                   "resolution": self.s.options.resolution if self.s.mode == "image" else None,
                   "refs": ref_files}
+        context = None
+        if _is_conversational(self.s.image_model):
+            # Like the Gemini app: the image model gets the conversation
+            direct = self.s.mode == "image"
+            params.update(context=True, direct=direct, history_limit=self.s.history_limit)
+            context = _image_context(self.conv_id, self.history, self.s.history_limit, self.content,
+                                     None if direct else prompt, ref_files)
         item = _new_media("image", "generated", prompt=prompt, model=self.s.image_model, params=params)
         self._add_media(item)
         try:
-            names, cost = _run_image_generation(self.conv_id, self.s.image_model, prompt, params)
+            names, cost = _run_image_generation(self.conv_id, self.s.image_model, prompt, params, context)
         except openrouter.OpenRouterError as e:
             self._update_media(item, **_failure_fields(e))
             raise
@@ -755,62 +765,9 @@ class Turn:
         start_video_poller(self.conv_id, self.message_id, item["id"], job["id"])
 
     # ― history → OpenRouter messages ―
-    def _build_llm_messages(self, vision: bool) -> list[dict]:
-        messages: list[dict] = [
-            {"role": "system", "content": SYSTEM_PROMPT.format(today=datetime.now().strftime("%A %d %B %Y"))}]
-
-        history = _history_window(self.history, self.s.history_limit)
-
-        # The most recent few images — uploaded or generated — go over as
-        # pixels so the model can see what's actually in them; older ones
-        # are described by a note instead.
-        image_budget = MAX_HISTORY_IMAGES if vision else 0
-        pixel_files: set[str] = set()
-        for msg in reversed(history):
-            for item in reversed(msg.media):
-                if (image_budget and item["kind"] == "image" and item.get("file")
-                        and item.get("status", "done") == "done"):
-                    pixel_files.add(item["file"])
-                    image_budget -= 1
-
-        conv_dir = _conv_dir(self.conv_id)
-
-        def pixels(item: dict) -> dict | None:
-            f = item.get("file")
-            if f in pixel_files and (conv_dir / f).is_file():
-                return {"type": "image_url", "image_url": {"url": _file_to_data_url(conv_dir / f)}}
-            return None
-
-        # Chat APIs don't accept images inside assistant messages, so images
-        # the model generated ride along with the next user message.
-        carried: list[dict] = []
-        carried_label = {"type": "text", "text": "[The images you generated in your previous reply, "
-                                                 "attached so you can see them]"}
-        for msg in history:
-            if msg.role == "user":
-                parts: list[dict] = []
-                if carried:
-                    parts += [carried_label, *carried]
-                    carried = []
-                if msg.content:
-                    parts.append({"type": "text", "text": msg.content})
-                for item in msg.media:
-                    parts.append(pixels(item) or {"type": "text", "text": "[user attached an image]"})
-                if parts:
-                    messages.append({"role": "user", "content": parts})
-            elif msg.role == "assistant":
-                text = msg.content or ""
-                notes = [_media_note(item) for item in msg.media]
-                if notes:
-                    text = (text + "\n\n" if text else "") + "\n".join(notes)
-                carried += [p for p in (pixels(i) for i in msg.media if i["kind"] == "image") if p]
-                if msg.status == "error" and not text:
-                    continue
-                if text:
-                    messages.append({"role": "assistant", "content": text})
-        if carried:  # history ended on an assistant message
-            messages.append({"role": "user", "content": [carried_label, *carried]})
-        return messages
+    def _build_llm_messages(self, vision: bool, as_tool_calls: bool = False) -> list[dict]:
+        return [{"role": "system", "content": SYSTEM_PROMPT.format(today=datetime.now().strftime("%A %d %B %Y"))},
+                *_conversation(self.conv_id, self.history, self.s.history_limit, vision, as_tool_calls)]
 
     def _maybe_title(self) -> None:
         conv = self.db.get_conversation(self.conv_id)
@@ -835,6 +792,119 @@ def _history_window(history: list, limit: int | None) -> list:
     while window and window[0].role != "user":
         window = window[1:]
     return window or history[-1:]
+
+
+def _conversation(conv_id: str, history: list, history_limit: int | None, vision: bool,
+                  as_tool_calls: bool = False) -> list[dict]:
+    """The chat history as OpenRouter messages (no system prompt): the last
+    `history_limit` messages, with the most recent images as pixels.
+    Shared by the chat model and conversational image models.
+
+    `as_tool_calls` (only when tools are offered — providers reject tool
+    calls otherwise) records generated media as the tool calls and results
+    that produced it; without it, media is summarised in bracketed notes."""
+    messages: list[dict] = []
+
+    history = _history_window(history, history_limit)
+
+    # The most recent few images — uploaded or generated — go over as
+    # pixels so the model can see what's actually in them; older ones
+    # are described by a note instead.
+    image_budget = MAX_HISTORY_IMAGES if vision else 0
+    pixel_files: set[str] = set()
+    for msg in reversed(history):
+        for item in reversed(msg.media):
+            if (image_budget and item["kind"] == "image" and item.get("file")
+                    and item.get("status", "done") == "done"):
+                pixel_files.add(item["file"])
+                image_budget -= 1
+
+    conv_dir = _conv_dir(conv_id)
+
+    def pixels(item: dict) -> dict | None:
+        f = item.get("file")
+        if f in pixel_files and (conv_dir / f).is_file():
+            return {"type": "image_url", "image_url": {"url": _file_to_data_url(conv_dir / f)}}
+        return None
+
+    # Chat APIs don't accept images inside assistant messages, so images
+    # the model generated ride along with the next user message.
+    carried: list[dict] = []
+    carried_label = {"type": "text", "text": "[The images you generated in your previous reply, "
+                                             "attached so you can see them]"}
+    for msg in history:
+        if msg.role == "user":
+            parts: list[dict] = []
+            if carried:
+                parts += [carried_label, *carried]
+                carried = []
+            if msg.content:
+                parts.append({"type": "text", "text": msg.content})
+            for item in msg.media:
+                parts.append(pixels(item) or {"type": "text", "text": "[user attached an image]"})
+            if parts:
+                messages.append({"role": "user", "content": parts})
+        elif msg.role == "assistant":
+            carried += [p for p in (pixels(i) for i in msg.media if i["kind"] == "image") if p]
+            generated = [i for i in msg.media if i.get("source") == "generated" and i.get("prompt")]
+            if as_tool_calls and generated:
+                # Record what actually happened: the model's tool calls and
+                # the results it got back — not text it could imitate
+                messages.append({"role": "assistant", "content": msg.content or None,
+                                 "tool_calls": [_history_tool_call(i) for i in generated]})
+                messages += [{"role": "tool", "tool_call_id": f"call_{i['id']}",
+                              "content": json.dumps(_history_tool_result(i))} for i in generated]
+                continue
+            text = msg.content or ""
+            notes = [_media_note(item) for item in msg.media]
+            if notes:
+                text = (text + "\n\n" if text else "") + "\n".join(notes)
+            if msg.status == "error" and not text:
+                continue
+            if text:
+                messages.append({"role": "assistant", "content": text})
+    if carried:  # history ended on an assistant message
+        messages.append({"role": "user", "content": [carried_label, *carried]})
+    return messages
+
+
+def _image_context(conv_id: str, history: list, history_limit: int | None, reply_text: str,
+                   prompt: str | None, refs: list[str]) -> list[dict]:
+    """What a conversational image model is sent: the conversation, then —
+    when the chat model called the tool — its reply so far and its prompt,
+    verbatim, with any reference images it asked for. In Image mode
+    (prompt=None) the user's own message is already the last one."""
+    messages = _conversation(conv_id, history, history_limit, vision=True)
+    if prompt is not None:
+        if reply_text.strip():
+            messages.append({"role": "assistant", "content": reply_text.strip()})
+        conv_dir = _conv_dir(conv_id)
+        parts: list[dict] = [{"type": "text", "text": prompt}]
+        parts += [{"type": "image_url", "image_url": {"url": _file_to_data_url(conv_dir / f)}}
+                  for f in refs if (conv_dir / f).is_file()]
+        messages.append({"role": "user", "content": parts})
+    return messages
+
+
+def _is_conversational(image_model: str | None) -> bool:
+    info = _model_info("image", image_model)
+    return bool(info and info.get("conversational"))
+
+
+def _history_tool_call(item: dict) -> dict:
+    args: dict[str, Any] = {"prompt": item["prompt"]}
+    ratio = (item.get("params") or {}).get("aspect_ratio")
+    if ratio:
+        args["aspect_ratio"] = ratio
+    return {"id": f"call_{item['id']}", "type": "function",
+            "function": {"name": "generate_image" if item["kind"] == "image" else "generate_video",
+                         "arguments": json.dumps(args)}}
+
+
+def _history_tool_result(item: dict) -> dict:
+    if item.get("status") == "error":
+        return {"ok": False, "error": item.get("error") or "failed"}
+    return {"ok": True, "result": IMAGE_TOOL_RESULT if item["kind"] == "image" else VIDEO_TOOL_RESULT}
 
 
 def _media_note(item: dict) -> str:
@@ -864,15 +934,21 @@ def _failure_fields(e: openrouter.OpenRouterError) -> dict[str, Any]:
     return {"status": "error", "error": str(e), "moderated": _is_moderation_error(e)}
 
 
-def _run_image_generation(conv_id: str, model: str, prompt: str,
-                          params: dict[str, Any]) -> tuple[list[str], float | None]:
-    """Generate and save images; returns (filenames, cost)."""
+def _run_image_generation(conv_id: str, model: str, prompt: str, params: dict[str, Any],
+                          context: list[dict] | None = None) -> tuple[list[str], float | None]:
+    """Generate and save images; returns (filenames, cost). With `context`
+    (conversational models) the model gets the conversation; otherwise the
+    Images API gets the prompt plus any reference images."""
     conv_dir = _conv_dir(conv_id)
-    refs = [conv_dir / f for f in params.get("refs") or [] if (conv_dir / f).is_file()]
-    images, cost = openrouter.generate_image(
-        model, prompt, aspect_ratio=params.get("aspect_ratio"), resolution=params.get("resolution"),
-        input_images=[_file_to_data_url(f) for f in refs] or None, session_id=conv_id,
-    )
+    if context is not None:
+        images, cost = openrouter.generate_image_chat(model, context, aspect_ratio=params.get("aspect_ratio"),
+                                                      session_id=conv_id)
+    else:
+        refs = [conv_dir / f for f in params.get("refs") or [] if (conv_dir / f).is_file()]
+        images, cost = openrouter.generate_image(
+            model, prompt, aspect_ratio=params.get("aspect_ratio"), resolution=params.get("resolution"),
+            input_images=[_file_to_data_url(f) for f in refs] or None, session_id=conv_id,
+        )
     names = []
     for data, media_type in images:
         name = f"img_{uuid.uuid4().hex[:12]}{IMAGE_EXTS.get(media_type, '.png')}"
@@ -936,8 +1012,17 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
     params = dict(item.get("params") or {})
     try:
         if item["kind"] == "image":
-            names, cost = _run_image_generation(conv_id, model, item["prompt"], params)
-            db.update_chat_media_item(message_id, media_id, status="done", file=names[0], cost=cost)
+            context = None
+            if _is_conversational(model):
+                msg = db.get_chat_message(message_id)
+                history = [m for m in db.get_chat_messages(conv_id) if m.id < message_id]
+                direct = params.get("direct", False)
+                context = _image_context(conv_id, history, params.get("history_limit"), msg.content if msg else "",
+                                         None if direct else item["prompt"], params.get("refs") or [])
+            params["context"] = context is not None
+            names, cost = _run_image_generation(conv_id, model, item["prompt"], params, context)
+            db.update_chat_media_item(message_id, media_id, status="done", file=names[0], cost=cost,
+                                      params=params)
             for extra in names[1:]:
                 db.append_chat_media_item(message_id, {**_new_media("image", "generated", prompt=item["prompt"],
                                                                     model=model), "status": "done", "file": extra})
