@@ -2105,3 +2105,29 @@ class TestMainGuards:
         assert callable(mod.main)
 
 
+
+
+# ── SPA static file serving ──────────────────────────────────────────
+
+class TestStaticFile:
+    @pytest.fixture()
+    def static(self, tmp_path):
+        d = tmp_path / "static"
+        (d / "assets").mkdir(parents=True)
+        (d / "index.html").write_text("index")
+        (d / "favicon.ico").write_text("icon")
+        (tmp_path / ".env").write_text("SECRET=1")
+        return d
+
+    def test_serves_existing_file(self, static):
+        from web.api import _static_file
+        assert _static_file("favicon.ico", static) == (static / "favicon.ico").resolve()
+
+    def test_unknown_path_falls_back_to_index(self, static):
+        from web.api import _static_file
+        assert _static_file("project/foo/gallery", static) == static / "index.html"
+
+    @pytest.mark.parametrize("path", ["../.env", "assets/../../.env", "/etc/passwd", "..", "../static2/x"])
+    def test_traversal_falls_back_to_index(self, static, path):
+        from web.api import _static_file
+        assert _static_file(path, static) == static / "index.html"

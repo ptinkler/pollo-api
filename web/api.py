@@ -45,6 +45,7 @@ from img2vid.common.metadata import get_db
 
 # ── Authentication ───────────────────────────────────────────────────
 from .auth import verify_api_key, is_auth_enabled, get_api_keys
+from .chat import router as chat_router, startup_resume_chat
 
 
 @asynccontextmanager
@@ -52,6 +53,7 @@ async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown events."""
     # Startup: resume polling for any jobs stuck in processing
     startup_resume_jobs()
+    startup_resume_chat()
     yield
     # Shutdown: nothing to do
 
@@ -3019,8 +3021,27 @@ def vpn_countries():
     return {"countries": ALLOWED_VPN_COUNTRIES}
 
 
+# ── Chat mode (OpenRouter) — see web/chat.py ─────────────────────────
+# Must be registered before the SPA catch-all below.
+app.include_router(chat_router)
+
+
 # ── Serve Vue frontend (production build) ────────────────────────────
 STATIC_DIR = WEB_DIR / "static"
+
+
+def _static_file(path: str, static_dir: Path = STATIC_DIR) -> Path:
+    """Map a request path to a file in the SPA build, falling back to index.html.
+
+    Resolved and confined to static_dir: encoded "../" (e.g. /..%2F.env)
+    reaches us un-normalised and would otherwise escape the directory.
+    """
+    file = (static_dir / path).resolve()
+    if file.is_relative_to(static_dir.resolve()) and file.is_file():
+        return file
+    return static_dir / "index.html"
+
+
 if STATIC_DIR.is_dir():
     # Serve static assets (js, css, etc.)
     app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="static-assets")
@@ -3028,10 +3049,7 @@ if STATIC_DIR.is_dir():
     @app.get("/{path:path}")
     def serve_frontend(path: str):
         """Catch-all: serve the Vue SPA index.html for any non-API route."""
-        file = STATIC_DIR / path
-        if file.is_file():
-            return FileResponse(file)
-        return FileResponse(STATIC_DIR / "index.html")
+        return FileResponse(_static_file(path))
 
 
 # ════════════════════════════════════════════════════════════════════

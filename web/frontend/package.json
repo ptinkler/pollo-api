@@ -11,6 +11,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "dompurify": "^3.4.16",
+    "marked": "^16.4.2",
     "vue": "^3.4.0",
     "vue-router": "^4.3.0"
   },

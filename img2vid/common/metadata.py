@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 import json
-from sqlalchemy import create_engine, event, String, Integer, Text, Boolean, DateTime, ForeignKey
+from sqlalchemy import create_engine, event, String, Integer, Float, Text, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session, relationship
 from sqlalchemy.pool import StaticPool
 
@@ -153,6 +153,99 @@ class Job(Base):
             except json.JSONDecodeError:
                 result["params"] = None
         return result
+
+
+class ChatConversation(Base):
+    __tablename__ = "chat_conversations"
+    id: Mapped[str] = mapped_column(String(50), primary_key=True)
+    title: Mapped[str] = mapped_column(String(255), default="New chat")
+    text_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    image_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    video_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
+    messages: Mapped[list["ChatMessage"]] = relationship(
+        back_populates="conversation", cascade="all, delete-orphan", order_by="ChatMessage.id",
+    )
+    library_items: Mapped[list["ChatLibraryItem"]] = relationship(
+        back_populates="conversation", cascade="all, delete-orphan",
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "text_model": self.text_model,
+            "image_model": self.image_model,
+            "video_model": self.video_model,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class ChatMessage(Base):
+    """One chat turn. `media_json` is a list of media items (images/videos,
+    uploaded or generated) — see web/chat.py for the item shape."""
+    __tablename__ = "chat_messages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(
+        String(50), ForeignKey("chat_conversations.id", ondelete="CASCADE"), index=True,
+    )
+    role: Mapped[str] = mapped_column(String(20))  # 'user' | 'assistant'
+    content: Mapped[str] = mapped_column(Text, default="")
+    media_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="done")  # 'streaming' | 'done' | 'error'
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    conversation: Mapped["ChatConversation"] = relationship(back_populates="messages")
+
+    @property
+    def media(self) -> list[dict[str, Any]]:
+        if not self.media_json:
+            return []
+        try:
+            return json.loads(self.media_json)
+        except json.JSONDecodeError:
+            return []
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "conversation_id": self.conversation_id,
+            "role": self.role,
+            "content": self.content,
+            "media": self.media,
+            "model": self.model,
+            "status": self.status,
+            "error": self.error,
+            "cost": self.cost,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class ChatLibraryItem(Base):
+    """Chat media detached from its message (the message was removed by an
+    edit or retry). Media still attached to messages lives in
+    ChatMessage.media_json; the library view shows both."""
+    __tablename__ = "chat_library_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    media_id: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    conversation_id: Mapped[str] = mapped_column(
+        String(50), ForeignKey("chat_conversations.id", ondelete="CASCADE"), index=True,
+    )
+    item_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    detached_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    conversation: Mapped["ChatConversation"] = relationship(back_populates="library_items")
+
+    @property
+    def item(self) -> dict[str, Any]:
+        try:
+            return json.loads(self.item_json)
+        except json.JSONDecodeError:
+            return {}
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -528,6 +621,235 @@ class MetadataDB:
                 session.commit()
                 return True
             return False
+
+    # ── Chat methods ─────────────────────────────────────────────────
+
+    def create_conversation(self, title: str = "New chat", **fields) -> ChatConversation:
+        with self._session() as session:
+            conv = ChatConversation(id=uuid.uuid4().hex, title=title, **fields)
+            session.add(conv)
+            session.commit()
+            session.refresh(conv)
+            session.expunge(conv)
+            return conv
+
+    def get_conversation(self, conv_id: str) -> ChatConversation | None:
+        with self._session() as session:
+            conv = session.get(ChatConversation, conv_id)
+            if conv:
+                session.expunge(conv)
+            return conv
+
+    def list_conversations(self, limit: int = 200) -> list[ChatConversation]:
+        with self._session() as session:
+            convs = session.query(ChatConversation)\
+                .order_by(ChatConversation.updated_at.desc()).limit(limit).all()
+            for c in convs:
+                session.expunge(c)
+            return convs
+
+    def update_conversation(self, conv_id: str, **fields) -> ChatConversation | None:
+        with self._session() as session:
+            conv = session.get(ChatConversation, conv_id)
+            if not conv:
+                return None
+            for key, value in fields.items():
+                if hasattr(conv, key):
+                    setattr(conv, key, value)
+            conv.updated_at = datetime.now()
+            session.commit()
+            session.refresh(conv)
+            session.expunge(conv)
+            return conv
+
+    def delete_conversation(self, conv_id: str) -> bool:
+        with self._session() as session:
+            conv = session.get(ChatConversation, conv_id)
+            if not conv:
+                return False
+            session.delete(conv)
+            session.commit()
+            return True
+
+    def add_chat_message(
+        self,
+        conversation_id: str,
+        role: str,
+        content: str = "",
+        media: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        status: str = "done",
+    ) -> ChatMessage:
+        with self._session() as session:
+            msg = ChatMessage(
+                conversation_id=conversation_id,
+                role=role,
+                content=content,
+                media_json=json.dumps(media) if media else None,
+                model=model,
+                status=status,
+            )
+            session.add(msg)
+            conv = session.get(ChatConversation, conversation_id)
+            if conv:
+                conv.updated_at = datetime.now()
+            session.commit()
+            session.refresh(msg)
+            session.expunge(msg)
+            return msg
+
+    def update_chat_message(self, message_id: int, media: list[dict[str, Any]] | None = None, **fields) -> ChatMessage | None:
+        with self._session() as session:
+            msg = session.get(ChatMessage, message_id)
+            if not msg:
+                return None
+            for key, value in fields.items():
+                if hasattr(msg, key):
+                    setattr(msg, key, value)
+            if media is not None:
+                msg.media_json = json.dumps(media) if media else None
+            session.commit()
+            session.refresh(msg)
+            session.expunge(msg)
+            return msg
+
+    def update_chat_media_item(self, message_id: int, media_id: str, **fields) -> ChatMessage | None:
+        """Atomically merge `fields` into one media item.
+
+        Looks in the message first, then the library (the message may have
+        been removed by an edit/retry while a video was still rendering).
+        Returns the message if the item was updated there, else None.
+        Background video pollers update items while the chat stream may be
+        appending others, so the read-modify-write must happen under one lock.
+        """
+        with self._session() as session:
+            msg = session.get(ChatMessage, message_id)
+            if msg:
+                media = msg.media
+                for item in media:
+                    if item.get("id") == media_id:
+                        item.update(fields)
+                        msg.media_json = json.dumps(media)
+                        session.commit()
+                        session.refresh(msg)
+                        session.expunge(msg)
+                        return msg
+            lib = session.query(ChatLibraryItem).filter(ChatLibraryItem.media_id == media_id).first()
+            if lib:
+                lib.item_json = json.dumps({**lib.item, **fields})
+                session.commit()
+            return None
+
+    def find_chat_media_item(self, message_id: int, media_id: str) -> dict[str, Any] | None:
+        """The media item's current state, wherever it lives (message or library)."""
+        with self._session() as session:
+            msg = session.get(ChatMessage, message_id)
+            if msg:
+                item = next((i for i in msg.media if i.get("id") == media_id), None)
+                if item:
+                    return item
+            lib = session.query(ChatLibraryItem).filter(ChatLibraryItem.media_id == media_id).first()
+            return lib.item if lib else None
+
+    def append_chat_media_item(self, message_id: int, item: dict[str, Any]) -> ChatMessage | None:
+        """Atomically append one media item to a message."""
+        with self._session() as session:
+            msg = session.get(ChatMessage, message_id)
+            if not msg:
+                return None
+            msg.media_json = json.dumps(msg.media + [item])
+            session.commit()
+            session.refresh(msg)
+            session.expunge(msg)
+            return msg
+
+    def get_chat_messages_by_status(self, status: str) -> list[ChatMessage]:
+        with self._session() as session:
+            msgs = session.query(ChatMessage).filter(ChatMessage.status == status).all()
+            for m in msgs:
+                session.expunge(m)
+            return msgs
+
+    def get_chat_message(self, message_id: int) -> ChatMessage | None:
+        with self._session() as session:
+            msg = session.get(ChatMessage, message_id)
+            if msg:
+                session.expunge(msg)
+            return msg
+
+    def get_chat_messages(self, conversation_id: str) -> list[ChatMessage]:
+        with self._session() as session:
+            msgs = session.query(ChatMessage)\
+                .filter(ChatMessage.conversation_id == conversation_id)\
+                .order_by(ChatMessage.id).all()
+            for m in msgs:
+                session.expunge(m)
+            return msgs
+
+    def truncate_chat(self, conversation_id: str, after_id: int) -> list[dict[str, Any]]:
+        """Delete every message with id > after_id (used by edit/retry),
+        moving their generated media into the library first. Uploaded
+        attachments are the user's own inputs and aren't kept.
+
+        Returns the detached media items.
+        """
+        with self._session() as session:
+            msgs = session.query(ChatMessage).filter(
+                ChatMessage.conversation_id == conversation_id,
+                ChatMessage.id > after_id,
+            ).all()
+            detached = []
+            for msg in msgs:
+                for item in msg.media:
+                    if item.get("source") == "upload" or not (item.get("file") or item.get("job_id")):
+                        continue
+                    session.add(ChatLibraryItem(
+                        media_id=item["id"], conversation_id=conversation_id,
+                        item_json=json.dumps(item), created_at=msg.created_at,
+                    ))
+                    detached.append(item)
+                session.delete(msg)
+            session.commit()
+            return detached
+
+    def list_chat_library(self) -> list[ChatLibraryItem]:
+        with self._session() as session:
+            items = session.query(ChatLibraryItem).order_by(ChatLibraryItem.created_at.desc()).all()
+            for i in items:
+                session.expunge(i)
+            return items
+
+    def get_chat_library_item(self, media_id: str) -> ChatLibraryItem | None:
+        with self._session() as session:
+            item = session.query(ChatLibraryItem).filter(ChatLibraryItem.media_id == media_id).first()
+            if item:
+                session.expunge(item)
+            return item
+
+    def delete_chat_library_item(self, media_id: str) -> bool:
+        with self._session() as session:
+            item = session.query(ChatLibraryItem).filter(ChatLibraryItem.media_id == media_id).first()
+            if not item:
+                return False
+            session.delete(item)
+            session.commit()
+            return True
+
+    def get_chat_messages_with_media(self) -> list[ChatMessage]:
+        with self._session() as session:
+            msgs = session.query(ChatMessage).filter(ChatMessage.media_json.isnot(None))\
+                .order_by(ChatMessage.id.desc()).all()
+            for m in msgs:
+                session.expunge(m)
+            return msgs
+
+    def get_chat_messages_with_pending_media(self) -> list[ChatMessage]:
+        with self._session() as session:
+            msgs = session.query(ChatMessage)\
+                .filter(ChatMessage.media_json.contains('"status": "pending"')).all()
+            for m in msgs:
+                session.expunge(m)
+            return msgs
 
 
 # ═══════════════════════════════════════════════════════════════════

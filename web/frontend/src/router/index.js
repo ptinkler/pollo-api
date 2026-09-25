@@ -2,6 +2,8 @@ import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from '../views/HomeView.vue'
 import ProjectView from '../views/ProjectView.vue'
 import UsageView from '../views/UsageView.vue'
+// Lazy: chat pulls in the markdown renderer, which the video pages don't need
+const ChatView = () => import('../views/ChatView.vue')
 
 // Empty component for child routes - ProjectView handles tab rendering via v-show
 const EmptyRouteComponent = { render: () => null }
@@ -18,6 +20,24 @@ const routes = [
     name: 'usage',
     component: UsageView,
     meta: { title: 'Credit Usage — Pollo' }
+  },
+  {
+    path: '/chat',
+    name: 'chat',
+    component: ChatView,
+    meta: { title: 'Chat — Pollo', fullBleed: true }
+  },
+  {
+    path: '/chat/library',
+    name: 'chat-library',
+    component: ChatView,
+    meta: { title: 'Library — Chat', fullBleed: true }
+  },
+  {
+    path: '/chat/:id',
+    name: 'chat-conversation',
+    component: ChatView,
+    meta: { title: 'Chat — Pollo', fullBleed: true }
   },
   {
     path: '/project/:project',

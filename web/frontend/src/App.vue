@@ -1,11 +1,17 @@
 <script setup>
-import { provide, onMounted } from 'vue'
+import { provide, onMounted, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import AppHeader from './components/AppHeader.vue'
+import KeyModal from './components/KeyModal.vue'
 import ToastContainer from './components/ToastContainer.vue'
 import JobsSidebar from './components/JobsSidebar.vue'
 import { useToast } from './composables/useToast'
 import { useJobsQueue } from './composables/useJobsQueue'
 import { useSessionCredits } from './composables/useSessionCredits'
+
+const route = useRoute()
+// Full-bleed pages (chat) own the whole viewport: no header, no container
+const fullBleed = computed(() => !!route.meta.fullBleed)
 
 const { toasts, showToast, removeToast } = useToast()
 provide('showToast', showToast)
@@ -38,7 +44,8 @@ onMounted(() => {
 <template>
   <div class="app-layout">
     <div class="main-content">
-      <div class="container">
+      <router-view v-if="fullBleed" />
+      <div v-else class="container">
         <AppHeader />
         <router-view />
       </div>
@@ -47,6 +54,7 @@ onMounted(() => {
     <JobsSidebar v-if="activeJobs.length > 0" />
   </div>
 
+  <KeyModal />
   <ToastContainer :toasts="toasts" @remove="removeToast" />
 </template>
 
