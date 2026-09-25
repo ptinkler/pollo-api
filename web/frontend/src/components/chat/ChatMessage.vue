@@ -22,9 +22,15 @@ marked.setOptions({ gfm: true, breaks: true })
 
 const isUser = computed(() => props.message.role === 'user')
 const streaming = computed(() => props.message.status === 'streaming')
+// Models sometimes echo a "[generated image: <prompt>]" line in their reply
+// (older chat history recorded media that way). The image itself is shown
+// below, so hide those lines — display only; the stored reply is untouched.
+const MEDIA_NOTE_LINE = /^[ \t]*\[(?:generated (?:image|video)|(?:image|video) (?:rendering|failed))\b[^\n]*\][ \t]*$/gim
+const displayText = computed(() =>
+  (props.message.content || '').replace(MEDIA_NOTE_LINE, '').replace(/\n{3,}/g, '\n\n').trim())
 const html = computed(() => {
-  if (!props.message.content) return ''
-  return DOMPurify.sanitize(marked.parse(props.message.content))
+  if (!displayText.value) return ''
+  return DOMPurify.sanitize(marked.parse(displayText.value))
 })
 // Image/Video mode failures already show on the media card — don't repeat them
 const errorShownOnMedia = computed(() =>
@@ -225,7 +231,7 @@ function fmtCost(c) {
         <div class="msg-meta">
           <button v-if="streaming" class="meta-btn" @click="emit('stop')">■ Stop</button>
           <template v-else>
-            <button v-if="message.content" class="meta-btn" @click="copy(message.content, 'reply')">{{ copiedKey === 'reply' ? '✓ Copied' : '⧉ Copy' }}</button>
+            <button v-if="displayText" class="meta-btn" @click="copy(displayText, 'reply')">{{ copiedKey === 'reply' ? '✓ Copied' : '⧉ Copy' }}</button>
             <button v-if="canRetry" class="meta-btn" @click="emit('retry')">↻ Retry</button>
           </template>
           <span v-if="modelShort && showTextModel" class="meta-info" :title="message.model">💬 {{ modelShort }}</span>

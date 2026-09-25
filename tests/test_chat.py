@@ -146,10 +146,9 @@ class TestTurns:
         # model picks are remembered on the conversation
         assert client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["text_model"] == "t/model"
 
-    def test_auto_mode_image_then_model_continues(self, client, conv, chat, monkeypatch):
+    def test_text_plus_image_is_one_llm_call(self, client, conv, chat, monkeypatch):
         rounds = iter([_tool_chunks("generate_image", {"prompt": "a cat", "aspect_ratio": "16:9"},
-                                    text="Once upon a time, a cat."),
-                       _text_chunks("The end.", cost=0.002)])
+                                    text="Once upon a time, a cat.")])
         calls = []
 
         def fake_stream(model, messages, tools=None, session_id=None, **kw):
@@ -166,16 +165,15 @@ class TestTurns:
         ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
                                  json={"content": "a story about a cat, with a picture", "mode": "auto", **SETTINGS}))
         assert [t["function"]["name"] for t in calls[0][1]] == ["generate_image", "generate_video"]
-        assert len(calls) == 2
-        assert calls[1][0][-1]["role"] == "tool" and json.loads(calls[1][0][-1]["content"])["ok"]
+        assert len(calls) == 1  # reply written + image made → complete
         assert img_args["model"] == "i/model" and img_args["prompt"] == "a cat"
         assert img_args["aspect_ratio"] == "16:9"
         media_events = [e["item"] for e in ev if e["type"] == "media"]
         assert [m["status"] for m in media_events] == ["pending", "done"]
         done = ev[-1]["message"]
-        assert done["content"] == "Once upon a time, a cat.\n\nThe end."
+        assert done["content"] == "Once upon a time, a cat."
         assert done["media"][0]["file"].startswith("img_")
-        assert done["cost"] == pytest.approx(0.045)  # both LLM rounds + image
+        assert done["cost"] == pytest.approx(0.043)  # LLM round + image
         path = chat._chat_root() / conv["id"] / done["media"][0]["file"]
         assert path.read_bytes() == _png_bytes()
 
@@ -219,7 +217,7 @@ class TestTurns:
                             lambda model, prompt, **kw: (submitted.update(kw), {"id": "gen-vid-1"})[1])
         ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
                                  json={"content": "draw a fox and animate it", **SETTINGS}))
-        assert len(calls) == 2
+        assert len(calls) == 1
         assert submitted["first_frame"].startswith("data:image/png;base64,")
         assert [m["kind"] for m in ev[-1]["message"]["media"]] == ["image", "video"]
 
@@ -998,3 +996,52 @@ class TestOpenRouterChatImages:
         assert models["google/gem-img"]["conversational"] is True
         assert models["seed/dream"]["conversational"] is False
         assert models["openai/gpt-img"]["conversational"] is True and models["openai/gpt-img"]["name"] == "GPT Image"
+
+
+class TestFollowUpRounds:
+    def _run(self, client, conv, chat, monkeypatch, rounds):
+        calls = []
+        rounds = iter(rounds)
+        monkeypatch.setattr(chat.openrouter, "stream_chat",
+                            lambda m, msgs, tools=None, session_id=None, **kw: (calls.append(tools), next(rounds))[1])
+        monkeypatch.setattr(chat.openrouter, "generate_image",
+                            lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None))
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                                 json={"content": "story and a picture", **SETTINGS}))
+        return calls, ev[-1]["message"]
+
+    def test_tool_first_gets_one_text_only_follow_up(self, client, conv, chat, monkeypatch):
+        calls, done = self._run(client, conv, chat, monkeypatch, [
+            _tool_chunks("generate_image", {"prompt": "scene"}),        # no text yet
+            _text_chunks("Here is the story."),
+        ])
+        assert len(calls) == 2 and calls[0] and calls[1] is None       # tools withheld on the follow-up
+        assert done["content"] == "Here is the story." and len(done["media"]) == 1
+
+    def test_no_second_image_even_if_the_model_tries(self, client, conv, chat, monkeypatch):
+        # With tools withheld, a model can't call generate_image again
+        calls, done = self._run(client, conv, chat, monkeypatch, [
+            _tool_chunks("generate_image", {"prompt": "scene"}),
+            _text_chunks("Story."),
+        ])
+        assert len(done["media"]) == 1
+
+    def test_non_moderation_failure_keeps_tools_for_a_retry(self, client, conv, chat, monkeypatch):
+        attempts = []
+
+        def image(model, prompt, **kw):
+            attempts.append(prompt)
+            if len(attempts) == 1:
+                raise chat.openrouter.OpenRouterError("Upstream timed out", 502)
+            return [(_png_bytes(), "image/png")], None
+        rounds = iter([_tool_chunks("generate_image", {"prompt": "first"}, text="Story."),
+                       _tool_chunks("generate_image", {"prompt": "second"}, text="Trying again.")])
+        calls = []
+        monkeypatch.setattr(chat.openrouter, "stream_chat",
+                            lambda m, msgs, tools=None, session_id=None, **kw: (calls.append(tools), next(rounds))[1])
+        monkeypatch.setattr(chat.openrouter, "generate_image", image)
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                                 json={"content": "story and a picture", **SETTINGS}))
+        assert len(calls) == 2 and calls[1]                              # tools still offered
+        assert attempts == ["first", "second"]
+        assert [m["status"] for m in ev[-1]["message"]["media"]] == ["error", "done"]

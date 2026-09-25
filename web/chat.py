@@ -585,9 +585,10 @@ class Turn:
         vision = info is None or "image" in (info.get("input_modalities") or [])
         messages = self._build_llm_messages(vision, as_tool_calls=bool(tools))
 
+        offer_tools = True
         for round_no in range(MAX_TOOL_ROUNDS):
             # Last round: withhold tools so the loop can't run forever
-            round_tools = (tools or None) if round_no < MAX_TOOL_ROUNDS - 1 else None
+            round_tools = (tools or None) if offer_tools and round_no < MAX_TOOL_ROUNDS - 1 else None
             text, tool_calls = self._stream_round(messages, round_tools)
             if self.cancel.is_set() or not tool_calls:
                 return
@@ -603,7 +604,16 @@ class Turn:
             # another model on the failed card (no automatic re-attempt)
             if any(r.get("moderated") for r in results):
                 return
-            # Otherwise the model gets the tool results and continues as it sees fit
+            if all(r.get("ok") for r in results):
+                # The media was made. If the model also wrote its reply, the
+                # reply is complete — asking it to continue just makes it
+                # start over (duplicate story + duplicate image). If it called
+                # the tool before writing anything, let it write, without tools.
+                if text.strip():
+                    return
+                offer_tools = False
+            # (After a non-moderation failure the model keeps its tools and
+            # can explain or try again.)
 
     def _stream_round(self, messages: list[dict], tools: list[dict] | None) -> tuple[str, list[dict]]:
         """One chat completion, streamed to the UI."""

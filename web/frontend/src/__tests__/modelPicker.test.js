@@ -160,3 +160,30 @@ describe('Failed media card', () => {
     expect(w.find('.error-actions').exists()).toBe(false)
   })
 })
+
+describe('Media note lines in replies', () => {
+  const reply = (content, media = []) => ({ id: 9, role: 'assistant', content, status: 'done', media })
+  const img = [{ id: 'm1', kind: 'image', source: 'generated', status: 'done', file: 'a.png', model: 'x/y', prompt: 'p' }]
+
+  it('hides a reply that is only a [generated image: …] line, leaving the image', () => {
+    const w = mount(ChatMessage, { props: { message: reply('[generated image: Photorealistic gym scene, long prompt…]', img), convId: 'c' } })
+    expect(w.find('.markdown').exists()).toBe(false)
+    expect(w.find('.media-item img').exists()).toBe(true)
+    expect(w.find('.msg-meta').text()).not.toContain('Copy')
+  })
+
+  it('keeps the story and drops only the note lines', async () => {
+    const writeText = vi.fn().mockResolvedValue()
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const w = mount(ChatMessage, { props: { message: reply('She laughed.\n\n[generated image: a gym]\n\nThe end.', img), convId: 'c' } })
+    expect(w.find('.markdown').text()).toBe('She laughed.\nThe end.')
+    await w.find('.msg-meta .meta-btn').trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith('She laughed.\n\nThe end.')
+  })
+
+  it('leaves ordinary bracketed text alone', () => {
+    const w = mount(ChatMessage, { props: { message: reply('[Chapter 2] She smiled.'), convId: 'c' } })
+    expect(w.find('.markdown').text()).toBe('[Chapter 2] She smiled.')
+  })
+})
