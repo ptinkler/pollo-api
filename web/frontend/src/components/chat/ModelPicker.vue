@@ -9,6 +9,10 @@ const props = defineProps({
   icon: { type: String, default: '' },
   kind: { type: String, default: 'text' },  // text | image | video
   loading: { type: Boolean, default: false },
+  // Render the trigger as a small text button (e.g. "Try another model…")
+  // instead of the labelled picker box, for one-off picks
+  triggerText: { type: String, default: '' },
+  allowNone: { type: Boolean, default: true },
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -105,7 +109,10 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
 
 <template>
   <div ref="root" class="model-picker">
-    <button type="button" class="picker-btn" :class="{ active: open }" @click="toggle" :title="modelValue || 'None selected'">
+    <button v-if="triggerText" type="button" class="picker-trigger" :class="{ active: open }" @click="toggle">
+      {{ triggerText }}
+    </button>
+    <button v-else type="button" class="picker-btn" :class="{ active: open }" @click="toggle" :title="modelValue || 'None selected'">
       <span class="picker-icon">{{ icon }}</span>
       <span class="picker-text">
         <span class="picker-label">{{ label }}</span>
@@ -129,7 +136,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
         <template v-for="section in sections" :key="section.id">
           <div v-if="section.label" class="picker-section">{{ section.label }}</div>
           <button
-            v-if="section.id === 'all' && kind !== 'text' && !query"
+            v-if="section.id === 'all' && kind !== 'text' && allowNone && !query"
             type="button"
             class="picker-item"
             :class="{ selected: !modelValue }"
@@ -191,6 +198,21 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
   cursor: pointer;
   text-align: left;
   transition: border-color 0.2s;
+}
+
+.picker-trigger {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 10px;
+  color: var(--text);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.picker-trigger:hover,
+.picker-trigger.active {
+  border-color: var(--accent);
 }
 
 .picker-btn:hover,

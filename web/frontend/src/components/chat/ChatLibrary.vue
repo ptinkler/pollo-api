@@ -2,8 +2,10 @@
 import { ref, computed, onMounted, onBeforeUnmount, inject } from 'vue'
 import { RouterLink } from 'vue-router'
 import { fetchChatLibrary, deleteLibraryItem, chatMediaUrl } from '../../composables/useChat'
+import { useCopy } from '../../composables/useClipboard'
 
 const emit = defineEmits(['open-media'])
+const { copiedKey, copy } = useCopy()
 const showToast = inject('showToast', () => {})
 
 const items = ref([])
@@ -116,6 +118,12 @@ const fmtDate = (iso) => new Date(iso).toLocaleDateString(undefined, { day: 'num
               class="from"
               :title="i.attached ? 'Open the chat' : 'Open the chat it came from'"
             >↗ {{ i.conversation_title }}</RouterLink>
+            <button
+              v-if="i.prompt"
+              class="act"
+              :title="copiedKey === i.id ? 'Copied' : 'Copy prompt'"
+              @click="copy(i.prompt, i.id)"
+            >{{ copiedKey === i.id ? '✓' : '⧉' }}</button>
             <a v-if="i.file" :href="url(i)" :download="i.file" class="act" title="Download">⤓</a>
             <button v-if="!i.attached" class="act" title="Delete" @click="remove(i)">🗑</button>
           </div>

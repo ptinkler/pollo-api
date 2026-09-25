@@ -27,13 +27,15 @@ def _text_chunks(*parts, cost=0.001):
     yield {"choices": [{"delta": {}, "finish_reason": "stop"}], "usage": {"cost": cost}}
 
 
-def _tool_chunks(name, args, call_id="call_1"):
+def _tool_chunks(name, args, call_id="call_1", text=""):
     raw = json.dumps(args)
+    if text:
+        yield {"choices": [{"delta": {"content": text}}]}
     yield {"choices": [{"delta": {"tool_calls": [
         {"index": 0, "id": call_id, "function": {"name": name, "arguments": raw[:5]}}]}}]}
     yield {"choices": [{"delta": {"tool_calls": [
         {"index": 0, "function": {"arguments": raw[5:]}}]}}]}
-    yield {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]}
+    yield {"choices": [{"delta": {}, "finish_reason": "tool_calls"}], "usage": {"cost": 0.003}}
 
 
 def _events(resp) -> list[dict]:
@@ -144,9 +146,9 @@ class TestTurns:
         # model picks are remembered on the conversation
         assert client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["text_model"] == "t/model"
 
-    def test_auto_mode_tool_call_generates_image(self, client, conv, chat, monkeypatch):
-        rounds = iter([_tool_chunks("generate_image", {"prompt": "a cat", "aspect_ratio": "16:9"}),
-                       _text_chunks("Here you go.")])
+    def test_auto_mode_text_then_image_in_one_llm_call(self, client, conv, chat, monkeypatch):
+        rounds = iter([_tool_chunks("generate_image", {"prompt": "a cat", "aspect_ratio": "16:9"},
+                                    text="Once upon a time, a cat.")])
         calls = []
 
         def fake_stream(model, messages, tools=None, session_id=None):
@@ -161,20 +163,62 @@ class TestTurns:
         monkeypatch.setattr(chat.openrouter, "generate_image", fake_image)
 
         ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                 json={"content": "draw a cat", "mode": "auto", **SETTINGS}))
+                                 json={"content": "a story about a cat, with a picture", "mode": "auto", **SETTINGS}))
         assert [t["function"]["name"] for t in calls[0][1]] == ["generate_image", "generate_video"]
+        assert len(calls) == 1  # success → no follow-up round
         assert img_args["model"] == "i/model" and img_args["prompt"] == "a cat"
         assert img_args["aspect_ratio"] == "16:9"
-        # second round sees the tool result
-        assert calls[1][0][-1]["role"] == "tool" and json.loads(calls[1][0][-1]["content"])["ok"]
         media_events = [e["item"] for e in ev if e["type"] == "media"]
         assert [m["status"] for m in media_events] == ["pending", "done"]
         done = ev[-1]["message"]
-        assert done["content"] == "Here you go."
+        assert done["content"] == "Once upon a time, a cat."
         assert done["media"][0]["file"].startswith("img_")
-        assert done["cost"] == pytest.approx(0.041)
+        assert done["cost"] == pytest.approx(0.043)  # tool round's usage + image
         path = chat._chat_root() / conv["id"] / done["media"][0]["file"]
         assert path.read_bytes() == _png_bytes()
+
+    def test_failed_tool_gets_follow_up_round(self, client, conv, chat, monkeypatch):
+        rounds = iter([_tool_chunks("generate_image", {"prompt": "a cat"}, text="Drawing it."),
+                       _text_chunks("Sorry, the image model is down.")])
+        calls = []
+        monkeypatch.setattr(chat.openrouter, "stream_chat",
+                            lambda m, msgs, tools=None, session_id=None: (calls.append(msgs), next(rounds))[1])
+
+        def boom(*a, **k):
+            raise chat.openrouter.OpenRouterError("[Seed] overloaded")
+        monkeypatch.setattr(chat.openrouter, "generate_image", boom)
+
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                                 json={"content": "draw a cat", **SETTINGS}))
+        assert len(calls) == 2
+        assert calls[1][-1]["role"] == "tool" and not json.loads(calls[1][-1]["content"])["ok"]
+        done = ev[-1]["message"]
+        assert done["status"] == "done"
+        assert done["content"] == "Drawing it.\n\nSorry, the image model is down."
+        assert done["media"][0]["status"] == "error"
+
+    def test_chained_image_then_video_in_one_response(self, client, conv, chat, monkeypatch):
+        args_img = json.dumps({"prompt": "a fox"})
+        args_vid = json.dumps({"prompt": "the fox runs", "source_image": "latest"})
+        chunks = [
+            {"choices": [{"delta": {"content": "A fox, then it runs."}}]},
+            {"choices": [{"delta": {"tool_calls": [
+                {"index": 0, "id": "c1", "function": {"name": "generate_image", "arguments": args_img}},
+                {"index": 1, "id": "c2", "function": {"name": "generate_video", "arguments": args_vid}}]}}]},
+        ]
+        calls = []
+        monkeypatch.setattr(chat.openrouter, "stream_chat",
+                            lambda *a, **k: (calls.append(1), iter(chunks))[1])
+        monkeypatch.setattr(chat.openrouter, "generate_image",
+                            lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None))
+        submitted = {}
+        monkeypatch.setattr(chat.openrouter, "submit_video",
+                            lambda model, prompt, **kw: (submitted.update(kw), {"id": "gen-vid-1"})[1])
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                                 json={"content": "draw a fox and animate it", **SETTINGS}))
+        assert len(calls) == 1
+        assert submitted["first_frame"].startswith("data:image/png;base64,")
+        assert [m["kind"] for m in ev[-1]["message"]["media"]] == ["image", "video"]
 
     def test_source_latest_uses_previous_image(self, client, conv, chat, monkeypatch):
         up = client.post(f"/api/chat/conversations/{conv['id']}/attachments",
@@ -231,7 +275,8 @@ class TestTurns:
         msg = db.add_chat_message(conv["id"], "assistant", media=[{"id": "m1", "kind": "video", "status": "pending"}])
         monkeypatch.setattr(chat.openrouter, "get_video", lambda j: {"status": "failed", "error": "nsfw"})
         chat._poll_video(conv["id"], msg.id, "m1", "gen-vid-x")
-        assert db.get_chat_message(msg.id).media[0] == {"id": "m1", "kind": "video", "status": "error", "error": "nsfw"}
+        assert db.get_chat_message(msg.id).media[0] == {"id": "m1", "kind": "video", "status": "error", "error": "nsfw",
+                                                        "moderated": True}
 
     def test_openrouter_error_marks_message(self, client, conv, chat, monkeypatch):
         def boom(*a, **k):
@@ -481,3 +526,277 @@ def test_resend_same_prompt_gets_fresh_reply(client, conv, chat, monkeypatch):
                         json={"message_id": first["id"], "content": "tell me a joke", **SETTINGS}))
     msgs = client.get(f"/api/chat/conversations/{conv['id']}").json()["messages"]
     assert [(m["role"], m["content"]) for m in msgs] == [("user", "tell me a joke"), ("assistant", "c")]
+
+
+class TestMediaNudge:
+    """Model writes the story, says a photo is coming, but forgets the tool call."""
+
+    def _run(self, client, conv, chat, monkeypatch, rounds, content):
+        calls = []
+        rounds = iter(rounds)
+        monkeypatch.setattr(chat.openrouter, "stream_chat",
+                            lambda m, msgs, tools=None, session_id=None: (calls.append((list(msgs), tools)), next(rounds))[1])
+        made = []
+        monkeypatch.setattr(chat.openrouter, "generate_image",
+                            lambda model, prompt, **kw: (made.append(prompt), ([(_png_bytes(), "image/png")], 0.03))[1])
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                                 json={"content": content, **SETTINGS}))
+        return ev, calls, made
+
+    def test_nudges_once_and_makes_the_image(self, client, conv, chat, monkeypatch):
+        ev, calls, made = self._run(client, conv, chat, monkeypatch, [
+            _text_chunks("Here's a story and a photo of them.\n\nLinh lifted."),
+            _tool_chunks("generate_image", {"prompt": "Linh in the gym"}, text="(ignored chatter)"),
+        ], "write a story about Linh and create a photo of her")
+        assert len(calls) == 2
+        assert calls[1][0][-1]["role"] == "user" and "didn't call" in calls[1][0][-1]["content"]
+        assert calls[1][0][-2] == {"role": "assistant", "content": "Here's a story and a photo of them.\n\nLinh lifted."}
+        assert made == ["Linh in the gym"]
+        done = ev[-1]["message"]
+        # the nudge round's text is never shown or saved
+        assert done["content"] == "Here's a story and a photo of them.\n\nLinh lifted."
+        assert "ignored" not in "".join(e.get("text", "") for e in ev if e["type"] == "delta")
+        assert done["media"][0]["status"] == "done"
+
+    def test_no_nudge_when_media_not_requested(self, client, conv, chat, monkeypatch):
+        ev, calls, made = self._run(client, conv, chat, monkeypatch, [
+            _text_chunks("Photography is the art of capturing light."),
+        ], "tell me a fact about cameras")
+        assert len(calls) == 1 and made == []
+
+    def test_no_nudge_when_reply_doesnt_mention_media(self, client, conv, chat, monkeypatch):
+        ev, calls, made = self._run(client, conv, chat, monkeypatch, [
+            _text_chunks("I can't help with that."),
+        ], "create a photo of something")
+        assert len(calls) == 1 and made == []
+
+    def test_nudge_that_still_gets_no_call_leaves_reply_alone(self, client, conv, chat, monkeypatch):
+        ev, calls, made = self._run(client, conv, chat, monkeypatch, [
+            _text_chunks("A story, with a picture below."),
+            _text_chunks("Sorry!"),
+        ], "story plus a picture please")
+        assert len(calls) == 2 and made == []
+        assert ev[-1]["message"]["content"] == "A story, with a picture below."
+
+
+class TestModerationAndRegenerate:
+    def _blocked(self, chat, status=403, msg="Your input was flagged by moderation"):
+        def boom(*a, **k):
+            raise chat.openrouter.OpenRouterError(msg, status)
+        return boom
+
+    def test_moderation_block_ends_turn_without_retry(self, client, conv, chat, monkeypatch):
+        rounds = iter([_tool_chunks("generate_image", {"prompt": "risky", "aspect_ratio": "9:16"}, text="Here goes.")])
+        calls = []
+        monkeypatch.setattr(chat.openrouter, "stream_chat",
+                            lambda *a, **k: (calls.append(1), next(rounds))[1])
+        monkeypatch.setattr(chat.openrouter, "generate_image", self._blocked(chat))
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                                 json={"content": "draw it", **SETTINGS}))
+        assert len(calls) == 1  # no follow-up round, so no silent re-attempt
+        done = ev[-1]["message"]
+        assert done["content"] == "Here goes." and done["status"] == "done"
+        item = done["media"][0]
+        assert item["status"] == "error" and item["moderated"] is True
+        assert item["params"] == {"aspect_ratio": "9:16", "resolution": None, "refs": []}
+
+    @pytest.mark.parametrize("status,msg,expected", [
+        (403, "Forbidden", True),
+        (400, "[Seed] Request rejected: content policy violation", True),
+        (400, "Provider returned error: prompt contains sensitive content", True),
+        (502, "Upstream timed out", False),
+        (400, "Invalid aspect_ratio", False),
+    ])
+    def test_moderation_detection(self, chat, status, msg, expected):
+        assert chat._is_moderation_error(chat.openrouter.OpenRouterError(msg, status)) is expected
+
+    def _failed_image(self, db, conv, **extra):
+        db.add_chat_message(conv["id"], "user", "draw")
+        return db.add_chat_message(conv["id"], "assistant", "Here goes.", model="t/model", media=[{
+            "id": "m1", "kind": "image", "source": "generated", "status": "error", "error": "flagged",
+            "moderated": True, "prompt": "a lighthouse", "model": "i/model",
+            "params": {"aspect_ratio": "16:9", "resolution": None, "refs": []}, **extra}])
+
+    def _run_worker_inline(self, chat, monkeypatch):
+        class Inline:
+            def __init__(self, target, args, **kw):
+                self.target, self.args = target, args
+            def start(self):
+                self.target(*self.args)
+        monkeypatch.setattr(chat.threading, "Thread", Inline)
+
+    def test_retry_same_model(self, client, conv, chat, db, monkeypatch):
+        msg = self._failed_image(db, conv)
+        self._run_worker_inline(chat, monkeypatch)
+        got = {}
+        monkeypatch.setattr(chat.openrouter, "generate_image",
+                            lambda model, prompt, **kw: (got.update(model=model, prompt=prompt, **kw),
+                                                         ([(_png_bytes(), "image/png")], 0.02))[1])
+        r = client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={})
+        assert r.status_code == 200
+        assert got["model"] == "i/model" and got["prompt"] == "a lighthouse" and got["aspect_ratio"] == "16:9"
+        item = db.get_chat_message(msg.id).media[0]
+        assert item["status"] == "done" and item["file"].startswith("img_") and item["moderated"] is False
+        assert db.get_chat_message(msg.id).cost == 0.02
+
+    def test_retry_with_different_model(self, client, conv, chat, db, monkeypatch):
+        msg = self._failed_image(db, conv)
+        self._run_worker_inline(chat, monkeypatch)
+        got = {}
+        monkeypatch.setattr(chat.openrouter, "generate_image",
+                            lambda model, prompt, **kw: (got.update(model=model), ([(_png_bytes(), "image/png")], None))[1])
+        client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={"model": "other/model"})
+        assert got["model"] == "other/model"
+        assert db.get_chat_message(msg.id).media[0]["model"] == "other/model"
+
+    def test_retry_blocked_again_stays_failed(self, client, conv, chat, db, monkeypatch):
+        msg = self._failed_image(db, conv)
+        self._run_worker_inline(chat, monkeypatch)
+        monkeypatch.setattr(chat.openrouter, "generate_image", self._blocked(chat))
+        client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={})
+        item = db.get_chat_message(msg.id).media[0]
+        assert item["status"] == "error" and item["moderated"] is True
+
+    def test_retry_video_refits_params_for_new_model(self, client, conv, chat, db, monkeypatch):
+        db.add_chat_message(conv["id"], "user", "waves")
+        msg = db.add_chat_message(conv["id"], "assistant", media=[{
+            "id": "v1", "kind": "video", "source": "generated", "status": "error", "error": "flagged",
+            "prompt": "waves", "model": "v/old",
+            "params": {"duration": 7, "aspect_ratio": "16:9", "resolution": None, "first_frame": None}}])
+        chat._models_cache.update(at=9e18, data={"text": [], "image": [], "video": [
+            {"id": "v/new", "durations": [5, 10], "aspect_ratios": ["16:9"], "resolutions": []}]})
+        self._run_worker_inline(chat, monkeypatch)
+        started = []
+        monkeypatch.setattr(chat, "start_video_poller", lambda *a: started.append(a))
+        got = {}
+        monkeypatch.setattr(chat.openrouter, "submit_video",
+                            lambda model, prompt, **kw: (got.update(model=model, **kw), {"id": "gen-vid-9"})[1])
+        client.post(f"/api/chat/messages/{msg.id}/media/v1/regenerate", json={"model": "v/new"})
+        assert got["model"] == "v/new" and got["duration"] == 5
+        item = db.get_chat_message(msg.id).media[0]
+        assert item["status"] == "pending" and item["job_id"] == "gen-vid-9"
+        assert started == [(conv["id"], msg.id, "v1", "gen-vid-9")]
+
+    def test_only_failed_items_can_be_retried(self, client, conv, db):
+        msg = self._failed_image(db, conv, status="done", file="x.png")
+        assert client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={}).status_code == 400
+        assert client.post(f"/api/chat/messages/{msg.id}/media/nope/regenerate", json={}).status_code == 404
+
+
+class TestMediaNudgeInIllustratedChats:
+    """The chat already has generated images; the user's message doesn't ask
+    for one, but the model says it's making one (and forgets the call)."""
+
+    def _illustrated(self, db, conv):
+        db.add_chat_message(conv["id"], "user", "write a story with a photo")
+        db.add_chat_message(conv["id"], "assistant", "Once upon a time.", media=[
+            {"id": "g1", "kind": "image", "source": "generated", "status": "done", "file": "x.png", "prompt": "Linh"}])
+
+    def _run(self, client, conv, chat, monkeypatch, rounds, content):
+        calls, made = [], []
+        rounds = iter(rounds)
+        monkeypatch.setattr(chat.openrouter, "stream_chat",
+                            lambda m, msgs, tools=None, session_id=None: (calls.append(list(msgs)), next(rounds))[1])
+        monkeypatch.setattr(chat.openrouter, "generate_image",
+                            lambda model, prompt, **kw: (made.append(prompt), ([(_png_bytes(), "image/png")], None))[1])
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                                 json={"content": content, **SETTINGS}))
+        return ev, calls, made
+
+    def test_continues_illustrating_when_model_promises(self, client, conv, chat, db, monkeypatch):
+        self._illustrated(db, conv)
+        ev, calls, made = self._run(client, conv, chat, monkeypatch, [
+            _text_chunks("She turned around.\n\nMaking the photo now."),
+            _tool_chunks("generate_image", {"prompt": "Linh turning, gym"}),
+        ], '"can i see your muscles?" he asked shyly')
+        assert len(calls) == 2 and made == ["Linh turning, gym"]
+        assert ev[-1]["message"]["content"] == "She turned around.\n\nMaking the photo now."
+
+    def test_model_can_decline_the_nudge(self, client, conv, chat, db, monkeypatch):
+        self._illustrated(db, conv)
+        ev, calls, made = self._run(client, conv, chat, monkeypatch, [
+            _text_chunks("She took a photo of the sunset with her phone."),
+            _text_chunks("none"),
+        ], "what happens next?")
+        assert len(calls) == 2 and made == []
+        assert ev[-1]["message"]["content"] == "She took a photo of the sunset with her phone."
+
+    def test_plain_chat_without_media_isnt_nudged(self, client, conv, chat, db, monkeypatch):
+        ev, calls, made = self._run(client, conv, chat, monkeypatch, [
+            _text_chunks("She took a photo of the sunset."),
+        ], "what happens next?")
+        assert len(calls) == 1 and made == []
+
+
+class TestContext:
+    def _capture(self, chat, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(chat.openrouter, "stream_chat",
+                            lambda m, msgs, tools=None, session_id=None: (seen.update(msgs=msgs), _text_chunks("ok"))[1])
+        return seen
+
+    def _img(self, chat, conv, name):
+        (chat._conv_dir(conv["id"]) / name).write_bytes(_png_bytes())
+        return {"id": name, "kind": "image", "source": "generated", "status": "done", "file": name, "prompt": name}
+
+    def test_generated_image_is_sent_as_pixels_with_next_user_message(self, client, conv, chat, db, monkeypatch):
+        db.add_chat_message(conv["id"], "user", "draw Linh")
+        db.add_chat_message(conv["id"], "assistant", "Here she is.", media=[self._img(chat, conv, "g1.png")])
+        seen = self._capture(chat, monkeypatch)
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                            json={"content": "what is she wearing?", **SETTINGS}))
+        last = seen["msgs"][-1]
+        assert last["role"] == "user"
+        kinds = [p["type"] for p in last["content"]]
+        assert kinds == ["text", "image_url", "text"]
+        assert "images you generated" in last["content"][0]["text"]
+        assert last["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+        assert last["content"][2]["text"] == "what is she wearing?"
+        # the assistant turn itself stays text-only
+        assert seen["msgs"][-2] == {"role": "assistant", "content": "Here she is.\n\n[generated image: g1.png]"}
+
+    def test_only_most_recent_images_as_pixels(self, client, conv, chat, db, monkeypatch):
+        for i in range(6):
+            db.add_chat_message(conv["id"], "user", f"draw {i}")
+            db.add_chat_message(conv["id"], "assistant", "ok", media=[self._img(chat, conv, f"g{i}.png")])
+        seen = self._capture(chat, monkeypatch)
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "next", **SETTINGS}))
+        n_pixels = sum(1 for m in seen["msgs"] if isinstance(m["content"], list)
+                       for p in m["content"] if p["type"] == "image_url")
+        assert n_pixels == chat.MAX_HISTORY_IMAGES
+
+    def test_no_pixels_for_text_only_models(self, client, conv, chat, db, monkeypatch):
+        chat._models_cache.update(at=9e18, data={"image": [], "video": [], "text": [
+            {"id": "t/model", "supports_tools": True, "input_modalities": ["text"]}]})
+        db.add_chat_message(conv["id"], "user", "draw")
+        db.add_chat_message(conv["id"], "assistant", "ok", media=[self._img(chat, conv, "g.png")])
+        seen = self._capture(chat, monkeypatch)
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "next", **SETTINGS}))
+        assert seen["msgs"][-1] == {"role": "user", "content": [{"type": "text", "text": "next"}]}
+
+    def test_history_limit_keeps_recent_messages_starting_on_user(self, client, conv, chat, db, monkeypatch):
+        for i in range(5):
+            db.add_chat_message(conv["id"], "user", f"q{i}")
+            db.add_chat_message(conv["id"], "assistant", f"a{i}")
+        seen = self._capture(chat, monkeypatch)
+        # limit 4 of 11 history messages → [a3?, q4, a4, now] trimmed to start on a user message
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                            json={"content": "now", "history_limit": 4, **SETTINGS}))
+        body = seen["msgs"][1:]
+        assert [m["role"] for m in body] == ["user", "assistant", "user"]
+        assert body[0]["content"][0]["text"] == "q4"
+        assert "most recent 3 of 11 messages" in seen["msgs"][0]["content"]
+
+    def test_no_limit_sends_everything(self, client, conv, chat, db, monkeypatch):
+        for i in range(3):
+            db.add_chat_message(conv["id"], "user", f"q{i}")
+            db.add_chat_message(conv["id"], "assistant", f"a{i}")
+        seen = self._capture(chat, monkeypatch)
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "now", **SETTINGS}))
+        assert len(seen["msgs"]) == 1 + 7
+        assert "omitted" not in seen["msgs"][0]["content"]
+
+    def test_invalid_limit_rejected(self, client, conv):
+        r = client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                        json={"content": "x", "history_limit": 0, **SETTINGS})
+        assert r.status_code == 422

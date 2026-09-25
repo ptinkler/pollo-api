@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount, inject } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount, inject, provide } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
 import ModelPicker from '../components/chat/ModelPicker.vue'
@@ -9,7 +9,7 @@ import {
   fetchChatStatus, fetchChatModels, fetchConversations, fetchConversation,
   createConversation, deleteConversation, renameConversation, fetchChatMessage,
   cancelChatMessage, uploadChatAttachment, chatMediaUrl, sendChatMessage, retryChatMessage,
-  editChatMessage,
+  editChatMessage, regenerateChatMedia,
 } from '../composables/useChat'
 
 const route = useRoute()
@@ -31,6 +31,10 @@ const PREFERRED = {
   video: ['veo', 'seedance', 'wan', 'sora'],
 }
 const STORE_KEY = 'chat.prefs'
+// Memory slider stops: how many past messages the chat model gets (null = all)
+const MEMORY_STEPS = [2, 4, 6, 10, 14, 20, 30, 40, 60, 80, 100, null]
+const DEFAULT_MEMORY = 20
+const MAX_CONTEXT_IMAGES = 4   // mirrors MAX_HISTORY_IMAGES in web/chat.py
 
 // ── Persistent prefs (per browser) ───────────────────────────────────
 function loadPrefs() {
@@ -43,17 +47,23 @@ const selected = reactive({
   video: prefs.video ?? '',
 })
 const mode = ref(prefs.mode || 'auto')
+const memoryIndex = ref((() => {
+  const i = MEMORY_STEPS.indexOf('memory' in prefs ? prefs.memory : DEFAULT_MEMORY)
+  return i === -1 ? MEMORY_STEPS.indexOf(DEFAULT_MEMORY) : i
+})())
+const historyLimit = computed(() => MEMORY_STEPS[memoryIndex.value])
 const options = reactive({ aspect_ratio: '', resolution: '', duration: '', generate_audio: true })
 
-watch([() => ({ ...selected }), mode], () => {
+watch([() => ({ ...selected }), mode, memoryIndex], () => {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify({ ...selected, mode: mode.value }))
+    localStorage.setItem(STORE_KEY, JSON.stringify({ ...selected, mode: mode.value, memory: historyLimit.value }))
   } catch { /* storage unavailable */ }
 }, { deep: true })
 
 // ── Server state ─────────────────────────────────────────────────────
 const configured = ref(true)
 const models = reactive({ text: [], image: [], video: [] })
+provide('chatModels', models)   // for "Try another model" on failed media
 const modelsLoading = ref(true)
 const conversations = ref([])
 const conversation = ref(null)
@@ -76,6 +86,20 @@ const sidebarOpen = ref(false)
 const lightbox = ref(null)
 let abort = null
 let skipLoadFor = null
+
+// What the slider means for this chat: the new prompt plus earlier messages
+const memoryHint = computed(() => {
+  const total = messages.value.length + 1
+  const limit = historyLimit.value
+  const imgs = `the ${MAX_CONTEXT_IMAGES} most recent images`
+  if (!limit || limit >= total) {
+    return messages.value.length
+      ? `Sending the whole chat (${total} messages) plus ${imgs}.`
+      : `Sends up to ${limit ?? 'all'} messages plus ${imgs}.`
+  }
+  const dropped = total - limit
+  return `Sending the last ${limit} of ${total} messages plus ${imgs}; the oldest ${dropped === 1 ? 'one is' : `${dropped} are`} left out.`
+})
 
 const currentMode = computed(() => MODES.find(m => m.id === mode.value) || MODES[0])
 
@@ -290,6 +314,7 @@ function onDrop(e) {
 function turnSettings() {
   const body = {
     mode: mode.value,
+    history_limit: historyLimit.value,
     text_model: selected.text || null,
     image_model: selected.image || null,
     video_model: selected.video || null,
@@ -428,6 +453,19 @@ function openLibrary() {
   router.push({ name: 'chat-library' })
 }
 
+// Retry a failed image/video in place (same or another model). The server
+// runs it in the background; polling picks up the result.
+async function regenerateMedia(msg, { mediaId, model }) {
+  try {
+    const fresh = await regenerateChatMedia(msg.id, mediaId, model)
+    const i = messages.value.findIndex(m => m.id === msg.id)
+    if (i !== -1) messages.value.splice(i, 1, fresh)
+    ensurePolling()
+  } catch (e) {
+    showToast(e.message, 'error')
+  }
+}
+
 async function stop() {
   if (streamingId.value) {
     try { await cancelChatMessage(streamingId.value) } catch { abort?.abort() }
@@ -471,7 +509,7 @@ function ensurePolling() {
         if (i !== -1) messages.value.splice(i, 1, fresh)
       } catch { /* retry next tick */ }
     }
-  }, 8000)
+  }, 5000)
 }
 
 function stopPolling() {
@@ -581,6 +619,23 @@ onBeforeUnmount(() => {
           <p class="mode-hint">{{ MODES.find(m => m.id === mode)?.hint }}</p>
         </div>
 
+        <div v-if="mode === 'auto' || mode === 'text'" class="side-section">
+          <div class="side-heading">
+            <span>Memory</span>
+            <span class="heading-value">{{ historyLimit ? `${historyLimit} messages` : 'All' }}</span>
+          </div>
+          <input
+            v-model.number="memoryIndex"
+            class="memory-slider"
+            type="range"
+            min="0"
+            :max="MEMORY_STEPS.length - 1"
+            step="1"
+            aria-label="Messages of history sent to the chat model"
+          />
+          <p class="mode-hint">{{ memoryHint }} More memory means better continuity but more tokens per reply.</p>
+        </div>
+
         <div v-if="mode === 'image' || mode === 'video'" class="side-section">
           <div class="side-heading"><span>{{ mode === 'video' ? 'Video' : 'Image' }} options</span></div>
           <div class="opts">
@@ -676,6 +731,7 @@ onBeforeUnmount(() => {
             @retry="retry(m)"
             @edit="content => editMessage(m, content)"
             @resend="resendMessage(m)"
+            @regenerate="payload => regenerateMedia(m, payload)"
             @stop="stop"
             @open-media="openMedia"
           />
@@ -876,6 +932,22 @@ onBeforeUnmount(() => {
   background: rgba(108, 92, 231, 0.2);
   border-color: var(--accent);
   color: var(--text);
+}
+
+.heading-value {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text);
+  font-size: 0.75rem;
+}
+
+.memory-slider {
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .mode-hint {

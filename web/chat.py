@@ -26,6 +26,7 @@ import io
 import json
 import mimetypes
 import queue
+import re
 import shutil
 import threading
 import time
@@ -37,7 +38,7 @@ from typing import Any, Iterator
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from img2vid.common import config
 from img2vid.common.metadata import get_db
@@ -48,7 +49,7 @@ from .auth import verify_api_key
 router = APIRouter(prefix="/api/chat", dependencies=[Depends(verify_api_key)])
 
 MAX_TOOL_ROUNDS = 4
-MAX_HISTORY_IMAGES = 4            # most recent images sent to the text model as pixels
+MAX_HISTORY_IMAGES = 4            # most recent images (uploaded or generated) sent to the chat model as pixels
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024   # larger images are downscaled before sending
 MODELS_CACHE_TTL = 30 * 60
@@ -68,13 +69,35 @@ Besides talking, you can create images and videos with the generate_image and ge
 - Write rich, specific visual prompts for the tools (subject, style, composition, lighting, camera, motion).
 - To edit, restyle or continue from an earlier image — or animate it — set source_image to "latest"; \
 it refers to the most recent image in the conversation (uploaded by the user or generated).
-- Never claim you produced media unless the tool reported success. Videos render in the background \
-and take a few minutes — say so briefly rather than describing the result.
-- After a tool call, reply with a short comment; don't repeat the full prompt back.
+- Write your text FIRST, then call the tool(s) at the END of the same response — nothing comes after \
+a tool call. When the user wants text and media together (e.g. a story and a picture of a scene), \
+write the full text, then base the visual prompt on what you wrote. For a media-only request, write \
+one short line first (what you're making), not the full prompt.
+- Never say you're making, creating or showing an image/video unless you call the tool in that \
+same response — otherwise nothing is created.
+- In an ongoing story or scene the user has been illustrating, you may add an image when the \
+scene changes meaningfully, even if this message doesn't ask for one — like a picture book.
+- You can call several tools in one response; they run in order, so a later call with \
+source_image "latest" uses the image made by an earlier call (e.g. draw something, then animate it).
+- Media appears to the user after your text once it's ready. Videos render in the background for a \
+few minutes. If a tool fails you'll be told and can explain or try again.
 - Lines like "[generated image: …]" in earlier turns are system notes about media that was produced; \
 never write such lines yourself.
 
 Today's date is {today}."""
+
+# The user's request and the model's reply both mention media (see _promised_media)
+_MEDIA_WORDS = re.compile(
+    r"\b(photo|photograph|picture|pic|image|illustration|drawing|draw|portrait|render|video|clip|animat\w*)s?\b",
+    re.IGNORECASE,
+)
+
+MEDIA_NUDGE = (
+    "[system] Your reply above mentions an image or video, but you didn't call generate_image / "
+    "generate_video, so nothing was created. If you meant to include media, call the tool(s) now, "
+    "basing the visual prompt on what you wrote — respond with only the tool call(s), no text; the "
+    "user already has your reply. If you didn't mean to create any media, reply with just: none"
+)
 
 TOOLS_IMAGE = {
     "type": "function",
@@ -140,6 +163,7 @@ class TurnOptions(BaseModel):
 
 class TurnSettings(BaseModel):
     mode: str = "auto"                 # auto | text | image | video
+    history_limit: int | None = Field(default=None, ge=1)   # past messages sent to the chat model; None = all
     text_model: str | None = None
     image_model: str | None = None
     video_model: str | None = None
@@ -582,23 +606,56 @@ class Turn:
         vision = info is None or "image" in (info.get("input_modalities") or [])
         messages = self._build_llm_messages(vision, tools_enabled=bool(tools))
 
+        nudged = False
+        visible = True
         for round_no in range(MAX_TOOL_ROUNDS):
             # Last round: withhold tools so the model has to wrap up in text
             round_tools = (tools or None) if round_no < MAX_TOOL_ROUNDS - 1 else None
-            text, tool_calls = self._stream_round(messages, round_tools)
-            if self.cancel.is_set() or not tool_calls:
+            text, tool_calls = self._stream_round(messages, round_tools, visible=visible)
+            visible = True
+            if self.cancel.is_set():
+                return
+            if not tool_calls:
+                # Writing a long text first sometimes makes a model announce the
+                # image and then end without calling the tool. Nudge it once,
+                # silently: its text is already shown, we only want the call.
+                # Only when no media was attempted — after a failed tool the
+                # model's apology mentions the image too, and that's final.
+                if round_tools and not nudged and not self.media and self._promised_media(text):
+                    nudged = True
+                    visible = False
+                    messages.append({"role": "assistant", "content": text})
+                    messages.append({"role": "user", "content": MEDIA_NUDGE})
+                    continue
                 return
             messages.append({"role": "assistant", "content": text or None, "tool_calls": tool_calls})
+            results = []
             for call in tool_calls:
                 result = self._run_tool(call)
+                results.append(result)
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result)})
                 if self.cancel.is_set():
                     return
+            # Moderation blocks are final for this turn: the user decides
+            # (retry, or another model) via the buttons on the failed card,
+            # rather than the model quietly rewording and retrying.
+            if any(r.get("moderated") for r in results):
+                return
+            # Text comes before tool calls (see SYSTEM_PROMPT), so when every
+            # tool succeeded the reply is complete — skip a follow-up LLM call
+            # that would only add a comment. Failures go back to the model so
+            # it can explain or try again.
+            if all(r.get("ok") for r in results):
+                return
 
-    def _stream_round(self, messages: list[dict], tools: list[dict] | None) -> tuple[str, list[dict]]:
+    def _stream_round(self, messages: list[dict], tools: list[dict] | None,
+                      visible: bool = True) -> tuple[str, list[dict]]:
+        """One chat completion. `visible=False` collects text without showing
+        or saving it (used by the media nudge, whose text we don't want)."""
         text = ""
         calls: dict[int, dict] = {}
-        if self.content and not self.content.endswith("\n\n"):
+        finish = None
+        if visible and self.content and not self.content.endswith("\n\n"):
             self._append("\n\n")
         for chunk in openrouter.stream_chat(self.s.text_model, messages, tools, session_id=self.conv_id):
             if self.cancel.is_set():
@@ -607,10 +664,12 @@ class Turn:
             if usage and usage.get("cost"):
                 self.cost += float(usage["cost"])
             for choice in chunk.get("choices") or []:
+                finish = choice.get("finish_reason") or finish
                 delta = choice.get("delta") or {}
                 if delta.get("content"):
                     text += delta["content"]
-                    self._append(delta["content"])
+                    if visible:
+                        self._append(delta["content"])
                 for tc in delta.get("tool_calls") or []:
                     slot = calls.setdefault(tc.get("index", 0), {
                         "id": "", "type": "function", "function": {"name": "", "arguments": ""}})
@@ -622,7 +681,25 @@ class Turn:
         tool_calls = [c for _, c in sorted(calls.items()) if c["function"]["name"]]
         for i, c in enumerate(tool_calls):
             c["id"] = c["id"] or f"call_{i}"
+        # Diagnostics: distinguishes "model never called the tool" from
+        # "we failed to parse the call" when media goes missing
+        print(f"💬 chat msg {self.message_id} {self.s.text_model}: finish={finish} "
+              f"tools_offered={bool(tools)} tool_calls={[c['function']['name'] for c in tool_calls]} "
+              f"raw_call_slots={len(calls)} text_chars={len(text)}{'' if visible else ' (nudge)'}")
         return text, tool_calls
+
+    def _promised_media(self, reply_text: str) -> bool:
+        """The model's text talks about media, yet no tool was called — it
+        may have forgotten the call. Only suspect that when media is in play:
+        the user asked for it, or the chat is already illustrated (the model
+        then continues the pattern unprompted, e.g. "Making the photo now.").
+        False alarms are cheap: the nudge lets the model answer "none"."""
+        if not _MEDIA_WORDS.search(reply_text):
+            return False
+        user = self._last_user()
+        if user and _MEDIA_WORDS.search(user.content or ""):
+            return True
+        return any(item.get("source") == "generated" for m in self.history for item in m.media)
 
     def _append(self, text: str) -> None:
         self.content += text
@@ -651,7 +728,7 @@ class Turn:
                 self._generate_video(prompt, duration, ratio, source)
                 return {"ok": True, "result": "Video job started; it will appear in the chat when it finishes rendering (usually a few minutes)."}
         except openrouter.OpenRouterError as e:
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": str(e), "moderated": _is_moderation_error(e)}
         return {"ok": False, "error": f"Unknown tool {name}"}
 
     def _latest_image(self) -> str | None:
@@ -678,24 +755,20 @@ class Turn:
     def _generate_image(self, prompt: str, aspect_ratio: str | None, ref_files: list[str]) -> None:
         if not self.s.image_model:
             raise openrouter.OpenRouterError("No image model selected")
-        item = _new_media("image", "generated", prompt=prompt, model=self.s.image_model)
+        # Params are stored on the item so a failed image can be retried as-is
+        params = {"aspect_ratio": aspect_ratio,
+                  "resolution": self.s.options.resolution if self.s.mode == "image" else None,
+                  "refs": ref_files}
+        item = _new_media("image", "generated", prompt=prompt, model=self.s.image_model, params=params)
         self._add_media(item)
-        conv_dir = _conv_dir(self.conv_id)
         try:
-            images, cost = openrouter.generate_image(
-                self.s.image_model, prompt, aspect_ratio=aspect_ratio,
-                resolution=self.s.options.resolution if self.s.mode == "image" else None,
-                input_images=[_file_to_data_url(conv_dir / f) for f in ref_files] or None,
-                session_id=self.conv_id,
-            )
+            names, cost = _run_image_generation(self.conv_id, self.s.image_model, prompt, params)
         except openrouter.OpenRouterError as e:
-            self._update_media(item, status="error", error=str(e))
+            self._update_media(item, **_failure_fields(e))
             raise
         if cost:
             self.cost += float(cost)
-        for i, (data, media_type) in enumerate(images):
-            name = f"img_{uuid.uuid4().hex[:12]}{IMAGE_EXTS.get(media_type, '.png')}"
-            (conv_dir / name).write_bytes(data)
+        for i, name in enumerate(names):
             if i == 0:
                 self._update_media(item, status="done", file=name, cost=cost)
             else:
@@ -708,19 +781,14 @@ class Turn:
             raise openrouter.OpenRouterError("No video model selected")
         duration, aspect_ratio, resolution = _fit_video_params(
             self.s.video_model, duration, aspect_ratio, self.s.options.resolution if self.s.mode == "video" else None)
-        item = _new_media("video", "generated", prompt=prompt, model=self.s.video_model,
-                          params={"duration": duration, "aspect_ratio": aspect_ratio, "resolution": resolution,
-                                  "first_frame": first_frame})
+        params = {"duration": duration, "aspect_ratio": aspect_ratio, "resolution": resolution,
+                  "first_frame": first_frame, "generate_audio": self.s.options.generate_audio}
+        item = _new_media("video", "generated", prompt=prompt, model=self.s.video_model, params=params)
         self._add_media(item)
         try:
-            job = openrouter.submit_video(
-                self.s.video_model, prompt, duration=duration, aspect_ratio=aspect_ratio,
-                resolution=resolution, generate_audio=self.s.options.generate_audio,
-                first_frame=_file_to_data_url(_conv_dir(self.conv_id) / first_frame) if first_frame else None,
-                session_id=self.conv_id,
-            )
+            job = _submit_video_generation(self.conv_id, self.s.video_model, prompt, params)
         except openrouter.OpenRouterError as e:
-            self._update_media(item, status="error", error=str(e))
+            self._update_media(item, **_failure_fields(e))
             raise
         self._update_media(item, job_id=job["id"])
         start_video_poller(self.conv_id, self.message_id, item["id"], job["id"])
@@ -733,29 +801,47 @@ class Turn:
                        "explain the user can switch to Auto, Image or Video mode.")
         messages: list[dict] = [{"role": "system", "content": system}]
 
-        # Only the most recent few uploaded images go over as pixels
+        history = _history_window(self.history, self.s.history_limit)
+        if len(history) < len(self.history):
+            messages[0]["content"] += (
+                f"\n\nOnly the most recent {len(history)} of {len(self.history)} messages in this "
+                "conversation are included below; earlier ones are omitted.")
+
+        # The most recent few images — uploaded or generated — go over as
+        # pixels so the model can see what's actually in them; older ones
+        # are described by a note instead.
         image_budget = MAX_HISTORY_IMAGES if vision else 0
         pixel_files: set[str] = set()
-        for msg in reversed(self.history):
-            if msg.role != "user":
-                continue
-            for item in msg.media:
-                if image_budget and item["kind"] == "image" and item.get("file"):
+        for msg in reversed(history):
+            for item in reversed(msg.media):
+                if (image_budget and item["kind"] == "image" and item.get("file")
+                        and item.get("status", "done") == "done"):
                     pixel_files.add(item["file"])
                     image_budget -= 1
 
         conv_dir = _conv_dir(self.conv_id)
-        for msg in self.history:
+
+        def pixels(item: dict) -> dict | None:
+            f = item.get("file")
+            if f in pixel_files and (conv_dir / f).is_file():
+                return {"type": "image_url", "image_url": {"url": _file_to_data_url(conv_dir / f)}}
+            return None
+
+        # Chat APIs don't accept images inside assistant messages, so images
+        # the model generated ride along with the next user message.
+        carried: list[dict] = []
+        carried_label = {"type": "text", "text": "[The images you generated in your previous reply, "
+                                                 "attached so you can see them]"}
+        for msg in history:
             if msg.role == "user":
                 parts: list[dict] = []
+                if carried:
+                    parts += [carried_label, *carried]
+                    carried = []
                 if msg.content:
                     parts.append({"type": "text", "text": msg.content})
                 for item in msg.media:
-                    f = item.get("file")
-                    if f in pixel_files and (conv_dir / f).is_file():
-                        parts.append({"type": "image_url", "image_url": {"url": _file_to_data_url(conv_dir / f)}})
-                    else:
-                        parts.append({"type": "text", "text": "[user attached an image]"})
+                    parts.append(pixels(item) or {"type": "text", "text": "[user attached an image]"})
                 if parts:
                     messages.append({"role": "user", "content": parts})
             elif msg.role == "assistant":
@@ -763,10 +849,13 @@ class Turn:
                 notes = [_media_note(item) for item in msg.media]
                 if notes:
                     text = (text + "\n\n" if text else "") + "\n".join(notes)
+                carried += [p for p in (pixels(i) for i in msg.media if i["kind"] == "image") if p]
                 if msg.status == "error" and not text:
                     continue
                 if text:
                     messages.append({"role": "assistant", "content": text})
+        if carried:  # history ended on an assistant message
+            messages.append({"role": "user", "content": [carried_label, *carried]})
         return messages
 
     def _maybe_title(self) -> None:
@@ -783,12 +872,134 @@ class Turn:
         self.emit({"type": "title", "title": title})
 
 
+def _history_window(history: list, limit: int | None) -> list:
+    """The last `limit` messages (None = all), starting on a user message so
+    the model never sees a reply without the prompt that caused it."""
+    if not limit or len(history) <= limit:
+        return history
+    window = history[-limit:]
+    while window and window[0].role != "user":
+        window = window[1:]
+    return window or history[-1:]
+
+
 def _media_note(item: dict) -> str:
     kind = item["kind"]
     if item.get("source") == "upload":
         return f"[user attached a {kind}]"
     state = {"done": f"generated {kind}", "pending": f"{kind} rendering", "error": f"{kind} failed"}[item["status"]]
     return f"[{state}: {item.get('prompt') or ''}]"
+
+
+# ── Generation helpers (shared by turns and media retries) ──────────
+
+_MODERATION = re.compile(
+    r"moderat|flagged|content[ _-]?polic|safety|nsfw|sexual|prohibited|violat|inappropriate|"
+    r"sensitive content|not allowed|blocked",
+    re.IGNORECASE,
+)
+
+
+def _is_moderation_error(e: openrouter.OpenRouterError) -> bool:
+    """OpenRouter's own moderation returns 403; providers phrase their
+    content-policy refusals in many ways, so also match on the message."""
+    return e.status == 403 or bool(_MODERATION.search(str(e)))
+
+
+def _failure_fields(e: openrouter.OpenRouterError) -> dict[str, Any]:
+    return {"status": "error", "error": str(e), "moderated": _is_moderation_error(e)}
+
+
+def _run_image_generation(conv_id: str, model: str, prompt: str,
+                          params: dict[str, Any]) -> tuple[list[str], float | None]:
+    """Generate and save images; returns (filenames, cost)."""
+    conv_dir = _conv_dir(conv_id)
+    refs = [conv_dir / f for f in params.get("refs") or [] if (conv_dir / f).is_file()]
+    images, cost = openrouter.generate_image(
+        model, prompt, aspect_ratio=params.get("aspect_ratio"), resolution=params.get("resolution"),
+        input_images=[_file_to_data_url(f) for f in refs] or None, session_id=conv_id,
+    )
+    names = []
+    for data, media_type in images:
+        name = f"img_{uuid.uuid4().hex[:12]}{IMAGE_EXTS.get(media_type, '.png')}"
+        (conv_dir / name).write_bytes(data)
+        names.append(name)
+    return names, cost
+
+
+def _submit_video_generation(conv_id: str, model: str, prompt: str, params: dict[str, Any]) -> dict:
+    first_frame = params.get("first_frame")
+    return openrouter.submit_video(
+        model, prompt, duration=params.get("duration"), aspect_ratio=params.get("aspect_ratio"),
+        resolution=params.get("resolution"), generate_audio=params.get("generate_audio"),
+        first_frame=_file_to_data_url(_conv_dir(conv_id) / first_frame) if first_frame else None,
+        session_id=conv_id,
+    )
+
+
+def _add_message_cost(message_id: int, cost: float | None) -> None:
+    if not cost:
+        return
+    db = get_db()
+    msg = db.get_chat_message(message_id)
+    if msg:
+        db.update_chat_message(message_id, cost=round((msg.cost or 0) + float(cost), 6))
+
+
+class RegenerateMedia(BaseModel):
+    model: str | None = None           # None = same model as the failed attempt
+
+
+@router.post("/messages/{message_id}/media/{media_id}/regenerate")
+def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia):
+    """Retry a failed image/video in place, optionally on a different model.
+    Runs in the background; the UI polls the message like a rendering video."""
+    _require_openrouter()
+    db = get_db()
+    msg = db.get_chat_message(message_id)
+    if not msg:
+        raise HTTPException(404, "Message not found")
+    if msg.status == "streaming":
+        raise HTTPException(409, "Wait for the reply to finish first")
+    item = next((i for i in msg.media if i.get("id") == media_id), None)
+    if not item or item.get("source") != "generated":
+        raise HTTPException(404, "Media not found")
+    if item.get("status") != "error":
+        raise HTTPException(400, "Only failed media can be retried")
+    if not item.get("prompt"):
+        raise HTTPException(400, "This item has no stored prompt to retry")
+    model = data.model or item.get("model")
+    msg = db.update_chat_media_item(message_id, media_id, status="pending", error=None,
+                                    moderated=False, model=model, job_id=None)
+    threading.Thread(target=_regenerate_worker, args=(msg.conversation_id, message_id, dict(item), model),
+                     daemon=True, name=f"chat-regen-{media_id}").start()
+    return msg.to_dict()
+
+
+def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) -> None:
+    db = get_db()
+    media_id = item["id"]
+    params = dict(item.get("params") or {})
+    try:
+        if item["kind"] == "image":
+            names, cost = _run_image_generation(conv_id, model, item["prompt"], params)
+            db.update_chat_media_item(message_id, media_id, status="done", file=names[0], cost=cost)
+            for extra in names[1:]:
+                db.append_chat_media_item(message_id, {**_new_media("image", "generated", prompt=item["prompt"],
+                                                                    model=model), "status": "done", "file": extra})
+            _add_message_cost(message_id, cost)
+        else:
+            # A different model may support different durations/ratios
+            params["duration"], params["aspect_ratio"], params["resolution"] = _fit_video_params(
+                model, params.get("duration"), params.get("aspect_ratio"), params.get("resolution"))
+            job = _submit_video_generation(conv_id, model, item["prompt"], params)
+            db.update_chat_media_item(message_id, media_id, job_id=job["id"], params=params)
+            start_video_poller(conv_id, message_id, media_id, job["id"])
+    except openrouter.OpenRouterError as e:
+        db.update_chat_media_item(message_id, media_id, **_failure_fields(e))
+    except Exception as e:  # noqa: BLE001 — never leave the card stuck on "pending"
+        db.update_chat_media_item(message_id, media_id, status="error", error=f"{type(e).__name__}: {e}",
+                                  moderated=False)
 
 
 # ── Video polling ───────────────────────────────────────────────────
@@ -827,13 +1038,14 @@ def _poll_video(conv_id: str, message_id: int, media_id: str, job_id: str) -> No
                 return
             cost = (job.get("usage") or {}).get("cost")
             msg = db.update_chat_media_item(message_id, media_id, status="done", file=name, cost=cost)
-            if msg and cost:
-                db.update_chat_message(message_id, cost=round((msg.cost or 0) + float(cost), 6))
+            if msg:
+                _add_message_cost(message_id, cost)
             print(f"✅ chat video {job_id} saved as {name}")
             return
         if status in ("failed", "cancelled", "expired"):
-            db.update_chat_media_item(message_id, media_id, status="error",
-                                      error=job.get("error") or f"Video {status}")
+            error = job.get("error") or f"Video {status}"
+            db.update_chat_media_item(message_id, media_id, status="error", error=error,
+                                      moderated=bool(_MODERATION.search(error)))
             return
     db.update_chat_media_item(message_id, media_id, status="error", error="Timed out waiting for video")
 

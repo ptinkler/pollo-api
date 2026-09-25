@@ -48,6 +48,10 @@ def client(tmp_path, db, monkeypatch):
     monkeypatch.setattr(api_mod, "THUMB_CACHE_DIR", tmp_path / "cache" / "thumbnails")
     monkeypatch.setattr(api_mod, "POLLO_ROOT", tmp_path)
     monkeypatch.setattr(api_mod, "get_db", lambda: db)
+    # The chat router (and its startup hook, run by the lifespan test) has its
+    # own get_db import — patch it too so no test touches the real database
+    import web.chat as chat_mod
+    monkeypatch.setattr(chat_mod, "get_db", lambda: db)
 
     # Clear caches
     api_mod._project_lookup_cache.clear()

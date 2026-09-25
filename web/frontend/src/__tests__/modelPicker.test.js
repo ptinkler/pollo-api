@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import { copyText } from '../composables/useClipboard'
 import { nextTick } from 'vue'
 import ModelPicker from '../components/chat/ModelPicker.vue'
 import { useModelFavourites } from '../composables/useModelFavourites'
@@ -91,8 +92,71 @@ describe('ChatMessage user actions', () => {
     expect(w.find('.edit-box').exists()).toBe(false)
   })
 
-  it('hides Edit and Retry while a reply is streaming (canEdit false)', () => {
+  it('hides Edit and Retry while a reply is streaming, but keeps Copy', () => {
     const w = mount(ChatMessage, { props: { message: msg, convId: 'c1', canEdit: false } })
-    expect(w.find('.user-actions').exists()).toBe(false)
+    const labels = w.findAll('.user-actions button').map(b => b.text())
+    expect(labels).toEqual(['⧉ Copy'])
+  })
+
+  it('Copy puts the prompt on the clipboard and shows feedback', async () => {
+    const writeText = vi.fn().mockResolvedValue()
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const w = mount(ChatMessage, { props: { message: msg, convId: 'c1', canEdit: true } })
+    await w.find('button[title="Copy prompt"]').trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith('hello')
+    expect(w.find('button[title="Copy prompt"]').text()).toBe('✓ Copied')
+  })
+
+  it('media caption copies the prompt sent to the image model', async () => {
+    const writeText = vi.fn().mockResolvedValue()
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const reply = {
+      id: 6, role: 'assistant', content: 'Here', status: 'done',
+      media: [{ id: 'm1', kind: 'image', status: 'done', file: 'a.png', model: 'x/seedream', prompt: 'a red fox, dusk' }],
+    }
+    const w = mount(ChatMessage, { props: { message: reply, convId: 'c1' } })
+    await w.find('.caption-btn').trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith('a red fox, dusk')
+    expect(w.find('.caption-btn').text()).toBe('✓ Copied')
+  })
+})
+
+describe('copyText fallback', () => {
+  it('uses execCommand when the Clipboard API is unavailable (plain HTTP)', async () => {
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+    document.execCommand = vi.fn().mockReturnValue(true)
+    expect(await copyText('hi')).toBe(true)
+    expect(document.execCommand).toHaveBeenCalledWith('copy')
+    expect(document.querySelectorAll('textarea').length).toBe(0)  // cleaned up
+  })
+})
+
+describe('Failed media card', () => {
+  const failed = {
+    id: 7, role: 'assistant', content: 'Here goes.', status: 'done',
+    media: [{ id: 'm1', kind: 'image', source: 'generated', status: 'error', moderated: true,
+              error: 'flagged', prompt: 'a lighthouse', model: 'x/strict' }],
+  }
+  const provide = { chatModels: { image: [{ id: 'x/strict', name: 'Strict' }, { id: 'y/lenient', name: 'Lenient' }], video: [] } }
+
+  it('labels moderation blocks and offers Retry / another model', async () => {
+    const w = mount(ChatMessage, { props: { message: failed, convId: 'c1' }, global: { provide }, attachTo: document.body })
+    expect(w.find('.media-error strong').text()).toContain('blocked by moderation')
+    await w.find('.retry-btn').trigger('click')
+    expect(w.emitted('regenerate')[0]).toEqual([{ mediaId: 'm1', model: null }])
+
+    await w.find('.picker-trigger').trigger('click')
+    const items = w.findAll('.picker-item')
+    expect(items.map(i => i.find('.item-name').text())).toEqual(['Strict', 'Lenient'])  // no "None"
+    await items[1].trigger('click')
+    expect(w.emitted('regenerate')[1]).toEqual([{ mediaId: 'm1', model: 'y/lenient' }])
+    w.unmount()
+  })
+
+  it('hides the actions while the reply is still streaming', () => {
+    const w = mount(ChatMessage, { props: { message: { ...failed, status: 'streaming' }, convId: 'c1' }, global: { provide } })
+    expect(w.find('.error-actions').exists()).toBe(false)
   })
 })

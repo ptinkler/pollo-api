@@ -12,6 +12,8 @@ export const createConversation = (data = {}) => apiPost('/api/chat/conversation
 export const deleteConversation = (id) => apiDelete(`/api/chat/conversations/${enc(id)}`)
 export const fetchChatMessage = (id) => apiGet(`/api/chat/messages/${id}`)
 export const cancelChatMessage = (id) => apiPost(`/api/chat/messages/${id}/cancel`)
+export const regenerateChatMedia = (messageId, mediaId, model = null) =>
+  apiPost(`/api/chat/messages/${messageId}/media/${enc(mediaId)}/regenerate`, { model })
 export const fetchChatLibrary = () => apiGet('/api/chat/library')
 export const deleteLibraryItem = (mediaId) => apiDelete(`/api/chat/library/${enc(mediaId)}`)
 

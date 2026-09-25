@@ -1,8 +1,10 @@
 <script setup>
-import { computed, ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, nextTick, inject, onMounted, onBeforeUnmount } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { chatMediaUrl } from '../../composables/useChat'
+import { useCopy } from '../../composables/useClipboard'
+import ModelPicker from './ModelPicker.vue'
 
 const props = defineProps({
   message: { type: Object, required: true },
@@ -11,7 +13,10 @@ const props = defineProps({
   canEdit: { type: Boolean, default: false },
   laterCount: { type: Number, default: 0 },   // messages an edit would remove
 })
-const emit = defineEmits(['retry', 'open-media', 'stop', 'edit', 'resend'])
+const emit = defineEmits(['retry', 'open-media', 'stop', 'edit', 'resend', 'regenerate'])
+
+// Model catalogues, provided by ChatView, for "Try another model"
+const chatModels = inject('chatModels', { image: [], video: [] })
 
 marked.setOptions({ gfm: true, breaks: true })
 
@@ -85,14 +90,7 @@ function onEditKeydown(e) {
   if (e.key === 'Escape') editing.value = false
 }
 
-const copied = ref(false)
-async function copy() {
-  try {
-    await navigator.clipboard.writeText(props.message.content || '')
-    copied.value = true
-    setTimeout(() => { copied.value = false }, 1500)
-  } catch { /* clipboard blocked (e.g. http) — ignore */ }
-}
+const { copiedKey, copy } = useCopy()
 
 function fmtCost(c) {
   if (!c) return ''
@@ -135,9 +133,14 @@ function fmtCost(c) {
         </div>
       </div>
       <div v-else-if="isUser && message.content" class="bubble">{{ message.content }}</div>
-      <div v-if="isUser && canEdit && !editing" class="user-actions">
-        <button class="meta-btn" title="Edit and resend" @click="startEdit">✎ Edit</button>
-        <button class="meta-btn" title="Resend this prompt for a different response" @click="emit('resend')">↻ Retry</button>
+      <div v-if="isUser && !editing && (canEdit || message.content)" class="user-actions">
+        <button v-if="message.content" class="meta-btn" title="Copy prompt" @click="copy(message.content, 'prompt')">
+          {{ copiedKey === 'prompt' ? '✓ Copied' : '⧉ Copy' }}
+        </button>
+        <template v-if="canEdit">
+          <button class="meta-btn" title="Edit and resend" @click="startEdit">✎ Edit</button>
+          <button class="meta-btn" title="Resend this prompt for a different response" @click="emit('resend')">↻ Retry</button>
+        </template>
       </div>
 
       <template v-if="!isUser">
@@ -148,7 +151,12 @@ function fmtCost(c) {
         <span v-if="streaming && html" class="cursor"></span>
 
         <div v-if="message.media?.length" class="media-grid" :class="{ single: message.media.length === 1 }">
-          <div v-for="item in message.media" :key="item.id" class="media-item" :class="item.kind">
+          <div
+            v-for="item in message.media"
+            :key="item.id"
+            class="media-item"
+            :class="[item.kind, { failed: item.status === 'error' }]"
+          >
             <template v-if="item.status === 'done' && item.file">
               <img
                 v-if="item.kind === 'image'"
@@ -173,13 +181,39 @@ function fmtCost(c) {
             </div>
 
             <div v-else class="media-error">
-              <strong>{{ item.kind === 'image' ? 'Image' : 'Video' }} failed</strong>
+              <strong>
+                {{ item.kind === 'image' ? 'Image' : 'Video' }}
+                {{ item.moderated ? 'blocked by moderation' : 'failed' }}
+              </strong>
               <span>{{ item.error || 'Unknown error' }}</span>
+              <!-- Nothing retries automatically — the user picks -->
+              <div v-if="item.source === 'generated' && item.prompt && message.status !== 'streaming'" class="error-actions">
+                <button class="retry-btn" title="Run the same prompt on the same model again" @click="emit('regenerate', { mediaId: item.id, model: null })">
+                  ↻ Retry
+                </button>
+                <ModelPicker
+                  :model-value="''"
+                  :models="chatModels[item.kind] || []"
+                  :kind="item.kind"
+                  :label="item.kind === 'image' ? 'Image' : 'Video'"
+                  :allow-none="false"
+                  trigger-text="Try another model…"
+                  @update:model-value="model => model && emit('regenerate', { mediaId: item.id, model })"
+                />
+              </div>
             </div>
 
             <!-- Which model made this — the footer only names the chat model -->
-            <div v-if="item.model" class="media-caption" :title="item.model">
-              {{ item.kind === 'image' ? '🖼' : '🎬' }} {{ shortModel(item.model) }}<template v-if="item.cost"> · {{ fmtCost(item.cost) }}</template>
+            <div v-if="item.model || item.prompt" class="media-caption">
+              <span class="caption-text" :title="item.model">
+                {{ item.kind === 'image' ? '🖼' : '🎬' }} {{ shortModel(item.model) }}<template v-if="item.cost"> · {{ fmtCost(item.cost) }}</template>
+              </span>
+              <button
+                v-if="item.prompt"
+                class="caption-btn"
+                :title="`Copy the prompt sent to the ${item.kind} model:\n${item.prompt}`"
+                @click="copy(item.prompt, item.id)"
+              >{{ copiedKey === item.id ? '✓ Copied' : '⧉ Prompt' }}</button>
             </div>
           </div>
         </div>
@@ -189,7 +223,7 @@ function fmtCost(c) {
         <div class="msg-meta">
           <button v-if="streaming" class="meta-btn" @click="emit('stop')">■ Stop</button>
           <template v-else>
-            <button v-if="message.content" class="meta-btn" @click="copy">{{ copied ? '✓ Copied' : '⧉ Copy' }}</button>
+            <button v-if="message.content" class="meta-btn" @click="copy(message.content, 'reply')">{{ copiedKey === 'reply' ? '✓ Copied' : '⧉ Copy' }}</button>
             <button v-if="canRetry" class="meta-btn" @click="emit('retry')">↻ Retry</button>
           </template>
           <span v-if="modelShort && showTextModel" class="meta-info" :title="message.model">💬 {{ modelShort }}</span>
@@ -463,13 +497,37 @@ function fmtCost(c) {
 }
 
 .media-caption {
-  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
   font-size: 0.72rem;
   color: var(--text2);
   border-top: 1px solid var(--border);
+}
+
+.caption-text {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.caption-btn {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text2);
+  font-size: 0.72rem;
+  padding: 3px 7px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.caption-btn:hover {
+  background: var(--surface2);
+  color: var(--text);
 }
 
 .media-pending {
@@ -534,6 +592,34 @@ function fmtCost(c) {
 .media-error span {
   color: var(--text2);
   word-break: break-word;
+}
+
+/* Failed cards host the model-picker popup, so they mustn't clip it */
+.media-item.failed {
+  overflow: visible;
+}
+
+.media-item.failed .media-error {
+  border-radius: 14px 14px 0 0;
+}
+
+.error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.retry-btn {
+  background: linear-gradient(145deg, var(--accent), #5a4bd1);
+  border: none;
+  border-radius: 8px;
+  padding: 5px 12px;
+  color: white;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .msg-error {
