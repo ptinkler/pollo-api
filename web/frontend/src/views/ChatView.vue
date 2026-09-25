@@ -241,7 +241,8 @@ async function ensureConversation() {
 
 function newChat() {
   sidebarOpen.value = false
-  if (convId.value) router.push({ name: 'chat' })
+  // From a conversation *or* the Library — anywhere but the blank chat itself
+  if (route.name !== 'chat') router.push({ name: 'chat' })
   draft.value = ''
   nextTick(() => textarea.value?.focus())
 }
@@ -378,10 +379,17 @@ function handleEvent(ev, tempUser) {
 async function runTurn(fn, id, body, tempUser) {
   sending.value = true
   abort = new AbortController()
+  let started = false
   try {
-    await fn(id, body, ev => handleEvent(ev, tempUser), abort.signal)
+    await fn(id, body, ev => {
+      if (ev.type === 'start') started = true
+      handleEvent(ev, tempUser)
+    }, abort.signal)
   } catch (e) {
-    if (e.name !== 'AbortError') {
+    // Once the reply has started, the server finishes it regardless of this
+    // connection — a dropped stream (throttled background tab, network blip)
+    // is recovered by polling in `finally`, so there's nothing to report
+    if (e.name !== 'AbortError' && !started) {
       showToast(e.message, 'error')
       if (tempUser) messages.value = messages.value.filter(m => m !== tempUser)
       // Edit/retry trim history optimistically — resync with the server
@@ -490,26 +498,41 @@ function useSuggestion(text, m) {
   nextTick(() => { autosize(); textarea.value?.focus() })
 }
 
-// ── Video polling ────────────────────────────────────────────────────
+// ── Polling (anything not covered by a live stream) ─────────────────
+// A reply's live SSE stream can drop — a background tab gets throttled or
+// frozen, you reload, or you open it mid-reply from elsewhere. The server
+// keeps working regardless, so poll such replies until they're done, plus
+// any rendering video / retried image.
 let pollTimer = null
 
 function hasPending(m) {
-  return m.status !== 'streaming' && m.media?.some(x => x.status === 'pending')
+  if (m.status === 'streaming') return m.id !== streamingId.value   // no live stream for it
+  return !!m.media?.some(x => x.status === 'pending')
+}
+
+async function pollOnce() {
+  const pending = messages.value.filter(hasPending)
+  if (!pending.length) return stopPolling()
+  for (const m of pending) {
+    try {
+      const fresh = await fetchChatMessage(m.id)
+      const i = messages.value.findIndex(x => x.id === m.id)
+      if (i !== -1) messages.value.splice(i, 1, fresh)
+    } catch { /* retry next tick */ }
+  }
 }
 
 function ensurePolling() {
   if (pollTimer || !messages.value.some(hasPending)) return
-  pollTimer = setInterval(async () => {
-    const pending = messages.value.filter(hasPending)
-    if (!pending.length) return stopPolling()
-    for (const m of pending) {
-      try {
-        const fresh = await fetchChatMessage(m.id)
-        const i = messages.value.findIndex(x => x.id === m.id)
-        if (i !== -1) messages.value.splice(i, 1, fresh)
-      } catch { /* retry next tick */ }
-    }
-  }, 5000)
+  pollTimer = setInterval(pollOnce, 5000)
+}
+
+// Coming back to the tab: catch up now rather than on the next tick
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible' && messages.value.some(hasPending)) {
+    pollOnce()
+    ensurePolling()
+  }
 }
 
 function stopPolling() {
@@ -566,6 +589,7 @@ function onGlobalKey(e) {
 
 onMounted(async () => {
   window.addEventListener('keydown', onGlobalKey)
+  document.addEventListener('visibilitychange', onVisibilityChange)
   try {
     configured.value = (await fetchChatStatus()).configured
   } catch { /* 401 handled by auth prompt */ }
@@ -578,6 +602,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalKey)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   abort?.abort()
   stopPolling()
   resizeObs?.disconnect()

@@ -177,7 +177,7 @@ function fmtCost(c) {
                 <span v-if="item.kind === 'image'">Creating image…</span>
                 <span v-else>Rendering video… {{ elapsed() }}</span>
               </div>
-              <div v-if="item.prompt" class="pending-prompt">{{ item.prompt }}</div>
+              <div v-if="item.prompt" class="pending-prompt" :title="item.prompt">{{ item.prompt }}</div>
             </div>
 
             <div v-else class="media-error">
@@ -206,7 +206,8 @@ function fmtCost(c) {
             <!-- Which model made this — the footer only names the chat model -->
             <div v-if="item.model || item.prompt" class="media-caption">
               <span class="caption-text" :title="item.model">
-                {{ item.kind === 'image' ? '🖼' : '🎬' }} {{ shortModel(item.model) }}<template v-if="item.cost"> · {{ fmtCost(item.cost) }}</template>
+                {{ item.kind === 'image' ? '🖼' : '🎬' }} {{ shortModel(item.model) }}<template v-if="item.cost"> · {{ fmtCost(item.cost) }}</template><template
+                  v-if="item.params?.refs?.length"> · <span :title="'Based on earlier image(s): ' + item.params.refs.join(', ')">🔗 {{ item.params.refs.length }} ref{{ item.params.refs.length === 1 ? '' : 's' }}</span></template>
               </span>
               <button
                 v-if="item.prompt"

@@ -49,10 +49,12 @@ from .auth import verify_api_key
 router = APIRouter(prefix="/api/chat", dependencies=[Depends(verify_api_key)])
 
 MAX_TOOL_ROUNDS = 4
+CONSISTENCY_REFS = 2              # recent images passed to the image model to keep characters consistent
 MAX_HISTORY_IMAGES = 4            # most recent images (uploaded or generated) sent to the chat model as pixels
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024   # larger images are downscaled before sending
 MODELS_CACHE_TTL = 30 * 60
+CHAT_ROUND_SECONDS = 300          # cap on one LLM call (long stories stream for a while)
 VIDEO_POLL_INTERVAL = 10
 VIDEO_POLL_TIMEOUT = 45 * 60
 VIDEO_MAX_POLL_ERRORS = 10
@@ -61,57 +63,31 @@ DEFAULT_TITLE = "New chat"
 ALLOWED_UPLOAD_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
 IMAGE_EXTS = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/svg+xml": ".svg"}
 
-SYSTEM_PROMPT = """You are a helpful, friendly assistant inside a creative chat app. \
-Besides talking, you can create images and videos with the generate_image and generate_video tools.
+SYSTEM_PROMPT = """You are an assistant in a chat app. You have generate_image and generate_video \
+tools, which create media with the image and video models the user has selected; the result is shown \
+to the user in the chat.
 
-- When the user asks for a picture, drawing, photo, logo, illustration or similar, call generate_image.
-- When the user asks for a video, clip or animation, or to animate something, call generate_video.
-- Write rich, specific visual prompts for the tools (subject, style, composition, lighting, camera, motion).
-- To edit, restyle or continue from an earlier image — or animate it — set source_image to "latest"; \
-it refers to the most recent image in the conversation (uploaded by the user or generated).
-- Write your text FIRST, then call the tool(s) at the END of the same response — nothing comes after \
-a tool call. When the user wants text and media together (e.g. a story and a picture of a scene), \
-write the full text, then base the visual prompt on what you wrote. For a media-only request, write \
-one short line first (what you're making), not the full prompt.
-- Never say you're making, creating or showing an image/video unless you call the tool in that \
-same response — otherwise nothing is created.
-- In an ongoing story or scene the user has been illustrating, you may add an image when the \
-scene changes meaningfully, even if this message doesn't ask for one — like a picture book.
-- You can call several tools in one response; they run in order, so a later call with \
-source_image "latest" uses the image made by an earlier call (e.g. draw something, then animate it).
-- Media appears to the user after your text once it's ready. Videos render in the background for a \
-few minutes. If a tool fails you'll be told and can explain or try again.
-- Lines like "[generated image: …]" in earlier turns are system notes about media that was produced; \
-never write such lines yourself.
+In the conversation history, notes in square brackets such as "[generated image: …]" record media \
+that was produced and the prompt used for it.
 
 Today's date is {today}."""
-
-# The user's request and the model's reply both mention media (see _promised_media)
-_MEDIA_WORDS = re.compile(
-    r"\b(photo|photograph|picture|pic|image|illustration|drawing|draw|portrait|render|video|clip|animat\w*)s?\b",
-    re.IGNORECASE,
-)
-
-MEDIA_NUDGE = (
-    "[system] Your reply above mentions an image or video, but you didn't call generate_image / "
-    "generate_video, so nothing was created. If you meant to include media, call the tool(s) now, "
-    "basing the visual prompt on what you wrote — respond with only the tool call(s), no text; the "
-    "user already has your reply. If you didn't mean to create any media, reply with just: none"
-)
 
 TOOLS_IMAGE = {
     "type": "function",
     "function": {
         "name": "generate_image",
-        "description": "Generate an image from a text prompt, optionally using the latest image in the conversation as a reference (for edits/variations).",
+        "description": "Generate an image from a text prompt. Earlier images in the conversation can be passed to the image model as references, to keep characters consistent or to edit an image.",
         "parameters": {
             "type": "object",
             "properties": {
                 "prompt": {"type": "string", "description": "Detailed description of the image to create."},
                 "aspect_ratio": {"type": "string", "enum": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
-                                 "description": "Aspect ratio. Omit unless the user implies one."},
+                                 "description": "Aspect ratio. Omit to use the image model's default."},
                 "source_image": {"type": "string", "enum": ["none", "latest"],
                                  "description": "'latest' to edit/transform the most recent image in the conversation."},
+                "keep_consistent": {"type": "boolean",
+                                    "description": "true = also send the 2 most recent images in the conversation to the "
+                                                   "image model as reference images. Default false."},
             },
             "required": ["prompt"],
         },
@@ -604,29 +580,13 @@ class Turn:
             if self.s.video_model:
                 tools.append(TOOLS_VIDEO)
         vision = info is None or "image" in (info.get("input_modalities") or [])
-        messages = self._build_llm_messages(vision, tools_enabled=bool(tools))
+        messages = self._build_llm_messages(vision)
 
-        nudged = False
-        visible = True
         for round_no in range(MAX_TOOL_ROUNDS):
-            # Last round: withhold tools so the model has to wrap up in text
+            # Last round: withhold tools so the loop can't run forever
             round_tools = (tools or None) if round_no < MAX_TOOL_ROUNDS - 1 else None
-            text, tool_calls = self._stream_round(messages, round_tools, visible=visible)
-            visible = True
-            if self.cancel.is_set():
-                return
-            if not tool_calls:
-                # Writing a long text first sometimes makes a model announce the
-                # image and then end without calling the tool. Nudge it once,
-                # silently: its text is already shown, we only want the call.
-                # Only when no media was attempted — after a failed tool the
-                # model's apology mentions the image too, and that's final.
-                if round_tools and not nudged and not self.media and self._promised_media(text):
-                    nudged = True
-                    visible = False
-                    messages.append({"role": "assistant", "content": text})
-                    messages.append({"role": "user", "content": MEDIA_NUDGE})
-                    continue
+            text, tool_calls = self._stream_round(messages, round_tools)
+            if self.cancel.is_set() or not tool_calls:
                 return
             messages.append({"role": "assistant", "content": text or None, "tool_calls": tool_calls})
             results = []
@@ -636,28 +596,21 @@ class Turn:
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result)})
                 if self.cancel.is_set():
                     return
-            # Moderation blocks are final for this turn: the user decides
-            # (retry, or another model) via the buttons on the failed card,
-            # rather than the model quietly rewording and retrying.
+            # A moderation block ends the turn: the user chooses Retry or
+            # another model on the failed card (no automatic re-attempt)
             if any(r.get("moderated") for r in results):
                 return
-            # Text comes before tool calls (see SYSTEM_PROMPT), so when every
-            # tool succeeded the reply is complete — skip a follow-up LLM call
-            # that would only add a comment. Failures go back to the model so
-            # it can explain or try again.
-            if all(r.get("ok") for r in results):
-                return
+            # Otherwise the model gets the tool results and continues as it sees fit
 
-    def _stream_round(self, messages: list[dict], tools: list[dict] | None,
-                      visible: bool = True) -> tuple[str, list[dict]]:
-        """One chat completion. `visible=False` collects text without showing
-        or saving it (used by the media nudge, whose text we don't want)."""
+    def _stream_round(self, messages: list[dict], tools: list[dict] | None) -> tuple[str, list[dict]]:
+        """One chat completion, streamed to the UI."""
         text = ""
         calls: dict[int, dict] = {}
         finish = None
-        if visible and self.content and not self.content.endswith("\n\n"):
+        if self.content and not self.content.endswith("\n\n"):
             self._append("\n\n")
-        for chunk in openrouter.stream_chat(self.s.text_model, messages, tools, session_id=self.conv_id):
+        for chunk in openrouter.stream_chat(self.s.text_model, messages, tools, session_id=self.conv_id,
+                                            max_seconds=CHAT_ROUND_SECONDS, should_stop=self.cancel.is_set):
             if self.cancel.is_set():
                 break
             usage = chunk.get("usage")
@@ -668,8 +621,7 @@ class Turn:
                 delta = choice.get("delta") or {}
                 if delta.get("content"):
                     text += delta["content"]
-                    if visible:
-                        self._append(delta["content"])
+                    self._append(delta["content"])
                 for tc in delta.get("tool_calls") or []:
                     slot = calls.setdefault(tc.get("index", 0), {
                         "id": "", "type": "function", "function": {"name": "", "arguments": ""}})
@@ -685,21 +637,8 @@ class Turn:
         # "we failed to parse the call" when media goes missing
         print(f"💬 chat msg {self.message_id} {self.s.text_model}: finish={finish} "
               f"tools_offered={bool(tools)} tool_calls={[c['function']['name'] for c in tool_calls]} "
-              f"raw_call_slots={len(calls)} text_chars={len(text)}{'' if visible else ' (nudge)'}")
+              f"raw_call_slots={len(calls)} text_chars={len(text)}")
         return text, tool_calls
-
-    def _promised_media(self, reply_text: str) -> bool:
-        """The model's text talks about media, yet no tool was called — it
-        may have forgotten the call. Only suspect that when media is in play:
-        the user asked for it, or the chat is already illustrated (the model
-        then continues the pattern unprompted, e.g. "Making the photo now.").
-        False alarms are cheap: the nudge lets the model answer "none"."""
-        if not _MEDIA_WORDS.search(reply_text):
-            return False
-        user = self._last_user()
-        if user and _MEDIA_WORDS.search(user.content or ""):
-            return True
-        return any(item.get("source") == "generated" for m in self.history for item in m.media)
 
     def _append(self, text: str) -> None:
         self.content += text
@@ -721,25 +660,47 @@ class Turn:
         ratio = self.s.options.aspect_ratio or args.get("aspect_ratio")
         try:
             if name == "generate_image":
-                self._generate_image(prompt, ratio, [source] if source else [])
-                return {"ok": True, "result": "Image generated and shown to the user."}
+                self._generate_image(prompt, ratio, self._image_refs(args, source))
+                return {"ok": True, "result": "Image generated; it is shown to the user."}
             if name == "generate_video":
                 duration = self.s.options.duration or args.get("duration")
                 self._generate_video(prompt, duration, ratio, source)
-                return {"ok": True, "result": "Video job started; it will appear in the chat when it finishes rendering (usually a few minutes)."}
+                return {"ok": True, "result": "Video job started; it is shown to the user once rendering finishes."}
         except openrouter.OpenRouterError as e:
             return {"ok": False, "error": str(e), "moderated": _is_moderation_error(e)}
         return {"ok": False, "error": f"Unknown tool {name}"}
 
     def _latest_image(self) -> str | None:
+        images = self._latest_images(1)
+        return images[0] if images else None
+
+    def _latest_images(self, n: int) -> list[str]:
+        """The n most recent finished images (this turn first, then history)."""
+        found: list[str] = []
         for item in reversed(self.media):
-            if item["kind"] == "image" and item["status"] == "done":
-                return item["file"]
+            if item["kind"] == "image" and item["status"] == "done" and item.get("file"):
+                found.append(item["file"])
         for msg in reversed(self.history):
             for item in reversed(msg.media):
                 if item["kind"] == "image" and item.get("status") == "done" and item.get("file"):
-                    return item["file"]
-        return None
+                    found.append(item["file"])
+        return found[:n]
+
+    def _image_refs(self, args: dict, source: str | None) -> list[str]:
+        """Reference images for generate_image, as the model asked for: the
+        edit source (source_image) and/or the most recent images
+        (keep_consistent). The app never adds references on its own."""
+        refs = [source] if source else []
+        info = _model_info("image", self.s.image_model)
+        if info and "image" not in (info.get("input_modalities") or []):
+            return []  # this image model can't take references
+        keep = args.get("keep_consistent") is True
+
+        if keep:
+            for f in self._latest_images(CONSISTENCY_REFS):
+                if f not in refs:
+                    refs.append(f)
+        return refs[:max(CONSISTENCY_REFS, 1)]
 
     # ― generation ―
     def _add_media(self, item: dict) -> None:
@@ -794,18 +755,11 @@ class Turn:
         start_video_poller(self.conv_id, self.message_id, item["id"], job["id"])
 
     # ― history → OpenRouter messages ―
-    def _build_llm_messages(self, vision: bool, tools_enabled: bool) -> list[dict]:
-        system = SYSTEM_PROMPT.format(today=datetime.now().strftime("%A %d %B %Y"))
-        if not tools_enabled:
-            system += ("\n\nImage/video tools are unavailable in this turn; if asked for media, "
-                       "explain the user can switch to Auto, Image or Video mode.")
-        messages: list[dict] = [{"role": "system", "content": system}]
+    def _build_llm_messages(self, vision: bool) -> list[dict]:
+        messages: list[dict] = [
+            {"role": "system", "content": SYSTEM_PROMPT.format(today=datetime.now().strftime("%A %d %B %Y"))}]
 
         history = _history_window(self.history, self.s.history_limit)
-        if len(history) < len(self.history):
-            messages[0]["content"] += (
-                f"\n\nOnly the most recent {len(history)} of {len(self.history)} messages in this "
-                "conversation are included below; earlier ones are omitted.")
 
         # The most recent few images — uploaded or generated — go over as
         # pixels so the model can see what's actually in them; older ones

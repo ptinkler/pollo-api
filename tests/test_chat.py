@@ -127,7 +127,7 @@ class TestTurns:
     def test_text_mode_streams_and_persists(self, client, conv, chat, monkeypatch):
         seen = {}
 
-        def fake_stream(model, messages, tools=None, session_id=None):
+        def fake_stream(model, messages, tools=None, session_id=None, **kw):
             seen.update(model=model, messages=messages, tools=tools)
             return _text_chunks("Hel", "lo!")
         monkeypatch.setattr(chat.openrouter, "stream_chat", fake_stream)
@@ -146,12 +146,13 @@ class TestTurns:
         # model picks are remembered on the conversation
         assert client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["text_model"] == "t/model"
 
-    def test_auto_mode_text_then_image_in_one_llm_call(self, client, conv, chat, monkeypatch):
+    def test_auto_mode_image_then_model_continues(self, client, conv, chat, monkeypatch):
         rounds = iter([_tool_chunks("generate_image", {"prompt": "a cat", "aspect_ratio": "16:9"},
-                                    text="Once upon a time, a cat.")])
+                                    text="Once upon a time, a cat."),
+                       _text_chunks("The end.", cost=0.002)])
         calls = []
 
-        def fake_stream(model, messages, tools=None, session_id=None):
+        def fake_stream(model, messages, tools=None, session_id=None, **kw):
             calls.append((messages, tools))
             return next(rounds)
         monkeypatch.setattr(chat.openrouter, "stream_chat", fake_stream)
@@ -165,15 +166,16 @@ class TestTurns:
         ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
                                  json={"content": "a story about a cat, with a picture", "mode": "auto", **SETTINGS}))
         assert [t["function"]["name"] for t in calls[0][1]] == ["generate_image", "generate_video"]
-        assert len(calls) == 1  # success → no follow-up round
+        assert len(calls) == 2
+        assert calls[1][0][-1]["role"] == "tool" and json.loads(calls[1][0][-1]["content"])["ok"]
         assert img_args["model"] == "i/model" and img_args["prompt"] == "a cat"
         assert img_args["aspect_ratio"] == "16:9"
         media_events = [e["item"] for e in ev if e["type"] == "media"]
         assert [m["status"] for m in media_events] == ["pending", "done"]
         done = ev[-1]["message"]
-        assert done["content"] == "Once upon a time, a cat."
+        assert done["content"] == "Once upon a time, a cat.\n\nThe end."
         assert done["media"][0]["file"].startswith("img_")
-        assert done["cost"] == pytest.approx(0.043)  # tool round's usage + image
+        assert done["cost"] == pytest.approx(0.045)  # both LLM rounds + image
         path = chat._chat_root() / conv["id"] / done["media"][0]["file"]
         assert path.read_bytes() == _png_bytes()
 
@@ -182,7 +184,7 @@ class TestTurns:
                        _text_chunks("Sorry, the image model is down.")])
         calls = []
         monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None: (calls.append(msgs), next(rounds))[1])
+                            lambda m, msgs, tools=None, session_id=None, **kw: (calls.append(msgs), next(rounds))[1])
 
         def boom(*a, **k):
             raise chat.openrouter.OpenRouterError("[Seed] overloaded")
@@ -207,8 +209,9 @@ class TestTurns:
                 {"index": 1, "id": "c2", "function": {"name": "generate_video", "arguments": args_vid}}]}}]},
         ]
         calls = []
+        replies = iter([iter(chunks), _text_chunks("Done.")])
         monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda *a, **k: (calls.append(1), iter(chunks))[1])
+                            lambda *a, **k: (calls.append(1), next(replies))[1])
         monkeypatch.setattr(chat.openrouter, "generate_image",
                             lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None))
         submitted = {}
@@ -216,7 +219,7 @@ class TestTurns:
                             lambda model, prompt, **kw: (submitted.update(kw), {"id": "gen-vid-1"})[1])
         ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
                                  json={"content": "draw a fox and animate it", **SETTINGS}))
-        assert len(calls) == 1
+        assert len(calls) == 2
         assert submitted["first_frame"].startswith("data:image/png;base64,")
         assert [m["kind"] for m in ev[-1]["message"]["media"]] == ["image", "video"]
 
@@ -292,12 +295,11 @@ class TestTurns:
             {"id": "t/model", "supports_tools": False, "input_modalities": ["text"]}]})
         seen = {}
         monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None: (seen.update(tools=tools, msgs=msgs),
+                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(tools=tools, msgs=msgs),
                                                                           _text_chunks("ok"))[1])
         _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
                             json={"content": "hi", "mode": "auto", **SETTINGS}))
         assert seen["tools"] is None
-        assert "unavailable" in seen["msgs"][0]["content"]
 
     def test_retry_replaces_assistant_message(self, client, conv, chat, monkeypatch):
         replies = iter([_text_chunks("first"), _text_chunks("second")])
@@ -316,7 +318,7 @@ class TestTurns:
             {"id": "a", "kind": "image", "source": "generated", "status": "done", "file": "x.png", "prompt": "a fox"}])
         seen = {}
         monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None: (seen.update(msgs=msgs), _text_chunks("ok"))[1])
+                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1])
         _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "nice", **SETTINGS}))
         assert seen["msgs"][2] == {"role": "assistant", "content": "Here!\n\n[generated image: a fox]"}
 
@@ -409,7 +411,7 @@ class TestEditAndLibrary:
         replies = iter([_text_chunks("one"), _text_chunks("two"), _text_chunks("edited reply")])
         seen = []
         monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None: (seen.append(msgs), next(replies))[1])
+                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.append(msgs), next(replies))[1])
         first = self._send(client, conv, "first")[0]["user_message"]
         self._send(client, conv, "second")
 
@@ -528,56 +530,6 @@ def test_resend_same_prompt_gets_fresh_reply(client, conv, chat, monkeypatch):
     assert [(m["role"], m["content"]) for m in msgs] == [("user", "tell me a joke"), ("assistant", "c")]
 
 
-class TestMediaNudge:
-    """Model writes the story, says a photo is coming, but forgets the tool call."""
-
-    def _run(self, client, conv, chat, monkeypatch, rounds, content):
-        calls = []
-        rounds = iter(rounds)
-        monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None: (calls.append((list(msgs), tools)), next(rounds))[1])
-        made = []
-        monkeypatch.setattr(chat.openrouter, "generate_image",
-                            lambda model, prompt, **kw: (made.append(prompt), ([(_png_bytes(), "image/png")], 0.03))[1])
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                 json={"content": content, **SETTINGS}))
-        return ev, calls, made
-
-    def test_nudges_once_and_makes_the_image(self, client, conv, chat, monkeypatch):
-        ev, calls, made = self._run(client, conv, chat, monkeypatch, [
-            _text_chunks("Here's a story and a photo of them.\n\nLinh lifted."),
-            _tool_chunks("generate_image", {"prompt": "Linh in the gym"}, text="(ignored chatter)"),
-        ], "write a story about Linh and create a photo of her")
-        assert len(calls) == 2
-        assert calls[1][0][-1]["role"] == "user" and "didn't call" in calls[1][0][-1]["content"]
-        assert calls[1][0][-2] == {"role": "assistant", "content": "Here's a story and a photo of them.\n\nLinh lifted."}
-        assert made == ["Linh in the gym"]
-        done = ev[-1]["message"]
-        # the nudge round's text is never shown or saved
-        assert done["content"] == "Here's a story and a photo of them.\n\nLinh lifted."
-        assert "ignored" not in "".join(e.get("text", "") for e in ev if e["type"] == "delta")
-        assert done["media"][0]["status"] == "done"
-
-    def test_no_nudge_when_media_not_requested(self, client, conv, chat, monkeypatch):
-        ev, calls, made = self._run(client, conv, chat, monkeypatch, [
-            _text_chunks("Photography is the art of capturing light."),
-        ], "tell me a fact about cameras")
-        assert len(calls) == 1 and made == []
-
-    def test_no_nudge_when_reply_doesnt_mention_media(self, client, conv, chat, monkeypatch):
-        ev, calls, made = self._run(client, conv, chat, monkeypatch, [
-            _text_chunks("I can't help with that."),
-        ], "create a photo of something")
-        assert len(calls) == 1 and made == []
-
-    def test_nudge_that_still_gets_no_call_leaves_reply_alone(self, client, conv, chat, monkeypatch):
-        ev, calls, made = self._run(client, conv, chat, monkeypatch, [
-            _text_chunks("A story, with a picture below."),
-            _text_chunks("Sorry!"),
-        ], "story plus a picture please")
-        assert len(calls) == 2 and made == []
-        assert ev[-1]["message"]["content"] == "A story, with a picture below."
-
 
 class TestModerationAndRegenerate:
     def _blocked(self, chat, status=403, msg="Your input was flagged by moderation"):
@@ -683,56 +635,12 @@ class TestModerationAndRegenerate:
         assert client.post(f"/api/chat/messages/{msg.id}/media/nope/regenerate", json={}).status_code == 404
 
 
-class TestMediaNudgeInIllustratedChats:
-    """The chat already has generated images; the user's message doesn't ask
-    for one, but the model says it's making one (and forgets the call)."""
-
-    def _illustrated(self, db, conv):
-        db.add_chat_message(conv["id"], "user", "write a story with a photo")
-        db.add_chat_message(conv["id"], "assistant", "Once upon a time.", media=[
-            {"id": "g1", "kind": "image", "source": "generated", "status": "done", "file": "x.png", "prompt": "Linh"}])
-
-    def _run(self, client, conv, chat, monkeypatch, rounds, content):
-        calls, made = [], []
-        rounds = iter(rounds)
-        monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None: (calls.append(list(msgs)), next(rounds))[1])
-        monkeypatch.setattr(chat.openrouter, "generate_image",
-                            lambda model, prompt, **kw: (made.append(prompt), ([(_png_bytes(), "image/png")], None))[1])
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                 json={"content": content, **SETTINGS}))
-        return ev, calls, made
-
-    def test_continues_illustrating_when_model_promises(self, client, conv, chat, db, monkeypatch):
-        self._illustrated(db, conv)
-        ev, calls, made = self._run(client, conv, chat, monkeypatch, [
-            _text_chunks("She turned around.\n\nMaking the photo now."),
-            _tool_chunks("generate_image", {"prompt": "Linh turning, gym"}),
-        ], '"can i see your muscles?" he asked shyly')
-        assert len(calls) == 2 and made == ["Linh turning, gym"]
-        assert ev[-1]["message"]["content"] == "She turned around.\n\nMaking the photo now."
-
-    def test_model_can_decline_the_nudge(self, client, conv, chat, db, monkeypatch):
-        self._illustrated(db, conv)
-        ev, calls, made = self._run(client, conv, chat, monkeypatch, [
-            _text_chunks("She took a photo of the sunset with her phone."),
-            _text_chunks("none"),
-        ], "what happens next?")
-        assert len(calls) == 2 and made == []
-        assert ev[-1]["message"]["content"] == "She took a photo of the sunset with her phone."
-
-    def test_plain_chat_without_media_isnt_nudged(self, client, conv, chat, db, monkeypatch):
-        ev, calls, made = self._run(client, conv, chat, monkeypatch, [
-            _text_chunks("She took a photo of the sunset."),
-        ], "what happens next?")
-        assert len(calls) == 1 and made == []
-
 
 class TestContext:
     def _capture(self, chat, monkeypatch):
         seen = {}
         monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None: (seen.update(msgs=msgs), _text_chunks("ok"))[1])
+                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1])
         return seen
 
     def _img(self, chat, conv, name):
@@ -785,7 +693,6 @@ class TestContext:
         body = seen["msgs"][1:]
         assert [m["role"] for m in body] == ["user", "assistant", "user"]
         assert body[0]["content"][0]["text"] == "q4"
-        assert "most recent 3 of 11 messages" in seen["msgs"][0]["content"]
 
     def test_no_limit_sends_everything(self, client, conv, chat, db, monkeypatch):
         for i in range(3):
@@ -800,3 +707,133 @@ class TestContext:
         r = client.post(f"/api/chat/conversations/{conv['id']}/messages",
                         json={"content": "x", "history_limit": 0, **SETTINGS})
         assert r.status_code == 422
+
+
+
+
+class TestStallProtection:
+    """A stalled upstream only sends keep-alives; we must not hang forever."""
+
+    class _FakeStream:
+        def __init__(self, lines):
+            self.lines = lines
+            self.status_code = 200
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def iter_lines(self):
+            yield from self.lines
+
+    def _keepalives(self):
+        import time as _t
+        while True:
+            _t.sleep(0.02)
+            yield ": OPENROUTER PROCESSING"
+
+    def test_deadline_breaks_a_keepalive_only_stream(self, chat, monkeypatch):
+        monkeypatch.setattr(chat.openrouter.httpx, "stream", lambda *a, **k: self._FakeStream(self._keepalives()))
+        with pytest.raises(chat.openrouter.OpenRouterError) as e:
+            list(chat.openrouter.stream_chat("m", [], max_seconds=0.2))
+        assert e.value.status == 504
+
+    def test_stop_is_noticed_during_keepalives(self, chat, monkeypatch):
+        import threading, time as _t
+        monkeypatch.setattr(chat.openrouter.httpx, "stream", lambda *a, **k: self._FakeStream(self._keepalives()))
+        stop = threading.Event()
+        threading.Timer(0.1, stop.set).start()
+        t0 = _t.monotonic()
+        assert list(chat.openrouter.stream_chat("m", [], should_stop=stop.is_set)) == []
+        assert _t.monotonic() - t0 < 2
+
+
+class TestConsistencyReferences:
+    def _prior_images(self, chat, db, conv, n):
+        db.add_chat_message(conv["id"], "user", "story with a photo")
+        for i in range(n):
+            f = f"g{i}.png"
+            (chat._conv_dir(conv["id"]) / f).write_bytes(_png_bytes(color=(i * 40, 0, 0)))
+            db.add_chat_message(conv["id"], "assistant", f"scene {i}", media=[
+                {"id": f"g{i}", "kind": "image", "source": "generated", "status": "done", "file": f, "prompt": f"p{i}"}])
+
+    def _run(self, client, conv, chat, monkeypatch, tool_args):
+        replies = iter([_tool_chunks("generate_image", tool_args, text="Next scene."), _text_chunks("Done.")])
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+        got = {}
+        monkeypatch.setattr(chat.openrouter, "generate_image",
+                            lambda model, prompt, **kw: (got.update(kw), ([(_png_bytes(), "image/png")], None))[1])
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                                 json={"content": "continue the story", **SETTINGS}))
+        return got, ev[-1]["message"]["media"][0]
+
+    def test_no_references_unless_the_model_asks(self, client, conv, chat, db, monkeypatch):
+        self._prior_images(chat, db, conv, 1)
+        got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "the same woman, now turned around"})
+        assert got.get("input_images") is None and item["params"]["refs"] == []
+
+    def test_model_opts_in_and_prompt_is_passed_verbatim(self, client, conv, chat, db, monkeypatch):
+        self._prior_images(chat, db, conv, 1)
+        replies = iter([_tool_chunks("generate_image", {"prompt": "exactly what the model wrote",
+                                                        "keep_consistent": True}, text="Next."),
+                        _text_chunks("Done.")])
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+        got = {}
+        monkeypatch.setattr(chat.openrouter, "generate_image",
+                            lambda model, prompt, **kw: (got.update(prompt=prompt, **kw), ([(_png_bytes(), "image/png")], None))[1])
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "continue", **SETTINGS}))
+        assert got["prompt"] == "exactly what the model wrote"
+        assert len(got["input_images"]) == 1
+
+    def test_uses_only_the_most_recent_two(self, client, conv, chat, db, monkeypatch):
+        self._prior_images(chat, db, conv, 3)
+        got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "scene 4", "keep_consistent": True})
+        assert item["params"]["refs"] == ["g2.png", "g1.png"]
+
+    def test_first_image_in_chat_has_no_refs(self, client, conv, chat, db, monkeypatch):
+        got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "Linh", "keep_consistent": True})
+        assert got.get("input_images") is None
+
+    def test_skipped_for_image_models_without_reference_support(self, client, conv, chat, db, monkeypatch):
+        chat._models_cache.update(at=9e18, data={"text": [], "video": [], "image": [
+            {"id": "i/model", "input_modalities": ["text"]}]})
+        self._prior_images(chat, db, conv, 1)
+        got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "next", "keep_consistent": True})
+        assert got.get("input_images") is None
+
+    def test_edit_source_comes_first(self, client, conv, chat, db, monkeypatch):
+        self._prior_images(chat, db, conv, 2)
+        got, item = self._run(client, conv, chat, monkeypatch,
+                              {"prompt": "make it night", "source_image": "latest", "keep_consistent": True})
+        assert item["params"]["refs"] == ["g1.png", "g0.png"]
+
+    def test_edit_alone_sends_just_the_source(self, client, conv, chat, db, monkeypatch):
+        self._prior_images(chat, db, conv, 2)
+        got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "make it night", "source_image": "latest"})
+        assert item["params"]["refs"] == ["g1.png"]
+
+
+class TestModelDecides:
+    """The app never adds instructions or extra calls to steer the model."""
+
+    def test_no_extra_call_when_model_skips_the_tool(self, client, conv, chat, monkeypatch):
+        calls = []
+        monkeypatch.setattr(chat.openrouter, "stream_chat",
+                            lambda *a, **k: (calls.append(k), _text_chunks("A story, and here's the photo."))[1])
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                                 json={"content": "write a story and create an image of the scene", **SETTINGS}))
+        assert len(calls) == 1
+        assert ev[-1]["message"]["content"] == "A story, and here's the photo." and ev[-1]["message"]["media"] == []
+
+    def test_system_prompt_is_static(self, client, conv, chat, db, monkeypatch):
+        for i in range(4):
+            db.add_chat_message(conv["id"], "user", f"q{i}")
+            db.add_chat_message(conv["id"], "assistant", f"a{i}")
+        chat._models_cache.update(at=9e18, data={"image": [], "video": [], "text": [
+            {"id": "t/model", "supports_tools": False, "input_modalities": ["text"]}]})
+        seen = {}
+        monkeypatch.setattr(chat.openrouter, "stream_chat",
+                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1])
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                            json={"content": "hi", "history_limit": 3, **SETTINGS}))
+        from datetime import datetime
+        assert seen["msgs"][0]["content"] == chat.SYSTEM_PROMPT.format(today=datetime.now().strftime("%A %d %B %Y"))

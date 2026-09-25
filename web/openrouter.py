@@ -12,8 +12,9 @@ not by probing the live API (probes cost real money).
 import base64
 import json
 import os
+import time
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 import httpx
 
@@ -141,9 +142,19 @@ def list_video_models() -> list[dict[str, Any]]:
 # ── Text ────────────────────────────────────────────────────────────
 
 def stream_chat(model: str, messages: list[dict], tools: list[dict] | None = None,
-                session_id: str | None = None) -> Iterator[dict]:
+                session_id: str | None = None,
+                max_seconds: float | None = None,
+                should_stop: Callable[[], bool] | None = None) -> Iterator[dict]:
     """Yield parsed chat.completion.chunk dicts. Raises OpenRouterError on
-    pre-stream HTTP errors and on mid-stream error chunks."""
+    pre-stream HTTP errors and on mid-stream error chunks.
+
+    OpenRouter sends ": OPENROUTER PROCESSING" keep-alives while a provider
+    is slow, and each one resets httpx's read timeout — so a stalled upstream
+    would otherwise hang forever. `max_seconds` caps the whole call and
+    `should_stop` is polled on every line (keep-alives included), so a
+    cancel is noticed within seconds even when no tokens are flowing.
+    """
+    deadline = time.monotonic() + max_seconds if max_seconds else None
     body: dict[str, Any] = {
         "model": model,
         "messages": messages,
@@ -160,6 +171,10 @@ def stream_chat(model: str, messages: list[dict], tools: list[dict] | None = Non
             resp.read()
             _raise_for_response(resp)
         for line in resp.iter_lines():
+            if should_stop and should_stop():
+                return
+            if deadline and time.monotonic() > deadline:
+                raise OpenRouterError(f"The model didn't finish within {int(max_seconds)}s", 504)
             # Blank separators and ": OPENROUTER PROCESSING" keep-alives
             if not line or line.startswith(":"):
                 continue
