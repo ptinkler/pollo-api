@@ -24,7 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY img2vid/ ./img2vid/
-COPY web/api.py web/auth.py ./web/
+COPY web/*.py ./web/
 COPY alembic/ ./alembic/
 COPY alembic.ini entrypoint.sh ./
 
