@@ -199,6 +199,18 @@ class BaseV1VideoGenerator(BaseVideoGenerator):
     # per-model from the OpenAPI spec, not assumed — see each subclass.
     HAS_ASPECT_RATIO_ON_IMAGE: ClassVar[bool] = False
 
+    # Reference-To-Video branch, per the spec's `refs` schema. REF_TYPES and
+    # MAX_REFS mirror web/api.py's MODEL_INFO "ref_mode" (kept in sync by a
+    # test). The ref branch is its own schema: no model's has webSearch or
+    # imageTail, some drop seed (REF_HAS_SEED), and a few have different
+    # duration/resolution enums (REF_VALID_LENGTHS/REF_VALID_RESOLUTIONS,
+    # empty = same as the image/text branches).
+    REF_TYPES: ClassVar[tuple] = ("image", "video", "audio")
+    MAX_REFS: ClassVar[int] = 0
+    REF_HAS_SEED: ClassVar[bool] = True
+    REF_VALID_LENGTHS: ClassVar[tuple] = ()
+    REF_VALID_RESOLUTIONS: ClassVar[tuple] = ()
+
     resolution: str
     length: int
     aspect_ratio: str
@@ -214,16 +226,19 @@ class BaseV1VideoGenerator(BaseVideoGenerator):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_V1_BASE}/{self.V1_PROVIDER}/{self.V1_MODEL}/video"
+        self.refs = kwargs.get('refs') if self.HAS_REFS else None
         self.resolution = kwargs.get('resolution') or os.getenv("RESOLUTION", self.DEFAULT_RESOLUTION)
-        self.length = self._get_valid_length(
-            str(kwargs.get('length') or os.getenv("LENGTH", str(self.DEFAULT_LENGTH))),
-            default=self.DEFAULT_LENGTH,
-        )
+        length_str = str(kwargs.get('length') or os.getenv("LENGTH", str(self.DEFAULT_LENGTH)))
+        if self.refs and self.REF_VALID_LENGTHS:
+            # Snap to the nearest length the ref branch allows
+            length = int(length_str) if length_str.isdigit() else self.DEFAULT_LENGTH
+            self.length = min(self.REF_VALID_LENGTHS, key=lambda v: abs(v - length))
+        else:
+            self.length = self._get_valid_length(length_str, default=self.DEFAULT_LENGTH)
         self.aspect_ratio = kwargs.get('aspect_ratio') or self.get_aspect_ratio(
             os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "portrait")
         )
         self.image_tail = (kwargs.get('image_tail') or os.getenv("IMAGE_TAIL")) if self.HAS_IMAGE_TAIL else None
-        self.refs = kwargs.get('refs') if self.HAS_REFS else None
         self.seed = (
             kwargs.get('seed') or (int(os.getenv("SEED")) if os.getenv("SEED") else None)
         ) if self.HAS_SEED else None
@@ -285,15 +300,15 @@ class BaseV1VideoGenerator(BaseVideoGenerator):
             attrs["imageTail"] = self.image_tail
         if self.generate_audio is not None:
             attrs["generateAudio"] = self.generate_audio
-        if self.web_search is not None:
+        if self.web_search is not None and not refs:
             attrs["webSearch"] = self.web_search
-        if self.seed is not None:
+        if self.seed is not None and (self.REF_HAS_SEED or not refs):
             attrs["seed"] = self.seed
         if self.mode:
             attrs["mode"] = self.mode
         if self.negative_prompt:
             attrs["negativePrompt"] = self.negative_prompt
-        if self.audio_url:
+        if self.audio_url and not refs:
             attrs["audio"] = self.audio_url
 
         self.payload_attrs = attrs
@@ -508,6 +523,7 @@ class MinimaxH3MaxVideoGenerator(BaseV1VideoGenerator):
 
     HAS_IMAGE_TAIL: ClassVar[bool] = True
     HAS_REFS: ClassVar[bool] = True
+    MAX_REFS: ClassVar[int] = 12
 
 
 class Wan27VideoGenerator(BaseVideoGenerator):
@@ -660,6 +676,11 @@ class Pollo20VideoGeneratorV1(BaseV1VideoGenerator):
     HAS_SEED: ClassVar[bool] = True
     HAS_GENERATE_AUDIO: ClassVar[bool] = True
     HAS_REFS: ClassVar[bool] = True
+    # Ref branch: image refs only, and its own duration/resolution enums.
+    REF_TYPES: ClassVar[tuple] = ("image",)
+    MAX_REFS: ClassVar[int] = 7
+    REF_VALID_LENGTHS: ClassVar[tuple] = tuple(range(1, 9))
+    REF_VALID_RESOLUTIONS: ClassVar[tuple] = ("540p", "720p", "1080p")
 
 
 class Pollo25VideoGeneratorV1(BaseV1VideoGenerator):
@@ -720,6 +741,8 @@ class PolloDance20VideoGeneratorV1(BaseV1VideoGenerator):
     HAS_WEB_SEARCH: ClassVar[bool] = True
     HAS_IMAGE_TAIL: ClassVar[bool] = True
     HAS_REFS: ClassVar[bool] = True
+    MAX_REFS: ClassVar[int] = 13
+    REF_HAS_SEED: ClassVar[bool] = False
     HAS_ASPECT_RATIO_ON_IMAGE: ClassVar[bool] = True
 
 
@@ -760,6 +783,7 @@ class Seedance20VideoGeneratorV1(BaseV1VideoGenerator):
     HAS_WEB_SEARCH: ClassVar[bool] = True
     HAS_IMAGE_TAIL: ClassVar[bool] = True
     HAS_REFS: ClassVar[bool] = True
+    MAX_REFS: ClassVar[int] = 15
     HAS_ASPECT_RATIO_ON_IMAGE: ClassVar[bool] = True
 
 
@@ -800,6 +824,7 @@ class Seedance25VideoGeneratorV1(BaseV1VideoGenerator):
     HAS_WEB_SEARCH: ClassVar[bool] = True
     HAS_IMAGE_TAIL: ClassVar[bool] = True
     HAS_REFS: ClassVar[bool] = True
+    MAX_REFS: ClassVar[int] = 50
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -831,6 +856,7 @@ class MinimaxH3VideoGeneratorV1(BaseV1VideoGenerator):
 
     HAS_IMAGE_TAIL: ClassVar[bool] = True
     HAS_REFS: ClassVar[bool] = True
+    MAX_REFS: ClassVar[int] = 15
 
 
 class Wan27VideoGeneratorV1(BaseV1VideoGenerator):
@@ -858,6 +884,7 @@ class Wan27VideoGeneratorV1(BaseV1VideoGenerator):
     HAS_SEED: ClassVar[bool] = True
     HAS_IMAGE_TAIL: ClassVar[bool] = True
     HAS_REFS: ClassVar[bool] = True
+    MAX_REFS: ClassVar[int] = 10
     HAS_NEGATIVE_PROMPT_AUDIO: ClassVar[bool] = True
 
 
@@ -888,6 +915,9 @@ class Wan30VideoGeneratorV1(BaseV1VideoGenerator):
     HAS_GENERATE_AUDIO: ClassVar[bool] = True
     HAS_IMAGE_TAIL: ClassVar[bool] = True
     HAS_REFS: ClassVar[bool] = True
+    # "file" = a document, "link" = a web page (at most one of the two).
+    REF_TYPES: ClassVar[tuple] = ("image", "video", "audio", "file", "link")
+    MAX_REFS: ClassVar[int] = 22
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)

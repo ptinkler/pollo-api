@@ -14,6 +14,7 @@ export function useProjectSettings(projectName) {
     image_tail: '',
     seed: '',
     refs: [],
+    ref_mode: false,
     video_num: 1,
     max_images: '1',
     thinking_level: 'minimal',
@@ -81,6 +82,8 @@ export function useProjectSettings(projectName) {
       const url = r._local_image || r._local_url || r.url || r.image || r.video || r.audio || ''
       return { type: r.type || 'image', name: r.name || '', url, order: r.order || 0 }
     })
+    // v1 models only take refs in ref mode, so a job that used refs was one
+    settings.value.ref_mode = settings.value.refs.length > 0
 
     // Prefer the recorded local reference (if present in job params) so the
     // regenerate Source Image input shows the permanent local file instead

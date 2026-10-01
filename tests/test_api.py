@@ -1469,6 +1469,39 @@ class TestGenerateOptions:
         })
         assert resp.status_code == 200
 
+    def _v1_ref_post(self, client, db, name, model, refs, **extra):
+        proj = db.create_project(name=name)
+        import web.api as api_mod
+        (api_mod.ASSETS_DIR / proj.assets_folder).mkdir(parents=True, exist_ok=True)
+        return client.post("/api/generate", json={
+            "model": model, "project": proj.slug, "prompt": "p", "refs": refs, **extra,
+        })
+
+    @patch("web.api.threading.Thread")
+    def test_generate_v1_ref_mode(self, mock_thread, client, db):
+        refs = [{"type": "image", "url": "https://i.jpg"}, {"type": "video", "url": "https://v.mp4"}]
+        resp = self._v1_ref_post(client, db, "V1Ref", "seedance20v1", refs,
+                                 image_url="https://src.jpg", image_tail="https://tail.jpg")
+        assert resp.status_code == 200
+        kwargs = mock_thread.call_args.kwargs["args"][2]
+        assert kwargs["refs"] == refs
+        assert kwargs["image_url"] is None
+        assert "image_tail" not in kwargs
+
+    @pytest.mark.parametrize("model,refs,detail", [
+        ("pollo20v1", [{"type": "video", "url": "https://v.mp4"}], "doesn't accept video"),
+        ("pollo20v1", [{"type": "image", "url": f"https://{i}.jpg"} for i in range(8)], "max 7"),
+        ("seedance20v1", [{"type": "image", "url": f"https://{i}.jpg"} for i in range(10)], "image references (max 9)"),
+        ("seedance20v1", [{"type": "audio", "url": "https://a.mp3"}], "non-audio"),
+        ("wan30v1", [{"type": "file", "url": "https://d.pdf"}, {"type": "link", "url": "https://l"}], "combine"),
+    ])
+    @patch("web.api.threading.Thread")
+    def test_generate_v1_ref_mode_rejects_invalid_refs(self, mock_thread, client, db, model, refs, detail):
+        resp = self._v1_ref_post(client, db, "V1RefBad", model, refs)
+        assert resp.status_code == 400
+        assert detail in resp.json()["detail"]
+        mock_thread.assert_not_called()
+
     @patch("web.api.threading.Thread")
     def test_generate_with_web_search(self, mock_thread, client, db):
         proj = db.create_project(name="WebSearch")

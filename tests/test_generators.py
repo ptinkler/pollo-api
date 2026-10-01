@@ -1028,3 +1028,77 @@ class TestBaseV1VideoGeneratorRefsNormalization:
         )
         payload = gen.get_payload()
         assert payload["input"]["refs"] == [{"url": "https://img.com/a.jpg", "type": "image"}]
+
+
+class TestBaseV1VideoGeneratorRefBranch:
+    """The Reference-To-Video branch is its own schema (docs.pollo.ai/openapi.json)."""
+
+    REFS = [{"type": "image", "url": "https://img.com/a.jpg"}]
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_ref_branch_drops_web_search_and_image(self, *mocks):
+        gen = Seedance20VideoGeneratorV1(
+            api_key="k", project="p", prompt="hi", image_url="https://src.jpg",
+            image_tail="https://tail.jpg", web_search=True, seed=7, refs=self.REFS,
+        )
+        attrs = gen.get_payload()["input"]
+        assert attrs["refs"] == self.REFS
+        assert attrs["seed"] == 7
+        for key in ("webSearch", "image", "imageTail"):
+            assert key not in attrs
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_pollo_dance_ref_branch_has_no_seed(self, *mocks):
+        gen = PolloDance20VideoGeneratorV1(api_key="k", project="p", prompt="hi", seed=7, refs=self.REFS)
+        assert "seed" not in gen.get_payload()["input"]
+        gen = PolloDance20VideoGeneratorV1(api_key="k", project="p", prompt="hi", seed=7)
+        assert gen.get_payload()["input"]["seed"] == 7
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_pollo20_ref_lengths(self, *mocks):
+        # Ref branch is 1-8s, unlike the image/text branches' 5|10
+        gen = Pollo20VideoGeneratorV1(api_key="k", project="p", prompt="hi", length=3, refs=self.REFS)
+        assert gen.get_payload()["input"]["duration"] == 3
+        gen = Pollo20VideoGeneratorV1(api_key="k", project="p", prompt="hi", length=10, refs=self.REFS)
+        assert gen.length == 8
+        gen = Pollo20VideoGeneratorV1(api_key="k", project="p", prompt="hi", length=3)
+        assert gen.length == 5
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    @patch("img2vid.pollo.generators.get_audio_url", return_value="https://a.mp3")
+    def test_wan27_ref_branch_has_no_audio(self, *mocks):
+        gen = Wan27VideoGeneratorV1(api_key="k", project="p", prompt="hi", refs=self.REFS)
+        assert "audio" not in gen.get_payload()["input"]
+
+    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
+    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
+    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    def test_wan30_file_and_link_refs(self, *mocks):
+        refs = [{"type": "file", "url": "https://d.pdf"}, {"type": "image", "url": "https://i.jpg"}]
+        gen = Wan30VideoGeneratorV1(api_key="k", project="p", prompt="hi", refs=refs)
+        assert gen.get_payload()["input"]["refs"] == refs
+
+    def test_model_info_ref_mode_matches_generators(self):
+        # MODEL_INFO "ref_mode" (what the UI offers) must mirror the generator classes
+        from web.api import MODEL_INFO
+        from img2vid.pollo.pollo_img2vid import GENERATORS, IMAGE_GENERATORS
+        for key, info in MODEL_INFO.items():
+            cls = GENERATORS.get(key) or IMAGE_GENERATORS[key]
+            is_v1_refs = issubclass(cls, BaseV1VideoGenerator) and cls.HAS_REFS
+            assert ("ref_mode" in info) == is_v1_refs, key
+            if not is_v1_refs:
+                continue
+            ref_mode = info["ref_mode"]
+            assert tuple(ref_mode["types"]) == cls.REF_TYPES, key
+            assert ref_mode["max"] == cls.MAX_REFS, key
+            assert tuple(ref_mode.get("lengths", ())) == cls.REF_VALID_LENGTHS, key
+            assert tuple(ref_mode.get("resolutions", ())) == cls.REF_VALID_RESOLUTIONS, key
+            assert ("seed" in ref_mode.get("hide_options", [])) == (cls.HAS_SEED and not cls.REF_HAS_SEED), key

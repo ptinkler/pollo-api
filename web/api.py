@@ -77,6 +77,15 @@ app.add_middleware(
 # dropdown unless the frontend's "legacy mode" toggle is on (GET
 # /api/models filters them out by default; see get_models() below).
 # Models with no "legacy" key are on the current v1 API and always shown.
+#
+# "ref_mode" (v1 models only) describes the model's Reference-To-Video
+# branch, which the frontend exposes as a "Ref mode" toggle (the legacy API
+# used separate "type": "ref" models instead). From docs.pollo.ai/openapi.json:
+# allowed ref "types", total "max" refs, optional per-type "limits", and
+# optional "lengths"/"resolutions" when they differ from the image/text
+# branches. "hide_options" lists options the ref branch lacks (web_search
+# and image_tail never exist there). "max_length_with_video" caps duration
+# when a video ref is present; "exclusive" ref types can't be combined.
 MODEL_INFO = {
     "pollodance20": {
         "label": "Pollo Dance 2.0", "type": "img2vid",
@@ -237,6 +246,7 @@ MODEL_INFO = {
         "resolutions": ["480p", "720p", "1080p"],
         "ratios": ["16:9", "9:16", "4:3", "3:4", "1:1"],
         "options": ["generate_audio", "seed", "refs"],
+        "ref_mode": {"types": ["image"], "max": 7, "lengths": list(range(1, 9)), "resolutions": ["540p", "720p", "1080p"]},
     },
     "pollo25v1": {
         "label": "Pollo 2.5", "type": "img2vid",
@@ -251,6 +261,7 @@ MODEL_INFO = {
         "resolutions": ["480p", "720p", "1080p"],
         "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
         "options": ["generate_audio", "web_search", "seed", "image_tail", "refs"],
+        "ref_mode": {"types": ["image", "video", "audio"], "max": 13, "limits": {"image": 9, "video": 3, "audio": 3}, "hide_options": ["seed"]},
     },
     "pollodance20fastv1": {
         "label": "Pollo Dance 2.0 Fast", "type": "img2vid",
@@ -258,6 +269,7 @@ MODEL_INFO = {
         "resolutions": ["480p", "720p"],
         "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
         "options": ["generate_audio", "web_search", "seed", "image_tail", "refs"],
+        "ref_mode": {"types": ["image", "video", "audio"], "max": 13, "limits": {"image": 9, "video": 3, "audio": 3}, "hide_options": ["seed"]},
     },
     "seedance20v1": {
         "label": "Seedance 2.0", "type": "img2vid",
@@ -265,6 +277,7 @@ MODEL_INFO = {
         "resolutions": ["480p", "720p", "1080p", "4K"],
         "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
         "options": ["generate_audio", "web_search", "seed", "image_tail", "refs"],
+        "ref_mode": {"types": ["image", "video", "audio"], "max": 15, "limits": {"image": 9, "video": 3, "audio": 3}},
     },
     "seedance20fastv1": {
         "label": "Seedance 2.0 Fast", "type": "img2vid",
@@ -272,6 +285,7 @@ MODEL_INFO = {
         "resolutions": ["480p", "720p"],
         "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
         "options": ["generate_audio", "web_search", "seed", "image_tail", "refs"],
+        "ref_mode": {"types": ["image", "video", "audio"], "max": 15, "limits": {"image": 9, "video": 3, "audio": 3}},
     },
     "seedance20miniv1": {
         "label": "Seedance 2.0 Mini", "type": "img2vid",
@@ -279,6 +293,7 @@ MODEL_INFO = {
         "resolutions": ["480p", "720p"],
         "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
         "options": ["generate_audio", "web_search", "seed", "image_tail", "refs"],
+        "ref_mode": {"types": ["image", "video", "audio"], "max": 15, "limits": {"image": 9, "video": 3, "audio": 3}},
     },
     "seedance25v1": {
         "label": "Seedance 2.5", "type": "img2vid",
@@ -286,6 +301,7 @@ MODEL_INFO = {
         "resolutions": ["480p", "720p", "1080p"],
         "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
         "options": ["generate_audio", "web_search", "seed", "image_tail", "refs"],
+        "ref_mode": {"types": ["image", "video", "audio"], "max": 50, "limits": {"image": 30, "video": 10, "audio": 10}},
     },
     "minimaxh3v1": {
         "label": "MiniMax H3", "type": "img2vid",
@@ -293,6 +309,7 @@ MODEL_INFO = {
         "resolutions": ["480p", "768p", "2K"],
         "ratios": ["auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],
         "options": ["image_tail", "refs"],
+        "ref_mode": {"types": ["image", "video", "audio"], "max": 15, "limits": {"image": 9, "video": 3, "audio": 3}},
     },
     "minimaxh3max": {
         "label": "MiniMax H3 Max", "type": "img2vid",
@@ -300,6 +317,7 @@ MODEL_INFO = {
         "resolutions": ["480p", "768p", "1080p"],
         "ratios": ["auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],
         "options": ["image_tail", "refs"],
+        "ref_mode": {"types": ["image", "video", "audio"], "max": 12, "limits": {"image": 9, "video": 3, "audio": 3}},
     },
     "wan27v1": {
         "label": "Wan 2.7", "type": "img2vid",
@@ -307,6 +325,7 @@ MODEL_INFO = {
         "resolutions": ["720p", "1080p"],
         "ratios": ["16:9", "1:1", "4:3", "3:4", "9:16"],
         "options": ["seed", "image_tail", "negative_prompt", "audio_url", "refs"],
+        "ref_mode": {"types": ["image", "video", "audio"], "max": 10, "limits": {"image": 5, "video": 5, "audio": 1}, "max_length_with_video": 10, "hide_options": ["audio_url"]},
         "deprecated": True,
     },
     "wan30v1": {
@@ -315,6 +334,7 @@ MODEL_INFO = {
         "resolutions": ["480p", "720p", "1080p"],
         "ratios": ["adaptive", "16:9", "9:16", "4:3", "3:4", "1:1"],
         "options": ["generate_audio", "seed", "image_tail", "refs"],
+        "ref_mode": {"types": ["image", "video", "audio", "file", "link"], "max": 22, "limits": {"image": 10, "video": 5, "audio": 5, "file": 1, "link": 1}, "exclusive": ["file", "link"]},
     },
     "wan30primev1": {
         "label": "Wan 3.0 Prime", "type": "img2vid",
@@ -322,6 +342,7 @@ MODEL_INFO = {
         "resolutions": ["480p", "720p", "1080p"],
         "ratios": ["adaptive", "16:9", "9:16", "4:3", "3:4", "1:1"],
         "options": ["generate_audio", "seed", "image_tail", "refs"],
+        "ref_mode": {"types": ["image", "video", "audio", "file", "link"], "max": 22, "limits": {"image": 10, "video": 5, "audio": 5, "file": 1, "link": 1}, "exclusive": ["file", "link"]},
     },
     "pollojourneyv1": {
         "label": "Pollo Journey 8.2", "type": "image",
@@ -1055,6 +1076,27 @@ def _extract_first_frame(video_path: Path) -> bytes | None:
 
 # ── Generate ────────────────────────────────────────────────────────
 
+def _validate_v1_refs(refs: list, ref_mode: dict) -> None:
+    """Reject refs that a v1 model's Reference-To-Video branch can't take
+    (see "ref_mode" in MODEL_INFO), before anything is uploaded or billed."""
+    counts: dict[str, int] = {}
+    for ref in refs:
+        ref_type = ref.get("type", "image")
+        if ref_type not in ref_mode["types"]:
+            raise HTTPException(status_code=400, detail=f"This model doesn't accept {ref_type} references")
+        counts[ref_type] = counts.get(ref_type, 0) + 1
+    if len(refs) > ref_mode["max"]:
+        raise HTTPException(status_code=400, detail=f"Too many references (max {ref_mode['max']})")
+    for ref_type, limit in ref_mode.get("limits", {}).items():
+        if counts.get(ref_type, 0) > limit:
+            raise HTTPException(status_code=400, detail=f"Too many {ref_type} references (max {limit})")
+    exclusive = ref_mode.get("exclusive", [])
+    if sum(1 for t in exclusive if counts.get(t)) > 1:
+        raise HTTPException(status_code=400, detail=f"Can't combine {' and '.join(exclusive)} references")
+    if not any(t != "audio" for t in counts):
+        raise HTTPException(status_code=400, detail="At least one non-audio reference is required")
+
+
 @app.post("/api/generate")
 def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key)):
     model = data.model
@@ -1159,7 +1201,17 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
     if "num_outputs" in model_opts and data.num_outputs is not None:
         kwargs["num_outputs"] = data.num_outputs
 
-    if MODEL_INFO.get(model, {}).get("type") == "ref":
+    is_ref_model = MODEL_INFO.get(model, {}).get("type") == "ref"
+    # v1 models take refs on their regular endpoint ("Ref mode" in the UI)
+    ref_mode = MODEL_INFO.get(model, {}).get("ref_mode")
+    v1_ref_mode = bool(data.refs) and ref_mode is not None
+    if v1_ref_mode:
+        _validate_v1_refs(data.refs, ref_mode)
+        # The ref branch has no source image or end frame
+        kwargs["image_url"] = None
+        kwargs.pop("image_tail", None)
+
+    if is_ref_model or v1_ref_mode:
         # ref uses refs array
         if data.refs:
             # Handle local: refs by uploading to litterbox
@@ -1209,9 +1261,9 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
         else:
             # Build refs from individual URLs (backward-compatible)
             kwargs["subject_url"] = subject_url
-        if data.video_num is not None:
+        if is_ref_model and data.video_num is not None:
             kwargs["video_num"] = data.video_num
-        if data.image_meta is not None:
+        if is_ref_model and data.image_meta is not None:
             kwargs["image_meta"] = data.image_meta
 
     # Create DB job record with extra params

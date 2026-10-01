@@ -104,6 +104,18 @@ describe('useProjectSettings', () => {
     expect(settings.value.model).toBe('pollodance20')
     expect(settings.value.web_search).toBe(false)
     expect(settings.value.image_tail).toBe('')
+    expect(settings.value.ref_mode).toBe(false)
+  })
+
+  it('applyJobSettings turns on ref mode for a job that used refs', () => {
+    const projectName = ref('jobrefs')
+    const { settings, applyJobSettings } = useProjectSettings(projectName)
+    applyJobSettings({
+      model: 'seedance20v1',
+      params: { refs: [{ type: 'image', url: 'https://i.jpg', _local_image: 'local:ref-1.jpg' }] },
+    })
+    expect(settings.value.ref_mode).toBe(true)
+    expect(settings.value.refs[0]).toMatchObject({ type: 'image', url: 'local:ref-1.jpg' })
   })
 
   it('loads on project name change', async () => {

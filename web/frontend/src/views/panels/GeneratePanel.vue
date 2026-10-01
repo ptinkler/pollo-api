@@ -37,17 +37,25 @@ const submitButtonText = computed(() => {
 // Model options
 const selectedModel = computed(() => props.models[settings.value.model] || {})
 const modelType = computed(() => selectedModel.value.type || 'img2vid')
-const modelLengths = computed(() => selectedModel.value.lengths || [])
+
+// Ref mode: legacy-API ref models are their own "type: ref" models, while v1
+// models take refs on their regular endpoint when "Ref mode" is toggled on.
+// Its limits come from the model's "ref_mode" (see MODEL_INFO in web/api.py).
+const refModeInfo = computed(() => selectedModel.value.ref_mode || null)
+const inV1RefMode = computed(() => !!refModeInfo.value && !!settings.value.ref_mode)
+const showRefFields = computed(() => modelType.value === 'ref' || inV1RefMode.value)
+const refHiddenOptions = computed(() => inV1RefMode.value ? (refModeInfo.value.hide_options || []) : [])
+
+const modelLengths = computed(() => (inV1RefMode.value && refModeInfo.value.lengths) || selectedModel.value.lengths || [])
 const modelRatios = computed(() => selectedModel.value.ratios || [])
-const modelOptions = computed(() => selectedModel.value.options || [])
+const modelOptions = computed(() => (selectedModel.value.options || []).filter(o => !refHiddenOptions.value.includes(o)))
 
 const showAudioOption = computed(() => modelOptions.value.includes('generate_audio'))
-const showWebSearchOption = computed(() => modelOptions.value.includes('web_search'))
-const showImageTailOption = computed(() => modelOptions.value.includes('image_tail'))
+const showWebSearchOption = computed(() => modelOptions.value.includes('web_search') && !inV1RefMode.value)
+const showImageTailOption = computed(() => modelOptions.value.includes('image_tail') && !inV1RefMode.value)
 const showSeedOption = computed(() => modelOptions.value.includes('seed'))
 const showMaxImagesOption = computed(() => modelOptions.value.includes('max_images'))
-const showRefFields = computed(() => modelType.value === 'ref')
-const modelResolutions = computed(() => selectedModel.value.resolutions || null)
+const modelResolutions = computed(() => (inV1RefMode.value && refModeInfo.value.resolutions) || selectedModel.value.resolutions || null)
 const showResolution = computed(() => modelType.value !== 'image' || !!modelResolutions.value)
 const resolutions = computed(() => modelResolutions.value || ['480p', '720p', '1080p'])
 const showVideoNumOption = computed(() => modelOptions.value.includes('video_num'))
@@ -190,8 +198,16 @@ watch(() => props.regenerateJob, (job) => {
 // Watch for use-as-ref - switch to ref model and prefill refs
 watch(() => props.useAsRef, (data) => {
   if (data) {
-    settings.value.model = 'seedanceref'
-    settings.value.refs = data.refs || []
+    const refs = data.refs || []
+    if (props.models.seedanceref) {
+      settings.value.model = 'seedanceref'
+    } else {
+      // v1: keep the current model if its ref mode takes these refs, else Seedance 2.0
+      const types = props.models[settings.value.model]?.ref_mode?.types || []
+      if (!refs.every(r => types.includes(r.type))) settings.value.model = 'seedance20v1'
+      settings.value.ref_mode = true
+    }
+    settings.value.refs = refs
     if (data.prompt) {
       prompt.value = data.prompt
     }
@@ -233,12 +249,18 @@ watch(resolutions, (res) => {
 })
 
 // --- Refs management for ref2video ---
-const refTypes = [
-  { value: 'image', label: 'Image' },
-  { value: 'subject', label: 'Subject' },
-  { value: 'video', label: 'Video' },
-  { value: 'audio', label: 'Audio' },
-]
+const REF_TYPE_LABELS = {
+  image: 'Image', subject: 'Subject', video: 'Video', audio: 'Audio', file: 'Document', link: 'Web page',
+}
+const REF_URL_PLACEHOLDERS = {
+  file: 'https://example.com/document.pdf',
+  link: 'https://example.com/page',
+}
+const refTypes = computed(() =>
+  (inV1RefMode.value ? refModeInfo.value.types : ['image', 'subject', 'video', 'audio'])
+    .map(value => ({ value, label: REF_TYPE_LABELS[value] || value }))
+)
+const maxRefs = computed(() => inV1RefMode.value ? refModeInfo.value.max : 13)
 
 function newRefItem(type = 'image') {
   const order = settings.value.refs.length + 1
@@ -250,7 +272,7 @@ function newRefItem(type = 'image') {
 }
 
 function addRef() {
-  if (settings.value.refs.length >= 13) return
+  if (settings.value.refs.length >= maxRefs.value) return
   settings.value.refs.push(newRefItem('image'))
 }
 
@@ -400,7 +422,39 @@ async function handleSubmit() {
     data.thinking_level = settings.value.thinking_level
   }
 
-  if (showRefFields.value) {
+  if (inV1RefMode.value) {
+    // v1 refs are just { type, url } — no names, order or subjects
+    const info = refModeInfo.value
+    const validRefs = settings.value.refs
+      .filter(r => r.url && r.url.trim())
+      .map(r => ({ type: r.type, url: r.url.trim() }))
+    const counts = {}
+    validRefs.forEach(r => { counts[r.type] = (counts[r.type] || 0) + 1 })
+    const error = (() => {
+      if (!validRefs.some(r => r.type !== 'audio')) return 'At least one non-audio reference is required'
+      const badType = validRefs.find(r => !info.types.includes(r.type))
+      if (badType) return `This model doesn't accept ${REF_TYPE_LABELS[badType.type] || badType.type} references`
+      if (validRefs.length > info.max) return `Too many references (max ${info.max})`
+      for (const [type, limit] of Object.entries(info.limits || {})) {
+        if ((counts[type] || 0) > limit) return `Too many ${REF_TYPE_LABELS[type]} references (max ${limit})`
+      }
+      if ((info.exclusive || []).filter(t => counts[t]).length > 1) {
+        return `Can't combine ${info.exclusive.map(t => REF_TYPE_LABELS[t]).join(' and ')} references`
+      }
+      if (info.max_length_with_video && counts.video && settings.value.length > info.max_length_with_video) {
+        return `Length must be ${info.max_length_with_video}s or less with a video reference`
+      }
+      return null
+    })()
+    if (error) {
+      showToast(error, 'error')
+      isSubmitting.value = false
+      return
+    }
+    data.refs = validRefs
+    delete data.image_url
+    delete data.image_tail
+  } else if (showRefFields.value) {
     // Build refs payload per type
     let order = 1
     const validRefs = []
@@ -439,7 +493,7 @@ async function handleSubmit() {
     // Show "Uploading image..." if using a local source image or local ref images
     const hasLocalSource = data.image_url && data.image_url.startsWith('local:')
     const hasLocalRefs = (data.refs || []).some(r => {
-      if (r.type === 'image' && r.image && r.image.startsWith('local:')) return true
+      if (r.type === 'image' && (r.image || r.url || '').startsWith('local:')) return true
       if (r.type === 'subject' && r.images) return r.images.some(img => img.url && img.url.startsWith('local:'))
       return false
     })
@@ -583,7 +637,14 @@ async function handleSubmit() {
         />
 
         <!-- Toggles inline -->
-        <div v-if="showAudioOption || showWebSearchOption" class="toggle-group">
+        <div v-if="showAudioOption || showWebSearchOption || refModeInfo" class="toggle-group">
+          <ToggleSwitch
+            v-if="refModeInfo"
+            id="ref_mode"
+            v-model="settings.ref_mode"
+            label="Refs"
+            title="Reference mode: generate from reference images/videos/audio instead of a source image"
+          />
           <ToggleSwitch
             v-if="showAudioOption"
             id="generate_audio"
@@ -625,7 +686,7 @@ async function handleSubmit() {
       <div v-if="showRefFields" class="form-section ref2-fields">
         <div class="ref2-header">
           <span class="ref2-title">References</span>
-          <span class="ref2-hint">{{ settings.refs.length }}/13 refs</span>
+          <span class="ref2-hint">{{ settings.refs.length }}/{{ maxRefs }} refs</span>
         </div>
 
         <div
@@ -642,6 +703,7 @@ async function handleSubmit() {
               @update:modelValue="onRefTypeChange(index)"
             />
             <SleekInput
+              v-if="!inV1RefMode"
               v-model="refItem.name"
               label="Name"
               :placeholder="`ref${index + 1}`"
@@ -717,6 +779,16 @@ async function handleSubmit() {
             />
           </div>
 
+          <div v-else-if="refItem.type === 'file' || refItem.type === 'link'" class="ref-item-body">
+            <SleekInput
+              v-model="refItem.url"
+              :label="`${REF_TYPE_LABELS[refItem.type]} URL`"
+              type="url"
+              :placeholder="REF_URL_PLACEHOLDERS[refItem.type]"
+              class="ref-url-full"
+            />
+          </div>
+
           <!-- Subject: multiple images + subjectId -->
           <div v-else-if="refItem.type === 'subject'" class="ref-item-body subject-body">
             <SleekInput
@@ -784,7 +856,7 @@ async function handleSubmit() {
         <button
           type="button"
           class="btn-add-ref"
-          :disabled="settings.refs.length >= 13"
+          :disabled="settings.refs.length >= maxRefs"
           @click="addRef"
         >
           + Add Reference
