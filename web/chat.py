@@ -124,6 +124,7 @@ class ConversationCreate(BaseModel):
     text_model: str | None = None
     image_model: str | None = None
     video_model: str | None = None
+    instruction_id: int | None = None   # omitted = the default instruction, if one is set
 
 
 class ConversationUpdate(BaseModel):
@@ -131,6 +132,13 @@ class ConversationUpdate(BaseModel):
     text_model: str | None = None
     image_model: str | None = None
     video_model: str | None = None
+    instruction_id: int | None = None   # explicit null detaches
+
+
+class InstructionIn(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    content: str = Field(default="", max_length=20000)
+    is_default: bool = False
 
 
 class TurnOptions(BaseModel):
@@ -287,11 +295,52 @@ def api_list_conversations():
 
 @router.post("/conversations")
 def api_create_conversation(data: ConversationCreate):
-    conv = get_db().create_conversation(
+    db = get_db()
+    if "instruction_id" in data.model_fields_set:
+        instruction_id = _require_instruction(data.instruction_id)
+    else:
+        default = db.get_default_instruction()
+        instruction_id = default.id if default else None
+    conv = db.create_conversation(
         title=(data.title or DEFAULT_TITLE).strip()[:255] or DEFAULT_TITLE,
         text_model=data.text_model, image_model=data.image_model, video_model=data.video_model,
+        instruction_id=instruction_id,
     )
     return conv.to_dict()
+
+
+def _require_instruction(instruction_id: int | None) -> int | None:
+    if instruction_id is not None and not get_db().get_instruction(instruction_id):
+        raise HTTPException(400, "Instruction not found")
+    return instruction_id
+
+
+# ── Routes: custom instructions ─────────────────────────────────────
+
+@router.get("/instructions")
+def api_list_instructions():
+    return {"instructions": [i.to_dict() for i in get_db().list_instructions()]}
+
+
+@router.post("/instructions")
+def api_create_instruction(data: InstructionIn):
+    return get_db().save_instruction(name=data.name.strip(), content=data.content, is_default=data.is_default).to_dict()
+
+
+@router.put("/instructions/{instruction_id}")
+def api_update_instruction(instruction_id: int, data: InstructionIn):
+    item = get_db().save_instruction(instruction_id, name=data.name.strip(), content=data.content,
+                                     is_default=data.is_default)
+    if not item:
+        raise HTTPException(404, "Instruction not found")
+    return item.to_dict()
+
+
+@router.delete("/instructions/{instruction_id}")
+def api_delete_instruction(instruction_id: int):
+    if not get_db().delete_instruction(instruction_id):
+        raise HTTPException(404, "Instruction not found")
+    return {"deleted": instruction_id}
 
 
 @router.get("/conversations/{conv_id}")
@@ -305,6 +354,8 @@ def api_get_conversation(conv_id: str):
 def api_update_conversation(conv_id: str, data: ConversationUpdate):
     _require_conv(conv_id)
     fields = data.model_dump(exclude_unset=True)
+    if "instruction_id" in fields:
+        _require_instruction(fields["instruction_id"])
     if "title" in fields:
         fields["title"] = (fields["title"] or "").strip()[:255] or DEFAULT_TITLE
     return get_db().update_conversation(conv_id, **fields).to_dict()
@@ -521,6 +572,7 @@ class Turn:
         self.cancel = cancel
         self.db = get_db()
         self.history = [m for m in self.db.get_chat_messages(conv_id) if m.id != message_id]
+        self.instructions = _conversation_instructions(conv_id)
         self.content = ""
         self.cost = 0.0
         self.media: list[dict] = []
@@ -739,7 +791,7 @@ class Turn:
             direct = self.s.mode == "image"
             params.update(context=True, direct=direct, history_limit=self.s.history_limit)
             context = _image_context(self.conv_id, self.history, self.s.history_limit, self.content,
-                                     None if direct else prompt, ref_files)
+                                     None if direct else prompt, ref_files, self.instructions)
         item = _new_media("image", "generated", prompt=prompt, model=self.s.image_model, params=params)
         self._add_media(item)
         try:
@@ -776,8 +828,11 @@ class Turn:
 
     # ― history → OpenRouter messages ―
     def _build_llm_messages(self, vision: bool, as_tool_calls: bool = False) -> list[dict]:
-        return [{"role": "system", "content": SYSTEM_PROMPT.format(today=datetime.now().strftime("%A %d %B %Y"))},
-                *_conversation(self.conv_id, self.history, self.s.history_limit, vision, as_tool_calls)]
+        messages = [{"role": "system", "content": SYSTEM_PROMPT.format(today=datetime.now().strftime("%A %d %B %Y"))}]
+        if self.instructions:
+            # The user's own custom instructions, verbatim
+            messages.append({"role": "system", "content": self.instructions})
+        return messages + _conversation(self.conv_id, self.history, self.s.history_limit, vision, as_tool_calls)
 
     def _maybe_title(self) -> None:
         conv = self.db.get_conversation(self.conv_id)
@@ -879,12 +934,14 @@ def _conversation(conv_id: str, history: list, history_limit: int | None, vision
 
 
 def _image_context(conv_id: str, history: list, history_limit: int | None, reply_text: str,
-                   prompt: str | None, refs: list[str]) -> list[dict]:
+                   prompt: str | None, refs: list[str], instructions: str | None = None) -> list[dict]:
     """What a conversational image model is sent: the conversation, then —
     when the chat model called the tool — its reply so far and its prompt,
     verbatim, with any reference images it asked for. In Image mode
     (prompt=None) the user's own message is already the last one."""
     messages = _conversation(conv_id, history, history_limit, vision=True)
+    if instructions:
+        messages.insert(0, {"role": "system", "content": instructions})
     if prompt is not None:
         if reply_text.strip():
             messages.append({"role": "assistant", "content": reply_text.strip()})
@@ -894,6 +951,16 @@ def _image_context(conv_id: str, history: list, history_limit: int | None, reply
                   for f in refs if (conv_dir / f).is_file()]
         messages.append({"role": "user", "content": parts})
     return messages
+
+
+def _conversation_instructions(conv_id: str) -> str | None:
+    """The custom instructions attached to a chat, if any (user's text, verbatim)."""
+    db = get_db()
+    conv = db.get_conversation(conv_id)
+    if not conv or not conv.instruction_id:
+        return None
+    item = db.get_instruction(conv.instruction_id)
+    return item.content if item and item.content.strip() else None
 
 
 def _is_conversational(image_model: str | None) -> bool:
@@ -1028,7 +1095,8 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
                 history = [m for m in db.get_chat_messages(conv_id) if m.id < message_id]
                 direct = params.get("direct", False)
                 context = _image_context(conv_id, history, params.get("history_limit"), msg.content if msg else "",
-                                         None if direct else item["prompt"], params.get("refs") or [])
+                                         None if direct else item["prompt"], params.get("refs") or [],
+                                         _conversation_instructions(conv_id))
             params["context"] = context is not None
             names, cost = _run_image_generation(conv_id, model, item["prompt"], params, context)
             db.update_chat_media_item(message_id, media_id, status="done", file=names[0], cost=cost,

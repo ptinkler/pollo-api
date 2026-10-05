@@ -1045,3 +1045,86 @@ class TestFollowUpRounds:
         assert len(calls) == 2 and calls[1]                              # tools still offered
         assert attempts == ["first", "second"]
         assert [m["status"] for m in ev[-1]["message"]["media"]] == ["error", "done"]
+
+
+def test_attribution_is_generic_and_hidden(chat, monkeypatch):
+    """The app is named but not linkable: generic localhost URL, hidden from public rankings."""
+    monkeypatch.setenv("OPENROUTER_REFERER", "https://example.com/should-be-ignored")
+    assert chat.openrouter._headers() == {
+        "Authorization": "Bearer sk-test",
+        "HTTP-Referer": "http://localhost",
+        "X-OpenRouter-Title": "Pollo Chat",
+        "X-OpenRouter-App-Visibility": "hidden",
+    }
+
+
+class TestCustomInstructions:
+    def test_crud_and_single_default(self, client):
+        a = client.post("/api/chat/instructions", json={"name": "Terse", "content": "Be brief.", "is_default": True}).json()
+        b = client.post("/api/chat/instructions", json={"name": "Story", "content": "Write vividly.", "is_default": True}).json()
+        items = {i["name"]: i for i in client.get("/api/chat/instructions").json()["instructions"]}
+        assert items["Story"]["is_default"] and not items["Terse"]["is_default"]   # only one default
+        r = client.put(f"/api/chat/instructions/{a['id']}", json={"name": "Terse", "content": "Very brief."})
+        assert r.json()["content"] == "Very brief."
+        assert client.delete(f"/api/chat/instructions/{b['id']}").status_code == 200
+        assert [i["name"] for i in client.get("/api/chat/instructions").json()["instructions"]] == ["Terse"]
+        assert client.post("/api/chat/instructions", json={"name": "", "content": "x"}).status_code == 422
+
+    def test_default_attaches_to_new_chats_unless_overridden(self, client):
+        d = client.post("/api/chat/instructions", json={"name": "D", "content": "x", "is_default": True}).json()
+        assert client.post("/api/chat/conversations", json={}).json()["instruction_id"] == d["id"]
+        assert client.post("/api/chat/conversations", json={"instruction_id": None}).json()["instruction_id"] is None
+        assert client.post("/api/chat/conversations", json={"instruction_id": 999}).status_code == 400
+
+    def test_attach_and_detach_on_existing_chat(self, client, conv):
+        i = client.post("/api/chat/instructions", json={"name": "I", "content": "x"}).json()
+        assert client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_id": i["id"]}).json()["instruction_id"] == i["id"]
+        assert client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_id": None}).json()["instruction_id"] is None
+
+    def test_deleting_an_instruction_detaches_it(self, client, conv):
+        i = client.post("/api/chat/instructions", json={"name": "I", "content": "x"}).json()
+        client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_id": i["id"]})
+        client.delete(f"/api/chat/instructions/{i['id']}")
+        assert client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["instruction_id"] is None
+
+    def test_sent_verbatim_as_second_system_message(self, client, conv, chat, monkeypatch):
+        i = client.post("/api/chat/instructions", json={"name": "I", "content": "Always answer in French."}).json()
+        client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_id": i["id"]})
+        seen = {}
+        monkeypatch.setattr(chat.openrouter, "stream_chat",
+                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("Bonjour"))[1])
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", **SETTINGS}))
+        assert seen["msgs"][1] == {"role": "system", "content": "Always answer in French."}
+        assert seen["msgs"][2]["role"] == "user"
+
+    def test_not_sent_when_none_attached(self, client, conv, chat, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(chat.openrouter, "stream_chat",
+                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1])
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", **SETTINGS}))
+        assert [m["role"] for m in seen["msgs"]] == ["system", "user"]
+
+    def test_conversational_image_models_get_them_too(self, client, conv, chat, monkeypatch):
+        chat._models_cache.update(at=9e18, data={"text": [], "video": [], "image": [
+            {"id": "i/model", "input_modalities": ["text", "image"], "conversational": True}]})
+        i = client.post("/api/chat/instructions", json={"name": "I", "content": "Watercolour style only."}).json()
+        client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_id": i["id"]})
+        got = {}
+        monkeypatch.setattr(chat.openrouter, "generate_image_chat",
+                            lambda model, messages, **kw: (got.update(messages=messages), ([(_png_bytes(), "image/png")], None))[1])
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                            json={"content": "a fox", "mode": "image", **SETTINGS}))
+        assert got["messages"][0] == {"role": "system", "content": "Watercolour style only."}
+
+    def test_missing_column_is_added_to_older_databases(self, tmp_path):
+        import sqlalchemy as sa
+        path = tmp_path / "old.db"
+        eng = sa.create_engine(f"sqlite:///{path}")
+        with eng.begin() as c:   # a chat_conversations table from before instructions existed
+            c.execute(sa.text("CREATE TABLE chat_conversations (id VARCHAR(50) PRIMARY KEY, title VARCHAR(255), "
+                              "text_model VARCHAR(255), image_model VARCHAR(255), video_model VARCHAR(255), "
+                              "created_at DATETIME, updated_at DATETIME)"))
+        eng.dispose()
+        db = MetadataDB(db_path=path)
+        conv = db.create_conversation(instruction_id=None)
+        assert db.get_conversation(conv.id).instruction_id is None

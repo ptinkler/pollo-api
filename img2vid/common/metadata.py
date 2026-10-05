@@ -162,6 +162,8 @@ class ChatConversation(Base):
     text_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     image_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     video_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Saved custom instructions attached to this chat (ChatInstruction.id)
+    instruction_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
     messages: Mapped[list["ChatMessage"]] = relationship(
@@ -178,6 +180,28 @@ class ChatConversation(Base):
             "text_model": self.text_model,
             "image_model": self.image_model,
             "video_model": self.video_model,
+            "instruction_id": self.instruction_id,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class ChatInstruction(Base):
+    """User-written custom instructions, saved for reuse and attached to chats."""
+    __tablename__ = "chat_instructions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    content: Mapped[str] = mapped_column(Text, default="")
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)   # attached to new chats
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "content": self.content,
+            "is_default": self.is_default,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -280,6 +304,24 @@ class MetadataDB:
             cursor.close()
 
         Base.metadata.create_all(self.engine)
+        self._add_missing_columns()
+
+    # Columns added after a table first existed. create_all() only creates
+    # missing *tables*; Docker runs Alembic on start, but a local dev server
+    # doesn't, so add them here too (same as the Alembic migration).
+    _LATE_COLUMNS = {"chat_conversations": {"instruction_id": "INTEGER"}}
+
+    def _add_missing_columns(self) -> None:
+        from sqlalchemy import inspect, text
+        insp = inspect(self.engine)
+        with self.engine.begin() as conn:
+            for table, columns in self._LATE_COLUMNS.items():
+                if not insp.has_table(table):
+                    continue
+                existing = {c["name"] for c in insp.get_columns(table)}
+                for name, ddl in columns.items():
+                    if name not in existing:
+                        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
 
     @contextmanager
     def _session(self):
@@ -661,6 +703,61 @@ class MetadataDB:
             session.refresh(conv)
             session.expunge(conv)
             return conv
+
+    def list_instructions(self) -> list[ChatInstruction]:
+        with self._session() as session:
+            items = session.query(ChatInstruction).order_by(ChatInstruction.name).all()
+            for i in items:
+                session.expunge(i)
+            return items
+
+    def get_instruction(self, instruction_id: int) -> ChatInstruction | None:
+        with self._session() as session:
+            item = session.get(ChatInstruction, instruction_id)
+            if item:
+                session.expunge(item)
+            return item
+
+    def get_default_instruction(self) -> ChatInstruction | None:
+        with self._session() as session:
+            item = session.query(ChatInstruction).filter(ChatInstruction.is_default.is_(True)).first()
+            if item:
+                session.expunge(item)
+            return item
+
+    def save_instruction(self, instruction_id: int | None = None, **fields) -> ChatInstruction | None:
+        """Create (id None) or update an instruction. Only one can be the default."""
+        with self._session() as session:
+            if instruction_id is None:
+                item = ChatInstruction(**fields)
+                session.add(item)
+            else:
+                item = session.get(ChatInstruction, instruction_id)
+                if not item:
+                    return None
+                for key, value in fields.items():
+                    setattr(item, key, value)
+                item.updated_at = datetime.now()
+            if fields.get("is_default"):
+                session.flush()
+                session.query(ChatInstruction).filter(ChatInstruction.id != item.id)\
+                    .update({ChatInstruction.is_default: False})
+            session.commit()
+            session.refresh(item)
+            session.expunge(item)
+            return item
+
+    def delete_instruction(self, instruction_id: int) -> bool:
+        """Delete an instruction and detach it from any chats using it."""
+        with self._session() as session:
+            item = session.get(ChatInstruction, instruction_id)
+            if not item:
+                return False
+            session.query(ChatConversation).filter(ChatConversation.instruction_id == instruction_id)\
+                .update({ChatConversation.instruction_id: None})
+            session.delete(item)
+            session.commit()
+            return True
 
     def delete_conversation(self, conv_id: str) -> bool:
         with self._session() as session:

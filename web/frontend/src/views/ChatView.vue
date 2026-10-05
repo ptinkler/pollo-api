@@ -5,11 +5,12 @@ import { useAuth } from '../composables/useAuth'
 import ModelPicker from '../components/chat/ModelPicker.vue'
 import ChatMessage from '../components/chat/ChatMessage.vue'
 import ChatLibrary from '../components/chat/ChatLibrary.vue'
+import InstructionsDialog from '../components/chat/InstructionsDialog.vue'
 import {
   fetchChatStatus, fetchChatModels, fetchConversations, fetchConversation,
   createConversation, deleteConversation, renameConversation, fetchChatMessage,
   cancelChatMessage, uploadChatAttachment, chatMediaUrl, sendChatMessage, retryChatMessage,
-  editChatMessage, regenerateChatMedia,
+  editChatMessage, regenerateChatMedia, fetchInstructions, patchConversation,
 } from '../composables/useChat'
 
 const route = useRoute()
@@ -181,6 +182,39 @@ async function loadModels(refresh = false) {
   }
 }
 
+// ── Custom instructions ──────────────────────────────────────────────
+const instructions = ref([])
+const instructionId = ref(null)       // attached to this chat (or the next new one)
+const instructionsOpen = ref(false)
+const defaultInstructionId = () => instructions.value.find(i => i.is_default)?.id ?? null
+const attachedInstruction = computed(() => instructions.value.find(i => i.id === instructionId.value))
+
+async function loadInstructions() {
+  try {
+    instructions.value = (await fetchInstructions()).instructions
+    if (!convId.value) instructionId.value = defaultInstructionId()
+  } catch { /* 401 handled by auth prompt */ }
+}
+
+// Picking from the sidebar: saved on the chat right away (new chats get it on creation)
+async function setInstruction(id) {
+  instructionId.value = id
+  if (!convId.value) return
+  try {
+    const updated = await patchConversation(convId.value, { instruction_id: id })
+    if (conversation.value) conversation.value.instruction_id = updated.instruction_id
+  } catch (e) {
+    showToast(`Couldn't attach instructions: ${e.message}`, 'error')
+  }
+}
+
+async function onInstructionsChanged({ saved, deleted }) {
+  await loadInstructions()
+  if (deleted && instructionId.value === deleted) instructionId.value = null
+  // Saving from the dialog attaches it here if nothing was attached yet
+  if (saved && instructionId.value == null) setInstruction(saved.id)
+}
+
 async function loadConversations() {
   try {
     conversations.value = (await fetchConversations()).conversations
@@ -192,6 +226,7 @@ async function loadConversation(id) {
   if (!id) {
     conversation.value = null
     messages.value = []
+    instructionId.value = defaultInstructionId()
     return
   }
   loadingConv.value = true
@@ -203,6 +238,7 @@ async function loadConversation(id) {
     if (c.text_model) selected.text = c.text_model
     if (c.image_model) selected.image = c.image_model
     if (c.video_model) selected.video = c.video_model
+    instructionId.value = c.instruction_id ?? null
     document.title = `${c.title} — Chat`
     scrollToBottom(true)
     ensurePolling()
@@ -231,6 +267,7 @@ async function ensureConversation() {
     text_model: selected.text || null,
     image_model: selected.image || null,
     video_model: selected.video || null,
+    instruction_id: instructionId.value,   // explicit, so "None" sticks
   })
   conversation.value = conv
   conversations.value = [conv, ...conversations.value]
@@ -594,6 +631,7 @@ onMounted(async () => {
     configured.value = (await fetchChatStatus()).configured
   } catch { /* 401 handled by auth prompt */ }
   loadConversations()
+  loadInstructions()
   loadConversation(convId.value)
   if (configured.value) loadModels()
   else modelsLoading.value = false
@@ -642,6 +680,25 @@ onBeforeUnmount(() => {
             >{{ m.icon }} {{ m.label }}</button>
           </div>
           <p class="mode-hint">{{ MODES.find(m => m.id === mode)?.hint }}</p>
+        </div>
+
+        <div class="side-section">
+          <div class="side-heading">
+            <span>Instructions</span>
+            <button class="mini-btn" title="Create and edit saved instructions" @click="instructionsOpen = true">Manage</button>
+          </div>
+          <select
+            class="instruction-select"
+            :value="instructionId ?? ''"
+            aria-label="Custom instructions for this chat"
+            @change="setInstruction($event.target.value === '' ? null : Number($event.target.value))"
+          >
+            <option value="">None</option>
+            <option v-for="i in instructions" :key="i.id" :value="i.id">{{ i.name }}{{ i.is_default ? ' (default)' : '' }}</option>
+          </select>
+          <p v-if="attachedInstruction && (mode === 'video' || (mode === 'image' && !imageInfo?.conversational))" class="mode-hint">
+            {{ mode === 'video' ? 'Video models' : 'This image model' }} can't take instructions; they apply in Auto and Chat modes.
+          </p>
         </div>
 
         <div v-if="mode === 'auto' || mode === 'text'" class="side-section">
@@ -797,6 +854,14 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </section>
+
+    <InstructionsDialog
+      :open="instructionsOpen"
+      :instructions="instructions"
+      :select-id="instructionId"
+      @close="instructionsOpen = false"
+      @changed="onInstructionsChanged"
+    />
 
     <!-- ── Lightbox ─────────────────────────────────────── -->
     <Teleport to="body">
@@ -957,6 +1022,13 @@ onBeforeUnmount(() => {
   background: rgba(108, 92, 231, 0.2);
   border-color: var(--accent);
   color: var(--text);
+}
+
+.instruction-select {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 0.82rem;
+  border-radius: 8px;
 }
 
 .heading-value {

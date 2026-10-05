@@ -45,9 +45,13 @@ def _headers() -> dict[str, str]:
         raise OpenRouterError("OPENROUTER_API_KEY is not configured", 503)
     return {
         "Authorization": f"Bearer {key}",
-        # Optional attribution headers — shown on openrouter.ai activity pages
-        "HTTP-Referer": os.getenv("OPENROUTER_REFERER", "https://github.com/ptinkler/pollo-api"),
-        "X-Title": "Pollo Chat",
+        # App attribution (https://openrouter.ai/docs/app-attribution). The URL
+        # is deliberately generic — OpenRouter needs one to create the app and
+        # accepts localhost with a title — so the app isn't linkable to anyone.
+        # Visibility only applies when the app is first created.
+        "HTTP-Referer": "http://localhost",
+        "X-OpenRouter-Title": "Pollo Chat",
+        "X-OpenRouter-App-Visibility": "hidden",
     }
 
 

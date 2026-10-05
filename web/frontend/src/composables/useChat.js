@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiDelete } from './useApi'
+import { apiGet, apiPost, apiPut, apiDelete } from './useApi'
 import { useAuth } from './useAuth'
 
 const enc = encodeURIComponent
@@ -16,6 +16,26 @@ export const regenerateChatMedia = (messageId, mediaId, model = null) =>
   apiPost(`/api/chat/messages/${messageId}/media/${enc(mediaId)}/regenerate`, { model })
 export const fetchChatLibrary = () => apiGet('/api/chat/library')
 export const deleteLibraryItem = (mediaId) => apiDelete(`/api/chat/library/${enc(mediaId)}`)
+
+// Custom instructions (saved, attachable per chat)
+export const fetchInstructions = () => apiGet('/api/chat/instructions')
+export const createInstruction = (data) => apiPost('/api/chat/instructions', data)
+export const updateInstruction = (id, data) => apiPut(`/api/chat/instructions/${id}`, data)
+export const deleteInstruction = (id) => apiDelete(`/api/chat/instructions/${id}`)
+
+export async function patchConversation(id, data) {
+  const res = await fetch(`/api/chat/conversations/${enc(id)}`, {
+    method: 'PATCH',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || `API error: ${res.status}`)
+  }
+  return res.json()
+}
 
 export async function renameConversation(id, title) {
   const res = await fetch(`/api/chat/conversations/${enc(id)}`, {
