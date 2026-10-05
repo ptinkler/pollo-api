@@ -352,6 +352,60 @@ MODEL_INFO = {
         "options": ["generate_audio", "seed", "image_tail", "refs"],
         "ref_mode": {"types": ["image", "video", "audio", "file", "link"], "max": 22, "limits": {"image": 10, "video": 5, "audio": 5, "file": 1, "link": 1}, "exclusive": ["file", "link"]},
     },
+    "klingv21v1": {
+        "label": "Kling 2.1", "type": "img2vid",
+        "lengths": [5, 10],
+        "resolutions": ["std", "pro"],   # quality tiers, sent as Kling's "mode"
+        "ratios": ["16:9", "9:16", "1:1"],
+        "options": [],
+        "note": "Image-to-video only — needs a source image.",
+    },
+    "klingv21masterv1": {
+        "label": "Kling 2.1 Master", "type": "img2vid",
+        "lengths": [5, 10],
+        "ratios": ["16:9", "9:16", "1:1"],
+        "options": [],
+    },
+    "klingv25turbov1": {
+        "label": "Kling 2.5 Turbo", "type": "img2vid",
+        "lengths": [5, 10],
+        "resolutions": ["std", "pro"],   # quality tiers, sent as Kling's "mode"
+        "ratios": ["16:9", "9:16", "1:1"],
+        "options": ["image_tail"],
+    },
+    "klingvideoo1v1": {
+        "label": "Kling Video O1", "type": "img2vid",
+        "lengths": [5, 10],
+        "ratios": ["16:9", "9:16", "1:1"],
+        "options": ["image_tail"],
+    },
+    "klingv26v1": {
+        "label": "Kling 2.6", "type": "img2vid",
+        "lengths": [5, 10],
+        "ratios": ["16:9", "9:16", "1:1"],
+        "options": ["generate_audio", "image_tail"],
+    },
+    "klingv3v1": {
+        "label": "Kling 3.0", "type": "img2vid",
+        "lengths": list(range(3, 16)),
+        "resolutions": ["std", "pro", "4K"],   # quality tiers, sent as Kling's "mode"
+        "ratios": ["16:9", "9:16", "1:1"],
+        "options": ["generate_audio", "image_tail"],
+    },
+    "klingv3turbov1": {
+        "label": "Kling 3.0 Turbo", "type": "img2vid",
+        "lengths": list(range(3, 16)),
+        "resolutions": ["720p", "1080p"],
+        "ratios": ["16:9", "9:16", "1:1"],
+        "options": [],
+    },
+    "klingv3omniv1": {
+        "label": "Kling 3.0 Omni", "type": "img2vid",
+        "lengths": list(range(3, 16)),
+        "resolutions": ["std", "pro", "4K"],   # quality tiers, sent as Kling's "mode"
+        "ratios": ["16:9", "9:16", "1:1"],
+        "options": ["generate_audio", "image_tail"],
+    },
     "pollojourneyv1": {
         "label": "Pollo Journey 8.2", "type": "image",
         "ratios": ["1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16"],
@@ -370,6 +424,46 @@ MODEL_INFO = {
                    "21:9", "1:4", "4:1", "8:1", "1:8"],
         "resolutions": ["0.5K", "1K", "2K", "4K"],
         "options": ["images"],
+    },
+    "klingimageo1v1": {
+        "label": "Kling Image O1", "type": "image",
+        "ratios": ["1:1", "3:2", "2:3", "3:4", "4:3", "16:9", "9:16", "21:9"],
+        "resolutions": ["1K", "2K"],
+        "options": ["images"],
+    },
+    "klingv3imagev1": {
+        "label": "Kling 3.0 Image", "type": "image",
+        "ratios": ["1:1", "3:2", "2:3", "3:4", "4:3", "16:9", "9:16", "21:9"],
+        "resolutions": ["1K", "2K"],
+        "options": ["images"],
+    },
+    "klingv3omniimagev1": {
+        "label": "Kling 3.0 Omni Image", "type": "image",
+        "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "21:9", "auto"],
+        "resolutions": ["1K", "2K", "4K"],
+        "options": ["images"],
+    },
+    "qwenimagev1": {
+        "label": "Qwen Image", "type": "image",
+        "ratios": ["1:1", "3:4", "4:3", "16:9", "9:16"],
+        "options": ["images"],
+    },
+    "qwenimage3v1": {
+        "label": "Qwen Image 3", "type": "image",
+        "ratios": ["1:1", "3:4", "4:3", "16:9", "9:16"],
+        "resolutions": ["1K", "2K"],
+        "options": ["images"],
+    },
+    "qwenimage3prov1": {
+        "label": "Qwen Image 3 Pro", "type": "image",
+        "ratios": ["1:1", "3:4", "4:3", "16:9", "9:16"],
+        "resolutions": ["1K", "2K"],
+        "options": ["images"],
+    },
+    "qwenimageflashv1": {
+        "label": "Qwen Image Flash", "type": "image",
+        "ratios": ["1:1", "3:4", "4:3", "16:9", "9:16"],
+        "options": [],
     },
 }
 

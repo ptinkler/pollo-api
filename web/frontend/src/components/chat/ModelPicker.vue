@@ -25,12 +25,31 @@ const current = computed(() => props.models.find(m => m.id === props.modelValue)
 
 const { favourites, isFavourite, toggleFavourite } = useModelFavourites()
 
-const matches = computed(() => {
+// ── Provider tabs: Pollo models ("pollo/…", billed in Pollo credits) vs
+// OpenRouter ones. Only shown when the catalogue has both.
+const PROVIDERS = {
+  pollo: { label: 'Pollo', title: 'Runs on your Pollo account (billed in Pollo credits)' },
+  openrouter: { label: 'OpenRouter', title: 'Runs on OpenRouter (billed in OpenRouter credits)' },
+}
+const providerOf = (id) => (id || '').startsWith('pollo/') ? 'pollo' : 'openrouter'
+const showTabs = computed(() =>
+  props.models.some(m => providerOf(m.id) === 'pollo') && props.models.some(m => providerOf(m.id) === 'openrouter'))
+const tab = ref('pollo')
+
+const searched = computed(() => {
   const q = query.value.trim().toLowerCase()
   return q
     ? props.models.filter(m => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
     : props.models
 })
+const matches = computed(() =>
+  showTabs.value ? searched.value.filter(m => providerOf(m.id) === tab.value) : searched.value)
+const tabCounts = computed(() => {
+  const counts = { pollo: 0, openrouter: 0 }
+  for (const m of searched.value) counts[providerOf(m.id)]++
+  return counts
+})
+const otherTab = computed(() => (tab.value === 'pollo' ? 'openrouter' : 'pollo'))
 
 // Favourites keep the order they were starred in; models that have left
 // the catalogue are skipped rather than shown broken
@@ -60,7 +79,6 @@ function perMillion(price) {
 
 function badges(m) {
   const out = []
-  if (m.id.startsWith('pollo/')) out.push({ t: 'pollo', title: 'Runs on your Pollo account (billed in Pollo credits)' })
   if (props.kind === 'text') {
     if (m.input_modalities?.includes('image')) out.push({ t: 'vision', title: 'Accepts images' })
     if (m.supports_tools) out.push({ t: 'tools', title: 'Can create images/videos in Auto mode' })
@@ -86,6 +104,8 @@ async function toggle() {
   if (open.value) return close()
   open.value = true
   query.value = ''
+  // Open on the tab holding the current pick, so it's in view
+  if (props.modelValue) tab.value = providerOf(props.modelValue)
   document.addEventListener('mousedown', onDocClick)
   await nextTick()
   searchInput.value?.focus()
@@ -117,7 +137,9 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
     <button v-else type="button" class="picker-btn" :class="{ active: open }" @click="toggle" :title="modelValue || 'None selected'">
       <span class="picker-icon">{{ icon }}</span>
       <span class="picker-text">
-        <span class="picker-label">{{ label }}</span>
+        <span class="picker-label">{{ label }}<span
+          v-if="showTabs && modelValue" class="provider-tag" :class="providerOf(modelValue)"
+          :title="PROVIDERS[providerOf(modelValue)].title"> · {{ PROVIDERS[providerOf(modelValue)].label }}</span></span>
         <span class="picker-value">
           <template v-if="loading">Loading…</template>
           <template v-else>{{ current?.name || modelValue || 'None' }}</template>
@@ -134,6 +156,19 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
         :placeholder="`Search ${models.length} ${label.toLowerCase()} models…`"
         @keydown="onKeydown"
       />
+      <div v-if="showTabs" class="picker-tabs" role="tablist">
+        <button
+          v-for="(p, id) in PROVIDERS"
+          :key="id"
+          type="button"
+          role="tab"
+          class="picker-tab"
+          :class="[id, { active: tab === id }]"
+          :aria-selected="tab === id"
+          :title="p.title"
+          @click="tab = id; searchInput?.focus()"
+        >{{ p.label }} <span class="tab-count">{{ tabCounts[id] }}</span></button>
+      </div>
       <div class="picker-list">
         <template v-for="section in sections" :key="section.id">
           <div v-if="section.label" class="picker-section">{{ section.label }}</div>
@@ -175,7 +210,12 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
             <span class="item-id">{{ m.id }}</span>
           </div>
         </template>
-        <div v-if="!filtered.length" class="picker-empty">No models match “{{ query }}”</div>
+        <div v-if="!filtered.length" class="picker-empty">
+          No {{ showTabs ? PROVIDERS[tab].label + ' ' : '' }}models match “{{ query }}”
+          <button v-if="showTabs && tabCounts[otherTab]" type="button" class="tab-hint" @click="tab = otherTab">
+            {{ tabCounts[otherTab] }} match{{ tabCounts[otherTab] === 1 ? '' : 'es' }} in {{ PROVIDERS[otherTab].label }} →
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -272,6 +312,65 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
   border-radius: 0;
   padding: 10px 12px;
   background: var(--surface);
+}
+
+.picker-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.picker-tab {
+  flex: 1;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 6px 8px 8px;
+  color: var(--text2);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.picker-tab:hover {
+  color: var(--text);
+}
+
+.picker-tab.active.pollo {
+  color: var(--accent2);
+  border-bottom-color: var(--accent2);
+}
+
+.picker-tab.active.openrouter {
+  color: var(--text);
+  border-bottom-color: var(--text);
+}
+
+.tab-count {
+  font-weight: 400;
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+
+.provider-tag {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+
+.provider-tag.pollo {
+  color: var(--accent2);
+}
+
+.tab-hint {
+  display: block;
+  margin: 8px auto 0;
+  background: none;
+  border: none;
+  color: var(--accent2);
+  font-size: 0.8rem;
+  cursor: pointer;
 }
 
 .picker-list {

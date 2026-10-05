@@ -43,6 +43,21 @@ from .generators import (
     SeedreamImageGeneratorV1,
     NanoBanana2ImageGeneratorV1,
     PolloImage2ImageGenerator,
+    KlingImageO1ImageGeneratorV1,
+    KlingV3ImageGeneratorV1,
+    KlingV3OmniImageGeneratorV1,
+    QwenImageImageGeneratorV1,
+    QwenImage3ImageGeneratorV1,
+    QwenImage3ProImageGeneratorV1,
+    QwenImageFlashImageGeneratorV1,
+    KlingV21VideoGeneratorV1,
+    KlingV21MasterVideoGeneratorV1,
+    KlingV25TurboVideoGeneratorV1,
+    KlingVideoO1VideoGeneratorV1,
+    KlingV26VideoGeneratorV1,
+    KlingV3VideoGeneratorV1,
+    KlingV3TurboVideoGeneratorV1,
+    KlingV3OmniVideoGeneratorV1,
     SUCCESS_STATUSES,
     ERROR_STATUSES,
 )
@@ -86,6 +101,14 @@ GENERATORS_V1 = {
     "wan27v1": Wan27VideoGeneratorV1,
     "wan30v1": Wan30VideoGeneratorV1,
     "wan30primev1": Wan30PrimeVideoGeneratorV1,
+    "klingv21v1": KlingV21VideoGeneratorV1,
+    "klingv21masterv1": KlingV21MasterVideoGeneratorV1,
+    "klingv25turbov1": KlingV25TurboVideoGeneratorV1,
+    "klingvideoo1v1": KlingVideoO1VideoGeneratorV1,
+    "klingv26v1": KlingV26VideoGeneratorV1,
+    "klingv3v1": KlingV3VideoGeneratorV1,
+    "klingv3turbov1": KlingV3TurboVideoGeneratorV1,
+    "klingv3omniv1": KlingV3OmniVideoGeneratorV1,
 }
 
 GENERATORS = {**GENERATORS_LEGACY, **GENERATORS_V1}
@@ -103,6 +126,13 @@ IMAGE_GENERATORS_V1 = {
     "pollojourneyv1": PolloJourneyImageGeneratorV1,
     "seedreamv1": SeedreamImageGeneratorV1,
     "nanobanana2v1": NanoBanana2ImageGeneratorV1,
+    "klingimageo1v1": KlingImageO1ImageGeneratorV1,
+    "klingv3imagev1": KlingV3ImageGeneratorV1,
+    "klingv3omniimagev1": KlingV3OmniImageGeneratorV1,
+    "qwenimagev1": QwenImageImageGeneratorV1,
+    "qwenimage3v1": QwenImage3ImageGeneratorV1,
+    "qwenimage3prov1": QwenImage3ProImageGeneratorV1,
+    "qwenimageflashv1": QwenImageFlashImageGeneratorV1,
 }
 
 IMAGE_GENERATORS = {**IMAGE_GENERATORS_LEGACY, **IMAGE_GENERATORS_V1}

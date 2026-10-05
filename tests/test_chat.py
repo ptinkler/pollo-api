@@ -1413,3 +1413,22 @@ class TestPolloImageModels:
         chat._poll_video(conv["id"], msg.id, "pv2", "pollo:task-8")
         item = db.get_chat_message(msg.id).media[0]
         assert item["status"] == "error" and item["moderated"] is True and item["error"].startswith("Pollo:")
+
+    def test_kling_and_qwen_models_offered_in_chat(self, chat, monkeypatch, pollo):
+        for fn in ("list_text_models", "list_image_models", "list_video_models"):
+            monkeypatch.setattr(chat.openrouter, fn, lambda: [])
+        data = chat.get_models(refresh=True)
+        images = {m["id"]: m for m in data["image"]}
+        videos = {m["id"]: m for m in data["video"]}
+        assert images["pollo/qwenimage3prov1"]["input_modalities"] == ["text", "image"]
+        assert images["pollo/qwenimageflashv1"]["input_modalities"] == ["text"]   # no reference images
+        assert videos["pollo/klingv3v1"]["resolutions"] == ["std", "pro", "4K"]
+        assert videos["pollo/klingv3v1"]["durations"] == list(range(3, 16))
+
+    def test_image_only_kling_without_an_image_fails_on_the_card(self, client, conv, chat, db, monkeypatch, pollo):
+        import img2vid.pollo.pollo_img2vid as registry
+        monkeypatch.setattr(chat.pollo_chat, "get_video_generator", registry.get_video_generator)   # the real one
+        msg = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
+            "content": "a fox running", "mode": "video", **{**SETTINGS, "video_model": "pollo/klingv21v1"}}))[-1]["message"]
+        item = msg["media"][0]
+        assert item["status"] == "error" and "needs a source image" in item["error"]

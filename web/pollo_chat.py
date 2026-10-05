@@ -79,7 +79,7 @@ def list_image_models() -> list[dict[str, Any]]:
     return [{
         "id": PREFIX + key,
         "name": f"Pollo: {meta.get('label') or key}",
-        "input_modalities": ["text", "image"],   # all take reference images
+        "input_modalities": ["text", "image"] if getattr(cls, "ACCEPTS_IMAGES", True) else ["text"],
         "aspect_ratios": list(cls.VALID_RATIOS) or None,
         "resolutions": list(cls.VALID_RESOLUTIONS) or None,
         "created": None,
@@ -201,8 +201,10 @@ def download_video(job_id: str, dest: Path, index: int = 0) -> None:
 def _submit(generator) -> str:
     try:
         resp = generator.send_request()
-    except ConnectionError as e:
-        raise OpenRouterError(str(e)) from e
+    except (ConnectionError, ValueError) as e:
+        # ValueError: the generator refused the request (e.g. an
+        # image-to-video-only model with no image) — nothing was sent
+        raise OpenRouterError(f"Pollo: {e}") from e
     try:
         body = resp.json()
     except ValueError:

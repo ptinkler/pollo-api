@@ -187,3 +187,54 @@ describe('Media note lines in replies', () => {
     expect(w.find('.markdown').text()).toBe('[Chapter 2] She smiled.')
   })
 })
+
+describe('ModelPicker provider tabs', () => {
+  const MIXED = [
+    { id: 'pollo/seedreamv1', name: 'Pollo: Seedream 5.0' },
+    { id: 'pollo/qwenimage3v1', name: 'Pollo: Qwen Image 3' },
+    { id: 'google/gem-img', name: 'Gemini Image' },
+    { id: 'qwen/qwen-img', name: 'Qwen (OpenRouter)' },
+  ]
+  const tabs = (w) => w.findAll('.picker-tab').map(t => t.text())
+  const modelNames = (w) => names(w).filter(n => n !== 'None')
+
+  beforeEach(() => {
+    const { favourites } = useModelFavourites()
+    favourites.image.splice(0)
+    localStorage.clear()
+  })
+
+  it('has no tabs when every model is from one provider', async () => {
+    const w = await openPicker()
+    expect(tabs(w)).toEqual([])
+    w.unmount()
+  })
+
+  it('splits Pollo from OpenRouter, opening on the selected model\'s tab', async () => {
+    const w = await openPicker({ models: MIXED, modelValue: 'google/gem-img' })
+    expect(tabs(w)).toEqual(['Pollo 2', 'OpenRouter 2'])
+    expect(w.find('.picker-tab.active').text()).toContain('OpenRouter')
+    expect(modelNames(w)).toEqual(['Gemini Image', 'Qwen (OpenRouter)'])
+    await w.findAll('.picker-tab')[0].trigger('click')
+    expect(modelNames(w)).toEqual(['Pollo: Seedream 5.0', 'Pollo: Qwen Image 3'])
+    w.unmount()
+  })
+
+  it('shows the selected provider on the closed picker', () => {
+    const w = mount(ModelPicker, { props: { models: MIXED, label: 'Image', kind: 'image', modelValue: 'pollo/seedreamv1' } })
+    expect(w.find('.picker-label').text()).toBe('Image · Pollo')
+    w.unmount()
+  })
+
+  it('searches within the tab and points to matches in the other one', async () => {
+    const w = await openPicker({ models: MIXED, modelValue: 'pollo/seedreamv1' })
+    expect(tabs(w)).toEqual(['Pollo 2', 'OpenRouter 2'])
+    await w.find('.picker-search').setValue('gemini')
+    expect(modelNames(w)).toEqual([])
+    const hint = w.find('.tab-hint')
+    expect(hint.text()).toContain('1 match in OpenRouter')
+    await hint.trigger('click')
+    expect(modelNames(w)).toEqual(['Gemini Image'])
+    w.unmount()
+  })
+})

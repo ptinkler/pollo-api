@@ -1102,3 +1102,110 @@ class TestBaseV1VideoGeneratorRefBranch:
             assert tuple(ref_mode.get("lengths", ())) == cls.REF_VALID_LENGTHS, key
             assert tuple(ref_mode.get("resolutions", ())) == cls.REF_VALID_RESOLUTIONS, key
             assert ("seed" in ref_mode.get("hide_options", [])) == (cls.HAS_SEED and not cls.REF_HAS_SEED), key
+
+
+# ── Kling & Qwen (v1) — payloads per Pollo's OpenAPI spec ───────────
+
+def _v1(key, **kwargs):
+    from img2vid.pollo.pollo_img2vid import get_image_generator, get_video_generator
+    from img2vid.pollo.pollo_img2vid import IMAGE_GENERATORS
+    make = get_image_generator if key in IMAGE_GENERATORS else get_video_generator
+    kwargs.setdefault("image_url", None)
+    with patch("img2vid.pollo.generators.get_image_path", return_value=None):
+        return make(key, api_key="k", project="p", prompt="a fox", **kwargs)
+
+
+class TestKlingQwenImageGeneratorsV1:
+    @pytest.mark.parametrize("key,slug", [
+        ("klingimageo1v1", "kling-ai/kling-image-o1/image"),
+        ("klingv3imagev1", "kling-ai/kling-v3-image/image"),
+        ("klingv3omniimagev1", "kling-ai/kling-v3-omni/image"),
+        ("qwenimagev1", "qwen/qwen-image/image"),
+        ("qwenimage3v1", "qwen/qwen-image-3/image"),
+        ("qwenimage3prov1", "qwen/qwen-image-3-pro/image"),
+        ("qwenimageflashv1", "alibaba/pre-qwen-image-flash/image"),
+    ])
+    def test_model_url(self, key, slug):
+        assert _v1(key).model_url.endswith("/v1/generation/" + slug)
+
+    def test_reference_images_capped_per_model(self):
+        refs = [f"https://x/{i}.png" for i in range(5)]
+        assert _v1("klingv3imagev1", images=refs).get_payload()["input"]["images"] == refs[:1]
+        assert _v1("qwenimage3v1", images=refs).get_payload()["input"]["images"] == refs[:3]
+        assert _v1("klingimageo1v1", images=refs).get_payload()["input"]["images"] == refs
+
+    def test_qwen_image_follows_the_input_image_ratio(self):
+        edit = _v1("qwenimagev1", images=["https://x/a.png"], aspect_ratio="16:9").get_payload()["input"]
+        assert "aspectRatio" not in edit and "resolution" not in edit
+        assert _v1("qwenimagev1", aspect_ratio="16:9").get_payload()["input"]["aspectRatio"] == "16:9"
+
+    def test_qwen_flash_is_text_only(self):
+        payload = _v1("qwenimageflashv1", images=["https://x/a.png"]).get_payload()["input"]
+        assert payload == {"prompt": "a fox", "aspectRatio": "1:1"}
+
+    def test_omni_image_takes_4k_and_auto(self):
+        payload = _v1("klingv3omniimagev1", resolution="4K", aspect_ratio="auto").get_payload()["input"]
+        assert (payload["resolution"], payload["aspectRatio"]) == ("4K", "auto")
+
+
+class TestKlingVideoGeneratorsV1:
+    IMG = "https://x/frame.png"
+
+    @pytest.mark.parametrize("key,slug", [
+        ("klingv21v1", "kling-v2-1"), ("klingv21masterv1", "kling-v2-1-master"),
+        ("klingv25turbov1", "kling-v2-5-turbo"), ("klingvideoo1v1", "kling-video-o1"),
+        ("klingv26v1", "kling-v2-6"), ("klingv3v1", "kling-v3"),
+        ("klingv3turbov1", "kling-v3-turbo"), ("klingv3omniv1", "kling-v3-omni"),
+    ])
+    def test_model_url(self, key, slug):
+        assert _v1(key).model_url.endswith(f"/v1/generation/kling-ai/{slug}/video")
+
+    def test_quality_tier_is_sent_as_mode_not_resolution(self):
+        payload = _v1("klingv3v1", image_url=self.IMG, resolution="4K", length=12,
+                      generate_audio=False).get_payload()["input"]
+        assert payload == {"prompt": "a fox", "image": self.IMG, "duration": 12, "mode": "4K",
+                           "generateAudio": False}
+
+    def test_no_tier_picked_leaves_pollos_default(self, monkeypatch):
+        monkeypatch.setenv("RESOLUTION", "720p")   # a CLI default that isn't a Kling tier
+        payload = _v1("klingv3omniv1", image_url=self.IMG).get_payload()["input"]
+        assert "mode" not in payload and "resolution" not in payload
+
+    def test_v3_turbo_uses_real_resolutions(self):
+        payload = _v1("klingv3turbov1", resolution="1080p", aspect_ratio="9:16").get_payload()["input"]
+        assert (payload["resolution"], payload["aspectRatio"]) == ("1080p", "9:16")
+        assert "mode" not in payload and "generateAudio" not in payload
+
+    def test_image_branch_has_no_aspect_ratio(self):
+        assert "aspectRatio" not in _v1("klingv26v1", image_url=self.IMG, aspect_ratio="9:16").get_payload()["input"]
+
+    def test_v21_needs_an_image(self):
+        with pytest.raises(ValueError, match="needs a source image"):
+            _v1("klingv21v1").get_payload()
+
+    def test_v25_turbo_mode_only_on_image_branch_and_end_frame_forces_pro(self):
+        assert "mode" not in _v1("klingv25turbov1", resolution="pro").get_payload()["input"]
+        payload = _v1("klingv25turbov1", image_url=self.IMG, resolution="std",
+                      image_tail="https://x/end.png").get_payload()["input"]
+        assert (payload["mode"], payload["imageTail"]) == ("pro", "https://x/end.png")
+
+    def test_v26_end_frame_drops_audio(self):
+        payload = _v1("klingv26v1", image_url=self.IMG, generate_audio=True,
+                      image_tail="https://x/end.png").get_payload()["input"]
+        assert "generateAudio" not in payload and payload["imageTail"] == "https://x/end.png"
+
+    def test_lengths_snap_to_each_models_range(self):
+        assert _v1("klingv3v1", length=3).get_payload()["input"]["duration"] == 3
+        assert _v1("klingv26v1", length=7).get_payload()["input"]["duration"] == 5   # 5/10 only
+
+    def test_model_info_matches_classes(self):
+        from web.api import MODEL_INFO
+        from img2vid.pollo.pollo_img2vid import GENERATORS_V1, IMAGE_GENERATORS_V1
+        for key, cls in {**GENERATORS_V1, **IMAGE_GENERATORS_V1}.items():
+            if not key.startswith(("kling", "qwen")):
+                continue
+            info = MODEL_INFO[key]
+            assert tuple(info["ratios"]) == cls.VALID_RATIOS, key
+            assert tuple(info.get("resolutions", ())) == cls.VALID_RESOLUTIONS, key
+            if key in GENERATORS_V1:
+                assert tuple(info["lengths"]) == cls.VALID_LENGTHS, key

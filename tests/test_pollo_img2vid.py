@@ -16,7 +16,9 @@ class TestGeneratorsMap:
                   "minimaxh3", "wan27", "wan30", "wan30prime"}
         v1 = {"pollo20v1", "pollo25v1", "pollodance20v1", "pollodance20fastv1",
               "seedance20v1", "seedance20fastv1", "seedance20miniv1", "seedance25v1",
-              "minimaxh3v1", "minimaxh3max", "wan27v1", "wan30v1", "wan30primev1"}
+              "minimaxh3v1", "minimaxh3max", "wan27v1", "wan30v1", "wan30primev1",
+              "klingv21v1", "klingv21masterv1", "klingv25turbov1", "klingvideoo1v1",
+              "klingv26v1", "klingv3v1", "klingv3turbov1", "klingv3omniv1"}
         assert set(GENERATORS_LEGACY.keys()) == legacy
         assert set(GENERATORS_V1.keys()) == v1
         assert set(GENERATORS.keys()) == legacy | v1
