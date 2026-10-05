@@ -1192,6 +1192,12 @@ class BaseV1ImageGenerator(BaseVideoGenerator):
     DEFAULT_RATIO_KEYWORD: ClassVar[str] = "square"
     HAS_SEED: ClassVar[bool] = False
     IMAGES_REQUIRED_FOR_IMAGE_TO_IMAGE: ClassVar[bool] = False
+    # Image-to-image limits, per model's spec: whether it takes reference
+    # images at all, how many (0 = no limit known), and whether aspectRatio
+    # is still accepted alongside them (some follow the input image instead)
+    ACCEPTS_IMAGES: ClassVar[bool] = True
+    MAX_IMAGES: ClassVar[int] = 0
+    ASPECT_RATIO_WITH_IMAGES: ClassVar[bool] = True
 
     aspect_ratio: str
     resolution: str | None
@@ -1217,11 +1223,14 @@ class BaseV1ImageGenerator(BaseVideoGenerator):
 
     def get_payload(self) -> dict[str, Any]:
         images = ([self.image_url] if self.image_url else []) + (self.images or [])
+        if not self.ACCEPTS_IMAGES:
+            images = []
+        elif self.MAX_IMAGES:
+            images = images[:self.MAX_IMAGES]
 
-        input_payload: dict[str, Any] = {
-            "prompt": self.prompt,
-            "aspectRatio": self.aspect_ratio,
-        }
+        input_payload: dict[str, Any] = {"prompt": self.prompt}
+        if not images or self.ASPECT_RATIO_WITH_IMAGES:
+            input_payload["aspectRatio"] = self.aspect_ratio
         if images:
             input_payload["images"] = images
         if self.resolution:
@@ -1516,3 +1525,179 @@ class PolloImage2ImageGenerator(BaseVideoGenerator):
 
         self.payload_attrs = input_payload
         return {"input": input_payload}
+
+
+# ── Kling & Qwen image (v1) ─────────────────────────────────────────
+# All confirmed from Pollo's OpenAPI spec (https://docs.pollo.ai/openapi.json,
+# fetched 2026-10-06): each has a Text-To-Image and (except Qwen Image
+# Flash) an Image-To-Image branch on one /image endpoint. negativePrompt
+# (Qwen Image / Flash) is left out.
+
+_KLING_IMAGE_RATIOS = ("1:1", "3:2", "2:3", "3:4", "4:3", "16:9", "9:16", "21:9")
+_QWEN_IMAGE_RATIOS = ("1:1", "3:4", "4:3", "16:9", "9:16")
+
+
+class KlingImageO1ImageGeneratorV1(BaseV1ImageGenerator):
+    """Kling Image O1 (kling-ai/kling-image-o1/image): 1–10 reference images, 1K/2K."""
+    V1_PROVIDER: ClassVar[str] = "kling-ai"
+    V1_MODEL: ClassVar[str] = "kling-image-o1"
+    VALID_RATIOS: ClassVar[tuple] = _KLING_IMAGE_RATIOS
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("1K", "2K")
+    MAX_IMAGES: ClassVar[int] = 10
+
+
+class KlingV3ImageGeneratorV1(BaseV1ImageGenerator):
+    """Kling V3 Image (kling-ai/kling-v3-image/image): a single reference image, 1K/2K."""
+    V1_PROVIDER: ClassVar[str] = "kling-ai"
+    V1_MODEL: ClassVar[str] = "kling-v3-image"
+    VALID_RATIOS: ClassVar[tuple] = _KLING_IMAGE_RATIOS
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("1K", "2K")
+    MAX_IMAGES: ClassVar[int] = 1
+
+
+class KlingV3OmniImageGeneratorV1(BaseV1ImageGenerator):
+    """Kling V3 Omni image (kling-ai/kling-v3-omni/image): 1–10 reference
+    images, 1K/2K/4K, plus an "auto" ratio (server default 16:9)."""
+    V1_PROVIDER: ClassVar[str] = "kling-ai"
+    V1_MODEL: ClassVar[str] = "kling-v3-omni"
+    VALID_RATIOS: ClassVar[tuple] = ("16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "21:9", "auto")
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("1K", "2K", "4K")
+    MAX_IMAGES: ClassVar[int] = 10
+
+
+class QwenImageImageGeneratorV1(BaseV1ImageGenerator):
+    """Qwen Image (qwen/qwen-image/image): one reference image; no resolution.
+    Its Image-To-Image branch has no aspectRatio (the input image sets it)."""
+    V1_PROVIDER: ClassVar[str] = "qwen"
+    V1_MODEL: ClassVar[str] = "qwen-image"
+    VALID_RATIOS: ClassVar[tuple] = _QWEN_IMAGE_RATIOS
+    MAX_IMAGES: ClassVar[int] = 1
+    ASPECT_RATIO_WITH_IMAGES: ClassVar[bool] = False
+
+
+class QwenImage3ImageGeneratorV1(BaseV1ImageGenerator):
+    """Qwen Image 3 (qwen/qwen-image-3/image): 1–3 reference images, 1K/2K."""
+    V1_PROVIDER: ClassVar[str] = "qwen"
+    V1_MODEL: ClassVar[str] = "qwen-image-3"
+    VALID_RATIOS: ClassVar[tuple] = _QWEN_IMAGE_RATIOS
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("1K", "2K")
+    MAX_IMAGES: ClassVar[int] = 3
+
+
+class QwenImage3ProImageGeneratorV1(QwenImage3ImageGeneratorV1):
+    """Qwen Image 3 Pro (qwen/qwen-image-3-pro/image): same schema as Qwen Image 3."""
+    V1_MODEL: ClassVar[str] = "qwen-image-3-pro"
+
+
+class QwenImageFlashImageGeneratorV1(BaseV1ImageGenerator):
+    """Qwen Image Flash (alibaba/pre-qwen-image-flash/image): text-to-image only."""
+    V1_PROVIDER: ClassVar[str] = "alibaba"
+    V1_MODEL: ClassVar[str] = "pre-qwen-image-flash"
+    VALID_RATIOS: ClassVar[tuple] = _QWEN_IMAGE_RATIOS
+    ACCEPTS_IMAGES: ClassVar[bool] = False
+
+
+# ── Kling video (v1) ────────────────────────────────────────────────
+
+class BaseKlingVideoGeneratorV1(BaseV1VideoGenerator):
+    """
+    Kling video — v1 API (kling-ai/<model>/video). Confirmed from Pollo's
+    OpenAPI spec (https://docs.pollo.ai/openapi.json, fetched 2026-10-06).
+
+    Most Kling models have no "resolution" field: quality is a "mode" tier
+    (std/pro, plus 4K on V3/V3 Omni). With RESOLUTION_IS_MODE, the tiers are
+    offered as this model's resolutions (so the existing Resolution menus
+    on the Generate page and in chat can pick them) and the choice is sent
+    as "mode". Every model's Image-To-Video branch takes no aspectRatio (the
+    image sets it); Text-To-Video takes 16:9/9:16/1:1.
+
+    Left out: negativePrompt, V2.1's "strength", and the Reference-To-Video
+    branches of Video O1/V3 Omni (their own resolution/duration rules).
+    """
+    V1_PROVIDER: ClassVar[str] = "kling-ai"
+    VALID_LENGTHS: ClassVar[tuple] = (5, 10)
+    VALID_RATIOS: ClassVar[tuple] = ("16:9", "9:16", "1:1")
+    DEFAULT_RESOLUTION: ClassVar[str] = ""        # leave the tier to Pollo's default
+    RESOLUTION_IS_MODE: ClassVar[bool] = False
+    MODE_ON_TEXT: ClassVar[bool] = True          # V2.5 Turbo's text branch has no mode
+    TEXT_TO_VIDEO: ClassVar[bool] = True         # V2.1 is image-to-video only
+    IMAGE_TAIL_NEEDS_PRO: ClassVar[bool] = False  # V2.5 Turbo: end frame only in pro mode
+    NO_AUDIO_WITH_IMAGE_TAIL: ClassVar[bool] = False  # V2.6: end frame excludes audio
+
+    def get_payload(self) -> dict[str, Any]:
+        if self.is_text_only and not self.TEXT_TO_VIDEO:
+            raise ValueError(f"{self.model_name} needs a source image (it has no text-to-video mode)")
+        payload = super().get_payload()
+        attrs = payload["input"]
+        tier = attrs.pop("resolution", None)
+        if tier in self.VALID_RESOLUTIONS:
+            if not self.RESOLUTION_IS_MODE:
+                attrs["resolution"] = tier
+            elif self.MODE_ON_TEXT or not self.is_text_only:
+                attrs["mode"] = tier
+        if "imageTail" in attrs:
+            if self.IMAGE_TAIL_NEEDS_PRO:
+                attrs["mode"] = "pro"
+            if self.NO_AUDIO_WITH_IMAGE_TAIL:
+                attrs.pop("generateAudio", None)
+        return payload
+
+
+class KlingV21VideoGeneratorV1(BaseKlingVideoGeneratorV1):
+    """Kling V2.1 (kling-v2-1): image-to-video only, std/pro, 5/10s."""
+    V1_MODEL: ClassVar[str] = "kling-v2-1"
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("std", "pro")
+    RESOLUTION_IS_MODE: ClassVar[bool] = True
+    TEXT_TO_VIDEO: ClassVar[bool] = False
+
+
+class KlingV21MasterVideoGeneratorV1(BaseKlingVideoGeneratorV1):
+    """Kling V2.1 Master (kling-v2-1-master): 5/10s, no mode or end frame."""
+    V1_MODEL: ClassVar[str] = "kling-v2-1-master"
+
+
+class KlingV25TurboVideoGeneratorV1(BaseKlingVideoGeneratorV1):
+    """Kling V2.5 Turbo (kling-v2-5-turbo): std/pro on image-to-video only;
+    an end frame requires pro."""
+    V1_MODEL: ClassVar[str] = "kling-v2-5-turbo"
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("std", "pro")
+    RESOLUTION_IS_MODE: ClassVar[bool] = True
+    MODE_ON_TEXT: ClassVar[bool] = False
+    HAS_IMAGE_TAIL: ClassVar[bool] = True
+    IMAGE_TAIL_NEEDS_PRO: ClassVar[bool] = True
+
+
+class KlingVideoO1VideoGeneratorV1(BaseKlingVideoGeneratorV1):
+    """Kling Video O1 (kling-video-o1): 5/10s, end frame; no mode."""
+    V1_MODEL: ClassVar[str] = "kling-video-o1"
+    HAS_IMAGE_TAIL: ClassVar[bool] = True
+
+
+class KlingV26VideoGeneratorV1(BaseKlingVideoGeneratorV1):
+    """Kling V2.6 (kling-v2-6): 5/10s, audio, end frame — not both at once."""
+    V1_MODEL: ClassVar[str] = "kling-v2-6"
+    HAS_IMAGE_TAIL: ClassVar[bool] = True
+    HAS_GENERATE_AUDIO: ClassVar[bool] = True
+    NO_AUDIO_WITH_IMAGE_TAIL: ClassVar[bool] = True
+
+
+class KlingV3VideoGeneratorV1(BaseKlingVideoGeneratorV1):
+    """Kling V3 (kling-v3): 3–15s, std/pro/4K, audio, end frame."""
+    V1_MODEL: ClassVar[str] = "kling-v3"
+    VALID_LENGTHS: ClassVar[tuple] = tuple(range(3, 16))
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("std", "pro", "4K")
+    RESOLUTION_IS_MODE: ClassVar[bool] = True
+    HAS_IMAGE_TAIL: ClassVar[bool] = True
+    HAS_GENERATE_AUDIO: ClassVar[bool] = True
+
+
+class KlingV3TurboVideoGeneratorV1(BaseKlingVideoGeneratorV1):
+    """Kling V3 Turbo (kling-v3-turbo): 3–15s, real 720p/1080p resolutions; no mode/audio/end frame."""
+    V1_MODEL: ClassVar[str] = "kling-v3-turbo"
+    VALID_LENGTHS: ClassVar[tuple] = tuple(range(3, 16))
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("720p", "1080p")
+
+
+class KlingV3OmniVideoGeneratorV1(KlingV3VideoGeneratorV1):
+    """Kling V3 Omni (kling-v3-omni): as V3 (Pollo's default tier is pro, not std)."""
+    V1_MODEL: ClassVar[str] = "kling-v3-omni"
