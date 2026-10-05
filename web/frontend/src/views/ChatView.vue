@@ -2,6 +2,7 @@
 import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount, inject, provide } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
+import { useSessionCredits } from '../composables/useSessionCredits'
 import ModelPicker from '../components/chat/ModelPicker.vue'
 import ChatMessage from '../components/chat/ChatMessage.vue'
 import ChatLibrary from '../components/chat/ChatLibrary.vue'
@@ -10,7 +11,7 @@ import {
   fetchChatStatus, fetchChatModels, fetchConversations, fetchConversation,
   createConversation, deleteConversation, renameConversation, fetchChatMessage,
   cancelChatMessage, uploadChatAttachment, chatMediaUrl, sendChatMessage, retryChatMessage,
-  editChatMessage, switchChatBranch, regenerateChatMedia, fetchInstructions, patchConversation,
+  editChatMessage, switchChatBranch, fetchOpenRouterCredits, regenerateChatMedia, fetchInstructions, patchConversation,
 } from '../composables/useChat'
 
 const route = useRoute()
@@ -53,11 +54,16 @@ const memoryIndex = ref((() => {
   return i === -1 ? MEMORY_STEPS.indexOf(DEFAULT_MEMORY) : i
 })())
 const historyLimit = computed(() => MEMORY_STEPS[memoryIndex.value])
-const options = reactive({ aspect_ratio: '', resolution: '', duration: '', generate_audio: true })
+// Composer settings for generated media, used in every mode (Auto too).
+// '' = let the chat model choose (Auto), else the media model's default.
+const imageOpts = reactive({ aspect_ratio: '', resolution: '', ...prefs.imageOpts })
+const videoOpts = reactive({ aspect_ratio: '', resolution: '', duration: '', generate_audio: true, ...prefs.videoOpts })
 
-watch([() => ({ ...selected }), mode, memoryIndex], () => {
+watch([() => ({ ...selected }), mode, memoryIndex, () => ({ ...imageOpts }), () => ({ ...videoOpts })], () => {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify({ ...selected, mode: mode.value, memory: historyLimit.value }))
+    localStorage.setItem(STORE_KEY, JSON.stringify({
+      ...selected, mode: mode.value, memory: historyLimit.value, imageOpts: { ...imageOpts }, videoOpts: { ...videoOpts },
+    }))
   } catch { /* storage unavailable */ }
 }, { deep: true })
 
@@ -118,15 +124,25 @@ const textInfo = computed(() => models.text.find(m => m.id === selected.text))
 const imageInfo = computed(() => models.image.find(m => m.id === selected.image))
 const videoInfo = computed(() => models.video.find(m => m.id === selected.video))
 
-const ratioOptions = computed(() => {
-  const info = mode.value === 'video' ? videoInfo.value : imageInfo.value
-  return info?.aspect_ratios?.length ? info.aspect_ratios : DEFAULT_RATIOS
-})
-const resolutionOptions = computed(() => {
-  const info = mode.value === 'video' ? videoInfo.value : imageInfo.value
-  return info?.resolutions || []
-})
+const ratiosOf = (info) => (info?.aspect_ratios?.length ? info.aspect_ratios : DEFAULT_RATIOS)
+const imageRatioOptions = computed(() => ratiosOf(imageInfo.value))
+const imageResOptions = computed(() => imageInfo.value?.resolutions || [])
+const videoRatioOptions = computed(() => ratiosOf(videoInfo.value))
+const videoResOptions = computed(() => videoInfo.value?.resolutions || [])
 const durationOptions = computed(() => videoInfo.value?.durations || [])
+const showImageOpts = computed(() => !!selected.image && (mode.value === 'auto' || mode.value === 'image'))
+const showVideoOpts = computed(() => !!selected.video && (mode.value === 'auto' || mode.value === 'video'))
+
+// A newly picked model may not offer the old picks — fall back to auto/default
+function dropUnsupported(opts, ratios, resolutions, durations = null) {
+  if (opts.aspect_ratio && !ratios.includes(opts.aspect_ratio)) opts.aspect_ratio = ''
+  if (opts.resolution && !resolutions.includes(opts.resolution)) opts.resolution = ''
+  if (durations && opts.duration && !durations.includes(Number(opts.duration))) opts.duration = ''
+}
+watch(imageInfo, (info) => { if (info) dropUnsupported(imageOpts, imageRatioOptions.value, imageResOptions.value) })
+watch(videoInfo, (info) => {
+  if (info) dropUnsupported(videoOpts, videoRatioOptions.value, videoResOptions.value, durationOptions.value)
+})
 
 const modeWarning = computed(() => {
   if (mode.value === 'image' && !selected.image) return 'Pick an image model to use Image mode.'
@@ -365,21 +381,24 @@ function onDrop(e) {
 }
 
 // ── Sending ──────────────────────────────────────────────────────────
-function turnSettings() {
+// `turnMode`: rerun an edited/retried message in the mode it was sent in
+function turnSettings(turnMode = null) {
   const body = {
-    mode: mode.value,
+    mode: turnMode || mode.value,
     history_limit: historyLimit.value,
     text_model: selected.text || null,
     image_model: selected.image || null,
     video_model: selected.video || null,
   }
-  if (mode.value === 'image' || mode.value === 'video') {
-    body.options = {
-      aspect_ratio: options.aspect_ratio || null,
-      resolution: options.resolution || null,
-      duration: mode.value === 'video' && options.duration ? Number(options.duration) : null,
-      generate_audio: mode.value === 'video' && videoInfo.value?.generate_audio ? options.generate_audio : null,
-    }
+  body.image_options = {
+    aspect_ratio: imageOpts.aspect_ratio || null,
+    resolution: imageOpts.resolution || null,
+  }
+  body.video_options = {
+    aspect_ratio: videoOpts.aspect_ratio || null,
+    resolution: videoOpts.resolution || null,
+    duration: videoOpts.duration ? Number(videoOpts.duration) : null,
+    generate_audio: videoInfo.value?.generate_audio ? videoOpts.generate_audio : null,
   }
   return body
 }
@@ -454,6 +473,7 @@ async function runTurn(fn, id, body, tempUser) {
     abort = null
     bumpConversation(id)
     ensurePolling()
+    refreshBalances()
   }
 }
 
@@ -486,7 +506,8 @@ async function retry(msg) {
   const i = messages.value.findIndex(m => m.id === msg.id)
   if (i === -1) return
   messages.value = messages.value.slice(0, i)
-  await runTurn(retryChatMessage, convId.value, { ...turnSettings(), message_id: msg.id }, null)
+  // Rerun in the mode the reply was made in, not whatever the composer shows now
+  await runTurn(retryChatMessage, convId.value, { ...turnSettings(msg.mode), message_id: msg.id }, null)
 }
 
 async function editMessage(msg, content) {
@@ -496,7 +517,9 @@ async function editMessage(msg, content) {
   const tempUser = reactive({ ...msg, id: `tmp-${Date.now()}`, content, siblings: [] })
   messages.value = [...messages.value.slice(0, i), tempUser]
   scrollToBottom(true)
-  await runTurn(editChatMessage, convId.value, { ...turnSettings(), message_id: msg.id, content }, tempUser)
+  // An edited Video-mode prompt stays a video even if the composer is back on Auto
+  await runTurn(editChatMessage, convId.value,
+    { ...turnSettings(msg.mode), message_id: msg.id, content }, tempUser)
 }
 
 // Same as an edit with unchanged text: a new branch with a fresh reply
@@ -573,14 +596,32 @@ function hasPending(m) {
 async function pollOnce() {
   const pending = messages.value.filter(hasPending)
   if (!pending.length) return stopPolling()
+  let finished = false
   for (const m of pending) {
     try {
       const fresh = await fetchChatMessage(m.id)
       const i = messages.value.findIndex(x => x.id === m.id)
       if (i !== -1) messages.value.splice(i, 1, fresh)
+      finished ||= !hasPending(fresh)
     } catch { /* retry next tick */ }
   }
+  if (finished) refreshBalances()   // a video/image landed — it was billed
 }
+
+// ── Balances (top of the chat): OpenRouter dollars, Pollo credits ────
+const { creditsRemaining: polloCredits, refreshBalance: refreshPolloBalance } = useSessionCredits()
+const openrouterBalance = ref(null)
+
+async function refreshBalances() {
+  refreshPolloBalance(true)
+  if (!configured.value) return
+  try {
+    openrouterBalance.value = (await fetchOpenRouterCredits()).remaining
+  } catch { /* shown as — */ }
+}
+
+const fmtUsd = (v) => (v == null ? '—' : `$${v.toFixed(2)}`)
+const fmtCredits = (v) => (v == null ? '—' : Math.round(v).toLocaleString())
 
 function ensurePolling() {
   if (pollTimer || !messages.value.some(hasPending)) return
@@ -658,6 +699,7 @@ onMounted(async () => {
   loadConversation(convId.value)
   if (configured.value) loadModels()
   else modelsLoading.value = false
+  refreshBalances()
   textarea.value?.focus()
 })
 
@@ -741,26 +783,43 @@ onBeforeUnmount(() => {
           <p class="mode-hint">{{ memoryHint }} More memory means better continuity but more tokens per reply.</p>
         </div>
 
-        <div v-if="mode === 'image' || mode === 'video'" class="side-section">
-          <div class="side-heading"><span>{{ mode === 'video' ? 'Video' : 'Image' }} options</span></div>
+        <div v-if="showImageOpts" class="side-section">
+          <div class="side-heading"><span>Image options</span></div>
           <div class="opts">
-            <select v-model="options.aspect_ratio" title="Aspect ratio">
+            <select v-model="imageOpts.aspect_ratio" title="Aspect ratio">
               <option value="">Ratio: auto</option>
-              <option v-for="r in ratioOptions" :key="r" :value="r">{{ r }}</option>
+              <option v-for="r in imageRatioOptions" :key="r" :value="r">{{ r }}</option>
             </select>
-            <select v-if="resolutionOptions.length" v-model="options.resolution" title="Resolution">
+            <select v-if="imageResOptions.length" v-model="imageOpts.resolution" title="Resolution">
               <option value="">Res: default</option>
-              <option v-for="r in resolutionOptions" :key="r" :value="r">{{ r }}</option>
+              <option v-for="r in imageResOptions" :key="r" :value="r">{{ r }}</option>
             </select>
-            <select v-if="mode === 'video' && durationOptions.length" v-model="options.duration" title="Duration">
-              <option value="">Length: default</option>
+          </div>
+        </div>
+
+        <div v-if="showVideoOpts" class="side-section">
+          <div class="side-heading"><span>Video options</span></div>
+          <div class="opts">
+            <select v-model="videoOpts.aspect_ratio" title="Aspect ratio (ignored when animating an image — the image sets it)">
+              <option value="">Ratio: auto</option>
+              <option v-for="r in videoRatioOptions" :key="r" :value="r">{{ r }}</option>
+            </select>
+            <select v-if="videoResOptions.length" v-model="videoOpts.resolution" title="Resolution (Kling: quality tier)">
+              <option value="">Res: default</option>
+              <option v-for="r in videoResOptions" :key="r" :value="r">{{ r }}</option>
+            </select>
+            <select v-if="durationOptions.length" v-model="videoOpts.duration" title="Duration">
+              <option value="">Length: {{ mode === 'auto' ? 'auto' : 'default' }}</option>
               <option v-for="d in durationOptions" :key="d" :value="d">{{ d }}s</option>
             </select>
-            <label v-if="mode === 'video' && videoInfo?.generate_audio" class="opt-check">
-              <input type="checkbox" v-model="options.generate_audio" /> Audio
+            <label v-if="videoInfo?.generate_audio" class="opt-check">
+              <input type="checkbox" v-model="videoOpts.generate_audio" /> Audio
             </label>
           </div>
         </div>
+        <p v-if="mode === 'auto' && (showImageOpts || showVideoOpts)" class="mode-hint">
+          In Auto mode these apply whenever the chat model makes an image or video. "auto" lets it choose.
+        </p>
 
         <p v-if="modeWarning" class="side-warn">{{ modeWarning }}</p>
         <p v-if="!configured" class="side-warn">
@@ -807,6 +866,15 @@ onBeforeUnmount(() => {
       @drop.prevent="onDrop"
     >
       <button class="sidebar-toggle" title="Chats & settings" @click="sidebarOpen = !sidebarOpen">☰</button>
+
+      <div class="balances">
+        <span class="balance" title="OpenRouter balance — credits bought minus used (chat text, OpenRouter images/videos)">
+          OpenRouter <b>{{ fmtUsd(openrouterBalance) }}</b>
+        </span>
+        <RouterLink to="/usage" class="balance pollo" title="Pollo credits remaining (Pollo images/videos) — open Usage">
+          Pollo <b>{{ fmtCredits(polloCredits) }}</b>
+        </RouterLink>
+      </div>
 
       <div ref="scroller" class="chat-scroll" @scroll.passive="onScroll">
         <ChatLibrary v-if="isLibrary" @open-media="openMedia" />
@@ -1208,6 +1276,38 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   position: relative;
+}
+
+.balances {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 16px 0;
+}
+
+.balance {
+  font-size: 0.75rem;
+  color: var(--text2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.balance b {
+  color: var(--text);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-weight: 600;
+}
+
+.balance.pollo b {
+  color: var(--accent2);
+}
+
+.balance.pollo:hover {
+  border-color: var(--accent2);
 }
 
 .chat-scroll {

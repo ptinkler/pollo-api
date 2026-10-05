@@ -52,9 +52,29 @@ function elapsed() {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
+// The settings a generated item was made with. For Pollo these are what was
+// actually sent (defaults included); for OpenRouter only what we asked for —
+// the provider fills in the rest without saying.
+function specs(item) {
+  const p = item.params || {}
+  const out = []
+  if (item.kind === 'video') {
+    if (p.first_frame) out.push('from image')
+    if (p.duration) out.push(`${p.duration}s`)
+  }
+  if (p.resolution) out.push(p.resolution)
+  if (p.aspect_ratio) out.push(p.aspect_ratio)
+  if (item.kind === 'video' && p.generate_audio != null) out.push(p.generate_audio ? 'audio' : 'no audio')
+  return out
+}
+
 function url(item) {
   return chatMediaUrl(props.convId, item.file)
 }
+
+// Prompts sent outside Auto mode say so — an edit or retry reruns them in that mode
+const MODE_TAGS = { image: '🖼 Image', video: '🎬 Video', text: '💬 Text only' }
+const modeTag = computed(() => MODE_TAGS[props.message.mode] || '')
 
 // ── Branches: other versions of this turn (from edits/retries) ──
 const siblings = computed(() => props.message.siblings || [])
@@ -145,7 +165,8 @@ function fmtCost(c) {
         </div>
       </div>
       <div v-else-if="isUser && message.content" class="bubble">{{ message.content }}</div>
-      <div v-if="isUser && !editing && (canEdit || message.content || siblings.length > 1)" class="user-actions">
+      <div v-if="isUser && !editing && (canEdit || message.content || siblings.length > 1 || modeTag)" class="user-actions">
+        <span v-if="modeTag" class="mode-tag" :title="`Sent in ${modeTag} mode — editing or retrying reruns it that way`">{{ modeTag }}</span>
         <span v-if="siblings.length > 1" class="branch-nav">
           <button class="meta-btn" :disabled="!canSwitch || branchIndex <= 0" title="Previous version" @click="goBranch(-1)">‹</button>
           <span>{{ branchIndex + 1 }}/{{ siblings.length }}</span>
@@ -195,6 +216,7 @@ function fmtCost(c) {
                 <span v-if="item.kind === 'image'">Creating image…</span>
                 <span v-else>Rendering video… {{ elapsed() }}</span>
               </div>
+              <div v-if="specs(item).length" class="pending-specs">{{ specs(item).join(' · ') }}</div>
               <div v-if="item.prompt" class="pending-prompt" :title="item.prompt">{{ item.prompt }}</div>
             </div>
 
@@ -223,8 +245,9 @@ function fmtCost(c) {
 
             <!-- Which model made this — the footer only names the chat model -->
             <div v-if="item.model || item.prompt" class="media-caption">
-              <span class="caption-text" :title="item.model">
-                {{ item.kind === 'image' ? '🖼' : '🎬' }} {{ shortModel(item.model) }}<template v-if="item.cost"> · {{ fmtCost(item.cost) }}</template><template
+              <span class="caption-text" :title="[item.model, ...specs(item)].join(' · ')">
+                {{ item.kind === 'image' ? '🖼' : '🎬' }} {{ shortModel(item.model) }}<template
+                  v-if="specs(item).length"> · <span class="caption-specs">{{ specs(item).join(' · ') }}</span></template><template v-if="item.cost"> · {{ fmtCost(item.cost) }}</template><template
                   v-if="item.credits"> · <span title="Billed to your Pollo account">{{ item.credits }} credit{{ item.credits === 1 ? '' : 's' }}</span></template><template
                   v-if="item.params?.context"> · <span title="The image model was given the conversation">💬 context</span></template><template
                   v-if="item.params?.refs?.length"> · <span :title="'Based on earlier image(s): ' + item.params.refs.join(', ')">🔗 {{ item.params.refs.length }} ref{{ item.params.refs.length === 1 ? '' : 's' }}</span></template>
@@ -320,6 +343,12 @@ function fmtCost(c) {
   .user-actions > .meta-btn {
     opacity: 1;
   }
+}
+
+.mode-tag {
+  font-size: 0.7rem;
+  color: var(--text2);
+  padding: 0 6px;
 }
 
 .branch-nav {
@@ -653,6 +682,16 @@ function fmtCost(c) {
   align-items: center;
   gap: 8px;
   font-size: 0.85rem;
+}
+
+.pending-specs {
+  position: relative;
+  font-size: 0.75rem;
+  color: var(--accent2);
+}
+
+.caption-specs {
+  color: var(--text);
 }
 
 .pending-prompt {

@@ -91,6 +91,18 @@ class TestConversations:
         monkeypatch.delenv("OPENROUTER_API_KEY")
         assert client.get("/api/chat/status").json() == {"configured": False}
 
+    def test_openrouter_balance(self, client, chat, monkeypatch):
+        monkeypatch.setattr(chat.openrouter, "_get", lambda path, params=None: (
+            {"data": {"total_credits": 60, "total_usage": 52.78926312}} if path == "/credits" else pytest.fail(path)))
+        assert client.get("/api/chat/credits").json() == {
+            "total_credits": 60.0, "total_usage": 52.78926312, "remaining": 7.2107}
+
+    def test_openrouter_balance_error_is_502(self, client, chat, monkeypatch):
+        def boom(path, params=None):
+            raise chat.openrouter.OpenRouterError("nope", 500)
+        monkeypatch.setattr(chat.openrouter, "_get", boom)
+        assert client.get("/api/chat/credits").status_code == 502
+
     def test_send_without_key_is_503(self, client, conv, monkeypatch):
         monkeypatch.delenv("OPENROUTER_API_KEY")
         r = client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", **SETTINGS})
@@ -252,7 +264,7 @@ class TestTurns:
                                                          ([(_png_bytes(), "image/png")] * 2, 0.02))[1])
         ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
                                  json={"content": "a dog", "mode": "image",
-                                       "options": {"aspect_ratio": "1:1", "resolution": "2K"}, **SETTINGS}))
+                                       "image_options": {"aspect_ratio": "1:1", "resolution": "2K"}, **SETTINGS}))
         assert got["prompt"] == "a dog" and got["aspect_ratio"] == "1:1" and got["resolution"] == "2K"
         assert len(ev[-1]["message"]["media"]) == 2
         assert ev[-1]["message"]["model"] == "i/model"
@@ -266,7 +278,7 @@ class TestTurns:
             {"id": "v/model", "durations": [5, 10], "aspect_ratios": ["16:9"], "resolutions": ["720p"]}]})
         ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
                                  json={"content": "waves", "mode": "video",
-                                       "options": {"duration": 7, "aspect_ratio": "1:1"}, **SETTINGS}))
+                                       "video_options": {"duration": 7, "aspect_ratio": "1:1"}, **SETTINGS}))
         item = ev[-1]["message"]["media"][0]
         assert item["status"] == "pending" and item["job_id"] == "gen-vid-1"
         assert item["params"]["duration"] == 5 and item["params"]["aspect_ratio"] is None  # snapped to model
@@ -465,6 +477,17 @@ class TestEditAndLibrary:
         assert [m["content"] for m in old] == ["first", "one", "second", "two"]
         assert old[0]["siblings"] == [first["id"], edited["id"]]
         assert [m["content"] for m in self._messages(client, conv)] == ["first", "one", "second", "two"]
+
+    def test_messages_remember_their_mode(self, client, conv, chat, monkeypatch):
+        """The UI reruns an edit/retry in the message's own mode, so it must be recorded."""
+        monkeypatch.setattr(chat.openrouter, "generate_image",
+                            lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None))
+        ev = self._send(client, conv, "a dog", mode="image")
+        assert ev[0]["user_message"]["mode"] == "image" and ev[-1]["message"]["mode"] == "image"
+        edited = _events(client.post(f"/api/chat/conversations/{conv['id']}/edit", json={
+            "message_id": ev[0]["user_message"]["id"], "content": "a puppy", "mode": "image", **SETTINGS}))
+        assert edited[0]["user_message"]["mode"] == "image"
+        assert [m["mode"] for m in self._messages(client, conv)] == ["image", "image"]
 
     def test_switching_goes_to_the_newest_end_of_a_branch(self, client, conv, chat, monkeypatch):
         replies = iter([_text_chunks("a1"), _text_chunks("a2"), _text_chunks("b1"), _text_chunks("a3")])
@@ -1248,8 +1271,13 @@ class TestPolloImageModels:
 
             def __init__(self, key, **kwargs):
                 calls["generators"].append((key, kwargs))
+                self.payload_attrs = {}
 
             def send_request(self):
+                k = calls["generators"][-1][1]
+                self.payload_attrs = {name: k.get(arg) for name, arg in (
+                    ("aspectRatio", "aspect_ratio"), ("resolution", "resolution"), ("duration", "length"),
+                    ("generateAudio", "generate_audio")) if k.get(arg) is not None}
                 return FakeResponse({"code": "SUCCESS", "data": {"taskId": "task-1", "status": "waiting"}})
 
         monkeypatch.setattr(chat.pollo_chat, "get_image_generator", lambda key, **kw: FakeGenerator(key, **kw))
@@ -1333,7 +1361,7 @@ class TestPolloImageModels:
         pollo["statuses"] = iter([[("cloudflare_blocked", "blocked", None, None)],
                                   [("error", "HTTP 502", None, None)],
                                   [("succeed", None, "https://cdn/x.png", 2)]])
-        images, credits = chat.pollo_chat.generate_image("pollo/nanobanana2v1", "x")
+        images, credits, _sent = chat.pollo_chat.generate_image("pollo/nanobanana2v1", "x")
         assert len(images) == 1 and credits == 2
 
     # ── video ──
@@ -1357,7 +1385,7 @@ class TestPolloImageModels:
                          files={"file": ("a.png", _png_bytes(), "image/png")}).json()["file"]
         msg = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
             "content": "make it move", "attachments": [up], "mode": "video", **self.VIDEO,
-            "options": {"duration": 20, "aspect_ratio": "9:16", "generate_audio": False}}))[-1]["message"]
+            "video_options": {"duration": 20, "aspect_ratio": "9:16", "generate_audio": False}}))[-1]["message"]
         item = msg["media"][0]
         assert item["status"] == "pending" and item["job_id"] == "pollo:task-1"
         key, kwargs = pollo["generators"][0]
@@ -1432,3 +1460,20 @@ class TestPolloImageModels:
             "content": "a fox running", "mode": "video", **{**SETTINGS, "video_model": "pollo/klingv21v1"}}))[-1]["message"]
         item = msg["media"][0]
         assert item["status"] == "error" and "needs a source image" in item["error"]
+
+    def test_auto_mode_uses_composer_video_settings_and_records_what_was_sent(
+            self, client, conv, chat, monkeypatch, pollo):
+        chat._models_cache.update(at=0.0, data={"video": [{"id": "pollo/seedance20fastv1",
+                                                           "durations": list(range(4, 16)),
+                                                           "resolutions": ["480p", "720p"]}]})
+        rounds = iter([_tool_chunks("generate_video", {"prompt": "waves", "duration": 6}, text="Rolling."),
+                       _text_chunks("x")])
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(rounds))
+        msg = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
+            "content": "make a video of waves", "mode": "auto", **self.VIDEO,
+            "video_options": {"resolution": "720p", "aspect_ratio": "16:9"}}))[-1]["message"]
+        kwargs = pollo["generators"][0][1]
+        # composer picks apply in Auto; the chat model's duration fills the gap
+        assert (kwargs["resolution"], kwargs["aspect_ratio"], kwargs["length"]) == ("720p", "16:9", 6)
+        params = msg["media"][0]["params"]
+        assert (params["resolution"], params["aspect_ratio"], params["duration"]) == ("720p", "16:9", 6)

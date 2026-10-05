@@ -30,3 +30,37 @@ describe('ChatMessage "make a video from this image"', () => {
     expect(w.emitted('open-media')[0][0]).toMatchObject({ kind: 'image', file: 'img_a.png' })
   })
 })
+
+describe('ChatMessage media settings', () => {
+  it('shows the settings a video was made with, while rendering and when done', async () => {
+    const params = { duration: 5, resolution: '480p', aspect_ratio: null, first_frame: 'img_a.png', generate_audio: true }
+    const pending = { id: 'v1', kind: 'video', source: 'generated', status: 'pending', prompt: 'waves', params }
+    const w = mount(ChatMessage, { props: { convId: 'c1', message: {
+      id: 4, role: 'assistant', content: '', status: 'done', created_at: new Date().toISOString(), media: [pending] } } })
+    expect(w.find('.pending-specs').text()).toBe('from image · 5s · 480p · audio')
+    await w.setProps({ message: { id: 4, role: 'assistant', content: '', status: 'done',
+      media: [{ ...pending, status: 'done', file: 'vid.mp4' }] } })
+    expect(w.find('.caption-specs').text()).toBe('from image · 5s · 480p · audio')
+  })
+
+  it('shows ratio and resolution for images', () => {
+    const w = mount(ChatMessage, { props: { convId: 'c1', message: { id: 5, role: 'assistant', content: '', status: 'done',
+      media: [{ ...image, model: 'pollo/seedreamv1', params: { aspect_ratio: '16:9', resolution: '2K', refs: [] } }] } } })
+    expect(w.find('.caption-specs').text()).toBe('2K · 16:9')
+  })
+})
+
+describe('ChatMessage mode tag', () => {
+  const user = (mode) => mount(ChatMessage, { props: { convId: 'c1', canEdit: true,
+    message: { id: 6, role: 'user', content: 'waves', status: 'done', mode } } })
+
+  it('marks prompts sent outside Auto mode', () => {
+    expect(user('video').find('.mode-tag').text()).toBe('🎬 Video')
+    expect(user('image').find('.mode-tag').text()).toBe('🖼 Image')
+  })
+
+  it('stays quiet for Auto and older messages', () => {
+    expect(user('auto').find('.mode-tag').exists()).toBe(false)
+    expect(user(null).find('.mode-tag').exists()).toBe(false)
+  })
+})

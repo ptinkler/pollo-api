@@ -238,6 +238,9 @@ class ChatMessage(Base):
     content: Mapped[str] = mapped_column(Text, default="")
     media_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # The composer mode the turn ran in (auto/text/image/video), so an edit or
+    # retry reruns it the same way; None on messages from before it was kept
+    mode: Mapped[str | None] = mapped_column(String(10), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="done")  # 'streaming' | 'done' | 'error'
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     cost: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -262,6 +265,7 @@ class ChatMessage(Base):
             "content": self.content,
             "media": self.media,
             "model": self.model,
+            "mode": self.mode,
             "status": self.status,
             "error": self.error,
             "cost": self.cost,
@@ -331,7 +335,7 @@ class MetadataDB:
     # doesn't, so add them here too (same as the Alembic migration).
     _LATE_COLUMNS = {
         "chat_conversations": {"instruction_id": "INTEGER", "current_leaf_id": "INTEGER"},
-        "chat_messages": {"parent_id": "INTEGER"},
+        "chat_messages": {"parent_id": "INTEGER", "mode": "VARCHAR(10)"},
     }
     # Run once when the column is added: chats from before branching were
     # linear, so each message's parent is the one before it
@@ -814,6 +818,7 @@ class MetadataDB:
         model: str | None = None,
         status: str = "done",
         parent_id: Any = _APPEND,
+        mode: str | None = None,
     ) -> ChatMessage:
         """Add a message and make it the shown branch's last message. By
         default it continues the shown branch; pass `parent_id` (None for a
@@ -829,6 +834,7 @@ class MetadataDB:
                 content=content,
                 media_json=json.dumps(media) if media else None,
                 model=model,
+                mode=mode,
                 status=status,
             )
             session.add(msg)

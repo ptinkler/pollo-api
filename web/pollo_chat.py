@@ -119,8 +119,9 @@ def _upload(path: Path) -> str:
 
 def generate_image(model_id: str, prompt: str, aspect_ratio: str | None = None,
                    resolution: str | None = None,
-                   ref_paths: list[Path] | None = None) -> tuple[list[tuple[bytes, str]], int | None]:
-    """Generate on Pollo and wait for the result. Returns ([(bytes, media type)], credits).
+                   ref_paths: list[Path] | None = None) -> tuple[list[tuple[bytes, str]], int | None, dict]:
+    """Generate on Pollo and wait for the result. Returns ([(bytes, media
+    type)], credits, the settings actually sent — see _sent_params).
     Reference images are uploaded to a temporary public host first (Pollo
     only takes URLs), the same way the Generate page sends local images."""
     generators = _image_generators()
@@ -134,13 +135,16 @@ def generate_image(model_id: str, prompt: str, aspect_ratio: str | None = None,
         aspect_ratio=aspect_ratio, resolution=resolution, images=images or None,
     )
     task = _wait(_submit(generator))
-    return [_download(u) for u in task["urls"]], task["credits"]
+    sent = _sent_params(generator)
+    return [_download(u) for u in task["urls"]], task["credits"], {
+        "aspect_ratio": sent["aspect_ratio"], "resolution": sent["resolution"]}
 
 
 def submit_video(model_id: str, prompt: str, duration: int | None = None, aspect_ratio: str | None = None,
                  resolution: str | None = None, generate_audio: bool | None = None,
                  first_frame: Path | None = None) -> dict:
-    """Start a Pollo video job. Returns {"id": "pollo:<taskId>"}, like openrouter.submit_video.
+    """Start a Pollo video job. Returns {"id": "pollo:<taskId>", "params": the
+    settings actually sent}, shaped like openrouter.submit_video's result.
     A first frame is uploaded to a temporary public host first (Pollo only takes URLs)."""
     key = _generator_key(model_id, GENERATORS_V1)
     ratios = _web_api().MODEL_INFO.get(key, {}).get("ratios") or list(GENERATORS_V1[key].VALID_RATIOS)
@@ -156,7 +160,23 @@ def submit_video(model_id: str, prompt: str, duration: int | None = None, aspect
         image_url=_upload(first_frame) if first_frame else None,
         aspect_ratio=aspect_ratio, resolution=resolution, length=duration, generate_audio=generate_audio,
     )
-    return {"id": JOB_PREFIX + _submit(generator)}
+    task_id = _submit(generator)
+    return {"id": JOB_PREFIX + task_id, "params": _sent_params(generator)}
+
+
+def _sent_params(generator) -> dict[str, Any]:
+    """What the generator actually sent, in chat's param names — so the UI
+    shows the real settings, including defaults the generator filled in. A
+    None means the field wasn't sent (e.g. no aspectRatio when animating an
+    image: the image sets it). Kling's quality tier ("mode") shows as the
+    resolution, the way it's picked."""
+    attrs = generator.payload_attrs or {}
+    return {
+        "aspect_ratio": attrs.get("aspectRatio"),
+        "resolution": attrs.get("resolution") or attrs.get("mode"),
+        "duration": attrs.get("duration") or attrs.get("length"),
+        "generate_audio": attrs.get("generateAudio"),
+    }
 
 
 def _ratio_for_image(path: Path, ratios: list[str]) -> str | None:

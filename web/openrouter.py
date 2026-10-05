@@ -84,6 +84,14 @@ def _get(path: str, params: dict | None = None) -> dict:
     return resp.json()
 
 
+def get_credits() -> dict[str, float]:
+    """The account's balance in dollars: bought, used, and what's left. (Not
+    GET /key, which is only this key's own spending limit.)"""
+    data = _get("/credits").get("data") or {}
+    total, used = float(data.get("total_credits") or 0), float(data.get("total_usage") or 0)
+    return {"total_credits": total, "total_usage": used, "remaining": round(total - used, 4)}
+
+
 # ── Model catalogues ────────────────────────────────────────────────
 
 def list_text_models() -> list[dict[str, Any]]:

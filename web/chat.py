@@ -163,7 +163,10 @@ class TurnSettings(BaseModel):
     text_model: str | None = None
     image_model: str | None = None
     video_model: str | None = None
-    options: TurnOptions = TurnOptions()
+    # The composer's picks, applied in every mode (Auto included). Unset =
+    # the chat model's choice (Auto), else the media model's default.
+    image_options: TurnOptions = TurnOptions()
+    video_options: TurnOptions = TurnOptions()
 
 
 class SendMessage(TurnSettings):
@@ -319,6 +322,16 @@ def _fit_video_params(model_id: str, duration: int | None, aspect_ratio: str | N
 @router.get("/status")
 def api_chat_status():
     return {"configured": openrouter.is_configured()}
+
+
+@router.get("/credits")
+def api_chat_credits():
+    """OpenRouter balance for the chat header (Pollo's is /api/usage/balance)."""
+    _require_openrouter()
+    try:
+        return openrouter.get_credits()
+    except openrouter.OpenRouterError as e:
+        raise HTTPException(502, f"Couldn't fetch the OpenRouter balance: {e}")
 
 
 @router.get("/models")
@@ -526,7 +539,7 @@ def api_send_message(conv_id: str, data: SendMessage):
         media.append({**_new_media("image", "upload"), "status": "done", "file": name})
 
     db = get_db()
-    user_msg = db.add_chat_message(conv_id, "user", content, media=media)
+    user_msg = db.add_chat_message(conv_id, "user", content, media=media, mode=data.mode)
     _remember_models(conv, data)
     return _start_turn(conv_id, data, user_msg, parent_id=user_msg.id)
 
@@ -561,7 +574,8 @@ def api_edit(conv_id: str, data: EditMessage):
     if not content and not msg.media:
         raise HTTPException(400, "Message is empty")
     media = [{**item, "id": uuid.uuid4().hex[:8]} for item in msg.media]
-    user_msg = db.add_chat_message(conv_id, "user", content, media=media, parent_id=msg.parent_id)
+    user_msg = db.add_chat_message(conv_id, "user", content, media=media, parent_id=msg.parent_id,
+                                   mode=data.mode)
     _remember_models(conv, data)
     return _start_turn(conv_id, data, user_msg, parent_id=user_msg.id)
 
@@ -590,7 +604,7 @@ def _sse(event: dict) -> str:
 def _start_turn(conv_id: str, settings: TurnSettings, user_msg, parent_id: int | None) -> StreamingResponse:
     model = {"image": settings.image_model, "video": settings.video_model}.get(settings.mode, settings.text_model)
     assistant = get_db().add_chat_message(conv_id, "assistant", "", model=model, status="streaming",
-                                          parent_id=parent_id)
+                                          parent_id=parent_id, mode=settings.mode)
     start = {"type": "start", "user_message": _message_out(user_msg) if user_msg else None,
              "assistant_message": _message_out(assistant)}
     events: queue.Queue = queue.Queue()
@@ -676,7 +690,7 @@ class Turn:
         if not prompt:
             raise openrouter.OpenRouterError("Image mode needs a text prompt")
         refs = [m["file"] for m in (user.media if user else []) if m["kind"] == "image" and m.get("file")]
-        self._generate_image(prompt, self.s.options.aspect_ratio, refs)
+        self._generate_image(prompt, self.s.image_options.aspect_ratio, refs)
 
     def _direct_video(self) -> None:
         user = self._last_user()
@@ -684,7 +698,7 @@ class Turn:
         frames = [m["file"] for m in (user.media if user else []) if m["kind"] == "image" and m.get("file")]
         if not prompt and not frames:
             raise openrouter.OpenRouterError("Video mode needs a prompt or an image")
-        self._generate_video(prompt, self.s.options.duration, self.s.options.aspect_ratio,
+        self._generate_video(prompt, self.s.video_options.duration, self.s.video_options.aspect_ratio,
                              frames[0] if frames else None)
 
     # ― chat with tools ―
@@ -785,16 +799,17 @@ class Turn:
         source = self._latest_image() if args.get("source_image") == "latest" else None
         if args.get("source_image") == "latest" and not source:
             return {"ok": False, "error": "There is no earlier image in the conversation to use"}
-        # An explicit ratio picked in the composer beats the model's guess.
-        # When animating an image, the image's own shape beats the guess too.
+        # A setting picked in the composer beats the model's guess. When
+        # animating an image, the image's own shape beats the guess too.
+        opts = self.s.video_options if name == "generate_video" else self.s.image_options
         guess = None if name == "generate_video" and source else args.get("aspect_ratio")
-        ratio = self.s.options.aspect_ratio or guess
+        ratio = opts.aspect_ratio or guess
         try:
             if name == "generate_image":
                 self._generate_image(prompt, ratio, self._image_refs(args, source))
                 return {"ok": True, "result": IMAGE_TOOL_RESULT}
             if name == "generate_video":
-                duration = self.s.options.duration or args.get("duration")
+                duration = opts.duration or args.get("duration")
                 self._generate_video(prompt, duration, ratio, source)
                 return {"ok": True, "result": VIDEO_TOOL_RESULT}
         except openrouter.OpenRouterError as e:
@@ -849,7 +864,7 @@ class Turn:
             raise openrouter.OpenRouterError("No image model selected")
         # Params are stored on the item so a failed image can be retried as-is
         params = {"aspect_ratio": aspect_ratio,
-                  "resolution": self.s.options.resolution if self.s.mode == "image" else None,
+                  "resolution": self.s.image_options.resolution,
                   "refs": ref_files}
         context = None
         if _is_conversational(self.s.image_model):
@@ -861,7 +876,7 @@ class Turn:
         item = _new_media("image", "generated", prompt=prompt, model=self.s.image_model, params=params)
         self._add_media(item)
         try:
-            names, cost, credits = _run_image_generation(self.conv_id, self.s.image_model, prompt, params, context)
+            names, cost, credits, sent = _run_image_generation(self.conv_id, self.s.image_model, prompt, params, context)
         except openrouter.OpenRouterError as e:
             self._update_media(item, **_failure_fields(e))
             raise
@@ -869,7 +884,8 @@ class Turn:
             self.cost += float(cost)
         for i, name in enumerate(names):
             if i == 0:
-                self._update_media(item, status="done", file=name, cost=cost, credits=credits)
+                self._update_media(item, status="done", file=name, cost=cost, credits=credits,
+                                   params={**params, **sent})
             else:
                 self._add_media({**_new_media("image", "generated", prompt=prompt, model=self.s.image_model),
                                  "status": "done", "file": name})
@@ -879,9 +895,9 @@ class Turn:
         if not self.s.video_model:
             raise openrouter.OpenRouterError("No video model selected")
         duration, aspect_ratio, resolution = _fit_video_params(
-            self.s.video_model, duration, aspect_ratio, self.s.options.resolution if self.s.mode == "video" else None)
+            self.s.video_model, duration, aspect_ratio, self.s.video_options.resolution)
         params = {"duration": duration, "aspect_ratio": aspect_ratio, "resolution": resolution,
-                  "first_frame": first_frame, "generate_audio": self.s.options.generate_audio}
+                  "first_frame": first_frame, "generate_audio": self.s.video_options.generate_audio}
         item = _new_media("video", "generated", prompt=prompt, model=self.s.video_model, params=params)
         self._add_media(item)
         try:
@@ -889,7 +905,8 @@ class Turn:
         except openrouter.OpenRouterError as e:
             self._update_media(item, **_failure_fields(e))
             raise
-        self._update_media(item, job_id=job["id"])
+        # Pollo reports what it was actually sent, defaults included
+        self._update_media(item, job_id=job["id"], params={**params, **job.get("params", {})})
         start_video_poller(self.conv_id, self.message_id, item["id"], job["id"])
 
     # ― history → OpenRouter messages ―
@@ -1078,15 +1095,17 @@ def _failure_fields(e: openrouter.OpenRouterError) -> dict[str, Any]:
 
 
 def _run_image_generation(conv_id: str, model: str, prompt: str, params: dict[str, Any],
-                          context: list[dict] | None = None) -> tuple[list[str], float | None, int | None]:
-    """Generate and save images; returns (filenames, dollar cost, Pollo credits).
+                          context: list[dict] | None = None
+                          ) -> tuple[list[str], float | None, int | None, dict[str, Any]]:
+    """Generate and save images; returns (filenames, dollar cost, Pollo credits,
+    the params actually sent — Pollo only, defaults included — for display).
     With `context` (conversational models) the model gets the conversation;
     otherwise the Images API — or Pollo — gets the prompt plus any reference images."""
     conv_dir = _conv_dir(conv_id)
     refs = [conv_dir / f for f in params.get("refs") or [] if (conv_dir / f).is_file()]
-    credits = None
+    credits, sent = None, {}
     if pollo_chat.is_pollo(model):
-        images, credits = pollo_chat.generate_image(model, prompt, aspect_ratio=params.get("aspect_ratio"),
+        images, credits, sent = pollo_chat.generate_image(model, prompt, aspect_ratio=params.get("aspect_ratio"),
                                                     resolution=params.get("resolution"), ref_paths=refs)
         cost = None
     elif context is not None:
@@ -1102,7 +1121,7 @@ def _run_image_generation(conv_id: str, model: str, prompt: str, params: dict[st
         name = f"img_{uuid.uuid4().hex[:12]}{IMAGE_EXTS.get(media_type, '.png')}"
         (conv_dir / name).write_bytes(data)
         names.append(name)
-    return names, cost, credits
+    return names, cost, credits, sent
 
 
 def _submit_video_generation(conv_id: str, model: str, prompt: str, params: dict[str, Any]) -> dict:
@@ -1175,9 +1194,9 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
                                          None if direct else item["prompt"], params.get("refs") or [],
                                          _conversation_instructions(conv_id))
             params["context"] = context is not None
-            names, cost, credits = _run_image_generation(conv_id, model, item["prompt"], params, context)
+            names, cost, credits, sent = _run_image_generation(conv_id, model, item["prompt"], params, context)
             db.update_chat_media_item(message_id, media_id, status="done", file=names[0], cost=cost,
-                                      credits=credits, params=params)
+                                      credits=credits, params={**params, **sent})
             for extra in names[1:]:
                 db.append_chat_media_item(message_id, {**_new_media("image", "generated", prompt=item["prompt"],
                                                                     model=model), "status": "done", "file": extra})
@@ -1187,7 +1206,8 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
             params["duration"], params["aspect_ratio"], params["resolution"] = _fit_video_params(
                 model, params.get("duration"), params.get("aspect_ratio"), params.get("resolution"))
             job = _submit_video_generation(conv_id, model, item["prompt"], params)
-            db.update_chat_media_item(message_id, media_id, job_id=job["id"], params=params)
+            db.update_chat_media_item(message_id, media_id, job_id=job["id"],
+                                      params={**params, **job.get("params", {})})
             start_video_poller(conv_id, message_id, media_id, job["id"])
     except openrouter.OpenRouterError as e:
         db.update_chat_media_item(message_id, media_id, **_failure_fields(e))
