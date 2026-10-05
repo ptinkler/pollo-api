@@ -244,6 +244,7 @@ MODEL_INFO = {
         "resolutions": ["1K", "2K", "4K"],   # 2K/4K run in Pollo's "professional" mode
         "options": ["images"],
         "legacy": True,
+        "legacy_only": True,   # its v1 endpoint isn't enabled for API access — offered in both modes
     },
 
     # ── v1 API (current — https://docs.pollo.ai) ─────────────────────
@@ -368,12 +369,6 @@ MODEL_INFO = {
         "ratios": ["1:1", "9:16", "16:9", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5",
                    "21:9", "1:4", "4:1", "8:1", "1:8"],
         "resolutions": ["0.5K", "1K", "2K", "4K"],
-        "options": ["images"],
-    },
-    "polloimage2v1": {
-        "label": "Pollo Image 2.0", "type": "image",
-        "ratios": ["1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16", "4:5", "5:4"],
-        "resolutions": ["1K", "2K", "4K"],   # 2K/4K run in Pollo's "professional" mode
         "options": ["images"],
     },
 }
@@ -2418,8 +2413,11 @@ def api_models(legacy: bool = False):
     v1-API models; `legacy=true` returns the pre-v1 "legacy mode" fallback
     models instead — the two sets are disjoint, not merged, matching the
     frontend's legacy-mode toggle (one list or the other, not both at once).
+    The exception is `legacy_only` models (no working v1 endpoint), which
+    are in both lists.
     """
-    return {name: info for name, info in MODEL_INFO.items() if bool(info.get("legacy")) == legacy}
+    return {name: info for name, info in MODEL_INFO.items()
+            if bool(info.get("legacy")) == legacy or info.get("legacy_only")}
 
 
 # ── Usage / Credit tracking ─────────────────────────────────────────

@@ -2,7 +2,8 @@
 Pollo image and video models for chat mode.
 
 Chat's generate_image / generate_video tools normally run on OpenRouter
-models. This module lets them run on Pollo's v1 models too, reusing the
+models. This module lets them run on Pollo's v1 models too (plus legacy
+models that have no working v1 endpoint), reusing the
 generator classes the Generate page uses. They're listed in the chat's
 catalogues as "pollo/<generator key>" (e.g. "pollo/seedreamv1",
 "pollo/seedance20fastv1") and bill the Pollo account (POLLO_API_KEY).
@@ -24,8 +25,8 @@ from PIL import Image
 
 from img2vid.common.get_task import get_task_status
 from img2vid.pollo.generators import ERROR_STATUSES, SUCCESS_STATUSES, BaseVideoGenerator
-from img2vid.pollo.pollo_img2vid import (GENERATORS_V1, IMAGE_GENERATORS_V1, get_image_generator,
-                                         get_video_generator)
+from img2vid.pollo.pollo_img2vid import (GENERATORS_V1, IMAGE_GENERATORS, IMAGE_GENERATORS_V1,
+                                         get_image_generator, get_video_generator)
 
 from .openrouter import OpenRouterError
 
@@ -56,6 +57,14 @@ def _web_api():
     return api
 
 
+def _image_generators() -> dict:
+    """The v1 image models, plus legacy models with no working v1 endpoint
+    (MODEL_INFO "legacy_only", e.g. Pollo Image 2.0)."""
+    info = _web_api().MODEL_INFO
+    return {**IMAGE_GENERATORS_V1, **{key: cls for key, cls in IMAGE_GENERATORS.items()
+                                      if info.get(key, {}).get("legacy_only")}}
+
+
 def _catalogue(generators: dict) -> list[tuple[str, type, dict]]:
     """(key, class, MODEL_INFO entry) for each model the Generate page doesn't mark deprecated."""
     if not is_configured():
@@ -75,7 +84,7 @@ def list_image_models() -> list[dict[str, Any]]:
         "resolutions": list(cls.VALID_RESOLUTIONS) or None,
         "created": None,
         "conversational": False,
-    } for key, cls, meta in _catalogue(IMAGE_GENERATORS_V1)]
+    } for key, cls, meta in _catalogue(_image_generators())]
 
 
 def list_video_models() -> list[dict[str, Any]]:
@@ -114,8 +123,9 @@ def generate_image(model_id: str, prompt: str, aspect_ratio: str | None = None,
     """Generate on Pollo and wait for the result. Returns ([(bytes, media type)], credits).
     Reference images are uploaded to a temporary public host first (Pollo
     only takes URLs), the same way the Generate page sends local images."""
-    key = _generator_key(model_id, IMAGE_GENERATORS_V1)
-    if aspect_ratio not in IMAGE_GENERATORS_V1[key].VALID_RATIOS:
+    generators = _image_generators()
+    key = _generator_key(model_id, generators)
+    if aspect_ratio not in generators[key].VALID_RATIOS:
         aspect_ratio = None   # the generator falls back to 1:1
     images = [_upload(p) for p in ref_paths or []]
 

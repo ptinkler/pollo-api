@@ -1455,35 +1455,28 @@ class SeedreamImageGeneratorV1(BaseV1ImageGenerator):
     VALID_RESOLUTIONS: ClassVar[tuple] = ("2K", "3K", "4K")
 
 
-class _PolloImage2Mode:
-    """Pollo Image 2.0's "mode" field (fast/standard/professional, default
-    standard), shared by its legacy and v1 classes. Pollo's OpenAPI spec
-    (https://docs.pollo.ai/openapi.json, fetched 2026-10-05) says "Standard
-    and fast modes only support 1K resolution", so asking for 2K/4K switches
-    to professional rather than sending a combination Pollo rejects."""
-    VALID_MODES: ClassVar[tuple] = ("fast", "standard", "professional")
-    HIGH_RES_MODE: ClassVar[str] = "professional"
-
-    def _resolve_mode(self, mode: str | None, resolution: str | None) -> str | None:
-        mode = mode if mode in self.VALID_MODES else None
-        if resolution and resolution != "1K":
-            return self.HIGH_RES_MODE
-        return mode
-
-
-class PolloImage2ImageGenerator(_PolloImage2Mode, BaseVideoGenerator):
+class PolloImage2ImageGenerator(BaseVideoGenerator):
     """
-    Pollo Image 2.0 — legacy API (pollo/pollo-image-v2/image).
+    Pollo Image 2.0 — legacy API only (pollo/pollo-image-v2/image).
 
-    Confirmed from Pollo's OpenAPI spec (fetched 2026-10-05): text-to-image
-    and image-to-image (up to 8 reference URLs in "images"), aspectRatio
-    enum of nine values (default "1:1"), resolution "1K"/"2K"/"4K" (default
-    "1K"), and mode — see _PolloImage2Mode. The legacy schema also lists
-    imageUrl, guidance_scale, max_images, stream and response_format; they're
-    left out (a single reference goes through images[], like Pollo Journey).
+    Pollo's OpenAPI spec (fetched 2026-10-05) also lists a v1 endpoint
+    (pollo-ai/pollo-image-v2/image), but it answers "not enabled for API
+    access" (2026-10-06), so there's no V1 class; MODEL_INFO marks this one
+    legacy_only so it's offered outside legacy mode too.
+
+    From the spec: text-to-image and image-to-image (up to 8 reference URLs
+    in "images"), aspectRatio enum of nine values (default "1:1"),
+    resolution "1K"/"2K"/"4K" (default "1K"), and mode
+    fast/standard/professional (default standard). The spec says "Standard
+    and fast modes only support 1K resolution", so asking for 2K/4K switches
+    to professional rather than sending a combination Pollo rejects. The
+    schema also lists imageUrl, guidance_scale, max_images, stream and
+    response_format; they're left out (a single reference goes through
+    images[], like Pollo Journey).
     """
     VALID_RATIOS: ClassVar[tuple] = ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16", "4:5", "5:4")
     VALID_RESOLUTIONS: ClassVar[tuple] = ("1K", "2K", "4K")
+    VALID_MODES: ClassVar[tuple] = ("fast", "standard", "professional")
 
     aspect_ratio: str
     resolution: str | None
@@ -1498,7 +1491,9 @@ class PolloImage2ImageGenerator(_PolloImage2Mode, BaseVideoGenerator):
         )
         resolution = kwargs.get('resolution') or os.getenv("RESOLUTION")
         self.resolution = resolution if resolution in self.VALID_RESOLUTIONS else None
-        self.mode = self._resolve_mode(kwargs.get('mode') or os.getenv("IMAGE_MODE"), self.resolution)
+        mode = kwargs.get('mode') or os.getenv("IMAGE_MODE")
+        mode = mode if mode in self.VALID_MODES else None
+        self.mode = "professional" if self.resolution and self.resolution != "1K" else mode
         self.images = kwargs.get('images') or None
 
     @property
@@ -1521,31 +1516,3 @@ class PolloImage2ImageGenerator(_PolloImage2Mode, BaseVideoGenerator):
 
         self.payload_attrs = input_payload
         return {"input": input_payload}
-
-
-class PolloImage2ImageGeneratorV1(_PolloImage2Mode, BaseV1ImageGenerator):
-    """
-    Pollo Image 2.0 — v1 API (pollo-ai/pollo-image-v2/image).
-
-    Confirmed from Pollo's OpenAPI spec (fetched 2026-10-05): same fields
-    as the legacy endpoint minus its extras — prompt, images (1–8 URLs),
-    aspectRatio (nine values, default "1:1"), resolution "1K"/"2K"/"4K"
-    (default "1K") and mode (see _PolloImage2Mode). No seed.
-    """
-    V1_PROVIDER: ClassVar[str] = "pollo-ai"
-    V1_MODEL: ClassVar[str] = "pollo-image-v2"
-
-    VALID_RATIOS: ClassVar[tuple] = ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16", "4:5", "5:4")
-    VALID_RESOLUTIONS: ClassVar[tuple] = ("1K", "2K", "4K")
-
-    mode: str | None
-
-    def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.mode = self._resolve_mode(kwargs.get('mode') or os.getenv("IMAGE_MODE"), self.resolution)
-
-    def get_payload(self) -> dict[str, Any]:
-        payload = super().get_payload()
-        if self.mode:
-            payload["input"]["mode"] = self.mode
-        return payload

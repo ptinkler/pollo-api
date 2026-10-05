@@ -117,6 +117,16 @@ class TestMedia:
             chat.api_chat_media(conv_id, name)
         assert e.value.status_code == 400
 
+    def test_an_image_already_in_the_chat_can_be_attached(self, client, conv, chat, db, monkeypatch):
+        """"Make a video from this image" attaches a generated image by name — it becomes the first frame."""
+        (chat._conv_dir(conv["id"]) / "img_old.png").write_bytes(_png_bytes())
+        submitted = {}
+        monkeypatch.setattr(chat.openrouter, "submit_video",
+                            lambda model, prompt, **kw: (submitted.update(kw), {"id": "vid-1"})[1])
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
+            "content": "slow zoom", "attachments": ["img_old.png"], "mode": "video", **SETTINGS}))
+        assert submitted["first_frame"].startswith("data:image/")
+
     def test_unknown_attachment_rejected(self, client, conv):
         r = client.post(f"/api/chat/conversations/{conv['id']}/messages",
                         json={"content": "x", "attachments": ["nope.png"], **SETTINGS})
@@ -1266,7 +1276,9 @@ class TestPolloImageModels:
         models = {m["id"]: m for m in chat.get_models(refresh=True)["image"]}
         assert models["pollo/seedreamv1"]["name"] == "Pollo: Seedream 5.0"
         assert "21:9" in models["pollo/seedreamv1"]["aspect_ratios"]
-        assert models["pollo/polloimage2v1"]["name"] == "Pollo: Pollo Image 2.0"
+        # legacy-only: no working v1 endpoint, so chat offers the legacy one
+        assert models["pollo/polloimage2"]["name"] == "Pollo: Pollo Image 2.0"
+        assert "pollo/polloimage2v1" not in models and "pollo/seedream" not in models
         monkeypatch.delenv("POLLO_API_KEY")
         assert not any(m["id"].startswith("pollo/") for m in chat.get_models(refresh=True)["image"])
 
@@ -1309,6 +1321,13 @@ class TestPolloImageModels:
         client.post(f"/api/chat/messages/{msg['id']}/media/{item['id']}/regenerate", json={})
         fixed = db.get_chat_message(msg["id"]).media[0]
         assert fixed["status"] == "done" and fixed["credits"] == 3
+
+    def test_legacy_only_model_generates_on_its_legacy_key(self, client, conv, chat, monkeypatch, pollo):
+        pollo["statuses"] = iter([[("succeed", None, "https://cdn/x.png", 4)]])
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
+            "content": "a fox", "mode": "image", **{**SETTINGS, "image_model": "pollo/polloimage2"}}))
+        assert pollo["generators"][0][0] == "polloimage2"
 
     def test_polling_survives_transient_errors(self, chat, monkeypatch, pollo):
         pollo["statuses"] = iter([[("cloudflare_blocked", "blocked", None, None)],

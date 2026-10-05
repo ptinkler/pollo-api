@@ -330,6 +330,22 @@ async function addFiles(files) {
   }
 }
 
+// "Make a video from this image": attach an image already in this chat
+// (generated or uploaded — however far up) and switch to Video mode. Being
+// attached to the new message also makes it the latest image, so Auto mode
+// animates it too if the user switches back.
+function animateImage(file) {
+  lightbox.value = null
+  if (!attachments.value.some(a => a.file === file)) {
+    if (attachments.value.length >= 8) return showToast('Up to 8 attachments per message', 'error')
+    attachments.value.push(reactive({
+      key: Math.random().toString(36).slice(2), file, preview: chatMediaUrl(convId.value, file), uploading: false,
+    }))
+  }
+  mode.value = 'video'
+  nextTick(() => textarea.value?.focus())
+}
+
 function removeAttachment(att) {
   URL.revokeObjectURL(att.preview)
   attachments.value = attachments.value.filter(a => a !== att)
@@ -821,6 +837,7 @@ onBeforeUnmount(() => {
             @edit="content => editMessage(m, content)"
             @resend="resendMessage(m)"
             @branch="switchBranch"
+            @animate="animateImage"
             @regenerate="payload => regenerateMedia(m, payload)"
             @stop="stop"
             @open-media="openMedia"
@@ -876,6 +893,7 @@ onBeforeUnmount(() => {
       <div v-if="lightbox" class="lightbox" @click="lightbox = null">
         <img :src="lightbox.url" alt="" @click.stop />
         <p v-if="lightbox.prompt" class="lightbox-caption" @click.stop>{{ lightbox.prompt }}</p>
+        <button v-if="lightbox.file" class="lightbox-animate" @click.stop="animateImage(lightbox.file)">🎬 Make a video from this</button>
       </div>
     </Teleport>
   </div>
@@ -1428,6 +1446,17 @@ onBeforeUnmount(() => {
   object-fit: contain;
   border-radius: 8px;
   cursor: default;
+}
+
+.lightbox-animate {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(145deg, var(--accent), #5a4bd1);
+  color: white;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .lightbox-caption {

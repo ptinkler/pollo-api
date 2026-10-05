@@ -13,7 +13,7 @@ const props = defineProps({
   canEdit: { type: Boolean, default: false },
   canSwitch: { type: Boolean, default: false },   // ‹ › arrows usable (not mid-reply)
 })
-const emit = defineEmits(['retry', 'open-media', 'stop', 'edit', 'resend', 'regenerate', 'branch'])
+const emit = defineEmits(['retry', 'open-media', 'stop', 'edit', 'resend', 'regenerate', 'branch', 'animate'])
 
 // Model catalogues, provided by ChatView, for "Try another model"
 const chatModels = inject('chatModels', { image: [], video: [] })
@@ -119,14 +119,15 @@ function fmtCost(c) {
     <div class="msg-body">
       <!-- User attachments sit above their text, like Gemini -->
       <div v-if="isUser && message.media?.length" class="attachments">
-        <img
-          v-for="item in message.media"
-          :key="item.id"
-          :src="url(item)"
-          class="attachment-thumb"
-          alt="attachment"
-          @click="emit('open-media', { url: url(item), kind: 'image' })"
-        />
+        <div v-for="item in message.media" :key="item.id" class="attachment">
+          <img
+            :src="url(item)"
+            class="attachment-thumb"
+            alt="attachment"
+            @click="emit('open-media', { url: url(item), kind: 'image', file: item.file })"
+          />
+          <button class="animate-btn" title="Make a video from this image" @click="emit('animate', item.file)">🎬</button>
+        </div>
       </div>
 
       <div v-if="isUser && editing" class="edit-box">
@@ -178,10 +179,11 @@ function fmtCost(c) {
                 v-if="item.kind === 'image'"
                 :src="url(item)"
                 :alt="item.prompt || 'generated image'"
-                @click="emit('open-media', { url: url(item), kind: 'image', prompt: item.prompt })"
+                @click="emit('open-media', { url: url(item), kind: 'image', prompt: item.prompt, file: item.file })"
               />
               <video v-else :src="url(item)" controls loop playsinline preload="metadata"></video>
               <div class="media-overlay">
+                <button v-if="item.kind === 'image'" class="media-btn" title="Make a video from this image" @click.stop="emit('animate', item.file)">🎬</button>
                 <a :href="url(item)" :download="item.file" class="media-btn" title="Download" @click.stop>⤓</a>
               </div>
             </template>
@@ -408,6 +410,36 @@ function fmtCost(c) {
   margin-bottom: 6px;
 }
 
+.attachment {
+  position: relative;
+}
+
+.animate-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.65);
+  font-size: 0.85rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.attachment:hover .animate-btn,
+.animate-btn:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .animate-btn {
+    opacity: 1;
+  }
+}
+
 .attachment-thumb {
   width: 120px;
   height: 120px;
@@ -533,7 +565,14 @@ function fmtCost(c) {
   opacity: 1;
 }
 
+.media-overlay {
+  display: flex;
+  gap: 6px;
+}
+
 .media-btn {
+  border: none;
+  cursor: pointer;
   display: grid;
   place-items: center;
   width: 32px;

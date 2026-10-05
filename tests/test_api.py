@@ -122,6 +122,13 @@ class TestModelsEndpoint:
         # v1 models are excluded in legacy mode
         assert "seedance20fastv1" not in data
 
+    @pytest.mark.parametrize("legacy", ["false", "true"])
+    def test_legacy_only_models_are_in_both_lists(self, client, legacy):
+        """Pollo Image 2.0's v1 endpoint isn't enabled, so its legacy one is offered either way."""
+        data = client.get(f"/api/models?legacy={legacy}").json()
+        assert data["polloimage2"]["label"] == "Pollo Image 2.0"
+        assert "polloimage2v1" not in data
+
 
 # ── API: Projects ────────────────────────────────────────────────────
 
