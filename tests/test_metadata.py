@@ -412,3 +412,24 @@ class TestCascadeDelete:
         db.delete_project("casc")
         assert db.get_job("cj1") is None
 
+
+
+@pytest.mark.parametrize("tz", ["UTC", "Europe/London", "America/New_York"])
+def test_timestamps_carry_the_servers_utc_offset(tmp_path, monkeypatch, tz):
+    """Stored timestamps are naive server-local time. Serialised without an
+    offset, a browser in another timezone misreads them (a UTC server and a
+    UTC+1 browser showed a 1:20 render as 61:20)."""
+    import time
+    from datetime import datetime, timezone
+    monkeypatch.setenv("TZ", tz)
+    time.tzset()
+    try:
+        db = MetadataDB(db_path=tmp_path / "m.db")
+        conv = db.create_conversation()
+        stamp = db.add_chat_message(conv.id, "user", "hi").to_dict()["created_at"]
+        parsed = datetime.fromisoformat(stamp)
+        assert parsed.tzinfo is not None
+        assert abs((datetime.now(timezone.utc) - parsed).total_seconds()) < 5
+    finally:
+        monkeypatch.undo()
+        time.tzset()

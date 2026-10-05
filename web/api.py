@@ -41,7 +41,7 @@ from img2vid.pollo.pollo_img2vid import get_video_generator, GENERATORS, get_ima
 from img2vid.pollo.generators import SUCCESS_STATUSES, ERROR_STATUSES
 from img2vid.common.get_task import get_task_status, get_credit_balance
 from img2vid.common.download import download_video, download_image, download_generated_image, get_filename_from_url
-from img2vid.common.metadata import get_db
+from img2vid.common.metadata import get_db, iso
 
 # ── Authentication ───────────────────────────────────────────────────
 from .auth import verify_api_key, is_auth_enabled, get_api_keys
@@ -2630,7 +2630,7 @@ def api_usage_project_details(project_slug: str, days: int = 30, _api_key: str =
             "model": j.model,
             "status": j.status,
             "credits_used": credits,
-            "created_at": j.created_at.isoformat() if j.created_at else None,
+            "created_at": iso(j.created_at),
             "message": j.message,
             "video_path": j.video_path,
             "video_exists": False,

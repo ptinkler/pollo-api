@@ -50,7 +50,7 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from img2vid.common import config
-from img2vid.common.metadata import get_db
+from img2vid.common.metadata import get_db, iso
 
 from . import openrouter, pollo_chat
 from .auth import verify_api_key
@@ -468,10 +468,10 @@ def api_chat_library():
         for item in msg.media:
             if item.get("source") != "upload":
                 items.append({**item, "conversation_id": msg.conversation_id, "message_id": msg.id,
-                              "attached": True, "created_at": msg.created_at.isoformat()})
+                              "attached": True, "created_at": iso(msg.created_at)})
     for lib in db.list_chat_library():
         items.append({**lib.item, "conversation_id": lib.conversation_id, "message_id": None,
-                      "attached": False, "created_at": lib.created_at.isoformat()})
+                      "attached": False, "created_at": iso(lib.created_at)})
     items.sort(key=lambda i: i["created_at"], reverse=True)
     for i in items:
         i["conversation_title"] = titles.get(i["conversation_id"])

@@ -20,6 +20,14 @@ from .config import DB_PATH
 _APPEND = object()
 
 
+def iso(dt: datetime | None) -> str | None:
+    """A stored timestamp as ISO 8601 with its UTC offset. Timestamps are
+    saved as naive server-local time (datetime.now); without an offset the
+    browser reads them as *its* local time, which is wrong whenever the
+    server's timezone differs (e.g. a UTC container and a UTC+1 browser)."""
+    return dt.astimezone().isoformat() if dt else None
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  ORM Models
 # ═══════════════════════════════════════════════════════════════════
@@ -57,8 +65,8 @@ class Project(Base):
             "subject_url": self.subject_url,
             "audio_url": self.audio_url,
             "archived": self.archived,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": iso(self.created_at),
+            "updated_at": iso(self.updated_at),
         }
 
 
@@ -85,7 +93,7 @@ class Download(Base):
             "task_id": self.task_id,
             "model": self.model,
             "prompt": self.prompt,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": iso(self.created_at),
         }
         if self.metadata_json:
             try:
@@ -147,8 +155,8 @@ class Job(Base):
             "job_type": self.job_type,
             "archived": self.archived,
             "credits_used": self.credits_used,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": iso(self.created_at),
+            "updated_at": iso(self.updated_at),
         }
         if self.params_json:
             try:
@@ -188,8 +196,8 @@ class ChatConversation(Base):
             "video_model": self.video_model,
             "instruction_id": self.instruction_id,
             "current_leaf_id": self.current_leaf_id,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": iso(self.created_at),
+            "updated_at": iso(self.updated_at),
         }
 
 
@@ -209,8 +217,8 @@ class ChatInstruction(Base):
             "name": self.name,
             "content": self.content,
             "is_default": self.is_default,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": iso(self.created_at),
+            "updated_at": iso(self.updated_at),
         }
 
 
@@ -257,7 +265,7 @@ class ChatMessage(Base):
             "status": self.status,
             "error": self.error,
             "cost": self.cost,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": iso(self.created_at),
         }
 
 
