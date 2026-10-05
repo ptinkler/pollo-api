@@ -20,9 +20,10 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from PIL import Image
 
 from img2vid.common.get_task import get_task_status
-from img2vid.pollo.generators import ERROR_STATUSES, SUCCESS_STATUSES
+from img2vid.pollo.generators import ERROR_STATUSES, SUCCESS_STATUSES, BaseVideoGenerator
 from img2vid.pollo.pollo_img2vid import (GENERATORS_V1, IMAGE_GENERATORS_V1, get_image_generator,
                                          get_video_generator)
 
@@ -30,6 +31,7 @@ from .openrouter import OpenRouterError
 
 PREFIX = "pollo/"
 JOB_PREFIX = "pollo:"
+FOLLOW_IMAGE_RATIOS = ("adaptive", "auto")   # values meaning "match the input image"
 POLL_INTERVAL = 4
 POLL_TIMEOUT = 10 * 60
 MAX_POLL_ERRORS = 6
@@ -131,12 +133,33 @@ def submit_video(model_id: str, prompt: str, duration: int | None = None, aspect
     """Start a Pollo video job. Returns {"id": "pollo:<taskId>"}, like openrouter.submit_video.
     A first frame is uploaded to a temporary public host first (Pollo only takes URLs)."""
     key = _generator_key(model_id, GENERATORS_V1)
+    ratios = _web_api().MODEL_INFO.get(key, {}).get("ratios") or list(GENERATORS_V1[key].VALID_RATIOS)
+    if aspect_ratio not in ratios:
+        aspect_ratio = None
+    if first_frame and not aspect_ratio:
+        # Some models (Seedance 2.0, Pollo Dance 2.0) take aspectRatio on the
+        # image branch too, and the generator's fallback is 9:16 — so frame
+        # the video like the image instead
+        aspect_ratio = _ratio_for_image(first_frame, ratios)
     generator = get_video_generator(
         key, api_key=os.getenv("POLLO_API_KEY"), project="chat", prompt=prompt,
         image_url=_upload(first_frame) if first_frame else None,
         aspect_ratio=aspect_ratio, resolution=resolution, length=duration, generate_audio=generate_audio,
     )
     return {"id": JOB_PREFIX + _submit(generator)}
+
+
+def _ratio_for_image(path: Path, ratios: list[str]) -> str | None:
+    """The model's "follow the image" ratio if it has one, else its closest ratio to the image's shape."""
+    follow = next((r for r in ratios if r in FOLLOW_IMAGE_RATIOS), None)
+    if follow:
+        return follow
+    numeric = tuple(r for r in ratios if ":" in r)
+    if not numeric:
+        return None
+    with Image.open(path) as img:
+        width, height = img.size
+    return BaseVideoGenerator.get_closest_aspect_ratio(width, height, numeric)
 
 
 def get_video(job_id: str) -> dict:

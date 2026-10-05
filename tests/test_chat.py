@@ -1345,6 +1345,34 @@ class TestPolloImageModels:
         assert key == "seedance20fastv1"
         assert pollo["uploads"] == [up] and kwargs["image_url"] == f"https://tmp.example/{up}"
         assert (kwargs["prompt"], kwargs["length"], kwargs["generate_audio"]) == ("make it move", 15, False)
+        assert kwargs["aspect_ratio"] == "9:16"   # picked in the composer, so it wins over the image's shape
+
+    def _video_from_image(self, client, conv, chat, size, model, **extra):
+        up = client.post(f"/api/chat/conversations/{conv['id']}/attachments",
+                         files={"file": ("a.png", _png_bytes(size), "image/png")}).json()["file"]
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
+            "content": "animate", "attachments": [up], "mode": "video",
+            **{**SETTINGS, "video_model": model}, **extra}))
+
+    def test_first_frame_sets_the_ratio_when_none_is_picked(self, client, conv, chat, monkeypatch, pollo):
+        self._video_from_image(client, conv, chat, (60, 80), "pollo/seedance20fastv1")   # 3:4 photo
+        assert pollo["generators"][0][1]["aspect_ratio"] == "3:4"
+
+    def test_follow_image_ratio_preferred_when_the_model_has_one(self, client, conv, chat, monkeypatch, pollo):
+        self._video_from_image(client, conv, chat, (60, 80), "pollo/pollodance20v1")
+        assert pollo["generators"][0][1]["aspect_ratio"] == "adaptive"
+
+    def test_animating_ignores_the_chat_models_ratio_guess(self, client, conv, chat, db, monkeypatch, pollo):
+        (chat._conv_dir(conv["id"]) / "img_prev.png").write_bytes(_png_bytes((60, 80)))
+        db.add_chat_message(conv["id"], "user", "a cat")
+        db.add_chat_message(conv["id"], "assistant", media=[
+            {"id": "p1", "kind": "image", "source": "generated", "status": "done", "file": "img_prev.png"}])
+        rounds = iter([_tool_chunks("generate_video", {"prompt": "it walks", "aspect_ratio": "9:16",
+                                                       "source_image": "latest"}, text="Rolling."), _text_chunks("x")])
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(rounds))
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                            json={"content": "animate it", "mode": "auto", **self.VIDEO}))
+        assert pollo["generators"][0][1]["aspect_ratio"] == "3:4"
 
     def test_poller_finishes_a_pollo_video(self, chat, db, conv, monkeypatch, pollo):
         monkeypatch.setattr(chat.openrouter, "get_video", lambda *a: pytest.fail("should ask Pollo"))

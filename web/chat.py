@@ -785,8 +785,10 @@ class Turn:
         source = self._latest_image() if args.get("source_image") == "latest" else None
         if args.get("source_image") == "latest" and not source:
             return {"ok": False, "error": "There is no earlier image in the conversation to use"}
-        # An explicit ratio picked in the composer beats the model's guess
-        ratio = self.s.options.aspect_ratio or args.get("aspect_ratio")
+        # An explicit ratio picked in the composer beats the model's guess.
+        # When animating an image, the image's own shape beats the guess too.
+        guess = None if name == "generate_video" and source else args.get("aspect_ratio")
+        ratio = self.s.options.aspect_ratio or guess
         try:
             if name == "generate_image":
                 self._generate_image(prompt, ratio, self._image_refs(args, source))
