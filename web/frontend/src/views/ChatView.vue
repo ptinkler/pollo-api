@@ -10,7 +10,7 @@ import {
   fetchChatStatus, fetchChatModels, fetchConversations, fetchConversation,
   createConversation, deleteConversation, renameConversation, fetchChatMessage,
   cancelChatMessage, uploadChatAttachment, chatMediaUrl, sendChatMessage, retryChatMessage,
-  editChatMessage, regenerateChatMedia, fetchInstructions, patchConversation,
+  editChatMessage, switchChatBranch, regenerateChatMedia, fetchInstructions, patchConversation,
 } from '../composables/useChat'
 
 const route = useRoute()
@@ -428,9 +428,9 @@ async function runTurn(fn, id, body, tempUser) {
     // is recovered by polling in `finally`, so there's nothing to report
     if (e.name !== 'AbortError' && !started) {
       showToast(e.message, 'error')
-      if (tempUser) messages.value = messages.value.filter(m => m !== tempUser)
-      // Edit/retry trim history optimistically — resync with the server
-      else loadConversation(id)
+      // Edit/retry (they name a message_id) swap the branch optimistically — resync with the server
+      if (body.message_id != null) loadConversation(id)
+      else if (tempUser) messages.value = messages.value.filter(m => m !== tempUser)
     }
   } finally {
     sending.value = false
@@ -463,9 +463,13 @@ async function send() {
   await runTurn(sendChatMessage, id, { ...turnSettings(), content, attachments: files.map(a => a.file) }, tempUser)
 }
 
+// Retry/edit add a new branch beside the message; the old one stays
+// reachable with the ‹ 1/2 › arrows. Show the new branch right away.
 async function retry(msg) {
   if (sending.value) return
-  messages.value = messages.value.filter(m => m.id !== msg.id)
+  const i = messages.value.findIndex(m => m.id === msg.id)
+  if (i === -1) return
+  messages.value = messages.value.slice(0, i)
   await runTurn(retryChatMessage, convId.value, { ...turnSettings(), message_id: msg.id }, null)
 }
 
@@ -473,24 +477,27 @@ async function editMessage(msg, content) {
   if (sending.value) return
   const i = messages.value.findIndex(m => m.id === msg.id)
   if (i === -1) return
-  // Mirror the server: this prompt stays (with new text), everything after goes
-  messages.value = messages.value.slice(0, i + 1)
-  messages.value[i] = { ...msg, content }
+  const tempUser = reactive({ ...msg, id: `tmp-${Date.now()}`, content, siblings: [] })
+  messages.value = [...messages.value.slice(0, i), tempUser]
   scrollToBottom(true)
-  await runTurn(editChatMessage, convId.value, { ...turnSettings(), message_id: msg.id, content }, null)
+  await runTurn(editChatMessage, convId.value, { ...turnSettings(), message_id: msg.id, content }, tempUser)
 }
 
-// Same as an edit with unchanged text: drop everything after the prompt
-// (media goes to the Library) and generate a fresh reply
+// Same as an edit with unchanged text: a new branch with a fresh reply
 async function resendMessage(msg) {
-  const later = laterCount(msg)
-  if (later > 1 && !confirm(`Retry this prompt? The ${later} messages after it will be replaced. Generated images/videos stay in the Library.`)) return
   await editMessage(msg, msg.content || '')
 }
 
-function laterCount(m) {
-  const i = messages.value.findIndex(x => x.id === m.id)
-  return i === -1 ? 0 : messages.value.length - i - 1
+async function switchBranch(messageId) {
+  if (sending.value) return
+  try {
+    const data = await switchChatBranch(convId.value, messageId)
+    conversation.value = data.conversation
+    messages.value = data.messages
+    ensurePolling()
+  } catch (e) {
+    showToast(e.message, 'error')
+  }
 }
 
 function openLibrary() {
@@ -809,10 +816,11 @@ onBeforeUnmount(() => {
             :conv-id="convId || ''"
             :can-retry="m.id === lastAssistantId && !sending"
             :can-edit="m.role === 'user' && typeof m.id === 'number' && !sending"
-            :later-count="m.role === 'user' ? laterCount(m) : 0"
+            :can-switch="!sending"
             @retry="retry(m)"
             @edit="content => editMessage(m, content)"
             @resend="resendMessage(m)"
+            @branch="switchBranch"
             @regenerate="payload => regenerateMedia(m, payload)"
             @stop="stop"
             @open-media="openMedia"

@@ -10,11 +10,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 import json
-from sqlalchemy import create_engine, event, String, Integer, Float, Text, Boolean, DateTime, ForeignKey
+from sqlalchemy import create_engine, event, func, String, Integer, Float, Text, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session, relationship
 from sqlalchemy.pool import StaticPool
 
 from .config import DB_PATH
+
+# add_chat_message's default parent: continue the branch being shown
+_APPEND = object()
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -164,6 +167,9 @@ class ChatConversation(Base):
     video_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Saved custom instructions attached to this chat (ChatInstruction.id)
     instruction_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The last message of the branch being shown (messages form a tree: an
+    # edit or retry adds a sibling instead of deleting what came after)
+    current_leaf_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
     messages: Mapped[list["ChatMessage"]] = relationship(
@@ -181,6 +187,7 @@ class ChatConversation(Base):
             "image_model": self.image_model,
             "video_model": self.video_model,
             "instruction_id": self.instruction_id,
+            "current_leaf_id": self.current_leaf_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -209,12 +216,16 @@ class ChatInstruction(Base):
 
 class ChatMessage(Base):
     """One chat turn. `media_json` is a list of media items (images/videos,
-    uploaded or generated) — see web/chat.py for the item shape."""
+    uploaded or generated) — see web/chat.py for the item shape.
+
+    Messages form a tree through `parent_id` (None = first message of a
+    branch); siblings are alternative versions of the same turn."""
     __tablename__ = "chat_messages"
     id: Mapped[int] = mapped_column(primary_key=True)
     conversation_id: Mapped[str] = mapped_column(
         String(50), ForeignKey("chat_conversations.id", ondelete="CASCADE"), index=True,
     )
+    parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     role: Mapped[str] = mapped_column(String(20))  # 'user' | 'assistant'
     content: Mapped[str] = mapped_column(Text, default="")
     media_json: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -238,6 +249,7 @@ class ChatMessage(Base):
         return {
             "id": self.id,
             "conversation_id": self.conversation_id,
+            "parent_id": self.parent_id,
             "role": self.role,
             "content": self.content,
             "media": self.media,
@@ -309,19 +321,36 @@ class MetadataDB:
     # Columns added after a table first existed. create_all() only creates
     # missing *tables*; Docker runs Alembic on start, but a local dev server
     # doesn't, so add them here too (same as the Alembic migration).
-    _LATE_COLUMNS = {"chat_conversations": {"instruction_id": "INTEGER"}}
+    _LATE_COLUMNS = {
+        "chat_conversations": {"instruction_id": "INTEGER", "current_leaf_id": "INTEGER"},
+        "chat_messages": {"parent_id": "INTEGER"},
+    }
+    # Run once when the column is added: chats from before branching were
+    # linear, so each message's parent is the one before it
+    _BACKFILLS = {
+        "parent_id": "UPDATE chat_messages SET parent_id = (SELECT MAX(p.id) FROM chat_messages p "
+                     "WHERE p.conversation_id = chat_messages.conversation_id AND p.id < chat_messages.id)",
+        "current_leaf_id": "UPDATE chat_conversations SET current_leaf_id = (SELECT MAX(m.id) "
+                           "FROM chat_messages m WHERE m.conversation_id = chat_conversations.id)",
+    }
 
     def _add_missing_columns(self) -> None:
         from sqlalchemy import inspect, text
+        # Read the schema first: the inspector shares the one StaticPool
+        # connection and rolls back after each query, which would undo the
+        # backfill UPDATEs if it ran between them
         insp = inspect(self.engine)
+        existing = {t: {c["name"] for c in insp.get_columns(t)}
+                    for t in self._LATE_COLUMNS if insp.has_table(t)}
         with self.engine.begin() as conn:
             for table, columns in self._LATE_COLUMNS.items():
-                if not insp.has_table(table):
+                if table not in existing:
                     continue
-                existing = {c["name"] for c in insp.get_columns(table)}
                 for name, ddl in columns.items():
-                    if name not in existing:
+                    if name not in existing[table]:
                         conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
+                        if name in self._BACKFILLS:
+                            conn.execute(text(self._BACKFILLS[name]))
 
     @contextmanager
     def _session(self):
@@ -776,10 +805,18 @@ class MetadataDB:
         media: list[dict[str, Any]] | None = None,
         model: str | None = None,
         status: str = "done",
+        parent_id: Any = _APPEND,
     ) -> ChatMessage:
+        """Add a message and make it the shown branch's last message. By
+        default it continues the shown branch; pass `parent_id` (None for a
+        first message) to start a new branch beside an existing message."""
         with self._session() as session:
+            conv = session.get(ChatConversation, conversation_id)
+            if parent_id is _APPEND:
+                parent_id = self._chat_leaf_id(session, conv) if conv else None
             msg = ChatMessage(
                 conversation_id=conversation_id,
+                parent_id=parent_id,
                 role=role,
                 content=content,
                 media_json=json.dumps(media) if media else None,
@@ -787,13 +824,42 @@ class MetadataDB:
                 status=status,
             )
             session.add(msg)
-            conv = session.get(ChatConversation, conversation_id)
+            session.flush()
             if conv:
                 conv.updated_at = datetime.now()
+                conv.current_leaf_id = msg.id
             session.commit()
             session.refresh(msg)
             session.expunge(msg)
             return msg
+
+    @staticmethod
+    def _chat_leaf_id(session: Session, conv: ChatConversation) -> int | None:
+        """The shown branch's last message, falling back to the newest one."""
+        if conv.current_leaf_id and session.get(ChatMessage, conv.current_leaf_id):
+            return conv.current_leaf_id
+        return session.query(func.max(ChatMessage.id))\
+            .filter(ChatMessage.conversation_id == conv.id).scalar()
+
+    def get_chat_leaf_id(self, conversation_id: str) -> int | None:
+        with self._session() as session:
+            conv = session.get(ChatConversation, conversation_id)
+            return self._chat_leaf_id(session, conv) if conv else None
+
+    def set_chat_leaf(self, conversation_id: str, leaf_id: int) -> None:
+        """Show another branch. Not an edit, so the chat keeps its place in the list."""
+        with self._session() as session:
+            session.query(ChatConversation).filter(ChatConversation.id == conversation_id).update(
+                {ChatConversation.current_leaf_id: leaf_id, ChatConversation.updated_at: ChatConversation.updated_at})
+            session.commit()
+
+    def get_chat_sibling_ids(self, conversation_id: str, parent_id: int | None) -> list[int]:
+        """Ids of every version of a turn (messages sharing a parent), oldest first."""
+        with self._session() as session:
+            rows = session.query(ChatMessage.id).filter(
+                ChatMessage.conversation_id == conversation_id, ChatMessage.parent_id == parent_id,
+            ).order_by(ChatMessage.id).all()
+            return [r[0] for r in rows]
 
     def update_chat_message(self, message_id: int, media: list[dict[str, Any]] | None = None, **fields) -> ChatMessage | None:
         with self._session() as session:
@@ -884,8 +950,9 @@ class MetadataDB:
             return msgs
 
     def truncate_chat(self, conversation_id: str, after_id: int) -> list[dict[str, Any]]:
-        """Delete every message with id > after_id (used by edit/retry),
-        moving their generated media into the library first. Uploaded
+        """Delete every message with id > after_id, moving their generated
+        media into the library first. (Edit/retry used this before chats had
+        branches; library items from then remain.) Uploaded
         attachments are the user's own inputs and aren't kept.
 
         Returns the detached media items.

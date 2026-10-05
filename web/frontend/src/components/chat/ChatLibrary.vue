@@ -80,7 +80,7 @@ const fmtDate = (iso) => new Date(iso).toLocaleDateString(undefined, { day: 'num
         >{{ f.label }} <span class="count">{{ counts[f.id] }}</span></button>
       </div>
     </div>
-    <p class="lib-sub">Every image and video from your chats. Media from edited or retried replies stays here as <em>unattached</em>.</p>
+    <p class="lib-sub">Every image and video from your chats. Media from replies replaced before chats had branches stays here as <em>unattached</em>.</p>
 
     <div v-if="loading" class="lib-empty"><div class="spinner"></div></div>
     <div v-else-if="!shown.length" class="lib-empty">

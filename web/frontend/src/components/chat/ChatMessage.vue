@@ -11,9 +11,9 @@ const props = defineProps({
   convId: { type: String, required: true },
   canRetry: { type: Boolean, default: false },
   canEdit: { type: Boolean, default: false },
-  laterCount: { type: Number, default: 0 },   // messages an edit would remove
+  canSwitch: { type: Boolean, default: false },   // ‹ › arrows usable (not mid-reply)
 })
-const emit = defineEmits(['retry', 'open-media', 'stop', 'edit', 'resend', 'regenerate'])
+const emit = defineEmits(['retry', 'open-media', 'stop', 'edit', 'resend', 'regenerate', 'branch'])
 
 // Model catalogues, provided by ChatView, for "Try another model"
 const chatModels = inject('chatModels', { image: [], video: [] })
@@ -54,6 +54,14 @@ function elapsed() {
 
 function url(item) {
   return chatMediaUrl(props.convId, item.file)
+}
+
+// ── Branches: other versions of this turn (from edits/retries) ──
+const siblings = computed(() => props.message.siblings || [])
+const branchIndex = computed(() => siblings.value.indexOf(props.message.id))
+function goBranch(step) {
+  const id = siblings.value[branchIndex.value + step]
+  if (id != null) emit('branch', id)
 }
 
 // ── Inline edit (user messages) ──
@@ -130,16 +138,18 @@ function fmtCost(c) {
           @keydown="onEditKeydown"
         ></textarea>
         <div class="edit-actions">
-          <span v-if="laterCount" class="edit-note">
-            Resends this prompt and replaces the {{ laterCount }} message{{ laterCount === 1 ? '' : 's' }} after it.
-            Generated images/videos stay in the Library.
-          </span>
+          <span class="edit-note">Sends as a new branch — the original stays available with the ‹ › arrows.</span>
           <button class="meta-btn" @click="editing = false">Cancel</button>
           <button class="edit-send" :disabled="!editText.trim() && !message.media?.length" @click="submitEdit">Send</button>
         </div>
       </div>
       <div v-else-if="isUser && message.content" class="bubble">{{ message.content }}</div>
-      <div v-if="isUser && !editing && (canEdit || message.content)" class="user-actions">
+      <div v-if="isUser && !editing && (canEdit || message.content || siblings.length > 1)" class="user-actions">
+        <span v-if="siblings.length > 1" class="branch-nav">
+          <button class="meta-btn" :disabled="!canSwitch || branchIndex <= 0" title="Previous version" @click="goBranch(-1)">‹</button>
+          <span>{{ branchIndex + 1 }}/{{ siblings.length }}</span>
+          <button class="meta-btn" :disabled="!canSwitch || branchIndex >= siblings.length - 1" title="Next version" @click="goBranch(1)">›</button>
+        </span>
         <button v-if="message.content" class="meta-btn" title="Copy prompt" @click="copy(message.content, 'prompt')">
           {{ copiedKey === 'prompt' ? '✓ Copied' : '⧉ Copy' }}
         </button>
@@ -229,6 +239,11 @@ function fmtCost(c) {
         <div v-if="message.status === 'error' && message.error && !errorShownOnMedia" class="msg-error">⚠ {{ message.error }}</div>
 
         <div class="msg-meta">
+          <span v-if="siblings.length > 1" class="branch-nav">
+            <button class="meta-btn" :disabled="!canSwitch || branchIndex <= 0" title="Previous version" @click="goBranch(-1)">‹</button>
+            <span>{{ branchIndex + 1 }}/{{ siblings.length }}</span>
+            <button class="meta-btn" :disabled="!canSwitch || branchIndex >= siblings.length - 1" title="Next version" @click="goBranch(1)">›</button>
+          </span>
           <button v-if="streaming" class="meta-btn" @click="emit('stop')">■ Stop</button>
           <template v-else>
             <button v-if="displayText" class="meta-btn" @click="copy(displayText, 'reply')">{{ copiedKey === 'reply' ? '✓ Copied' : '⧉ Copy' }}</button>
@@ -282,21 +297,46 @@ function fmtCost(c) {
 
 .user-actions {
   display: flex;
+  align-items: center;
   gap: 2px;
-  opacity: 0;
-  transition: opacity 0.15s;
   margin-top: 2px;
 }
 
-.msg-user:hover .user-actions,
-.user-actions:focus-within {
+/* Action buttons fade in on hover; the branch arrows always show */
+.user-actions > .meta-btn {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.msg-user:hover .user-actions > .meta-btn,
+.user-actions:focus-within > .meta-btn {
   opacity: 1;
 }
 
 @media (hover: none) {
-  .user-actions {
+  .user-actions > .meta-btn {
     opacity: 1;
   }
+}
+
+.branch-nav {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+}
+
+.branch-nav .meta-btn {
+  padding: 3px 6px;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.branch-nav .meta-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  background: none;
 }
 
 .edit-box {

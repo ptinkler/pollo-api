@@ -12,6 +12,9 @@ export const createConversation = (data = {}) => apiPost('/api/chat/conversation
 export const deleteConversation = (id) => apiDelete(`/api/chat/conversations/${enc(id)}`)
 export const fetchChatMessage = (id) => apiGet(`/api/chat/messages/${id}`)
 export const cancelChatMessage = (id) => apiPost(`/api/chat/messages/${id}/cancel`)
+// Show the branch through this message (edits/retries are kept as sibling branches)
+export const switchChatBranch = (convId, messageId) =>
+  apiPost(`/api/chat/conversations/${enc(convId)}/branch`, { message_id: messageId })
 export const regenerateChatMedia = (messageId, mediaId, model = null) =>
   apiPost(`/api/chat/messages/${messageId}/media/${enc(mediaId)}/regenerate`, { model })
 export const fetchChatLibrary = () => apiGet('/api/chat/library')

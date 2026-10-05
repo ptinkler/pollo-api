@@ -58,6 +58,7 @@ describe('ChatView New chat button', () => {
       ok: true, status: 200,
       json: async () => (String(url).includes('/models') ? { text: [], image: [], video: [], errors: {} }
         : String(url).includes('/library') ? { items: [] }
+        : String(url).includes('/instructions') ? { instructions: [] }
         : String(url).includes('/conversations') ? { conversations: [] }
         : { configured: true }),
     }))

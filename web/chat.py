@@ -17,6 +17,11 @@ Media item shape (stored in ChatMessage.media_json, sent to the frontend):
       "prompt", "model", "job_id", "error", "cost": optional
     }
 
+Messages form a tree (ChatMessage.parent_id): editing a prompt or retrying
+a reply adds a sibling — a new branch — rather than deleting what came after,
+and the conversation remembers which branch is shown (current_leaf_id).
+Only the shown branch is sent to the models.
+
 Turns run in a worker thread that owns all persistence; the SSE response
 just relays its events. Closing the tab therefore doesn't lose the reply,
 and videos keep polling in their own threads until they land on disk.
@@ -171,6 +176,10 @@ class EditMessage(TurnSettings):
     content: str
 
 
+class SwitchBranch(BaseModel):
+    message_id: int                    # show the branch this message is on (its newest version)
+
+
 # ── Paths & media helpers ───────────────────────────────────────────
 
 def _chat_root() -> Path:
@@ -216,6 +225,32 @@ def _require_conv(conv_id: str):
     if not conv:
         raise HTTPException(404, "Conversation not found")
     return conv
+
+
+def _branch_to(messages: list, leaf_id: int | None) -> list:
+    """The branch ending at `leaf_id`, first message first."""
+    by_id = {m.id: m for m in messages}
+    path = []
+    msg = by_id.get(leaf_id)
+    while msg:
+        path.append(msg)
+        msg = by_id.get(msg.parent_id)
+    return path[::-1]
+
+
+def _message_out(msg) -> dict:
+    """A message for the UI, with its siblings for the ‹ 1/2 › branch arrows."""
+    return {**msg.to_dict(), "siblings": get_db().get_chat_sibling_ids(msg.conversation_id, msg.parent_id)}
+
+
+def _shown_branch(conv_id: str) -> list[dict]:
+    db = get_db()
+    messages = db.get_chat_messages(conv_id)
+    siblings: dict[int | None, list[int]] = {}
+    for m in messages:
+        siblings.setdefault(m.parent_id, []).append(m.id)
+    return [{**m.to_dict(), "siblings": siblings[m.parent_id]}
+            for m in _branch_to(messages, db.get_chat_leaf_id(conv_id))]
 
 
 def _require_openrouter():
@@ -346,8 +381,26 @@ def api_delete_instruction(instruction_id: int):
 @router.get("/conversations/{conv_id}")
 def api_get_conversation(conv_id: str):
     conv = _require_conv(conv_id)
-    return {"conversation": conv.to_dict(),
-            "messages": [m.to_dict() for m in get_db().get_chat_messages(conv_id)]}
+    return {"conversation": conv.to_dict(), "messages": _shown_branch(conv_id)}
+
+
+@router.post("/conversations/{conv_id}/branch")
+def api_switch_branch(conv_id: str, data: SwitchBranch):
+    """Show the branch through `message_id`, down to its newest message."""
+    _require_conv(conv_id)
+    _require_idle(conv_id)
+    db = get_db()
+    messages = db.get_chat_messages(conv_id)
+    if not any(m.id == data.message_id for m in messages):
+        raise HTTPException(400, "Message not in this conversation")
+    # Children are always newer than their parent, so the newest message
+    # under this one is the end of its most recent branch
+    below = {data.message_id}
+    for m in messages:
+        if m.parent_id in below:
+            below.add(m.id)
+    db.set_chat_leaf(conv_id, max(below))
+    return api_get_conversation(conv_id)
 
 
 @router.patch("/conversations/{conv_id}")
@@ -400,7 +453,8 @@ def api_chat_media(conv_id: str, filename: str):
 @router.get("/library")
 def api_chat_library():
     """Every generated image/video across chats, newest first. `attached`
-    items are still in their chat; the rest were detached by an edit/retry."""
+    items are still in their chat (on some branch); the rest were detached
+    by edits/retries made before chats had branches."""
     db = get_db()
     titles = {c.id: c.title for c in db.list_conversations(limit=100000)}
     items = []
@@ -437,7 +491,7 @@ def api_get_message(message_id: int):
     msg = get_db().get_chat_message(message_id)
     if not msg:
         raise HTTPException(404, "Message not found")
-    return msg.to_dict()
+    return _message_out(msg)
 
 
 @router.post("/messages/{message_id}/cancel")
@@ -468,28 +522,28 @@ def api_send_message(conv_id: str, data: SendMessage):
     db = get_db()
     user_msg = db.add_chat_message(conv_id, "user", content, media=media)
     _remember_models(conv, data)
-    return _start_turn(conv_id, data, user_msg.to_dict())
+    return _start_turn(conv_id, data, user_msg, parent_id=user_msg.id)
 
 
 @router.post("/conversations/{conv_id}/retry")
 def api_retry(conv_id: str, data: RetryMessage):
-    """Drop an assistant reply (and anything after it) and generate it again.
-    Generated media from the dropped messages moves to the library."""
+    """Generate another version of an assistant reply, as a new branch
+    beside it. The old reply and everything after it stay on their branch."""
     _require_openrouter()
     conv = _require_conv(conv_id)
     _require_idle(conv_id)
     msg = get_db().get_chat_message(data.message_id)
     if not msg or msg.conversation_id != conv_id or msg.role != "assistant":
         raise HTTPException(400, "Can only retry an assistant message in this conversation")
-    get_db().truncate_chat(conv_id, after_id=data.message_id - 1)
     _remember_models(conv, data)
-    return _start_turn(conv_id, data, None)
+    return _start_turn(conv_id, data, None, parent_id=msg.parent_id)
 
 
 @router.post("/conversations/{conv_id}/edit")
 def api_edit(conv_id: str, data: EditMessage):
-    """Rewrite a user message and resend it. Every later message is removed
-    (its generated media moves to the library) and a fresh reply streams."""
+    """Resend a user message with new text, as a new branch beside it (same
+    attachments), and stream a fresh reply. The original prompt and
+    everything after it stay on their branch."""
     _require_openrouter()
     conv = _require_conv(conv_id)
     _require_idle(conv_id)
@@ -500,10 +554,10 @@ def api_edit(conv_id: str, data: EditMessage):
     content = data.content.strip()
     if not content and not msg.media:
         raise HTTPException(400, "Message is empty")
-    db.truncate_chat(conv_id, after_id=msg.id)
-    user_msg = db.update_chat_message(msg.id, content=content)
+    media = [{**item, "id": uuid.uuid4().hex[:8]} for item in msg.media]
+    user_msg = db.add_chat_message(conv_id, "user", content, media=media, parent_id=msg.parent_id)
     _remember_models(conv, data)
-    return _start_turn(conv_id, data, user_msg.to_dict())
+    return _start_turn(conv_id, data, user_msg, parent_id=user_msg.id)
 
 
 def _require_idle(conv_id: str) -> None:
@@ -527,9 +581,12 @@ def _sse(event: dict) -> str:
     return f"data: {json.dumps(event)}\n\n"
 
 
-def _start_turn(conv_id: str, settings: TurnSettings, user_msg: dict | None) -> StreamingResponse:
+def _start_turn(conv_id: str, settings: TurnSettings, user_msg, parent_id: int | None) -> StreamingResponse:
     model = {"image": settings.image_model, "video": settings.video_model}.get(settings.mode, settings.text_model)
-    assistant = get_db().add_chat_message(conv_id, "assistant", "", model=model, status="streaming")
+    assistant = get_db().add_chat_message(conv_id, "assistant", "", model=model, status="streaming",
+                                          parent_id=parent_id)
+    start = {"type": "start", "user_message": _message_out(user_msg) if user_msg else None,
+             "assistant_message": _message_out(assistant)}
     events: queue.Queue = queue.Queue()
     cancel = threading.Event()
     _cancel_events[assistant.id] = cancel
@@ -544,7 +601,7 @@ def _start_turn(conv_id: str, settings: TurnSettings, user_msg: dict | None) -> 
     threading.Thread(target=worker, daemon=True, name=f"chat-turn-{assistant.id}").start()
 
     def stream() -> Iterator[str]:
-        yield _sse({"type": "start", "user_message": user_msg, "assistant_message": assistant.to_dict()})
+        yield _sse(start)
         while True:
             try:
                 ev = events.get(timeout=15)
@@ -571,7 +628,8 @@ class Turn:
         self.emit = emit
         self.cancel = cancel
         self.db = get_db()
-        self.history = [m for m in self.db.get_chat_messages(conv_id) if m.id != message_id]
+        # Only this reply's own branch — other versions of earlier turns aren't context
+        self.history = _branch_to(self.db.get_chat_messages(conv_id), message_id)[:-1]
         self.instructions = _conversation_instructions(conv_id)
         self.content = ""
         self.cost = 0.0
@@ -600,7 +658,7 @@ class Turn:
         if error:
             self.emit({"type": "error", "message": error})
         self._maybe_title()
-        self.emit({"type": "done", "message": msg.to_dict() if msg else None})
+        self.emit({"type": "done", "message": _message_out(msg) if msg else None})
 
     # ― explicit modes ―
     def _last_user(self):
@@ -1080,7 +1138,7 @@ def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia):
                                     moderated=False, model=model, job_id=None)
     threading.Thread(target=_regenerate_worker, args=(msg.conversation_id, message_id, dict(item), model),
                      daemon=True, name=f"chat-regen-{media_id}").start()
-    return msg.to_dict()
+    return _message_out(msg)
 
 
 def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) -> None:
@@ -1092,7 +1150,7 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
             context = None
             if _is_conversational(model):
                 msg = db.get_chat_message(message_id)
-                history = [m for m in db.get_chat_messages(conv_id) if m.id < message_id]
+                history = _branch_to(db.get_chat_messages(conv_id), message_id)[:-1]
                 direct = params.get("direct", False)
                 context = _image_context(conv_id, history, params.get("history_limit"), msg.content if msg else "",
                                          None if direct else item["prompt"], params.get("refs") or [],
@@ -1133,7 +1191,7 @@ def _poll_video(conv_id: str, message_id: int, media_id: str, job_id: str) -> No
     while time.time() < deadline:
         time.sleep(VIDEO_POLL_INTERVAL)
         if not db.find_chat_media_item(message_id, media_id):
-            return  # conversation deleted (edit/retry moves the item to the library, which we still update)
+            return  # conversation deleted (items detached to the library are still updated)
         try:
             job = openrouter.get_video(job_id)
             errors = 0

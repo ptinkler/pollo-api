@@ -430,7 +430,10 @@ class TestEditAndLibrary:
     def _messages(self, client, conv):
         return client.get(f"/api/chat/conversations/{conv['id']}").json()["messages"]
 
-    def test_edit_replaces_reply_and_drops_later_turns(self, client, conv, chat, monkeypatch):
+    def _switch(self, client, conv, message_id):
+        return client.post(f"/api/chat/conversations/{conv['id']}/branch", json={"message_id": message_id})
+
+    def test_edit_starts_a_branch_and_keeps_the_old_one(self, client, conv, chat, monkeypatch):
         replies = iter([_text_chunks("one"), _text_chunks("two"), _text_chunks("edited reply")])
         seen = []
         monkeypatch.setattr(chat.openrouter, "stream_chat",
@@ -440,14 +443,55 @@ class TestEditAndLibrary:
 
         ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/edit",
                                  json={"message_id": first["id"], "content": "first, but better", **SETTINGS}))
-        assert ev[0]["user_message"]["id"] == first["id"]
-        assert ev[0]["user_message"]["content"] == "first, but better"
+        edited = ev[0]["user_message"]
+        assert edited["id"] != first["id"] and edited["content"] == "first, but better"
+        assert edited["siblings"] == [first["id"], edited["id"]]
         assert [(m["role"], m["content"]) for m in self._messages(client, conv)] == [
             ("user", "first, but better"), ("assistant", "edited reply")]
-        # the model only saw the edited prompt, not the dropped turns
+        # the model only saw the edited prompt, not the other branch
         assert [m["role"] for m in seen[-1]] == ["system", "user"]
 
-    def test_edit_moves_generated_media_to_library(self, client, conv, chat, monkeypatch):
+        old = self._switch(client, conv, first["id"]).json()["messages"]
+        assert [m["content"] for m in old] == ["first", "one", "second", "two"]
+        assert old[0]["siblings"] == [first["id"], edited["id"]]
+        assert [m["content"] for m in self._messages(client, conv)] == ["first", "one", "second", "two"]
+
+    def test_switching_goes_to_the_newest_end_of_a_branch(self, client, conv, chat, monkeypatch):
+        replies = iter([_text_chunks("a1"), _text_chunks("a2"), _text_chunks("b1"), _text_chunks("a3")])
+        seen = []
+        monkeypatch.setattr(chat.openrouter, "stream_chat",
+                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.append(msgs), next(replies))[1])
+        first = self._send(client, conv, "q1")[0]["user_message"]
+        self._send(client, conv, "q2")
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/edit",
+                            json={"message_id": first["id"], "content": "other q1", **SETTINGS}))
+        self._switch(client, conv, first["id"])
+        # A new message continues the branch being shown
+        self._send(client, conv, "q3")
+        assert [m["content"] for m in self._messages(client, conv)] == ["q1", "a1", "q2", "a2", "q3", "a3"]
+        sent = [p["text"] for m in seen[-1] if m["role"] == "user" for p in m["content"]]
+        assert sent == ["q1", "q2", "q3"]
+
+    def test_switch_rejects_message_from_another_chat(self, client, conv, db):
+        other = client.post("/api/chat/conversations", json={}).json()
+        msg = db.add_chat_message(other["id"], "user", "hi")
+        assert self._switch(client, conv, msg.id).status_code == 400
+
+    def test_switch_rejected_while_streaming(self, client, conv, db):
+        user = db.add_chat_message(conv["id"], "user", "hi")
+        db.add_chat_message(conv["id"], "assistant", status="streaming")
+        assert self._switch(client, conv, user.id).status_code == 409
+
+    def test_edit_keeps_attachments(self, client, conv, chat, monkeypatch):
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
+        up = client.post(f"/api/chat/conversations/{conv['id']}/attachments",
+                         files={"file": ("a.png", _png_bytes(), "image/png")}).json()["file"]
+        first = self._send(client, conv, "what is this", attachments=[up])[0]["user_message"]
+        edited = _events(client.post(f"/api/chat/conversations/{conv['id']}/edit",
+                                     json={"message_id": first["id"], "content": "describe it", **SETTINGS}))[0]
+        assert [i["file"] for i in edited["user_message"]["media"]] == [up]
+
+    def test_edit_keeps_generated_media_on_the_old_branch(self, client, conv, chat, monkeypatch):
         rounds = iter([_tool_chunks("generate_image", {"prompt": "a cat"}), _text_chunks("Here."),
                        _text_chunks("No image this time.")])
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(rounds))
@@ -459,23 +503,25 @@ class TestEditAndLibrary:
 
         _events(client.post(f"/api/chat/conversations/{conv['id']}/edit",
                             json={"message_id": user_id, "content": "just say hi", **SETTINGS}))
-        msgs = self._messages(client, conv)
-        assert all(not m["media"] for m in msgs)
+        assert all(not m["media"] for m in self._messages(client, conv))
         lib = client.get("/api/chat/library").json()["items"]
-        assert [(i["id"], i["attached"], i["message_id"]) for i in lib] == [(img["id"], False, None)]
-        assert lib[0]["conversation_title"] == "draw a cat"
-        assert (chat._chat_root() / conv["id"] / img["file"]).is_file()  # file kept
+        assert [(i["id"], i["attached"]) for i in lib] == [(img["id"], True)]
+        old = self._switch(client, conv, user_id).json()["messages"]
+        assert old[1]["media"][0]["id"] == img["id"]
 
-    def test_retry_also_detaches_media(self, client, conv, chat, monkeypatch):
+    def test_retry_adds_a_sibling_reply(self, client, conv, chat, monkeypatch):
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
         monkeypatch.setattr(chat.openrouter, "generate_image",
                             lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None))
         first = self._send(client, conv, "a dog", mode="image")[-1]["message"]
         second = _events(client.post(f"/api/chat/conversations/{conv['id']}/retry",
                                       json={"message_id": first["id"], "mode": "image", **SETTINGS}))[-1]["message"]
+        assert second["siblings"] == [first["id"], second["id"]]
         lib = client.get("/api/chat/library").json()["items"]
         assert {(i["id"], i["attached"]) for i in lib} == {
-            (first["media"][0]["id"], False), (second["media"][0]["id"], True)}
+            (first["media"][0]["id"], True), (second["media"][0]["id"], True)}
+        shown = self._switch(client, conv, first["id"]).json()["messages"]
+        assert [m["id"] for m in shown][-1] == first["id"]
 
     def test_uploads_are_not_kept_in_library(self, client, conv, chat, db, monkeypatch):
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
@@ -541,7 +587,7 @@ class TestEditAndLibrary:
 
 
 def test_resend_same_prompt_gets_fresh_reply(client, conv, chat, monkeypatch):
-    """Retry on a prompt = edit with unchanged text: later turns go, reply regenerates."""
+    """Retry on a prompt = edit with unchanged text: a new branch with a fresh reply."""
     replies = iter([_text_chunks("a"), _text_chunks("b"), _text_chunks("c")])
     monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
     first = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
@@ -1115,6 +1161,27 @@ class TestCustomInstructions:
         _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
                             json={"content": "a fox", "mode": "image", **SETTINGS}))
         assert got["messages"][0] == {"role": "system", "content": "Watercolour style only."}
+
+    def test_branch_columns_are_backfilled_on_older_databases(self, tmp_path):
+        import sqlalchemy as sa
+        path = tmp_path / "old.db"
+        eng = sa.create_engine(f"sqlite:///{path}")
+        with eng.begin() as c:   # chats from before branching: linear, no parent_id / current_leaf_id
+            c.execute(sa.text("CREATE TABLE chat_conversations (id VARCHAR(50) PRIMARY KEY, title VARCHAR(255), "
+                              "text_model VARCHAR(255), image_model VARCHAR(255), video_model VARCHAR(255), "
+                              "instruction_id INTEGER, created_at DATETIME, updated_at DATETIME)"))
+            c.execute(sa.text("CREATE TABLE chat_messages (id INTEGER PRIMARY KEY, conversation_id VARCHAR(50), "
+                              "role VARCHAR(20), content TEXT, media_json TEXT, model VARCHAR(255), "
+                              "status VARCHAR(20), error TEXT, cost FLOAT, created_at DATETIME)"))
+            c.execute(sa.text("INSERT INTO chat_conversations (id, title) VALUES ('a', 'A'), ('b', 'B')"))
+            c.execute(sa.text("INSERT INTO chat_messages (id, conversation_id, role, content, status) VALUES "
+                              "(1, 'a', 'user', 'q', 'done'), (2, 'b', 'user', 'x', 'done'), "
+                              "(3, 'a', 'assistant', 'r', 'done')"))
+        eng.dispose()
+        db = MetadataDB(db_path=path)
+        assert [(m.id, m.parent_id) for m in db.get_chat_messages("a")] == [(1, None), (3, 1)]
+        assert db.get_conversation("a").current_leaf_id == 3
+        assert db.get_conversation("b").current_leaf_id == 2
 
     def test_missing_column_is_added_to_older_databases(self, tmp_path):
         import sqlalchemy as sa
