@@ -37,4 +37,5 @@ web/static/
 # Build artifacts
 dist/
 .vite/
+vite.config.*.timestamp-*
 /web/frontend/coverage/
