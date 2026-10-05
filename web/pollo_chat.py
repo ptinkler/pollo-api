@@ -1,12 +1,17 @@
 """
-Pollo image models for chat mode.
+Pollo image and video models for chat mode.
 
-Chat's generate_image tool normally runs on OpenRouter image models. This
-module lets it run on Pollo's image models too, reusing the same generator
-classes the Generate page uses. They're listed in the chat's image catalogue
-as "pollo/<generator key>" (e.g. "pollo/seedreamv1").
+Chat's generate_image / generate_video tools normally run on OpenRouter
+models. This module lets them run on Pollo's v1 models too, reusing the
+generator classes the Generate page uses. They're listed in the chat's
+catalogues as "pollo/<generator key>" (e.g. "pollo/seedreamv1",
+"pollo/seedance20fastv1") and bill the Pollo account (POLLO_API_KEY).
 
-Pollo bills in credits, not dollars, so a Pollo image records `credits` on
+Images are generated synchronously, like OpenRouter's. Videos mirror
+openrouter.submit_video / get_video / download_video, with job ids prefixed
+"pollo:" so chat's background video poller knows which API to ask.
+
+Pollo bills in credits, not dollars, so Pollo media records `credits` on
 its media item rather than adding to the OpenRouter `cost`.
 """
 import os
@@ -18,11 +23,13 @@ import requests
 
 from img2vid.common.get_task import get_task_status
 from img2vid.pollo.generators import ERROR_STATUSES, SUCCESS_STATUSES
-from img2vid.pollo.pollo_img2vid import IMAGE_GENERATORS_V1, get_image_generator
+from img2vid.pollo.pollo_img2vid import (GENERATORS_V1, IMAGE_GENERATORS_V1, get_image_generator,
+                                         get_video_generator)
 
 from .openrouter import OpenRouterError
 
 PREFIX = "pollo/"
+JOB_PREFIX = "pollo:"
 POLL_INTERVAL = 4
 POLL_TIMEOUT = 10 * 60
 MAX_POLL_ERRORS = 6
@@ -37,26 +44,66 @@ def is_pollo(model_id: str | None) -> bool:
     return bool(model_id and model_id.startswith(PREFIX))
 
 
+def is_pollo_job(job_id: str | None) -> bool:
+    return bool(job_id and job_id.startswith(JOB_PREFIX))
+
+
 def _web_api():
     # web.api imports this package's chat router, so import it lazily
     from . import api
     return api
 
 
-def list_image_models() -> list[dict[str, Any]]:
-    """Pollo's v1 image models, shaped like openrouter.list_image_models()."""
+def _catalogue(generators: dict) -> list[tuple[str, type, dict]]:
+    """(key, class, MODEL_INFO entry) for each model the Generate page doesn't mark deprecated."""
     if not is_configured():
         return []
     info = _web_api().MODEL_INFO
+    return [(key, cls, info.get(key, {})) for key, cls in generators.items()
+            if not info.get(key, {}).get("deprecated")]
+
+
+def list_image_models() -> list[dict[str, Any]]:
+    """Pollo's v1 image models, shaped like openrouter.list_image_models()."""
     return [{
         "id": PREFIX + key,
-        "name": f"Pollo: {info.get(key, {}).get('label') or key}",
+        "name": f"Pollo: {meta.get('label') or key}",
         "input_modalities": ["text", "image"],   # all take reference images
         "aspect_ratios": list(cls.VALID_RATIOS) or None,
         "resolutions": list(cls.VALID_RESOLUTIONS) or None,
         "created": None,
         "conversational": False,
-    } for key, cls in IMAGE_GENERATORS_V1.items()]
+    } for key, cls, meta in _catalogue(IMAGE_GENERATORS_V1)]
+
+
+def list_video_models() -> list[dict[str, Any]]:
+    """Pollo's v1 video models, shaped like openrouter.list_video_models()."""
+    return [{
+        "id": PREFIX + key,
+        "name": f"Pollo: {meta.get('label') or key}",
+        "durations": meta.get("lengths") or list(cls.VALID_LENGTHS) or None,
+        "resolutions": meta.get("resolutions") or list(cls.VALID_RESOLUTIONS) or None,
+        "aspect_ratios": meta.get("ratios") or list(cls.VALID_RATIOS) or None,
+        "frame_images": ["first_frame"],          # all animate a source image
+        "generate_audio": "generate_audio" in meta.get("options", []),
+        "created": None,
+    } for key, cls, meta in _catalogue(GENERATORS_V1)]
+
+
+def _generator_key(model_id: str, generators: dict) -> str:
+    if not is_configured():
+        raise OpenRouterError("POLLO_API_KEY is not set on the server")
+    key = model_id[len(PREFIX):]
+    if key not in generators:
+        raise OpenRouterError(f"Unknown Pollo model: {key}")
+    return key
+
+
+def _upload(path: Path) -> str:
+    try:
+        return _web_api()._upload_image(path)
+    except ValueError as e:
+        raise OpenRouterError(f"Couldn't upload the image for Pollo: {e}") from e
 
 
 def generate_image(model_id: str, prompt: str, aspect_ratio: str | None = None,
@@ -65,26 +112,57 @@ def generate_image(model_id: str, prompt: str, aspect_ratio: str | None = None,
     """Generate on Pollo and wait for the result. Returns ([(bytes, media type)], credits).
     Reference images are uploaded to a temporary public host first (Pollo
     only takes URLs), the same way the Generate page sends local images."""
-    if not is_configured():
-        raise OpenRouterError("POLLO_API_KEY is not set on the server")
-    key = model_id[len(PREFIX):]
-    cls = IMAGE_GENERATORS_V1.get(key)
-    if not cls:
-        raise OpenRouterError(f"Unknown Pollo image model: {key}")
-    if aspect_ratio not in cls.VALID_RATIOS:
+    key = _generator_key(model_id, IMAGE_GENERATORS_V1)
+    if aspect_ratio not in IMAGE_GENERATORS_V1[key].VALID_RATIOS:
         aspect_ratio = None   # the generator falls back to 1:1
-    try:
-        images = [_web_api()._upload_image(p) for p in ref_paths or []]
-    except ValueError as e:
-        raise OpenRouterError(f"Couldn't upload the reference image for Pollo: {e}") from e
+    images = [_upload(p) for p in ref_paths or []]
 
     generator = get_image_generator(
         key, api_key=os.getenv("POLLO_API_KEY"), project="chat", prompt=prompt, image_url=None,
         aspect_ratio=aspect_ratio, resolution=resolution, images=images or None,
     )
-    task_id = _submit(generator)
-    urls, credits = _wait(task_id, generator.api_key)
-    return [_download(u) for u in urls], credits
+    task = _wait(_submit(generator))
+    return [_download(u) for u in task["urls"]], task["credits"]
+
+
+def submit_video(model_id: str, prompt: str, duration: int | None = None, aspect_ratio: str | None = None,
+                 resolution: str | None = None, generate_audio: bool | None = None,
+                 first_frame: Path | None = None) -> dict:
+    """Start a Pollo video job. Returns {"id": "pollo:<taskId>"}, like openrouter.submit_video.
+    A first frame is uploaded to a temporary public host first (Pollo only takes URLs)."""
+    key = _generator_key(model_id, GENERATORS_V1)
+    generator = get_video_generator(
+        key, api_key=os.getenv("POLLO_API_KEY"), project="chat", prompt=prompt,
+        image_url=_upload(first_frame) if first_frame else None,
+        aspect_ratio=aspect_ratio, resolution=resolution, length=duration, generate_audio=generate_audio,
+    )
+    return {"id": JOB_PREFIX + _submit(generator)}
+
+
+def get_video(job_id: str) -> dict:
+    """The job in openrouter.get_video's shape: status completed | failed |
+    in_progress, plus "error", and "credits" once done. Transient poll
+    failures raise, so the poller's error budget handles them."""
+    task = _task_state(job_id[len(JOB_PREFIX):])
+    if task["status"] == "transient":
+        raise OpenRouterError(task["error"])
+    return task
+
+
+def download_video(job_id: str, dest: Path, index: int = 0) -> None:
+    task = get_video(job_id)
+    if task["status"] != "completed":
+        raise OpenRouterError(f"Pollo video isn't ready ({task['status']})")
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    try:
+        with requests.get(task["urls"][index], stream=True, timeout=DOWNLOAD_TIMEOUT) as resp:
+            resp.raise_for_status()
+            with open(tmp, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=1 << 16):
+                    f.write(chunk)
+    except requests.RequestException as e:
+        raise OpenRouterError(f"Couldn't download the Pollo video: {e}") from e
+    tmp.replace(dest)
 
 
 def _submit(generator) -> str:
@@ -104,32 +182,45 @@ def _submit(generator) -> str:
     return task_id
 
 
-def _wait(task_id: str, api_key: str) -> tuple[list[str], int | None]:
-    """Poll the task until every image is done (or one fails)."""
+def _task_state(task_id: str) -> dict:
+    """One status check: {"status": completed | failed | in_progress |
+    transient, "error", "urls", "credits"}. "transient" = Cloudflare/network/
+    HTTP trouble worth retrying, not a verdict on the generation."""
+    try:
+        results = get_task_status(task_id, os.getenv("POLLO_API_KEY"))
+    except Exception as e:  # noqa: BLE001 — network/VPN hiccups
+        return {"status": "transient", "error": f"Pollo: {e}"}
+    status, fail_msg = results[0][0], results[0][1]
+    if status == "cloudflare_blocked" or (status == "error" and (fail_msg or "").startswith("HTTP ")):
+        return {"status": "transient", "error": f"Pollo: {fail_msg}"}
+    if status in ERROR_STATUSES:
+        return {"status": "failed", "error": f"Pollo: {fail_msg or 'generation failed'}"}
+    if not all(r[0] in SUCCESS_STATUSES for r in results):
+        return {"status": "in_progress"}
+    urls = [r[2] for r in results if r[2]]
+    if not urls:
+        return {"status": "failed", "error": "Pollo finished but returned no file"}
+    return {"status": "completed", "urls": urls,
+            "credits": sum(r[3] for r in results if r[3] is not None) or None}
+
+
+def _wait(task_id: str) -> dict:
+    """Poll an image task until it's done (or fails)."""
     deadline = time.time() + POLL_TIMEOUT
     errors = 0
     while time.time() < deadline:
         time.sleep(POLL_INTERVAL)
-        try:
-            results = get_task_status(task_id, api_key)
-        except Exception as e:  # noqa: BLE001 — transient network/VPN hiccups
-            results = [("error_transient", str(e), None, None)]
-        status, fail_msg = results[0][0], results[0][1]
-        if status in ("cloudflare_blocked", "error_transient") or (
-                status == "error" and (fail_msg or "").startswith("HTTP ")):
+        task = _task_state(task_id)
+        if task["status"] == "transient":
             errors += 1
             if errors >= MAX_POLL_ERRORS:
-                raise OpenRouterError(f"Pollo: polling failed — {fail_msg}")
+                raise OpenRouterError(f"{task['error']} (polling gave up)")
             continue
         errors = 0
-        if status in ERROR_STATUSES:
-            raise OpenRouterError(f"Pollo: {fail_msg or 'generation failed'}")
-        if all(r[0] in SUCCESS_STATUSES for r in results):
-            urls = [r[2] for r in results if r[2]]
-            if not urls:
-                raise OpenRouterError("Pollo finished but returned no image")
-            credits = sum(r[3] for r in results if r[3] is not None) or None
-            return urls, credits
+        if task["status"] == "failed":
+            raise OpenRouterError(task["error"])
+        if task["status"] == "completed":
+            return task
     raise OpenRouterError("Pollo: timed out waiting for the image")
 
 

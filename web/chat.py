@@ -18,7 +18,7 @@ Media item shape (stored in ChatMessage.media_json, sent to the frontend):
       "credits": optional             # Pollo images bill in credits, not dollars
     }
 
-Image models come from OpenRouter, plus Pollo's own image models
+Image and video models come from OpenRouter, plus Pollo's own models
 ("pollo/<key>", see web/pollo_chat.py) when POLLO_API_KEY is set.
 
 Messages form a tree (ChatMessage.parent_id): editing a prompt or retrying
@@ -282,6 +282,7 @@ def get_models(refresh: bool = False) -> dict[str, Any]:
                 data[kind] = []
                 data["errors"][kind] = str(e)
         data["image"] = pollo_chat.list_image_models() + data["image"]
+        data["video"] = pollo_chat.list_video_models() + data["video"]
         # Only cache a complete result, so a transient failure isn't sticky
         if not data["errors"]:
             _models_cache.update(at=time.time(), data=data)
@@ -1104,6 +1105,12 @@ def _run_image_generation(conv_id: str, model: str, prompt: str, params: dict[st
 
 def _submit_video_generation(conv_id: str, model: str, prompt: str, params: dict[str, Any]) -> dict:
     first_frame = params.get("first_frame")
+    if pollo_chat.is_pollo(model):
+        return pollo_chat.submit_video(
+            model, prompt, duration=params.get("duration"), aspect_ratio=params.get("aspect_ratio"),
+            resolution=params.get("resolution"), generate_audio=params.get("generate_audio"),
+            first_frame=_conv_dir(conv_id) / first_frame if first_frame else None,
+        )
     return openrouter.submit_video(
         model, prompt, duration=params.get("duration"), aspect_ratio=params.get("aspect_ratio"),
         resolution=params.get("resolution"), generate_audio=params.get("generate_audio"),
@@ -1196,6 +1203,7 @@ def start_video_poller(conv_id: str, message_id: int, media_id: str, job_id: str
 
 def _poll_video(conv_id: str, message_id: int, media_id: str, job_id: str) -> None:
     db = get_db()
+    source = pollo_chat if pollo_chat.is_pollo_job(job_id) else openrouter
     deadline = time.time() + VIDEO_POLL_TIMEOUT
     errors = 0
     while time.time() < deadline:
@@ -1203,7 +1211,7 @@ def _poll_video(conv_id: str, message_id: int, media_id: str, job_id: str) -> No
         if not db.find_chat_media_item(message_id, media_id):
             return  # conversation deleted (items detached to the library are still updated)
         try:
-            job = openrouter.get_video(job_id)
+            job = source.get_video(job_id)
             errors = 0
         except Exception as e:  # noqa: BLE001 — transient network/VPN hiccups
             errors += 1
@@ -1217,12 +1225,13 @@ def _poll_video(conv_id: str, message_id: int, media_id: str, job_id: str) -> No
         if status == "completed":
             name = f"vid_{uuid.uuid4().hex[:12]}.mp4"
             try:
-                openrouter.download_video(job_id, _conv_dir(conv_id) / name)
+                source.download_video(job_id, _conv_dir(conv_id) / name)
             except Exception as e:  # noqa: BLE001
                 db.update_chat_media_item(message_id, media_id, status="error", error=f"Download failed: {e}")
                 return
             cost = (job.get("usage") or {}).get("cost")
-            msg = db.update_chat_media_item(message_id, media_id, status="done", file=name, cost=cost)
+            msg = db.update_chat_media_item(message_id, media_id, status="done", file=name, cost=cost,
+                                            credits=job.get("credits"))
             if msg:
                 _add_message_cost(message_id, cost)
             print(f"✅ chat video {job_id} saved as {name}")

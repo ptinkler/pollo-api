@@ -60,6 +60,7 @@ function perMillion(price) {
 
 function badges(m) {
   const out = []
+  if (m.id.startsWith('pollo/')) out.push({ t: 'pollo', title: 'Runs on your Pollo account (billed in Pollo credits)' })
   if (props.kind === 'text') {
     if (m.input_modalities?.includes('image')) out.push({ t: 'vision', title: 'Accepts images' })
     if (m.supports_tools) out.push({ t: 'tools', title: 'Can create images/videos in Auto mode' })
@@ -67,7 +68,6 @@ function badges(m) {
     const c = perMillion(m.completion_price)
     if (p) out.push({ t: p === 'free' ? 'free' : `${p}/${c}`, title: 'Input/output price per million tokens' })
   } else if (props.kind === 'image') {
-    if (m.id.startsWith('pollo/')) out.push({ t: 'pollo', title: 'Runs on your Pollo account (billed in Pollo credits)' })
     if (m.conversational) out.push({ t: 'context', title: 'Sees the conversation (text and earlier images), like the Gemini app' })
     else if (m.input_modalities?.includes('image')) out.push({ t: 'edits', title: 'Takes reference images (tends to edit them)' })
   } else if (props.kind === 'video') {

@@ -1224,6 +1224,15 @@ class TestPolloImageModels:
             def raise_for_status(self):
                 pass
 
+            def iter_content(self, chunk_size=None):
+                yield self.content
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
         class FakeGenerator:
             api_key = "pollo-test"
 
@@ -1234,9 +1243,11 @@ class TestPolloImageModels:
                 return FakeResponse({"code": "SUCCESS", "data": {"taskId": "task-1", "status": "waiting"}})
 
         monkeypatch.setattr(chat.pollo_chat, "get_image_generator", lambda key, **kw: FakeGenerator(key, **kw))
+        monkeypatch.setattr(chat.pollo_chat, "get_video_generator", lambda key, **kw: FakeGenerator(key, **kw))
         monkeypatch.setattr(chat.pollo_chat, "get_task_status", lambda task_id, key: next(calls["statuses"]))
         monkeypatch.setattr(chat.pollo_chat.requests, "get",
-                            lambda url, timeout=None: FakeResponse(None, _png_bytes(), "image/jpeg"))
+                            lambda url, timeout=None, stream=False: FakeResponse(
+                                None, b"mp4-bytes" if url.endswith(".mp4") else _png_bytes(), "image/jpeg"))
         monkeypatch.setattr(api_mod, "_upload_image",
                             lambda path: (calls["uploads"].append(path.name), f"https://tmp.example/{path.name}")[1])
         return calls
@@ -1255,6 +1266,7 @@ class TestPolloImageModels:
         models = {m["id"]: m for m in chat.get_models(refresh=True)["image"]}
         assert models["pollo/seedreamv1"]["name"] == "Pollo: Seedream 5.0"
         assert "21:9" in models["pollo/seedreamv1"]["aspect_ratios"]
+        assert models["pollo/polloimage2v1"]["name"] == "Pollo: Pollo Image 2.0"
         monkeypatch.delenv("POLLO_API_KEY")
         assert not any(m["id"].startswith("pollo/") for m in chat.get_models(refresh=True)["image"])
 
@@ -1304,3 +1316,53 @@ class TestPolloImageModels:
                                   [("succeed", None, "https://cdn/x.png", 2)]])
         images, credits = chat.pollo_chat.generate_image("pollo/nanobanana2v1", "x")
         assert len(images) == 1 and credits == 2
+
+    # ── video ──
+    VIDEO = {**SETTINGS, "video_model": "pollo/seedance20fastv1"}
+
+    def test_video_models_listed_without_deprecated_ones(self, chat, monkeypatch, pollo):
+        for fn in ("list_text_models", "list_image_models", "list_video_models"):
+            monkeypatch.setattr(chat.openrouter, fn, lambda: [])
+        models = {m["id"]: m for m in chat.get_models(refresh=True)["video"]}
+        fast = models["pollo/seedance20fastv1"]
+        assert fast["name"] == "Pollo: Seedance 2.0 Fast"
+        assert fast["durations"] == list(range(4, 16)) and fast["resolutions"] == ["480p", "720p"]
+        assert fast["frame_images"] == ["first_frame"] and fast["generate_audio"] is True
+        assert "pollo/wan27v1" not in models   # marked deprecated on the Generate page
+
+    def test_video_mode_submits_to_pollo_with_first_frame(self, client, conv, chat, monkeypatch, pollo):
+        monkeypatch.setattr(chat.openrouter, "submit_video", lambda *a, **k: pytest.fail("should run on Pollo"))
+        chat._models_cache.update(at=0.0, data={"video": [{"id": "pollo/seedance20fastv1",
+                                                           "durations": list(range(4, 16))}]})
+        up = client.post(f"/api/chat/conversations/{conv['id']}/attachments",
+                         files={"file": ("a.png", _png_bytes(), "image/png")}).json()["file"]
+        msg = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
+            "content": "make it move", "attachments": [up], "mode": "video", **self.VIDEO,
+            "options": {"duration": 20, "aspect_ratio": "9:16", "generate_audio": False}}))[-1]["message"]
+        item = msg["media"][0]
+        assert item["status"] == "pending" and item["job_id"] == "pollo:task-1"
+        key, kwargs = pollo["generators"][0]
+        assert key == "seedance20fastv1"
+        assert pollo["uploads"] == [up] and kwargs["image_url"] == f"https://tmp.example/{up}"
+        assert (kwargs["prompt"], kwargs["length"], kwargs["generate_audio"]) == ("make it move", 15, False)
+
+    def test_poller_finishes_a_pollo_video(self, chat, db, conv, monkeypatch, pollo):
+        monkeypatch.setattr(chat.openrouter, "get_video", lambda *a: pytest.fail("should ask Pollo"))
+        msg = db.add_chat_message(conv["id"], "assistant", media=[
+            {"id": "pv1", "kind": "video", "source": "generated", "status": "pending", "job_id": "pollo:task-9"}])
+        pollo["statuses"] = iter([[("processing", None, None, None)],
+                                  [("cloudflare_blocked", "blocked", None, None)],
+                                  [("succeed", None, "https://cdn/v.mp4", 40)],
+                                  [("succeed", None, "https://cdn/v.mp4", 40)]])   # re-read for the download
+        chat._poll_video(conv["id"], msg.id, "pv1", "pollo:task-9")
+        item = db.get_chat_message(msg.id).media[0]
+        assert item["status"] == "done" and item["credits"] == 40 and not item.get("cost")
+        assert (chat._chat_root() / conv["id"] / item["file"]).read_bytes() == b"mp4-bytes"
+
+    def test_failed_pollo_video_marks_the_item(self, chat, db, conv, monkeypatch, pollo):
+        msg = db.add_chat_message(conv["id"], "assistant", media=[
+            {"id": "pv2", "kind": "video", "source": "generated", "status": "pending", "job_id": "pollo:task-8"}])
+        pollo["statuses"] = iter([[("failed", "Your prompt violates our content policy", None, None)]])
+        chat._poll_video(conv["id"], msg.id, "pv2", "pollo:task-8")
+        item = db.get_chat_message(msg.id).media[0]
+        assert item["status"] == "error" and item["moderated"] is True and item["error"].startswith("Pollo:")

@@ -118,3 +118,42 @@ class TestImageGeneratorsRegistry:
     def test_get_image_generator_unknown(self):
         with pytest.raises(ValueError, match="Unsupported image model"):
             get_image_generator("unknown_model")
+
+
+class TestPolloImage2ImageGenerators:
+    """Pollo Image 2.0, legacy and v1 — fields from Pollo's OpenAPI spec."""
+
+    def _make(self, key, **kwargs):
+        with patch("img2vid.pollo.generators.get_image_path", return_value=None):
+            return get_image_generator(key, api_key="k", project="p", prompt="a fox", image_url=None, **kwargs)
+
+    @pytest.mark.parametrize("key,slug", [("polloimage2", "/pollo/pollo-image-v2/image"),
+                                          ("polloimage2v1", "/v1/generation/pollo-ai/pollo-image-v2/image")])
+    def test_model_url(self, key, slug):
+        assert self._make(key).model_url.endswith(slug)
+
+    @pytest.mark.parametrize("key", ["polloimage2", "polloimage2v1"])
+    def test_defaults_leave_mode_and_resolution_to_pollo(self, key):
+        assert self._make(key).get_payload() == {"input": {"prompt": "a fox", "aspectRatio": "1:1"}}
+
+    @pytest.mark.parametrize("key", ["polloimage2", "polloimage2v1"])
+    @pytest.mark.parametrize("resolution", ["2K", "4K"])
+    def test_high_resolution_switches_to_professional(self, key, resolution):
+        payload = self._make(key, resolution=resolution, mode="fast").get_payload()["input"]
+        assert (payload["resolution"], payload["mode"]) == (resolution, "professional")
+
+    @pytest.mark.parametrize("key", ["polloimage2", "polloimage2v1"])
+    def test_mode_and_reference_images(self, key):
+        payload = self._make(key, mode="fast", aspect_ratio="4:5",
+                             images=["https://x/a.png", "https://x/b.png"]).get_payload()["input"]
+        assert payload == {"prompt": "a fox", "aspectRatio": "4:5", "mode": "fast",
+                           "images": ["https://x/a.png", "https://x/b.png"]}
+
+    @pytest.mark.parametrize("key", ["polloimage2", "polloimage2v1"])
+    def test_invalid_mode_and_resolution_are_dropped(self, key):
+        payload = self._make(key, mode="turbo", resolution="8K").get_payload()["input"]
+        assert "mode" not in payload and "resolution" not in payload
+
+    def test_registered_in_both_sets(self):
+        from img2vid.pollo.pollo_img2vid import IMAGE_GENERATORS_LEGACY, IMAGE_GENERATORS_V1
+        assert "polloimage2" in IMAGE_GENERATORS_LEGACY and "polloimage2v1" in IMAGE_GENERATORS_V1

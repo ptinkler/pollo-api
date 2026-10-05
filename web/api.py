@@ -238,6 +238,13 @@ MODEL_INFO = {
         "deprecated": True,
         "legacy": True,
     },
+    "polloimage2": {
+        "label": "Pollo Image 2.0", "type": "image",
+        "ratios": ["1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16", "4:5", "5:4"],
+        "resolutions": ["1K", "2K", "4K"],   # 2K/4K run in Pollo's "professional" mode
+        "options": ["images"],
+        "legacy": True,
+    },
 
     # ── v1 API (current — https://docs.pollo.ai) ─────────────────────
     "pollo20v1": {
@@ -361,6 +368,12 @@ MODEL_INFO = {
         "ratios": ["1:1", "9:16", "16:9", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5",
                    "21:9", "1:4", "4:1", "8:1", "1:8"],
         "resolutions": ["0.5K", "1K", "2K", "4K"],
+        "options": ["images"],
+    },
+    "polloimage2v1": {
+        "label": "Pollo Image 2.0", "type": "image",
+        "ratios": ["1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16", "4:5", "5:4"],
+        "resolutions": ["1K", "2K", "4K"],   # 2K/4K run in Pollo's "professional" mode
         "options": ["images"],
     },
 }

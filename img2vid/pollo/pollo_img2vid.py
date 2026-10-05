@@ -42,6 +42,8 @@ from .generators import (
     PolloJourneyImageGeneratorV1,
     SeedreamImageGeneratorV1,
     NanoBanana2ImageGeneratorV1,
+    PolloImage2ImageGenerator,
+    PolloImage2ImageGeneratorV1,
     SUCCESS_STATUSES,
     ERROR_STATUSES,
 )
@@ -95,12 +97,14 @@ IMAGE_GENERATORS_LEGACY = {
     "pollojourney": PolloJourneyImageGenerator,
     "seedream": SeedreamImageGenerator,
     "nanobanana2": NanoBanana2ImageGenerator,
+    "polloimage2": PolloImage2ImageGenerator,
 }
 
 IMAGE_GENERATORS_V1 = {
     "pollojourneyv1": PolloJourneyImageGeneratorV1,
     "seedreamv1": SeedreamImageGeneratorV1,
     "nanobanana2v1": NanoBanana2ImageGeneratorV1,
+    "polloimage2v1": PolloImage2ImageGeneratorV1,
 }
 
 IMAGE_GENERATORS = {**IMAGE_GENERATORS_LEGACY, **IMAGE_GENERATORS_V1}
