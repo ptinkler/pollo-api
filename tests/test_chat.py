@@ -1195,3 +1195,112 @@ class TestCustomInstructions:
         db = MetadataDB(db_path=path)
         conv = db.create_conversation(instruction_id=None)
         assert db.get_conversation(conv.id).instruction_id is None
+
+
+class TestPolloImageModels:
+    """Pollo image models in chat. Pollo is fully mocked — nothing here can
+    reach the real API (which would bill credits)."""
+
+    POLLO = {**SETTINGS, "image_model": "pollo/seedreamv1"}
+
+    @pytest.fixture()
+    def pollo(self, chat, monkeypatch):
+        import web.api as api_mod
+        monkeypatch.setenv("POLLO_API_KEY", "pollo-test")
+        monkeypatch.setattr(chat.pollo_chat, "POLL_INTERVAL", 0)
+        calls = {"generators": [], "uploads": [], "statuses": iter([])}
+
+        class FakeResponse:
+            status_code = 200
+            text = ""
+
+            def __init__(self, body, content=b"", content_type="image/png"):
+                self._body, self.content = body, content
+                self.headers = {"Content-Type": content_type}
+
+            def json(self):
+                return self._body
+
+            def raise_for_status(self):
+                pass
+
+        class FakeGenerator:
+            api_key = "pollo-test"
+
+            def __init__(self, key, **kwargs):
+                calls["generators"].append((key, kwargs))
+
+            def send_request(self):
+                return FakeResponse({"code": "SUCCESS", "data": {"taskId": "task-1", "status": "waiting"}})
+
+        monkeypatch.setattr(chat.pollo_chat, "get_image_generator", lambda key, **kw: FakeGenerator(key, **kw))
+        monkeypatch.setattr(chat.pollo_chat, "get_task_status", lambda task_id, key: next(calls["statuses"]))
+        monkeypatch.setattr(chat.pollo_chat.requests, "get",
+                            lambda url, timeout=None: FakeResponse(None, _png_bytes(), "image/jpeg"))
+        monkeypatch.setattr(api_mod, "_upload_image",
+                            lambda path: (calls["uploads"].append(path.name), f"https://tmp.example/{path.name}")[1])
+        return calls
+
+    def _draw(self, client, conv, chat, monkeypatch, args, statuses, pollo):
+        pollo["statuses"] = iter(statuses)
+        rounds = iter([_tool_chunks("generate_image", args, text="Here you go."), _text_chunks("unused")])
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(rounds))
+        monkeypatch.setattr(chat.openrouter, "generate_image", lambda *a, **k: pytest.fail("should run on Pollo"))
+        return _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                                   json={"content": "draw", "mode": "auto", **self.POLLO}))[-1]["message"]
+
+    def test_listed_in_the_image_catalogue_when_key_is_set(self, chat, monkeypatch, pollo):
+        for fn in ("list_text_models", "list_image_models", "list_video_models"):
+            monkeypatch.setattr(chat.openrouter, fn, lambda: [])
+        models = {m["id"]: m for m in chat.get_models(refresh=True)["image"]}
+        assert models["pollo/seedreamv1"]["name"] == "Pollo: Seedream 5.0"
+        assert "21:9" in models["pollo/seedreamv1"]["aspect_ratios"]
+        monkeypatch.delenv("POLLO_API_KEY")
+        assert not any(m["id"].startswith("pollo/") for m in chat.get_models(refresh=True)["image"])
+
+    def test_tool_call_runs_on_pollo(self, client, conv, chat, monkeypatch, pollo):
+        msg = self._draw(client, conv, chat, monkeypatch, {"prompt": "a red fox", "aspect_ratio": "16:9"},
+                         [[("processing", None, None, None)], [("succeed", None, "https://cdn/x.jpg", 6)]], pollo)
+        item = msg["media"][0]
+        assert item["status"] == "done" and item["file"].endswith(".jpg")
+        assert item["credits"] == 6 and not item.get("cost")
+        assert msg["cost"] == pytest.approx(0.003)   # OpenRouter text only — credits aren't dollars
+        key, kwargs = pollo["generators"][0]
+        assert key == "seedreamv1"
+        assert (kwargs["prompt"], kwargs["aspect_ratio"], kwargs["images"]) == ("a red fox", "16:9", None)
+
+    def test_unsupported_ratio_falls_back_to_model_default(self, client, conv, chat, monkeypatch, pollo):
+        self._draw(client, conv, chat, monkeypatch, {"prompt": "x", "aspect_ratio": "5:4"},
+                   [[("succeed", None, "https://cdn/x.png", 3)]], pollo)
+        assert pollo["generators"][0][1]["aspect_ratio"] is None
+
+    def test_reference_images_are_uploaded_for_pollo(self, client, conv, chat, db, monkeypatch, pollo):
+        (chat._conv_dir(conv["id"]) / "img_prev.png").write_bytes(_png_bytes())
+        db.add_chat_message(conv["id"], "user", "a cat")
+        db.add_chat_message(conv["id"], "assistant", media=[
+            {"id": "p1", "kind": "image", "source": "generated", "status": "done", "file": "img_prev.png"}])
+        self._draw(client, conv, chat, monkeypatch, {"prompt": "same cat, in a hat", "source_image": "latest"},
+                   [[("succeed", None, "https://cdn/x.png", 3)]], pollo)
+        assert pollo["uploads"] == ["img_prev.png"]
+        assert pollo["generators"][0][1]["images"] == ["https://tmp.example/img_prev.png"]
+
+    def test_failure_marks_the_item_and_can_be_retried(self, client, conv, chat, db, monkeypatch, pollo):
+        msg = self._draw(client, conv, chat, monkeypatch, {"prompt": "x"},
+                         [[("failed", "Content flagged by moderation", None, None)]], pollo)
+        item = msg["media"][0]
+        assert item["status"] == "error" and item["moderated"] is True
+        assert "Pollo" in item["error"]
+
+        pollo["statuses"] = iter([[("succeed", None, "https://cdn/y.png", 3)]])
+        monkeypatch.setattr(chat.threading, "Thread", lambda target, args, **kw: type(
+            "T", (), {"start": lambda self: target(*args)})())
+        client.post(f"/api/chat/messages/{msg['id']}/media/{item['id']}/regenerate", json={})
+        fixed = db.get_chat_message(msg["id"]).media[0]
+        assert fixed["status"] == "done" and fixed["credits"] == 3
+
+    def test_polling_survives_transient_errors(self, chat, monkeypatch, pollo):
+        pollo["statuses"] = iter([[("cloudflare_blocked", "blocked", None, None)],
+                                  [("error", "HTTP 502", None, None)],
+                                  [("succeed", None, "https://cdn/x.png", 2)]])
+        images, credits = chat.pollo_chat.generate_image("pollo/nanobanana2v1", "x")
+        assert len(images) == 1 and credits == 2

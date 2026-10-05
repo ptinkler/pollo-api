@@ -14,8 +14,12 @@ Media item shape (stored in ChatMessage.media_json, sent to the frontend):
       "source": "upload" | "generated",
       "status": "pending" | "done" | "error",
       "file": "img_….png" | None,    # under <data>/chat/<conversation_id>/
-      "prompt", "model", "job_id", "error", "cost": optional
+      "prompt", "model", "job_id", "error", "cost": optional,
+      "credits": optional             # Pollo images bill in credits, not dollars
     }
+
+Image models come from OpenRouter, plus Pollo's own image models
+("pollo/<key>", see web/pollo_chat.py) when POLLO_API_KEY is set.
 
 Messages form a tree (ChatMessage.parent_id): editing a prompt or retrying
 a reply adds a sibling — a new branch — rather than deleting what came after,
@@ -48,7 +52,7 @@ from pydantic import BaseModel, Field
 from img2vid.common import config
 from img2vid.common.metadata import get_db
 
-from . import openrouter
+from . import openrouter, pollo_chat
 from .auth import verify_api_key
 
 router = APIRouter(prefix="/api/chat", dependencies=[Depends(verify_api_key)])
@@ -277,6 +281,7 @@ def get_models(refresh: bool = False) -> dict[str, Any]:
             except (openrouter.OpenRouterError, Exception) as e:  # noqa: BLE001 — surface any failure per-kind
                 data[kind] = []
                 data["errors"][kind] = str(e)
+        data["image"] = pollo_chat.list_image_models() + data["image"]
         # Only cache a complete result, so a transient failure isn't sticky
         if not data["errors"]:
             _models_cache.update(at=time.time(), data=data)
@@ -853,7 +858,7 @@ class Turn:
         item = _new_media("image", "generated", prompt=prompt, model=self.s.image_model, params=params)
         self._add_media(item)
         try:
-            names, cost = _run_image_generation(self.conv_id, self.s.image_model, prompt, params, context)
+            names, cost, credits = _run_image_generation(self.conv_id, self.s.image_model, prompt, params, context)
         except openrouter.OpenRouterError as e:
             self._update_media(item, **_failure_fields(e))
             raise
@@ -861,7 +866,7 @@ class Turn:
             self.cost += float(cost)
         for i, name in enumerate(names):
             if i == 0:
-                self._update_media(item, status="done", file=name, cost=cost)
+                self._update_media(item, status="done", file=name, cost=cost, credits=credits)
             else:
                 self._add_media({**_new_media("image", "generated", prompt=prompt, model=self.s.image_model),
                                  "status": "done", "file": name})
@@ -1070,16 +1075,21 @@ def _failure_fields(e: openrouter.OpenRouterError) -> dict[str, Any]:
 
 
 def _run_image_generation(conv_id: str, model: str, prompt: str, params: dict[str, Any],
-                          context: list[dict] | None = None) -> tuple[list[str], float | None]:
-    """Generate and save images; returns (filenames, cost). With `context`
-    (conversational models) the model gets the conversation; otherwise the
-    Images API gets the prompt plus any reference images."""
+                          context: list[dict] | None = None) -> tuple[list[str], float | None, int | None]:
+    """Generate and save images; returns (filenames, dollar cost, Pollo credits).
+    With `context` (conversational models) the model gets the conversation;
+    otherwise the Images API — or Pollo — gets the prompt plus any reference images."""
     conv_dir = _conv_dir(conv_id)
-    if context is not None:
+    refs = [conv_dir / f for f in params.get("refs") or [] if (conv_dir / f).is_file()]
+    credits = None
+    if pollo_chat.is_pollo(model):
+        images, credits = pollo_chat.generate_image(model, prompt, aspect_ratio=params.get("aspect_ratio"),
+                                                    resolution=params.get("resolution"), ref_paths=refs)
+        cost = None
+    elif context is not None:
         images, cost = openrouter.generate_image_chat(model, context, aspect_ratio=params.get("aspect_ratio"),
                                                       session_id=conv_id)
     else:
-        refs = [conv_dir / f for f in params.get("refs") or [] if (conv_dir / f).is_file()]
         images, cost = openrouter.generate_image(
             model, prompt, aspect_ratio=params.get("aspect_ratio"), resolution=params.get("resolution"),
             input_images=[_file_to_data_url(f) for f in refs] or None, session_id=conv_id,
@@ -1089,7 +1099,7 @@ def _run_image_generation(conv_id: str, model: str, prompt: str, params: dict[st
         name = f"img_{uuid.uuid4().hex[:12]}{IMAGE_EXTS.get(media_type, '.png')}"
         (conv_dir / name).write_bytes(data)
         names.append(name)
-    return names, cost
+    return names, cost, credits
 
 
 def _submit_video_generation(conv_id: str, model: str, prompt: str, params: dict[str, Any]) -> dict:
@@ -1156,9 +1166,9 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
                                          None if direct else item["prompt"], params.get("refs") or [],
                                          _conversation_instructions(conv_id))
             params["context"] = context is not None
-            names, cost = _run_image_generation(conv_id, model, item["prompt"], params, context)
+            names, cost, credits = _run_image_generation(conv_id, model, item["prompt"], params, context)
             db.update_chat_media_item(message_id, media_id, status="done", file=names[0], cost=cost,
-                                      params=params)
+                                      credits=credits, params=params)
             for extra in names[1:]:
                 db.append_chat_media_item(message_id, {**_new_media("image", "generated", prompt=item["prompt"],
                                                                     model=model), "status": "done", "file": extra})
