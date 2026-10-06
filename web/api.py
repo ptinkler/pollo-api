@@ -224,7 +224,7 @@ MODEL_INFO = {
         "legacy": True,
     },
     "seedream": {
-        "label": "Seedream 5.0", "type": "image",
+        "label": "Seedream 5.0 Lite", "type": "image",
         "ratios": ["1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16", "21:9"],
         "resolutions": ["2K", "3K", "4K"],
         "options": ["images", "max_images"],
@@ -413,7 +413,7 @@ MODEL_INFO = {
         "options": ["seed", "images"],
     },
     "seedreamv1": {
-        "label": "Seedream 5.0", "type": "image",
+        "label": "Seedream 5.0 Lite", "type": "image",
         "ratios": ["1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16", "21:9"],
         "resolutions": ["2K", "3K", "4K"],
         "options": ["images"],
@@ -423,12 +423,6 @@ MODEL_INFO = {
         "ratios": ["1:1", "9:16", "16:9", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5",
                    "21:9", "1:4", "4:1", "8:1", "1:8"],
         "resolutions": ["0.5K", "1K", "2K", "4K"],
-        "options": ["images"],
-    },
-    "klingimageo1v1": {
-        "label": "Kling Image O1", "type": "image",
-        "ratios": ["1:1", "3:2", "2:3", "3:4", "4:3", "16:9", "9:16", "21:9"],
-        "resolutions": ["1K", "2K"],
         "options": ["images"],
     },
     "klingv3imagev1": {
@@ -443,9 +437,17 @@ MODEL_INFO = {
         "resolutions": ["1K", "2K", "4K"],
         "options": ["images"],
     },
-    "qwenimagev1": {
+    "qwenimage": {
         "label": "Qwen Image", "type": "image",
-        "ratios": ["1:1", "3:4", "4:3", "16:9", "9:16"],
+        "ratios": ["1:1", "3:4", "4:3", "16:9", "9:16"],   # text-to-image only; an edit keeps the image's shape
+        "options": ["images"],
+        "legacy": True,
+        "legacy_only": True,   # v1 qwen/* endpoints 404 — offered in both modes
+    },
+    "seedreamprov1": {
+        "label": "Seedream 5.0 Pro", "type": "image",
+        "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+        "resolutions": ["1K", "2K"],
         "options": ["images"],
     },
     "qwenimage3v1": {

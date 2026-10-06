@@ -1462,6 +1462,20 @@ class SeedreamImageGeneratorV1(BaseV1ImageGenerator):
 
     VALID_RATIOS: ClassVar[tuple] = ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16", "21:9")
     VALID_RESOLUTIONS: ClassVar[tuple] = ("2K", "3K", "4K")
+    MAX_IMAGES: ClassVar[int] = 14
+
+
+_SEEDREAM_RATIOS = ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3")
+
+
+class SeedreamProImageGeneratorV1(BaseV1ImageGenerator):
+    """Seedream 5.0 Pro — v1 API (bytedance/seedream-5-0-pro/image). From the
+    spec (2026-10-06): seven ratios, 1K/2K, up to 10 reference images."""
+    V1_PROVIDER: ClassVar[str] = "bytedance"
+    V1_MODEL: ClassVar[str] = "seedream-5-0-pro"
+    VALID_RATIOS: ClassVar[tuple] = _SEEDREAM_RATIOS
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("1K", "2K")
+    MAX_IMAGES: ClassVar[int] = 10
 
 
 class PolloImage2ImageGenerator(BaseVideoGenerator):
@@ -1537,15 +1551,6 @@ _KLING_IMAGE_RATIOS = ("1:1", "3:2", "2:3", "3:4", "4:3", "16:9", "9:16", "21:9"
 _QWEN_IMAGE_RATIOS = ("1:1", "3:4", "4:3", "16:9", "9:16")
 
 
-class KlingImageO1ImageGeneratorV1(BaseV1ImageGenerator):
-    """Kling Image O1 (kling-ai/kling-image-o1/image): 1–10 reference images, 1K/2K."""
-    V1_PROVIDER: ClassVar[str] = "kling-ai"
-    V1_MODEL: ClassVar[str] = "kling-image-o1"
-    VALID_RATIOS: ClassVar[tuple] = _KLING_IMAGE_RATIOS
-    VALID_RESOLUTIONS: ClassVar[tuple] = ("1K", "2K")
-    MAX_IMAGES: ClassVar[int] = 10
-
-
 class KlingV3ImageGeneratorV1(BaseV1ImageGenerator):
     """Kling V3 Image (kling-ai/kling-v3-image/image): a single reference image, 1K/2K."""
     V1_PROVIDER: ClassVar[str] = "kling-ai"
@@ -1565,18 +1570,49 @@ class KlingV3OmniImageGeneratorV1(BaseV1ImageGenerator):
     MAX_IMAGES: ClassVar[int] = 10
 
 
-class QwenImageImageGeneratorV1(BaseV1ImageGenerator):
-    """Qwen Image (qwen/qwen-image/image): one reference image; no resolution.
-    Its Image-To-Image branch has no aspectRatio (the input image sets it)."""
-    V1_PROVIDER: ClassVar[str] = "qwen"
-    V1_MODEL: ClassVar[str] = "qwen-image"
+class QwenImageImageGenerator(BaseVideoGenerator):
+    """
+    Qwen Image — legacy API only (qwen/qwen-image/image).
+
+    The spec also lists v1 qwen/qwen-image, but it answers 404 "Not found"
+    (2026-10-06), so there's no V1 class; MODEL_INFO marks this one
+    legacy_only. Legacy schema: Text-To-Image needs aspectRatio;
+    Image-To-Image takes the reference as imageUrl (required) and has no
+    aspectRatio. negativePrompt/style are left out.
+    """
     VALID_RATIOS: ClassVar[tuple] = _QWEN_IMAGE_RATIOS
-    MAX_IMAGES: ClassVar[int] = 1
-    ASPECT_RATIO_WITH_IMAGES: ClassVar[bool] = False
+    VALID_RESOLUTIONS: ClassVar[tuple] = ()
+
+    aspect_ratio: str
+    images: list[str] | None
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.model_url = f"{POLLO_API_BASE}/qwen/qwen-image/image"
+        ratio = kwargs.get('aspect_ratio') or self.get_aspect_ratio(
+            os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "square"))
+        self.aspect_ratio = ratio if ratio in self.VALID_RATIOS else "1:1"
+        self.images = kwargs.get('images') or None
+
+    @property
+    def is_text_only(self) -> bool:
+        return self.image_url is None and not self.images
+
+    def get_payload(self) -> dict[str, Any]:
+        refs = ([self.image_url] if self.image_url else []) + (self.images or [])
+        input_payload: dict[str, Any] = {"prompt": self.prompt}
+        if refs:
+            input_payload["imageUrl"] = refs[0]     # one reference; the image sets the shape
+        else:
+            input_payload["aspectRatio"] = self.aspect_ratio
+        self.payload_attrs = input_payload
+        return {"input": input_payload}
 
 
 class QwenImage3ImageGeneratorV1(BaseV1ImageGenerator):
-    """Qwen Image 3 (qwen/qwen-image-3/image): 1–3 reference images, 1K/2K."""
+    """Qwen Image 3 (qwen/qwen-image-3/image): 1–3 reference images, 1K/2K.
+    NB: answered 404 "Not found" for this account's API key on 2026-10-06,
+    like a made-up model name; added at the user's request."""
     V1_PROVIDER: ClassVar[str] = "qwen"
     V1_MODEL: ClassVar[str] = "qwen-image-3"
     VALID_RATIOS: ClassVar[tuple] = _QWEN_IMAGE_RATIOS
@@ -1585,7 +1621,7 @@ class QwenImage3ImageGeneratorV1(BaseV1ImageGenerator):
 
 
 class QwenImage3ProImageGeneratorV1(QwenImage3ImageGeneratorV1):
-    """Qwen Image 3 Pro (qwen/qwen-image-3-pro/image): same schema as Qwen Image 3."""
+    """Qwen Image 3 Pro (qwen/qwen-image-3-pro/image): same schema as Qwen Image 3 (same 404 caveat)."""
     V1_MODEL: ClassVar[str] = "qwen-image-3-pro"
 
 

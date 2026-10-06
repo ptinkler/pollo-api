@@ -230,6 +230,9 @@ def _submit(generator) -> str:
     except ValueError:
         raise OpenRouterError(f"Pollo returned non-JSON (HTTP {resp.status_code}): {resp.text[:200]}", resp.status_code)
     task_id = (body.get("data") or {}).get("taskId") if isinstance(body.get("data"), dict) else None
+    if not task_id and resp.status_code == 404 and body.get("message") == "Not found":
+        raise OpenRouterError("Pollo: this model isn't available to your API key (404 Not found) — "
+                              "it may not be enabled for API access yet", 404)
     if not task_id:
         issues = (body.get("data") or {}).get("issues") if isinstance(body.get("data"), dict) else None
         detail = "; ".join(i.get("message", "") for i in issues or []) or body.get("message")

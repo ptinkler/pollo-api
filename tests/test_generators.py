@@ -1117,10 +1117,9 @@ def _v1(key, **kwargs):
 
 class TestKlingQwenImageGeneratorsV1:
     @pytest.mark.parametrize("key,slug", [
-        ("klingimageo1v1", "kling-ai/kling-image-o1/image"),
         ("klingv3imagev1", "kling-ai/kling-v3-image/image"),
         ("klingv3omniimagev1", "kling-ai/kling-v3-omni/image"),
-        ("qwenimagev1", "qwen/qwen-image/image"),
+        ("seedreamprov1", "bytedance/seedream-5-0-pro/image"),
         ("qwenimage3v1", "qwen/qwen-image-3/image"),
         ("qwenimage3prov1", "qwen/qwen-image-3-pro/image"),
         ("qwenimageflashv1", "alibaba/pre-qwen-image-flash/image"),
@@ -1131,13 +1130,28 @@ class TestKlingQwenImageGeneratorsV1:
     def test_reference_images_capped_per_model(self):
         refs = [f"https://x/{i}.png" for i in range(5)]
         assert _v1("klingv3imagev1", images=refs).get_payload()["input"]["images"] == refs[:1]
-        assert _v1("qwenimage3v1", images=refs).get_payload()["input"]["images"] == refs[:3]
-        assert _v1("klingimageo1v1", images=refs).get_payload()["input"]["images"] == refs
+        assert _v1("seedreamprov1", images=refs * 3).get_payload()["input"]["images"] == (refs * 3)[:10]
+        assert _v1("klingv3omniimagev1", images=refs).get_payload()["input"]["images"] == refs
 
-    def test_qwen_image_follows_the_input_image_ratio(self):
-        edit = _v1("qwenimagev1", images=["https://x/a.png"], aspect_ratio="16:9").get_payload()["input"]
-        assert "aspectRatio" not in edit and "resolution" not in edit
-        assert _v1("qwenimagev1", aspect_ratio="16:9").get_payload()["input"]["aspectRatio"] == "16:9"
+    def test_qwen_image_is_legacy_only(self):
+        """v1 qwen/* 404s on Pollo; the legacy endpoint is the one that works."""
+        from img2vid.pollo.pollo_img2vid import IMAGE_GENERATORS_LEGACY, IMAGE_GENERATORS_V1
+        assert "qwenimage" in IMAGE_GENERATORS_LEGACY
+        assert "qwenimagev1" not in IMAGE_GENERATORS_V1
+        assert _v1("qwenimage").model_url.endswith("/generation/qwen/qwen-image/image")
+        assert "/v1/" not in _v1("qwenimage").model_url
+
+    def test_qwen_image_3_caps_references_at_three(self):
+        refs = [f"https://x/{i}.png" for i in range(5)]
+        payload = _v1("qwenimage3prov1", images=refs, resolution="2K").get_payload()["input"]
+        assert payload["images"] == refs[:3] and payload["resolution"] == "2K"
+
+    def test_qwen_image_text_needs_ratio_and_edit_uses_image_url(self):
+        assert _v1("qwenimage", aspect_ratio="16:9").get_payload() == {
+            "input": {"prompt": "a fox", "aspectRatio": "16:9"}}
+        assert _v1("qwenimage", aspect_ratio="21:9").get_payload()["input"]["aspectRatio"] == "1:1"   # unsupported
+        edit = _v1("qwenimage", images=["https://x/a.png", "https://x/b.png"], aspect_ratio="16:9").get_payload()
+        assert edit == {"input": {"prompt": "a fox", "imageUrl": "https://x/a.png"}}
 
     def test_qwen_flash_is_text_only(self):
         payload = _v1("qwenimageflashv1", images=["https://x/a.png"]).get_payload()["input"]
@@ -1202,7 +1216,7 @@ class TestKlingVideoGeneratorsV1:
         from web.api import MODEL_INFO
         from img2vid.pollo.pollo_img2vid import GENERATORS_V1, IMAGE_GENERATORS_V1
         for key, cls in {**GENERATORS_V1, **IMAGE_GENERATORS_V1}.items():
-            if not key.startswith(("kling", "qwen")):
+            if not key.startswith(("kling", "qwen", "seedream")) or key == "seedream20v1":
                 continue
             info = MODEL_INFO[key]
             assert tuple(info["ratios"]) == cls.VALID_RATIOS, key

@@ -1302,7 +1302,8 @@ class TestPolloImageModels:
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
             monkeypatch.setattr(chat.openrouter, fn, lambda: [])
         models = {m["id"]: m for m in chat.get_models(refresh=True)["image"]}
-        assert models["pollo/seedreamv1"]["name"] == "Pollo: Seedream 5.0"
+        assert models["pollo/seedreamv1"]["name"] == "Pollo: Seedream 5.0 Lite"
+        assert models["pollo/seedreamprov1"]["name"] == "Pollo: Seedream 5.0 Pro"
         assert "21:9" in models["pollo/seedreamv1"]["aspect_ratios"]
         # legacy-only: no working v1 endpoint, so chat offers the legacy one
         assert models["pollo/polloimage2"]["name"] == "Pollo: Pollo Image 2.0"
@@ -1448,7 +1449,10 @@ class TestPolloImageModels:
         data = chat.get_models(refresh=True)
         images = {m["id"]: m for m in data["image"]}
         videos = {m["id"]: m for m in data["video"]}
+        # Qwen Image runs on its legacy endpoint (its v1 one 404s)
+        assert images["pollo/qwenimage"]["input_modalities"] == ["text", "image"]
         assert images["pollo/qwenimage3prov1"]["input_modalities"] == ["text", "image"]
+        assert "pollo/qwenimagev1" not in images
         assert images["pollo/qwenimageflashv1"]["input_modalities"] == ["text"]   # no reference images
         assert videos["pollo/klingv3v1"]["resolutions"] == ["std", "pro", "4K"]
         assert videos["pollo/klingv3v1"]["durations"] == list(range(3, 16))
@@ -1477,3 +1481,18 @@ class TestPolloImageModels:
         assert (kwargs["resolution"], kwargs["aspect_ratio"], kwargs["length"]) == ("720p", "16:9", 6)
         params = msg["media"][0]["params"]
         assert (params["resolution"], params["aspect_ratio"], params["duration"]) == ("720p", "16:9", 6)
+
+    def test_model_pollo_doesnt_serve_explains_itself(self, client, conv, chat, monkeypatch, pollo):
+        class NotServed:
+            status_code, text = 404, ""
+            def json(self):
+                return {"message": "Not found", "code": "NOT_FOUND", "errorCode": "REJECTED"}
+        class Gen:
+            api_key, payload_attrs = "k", {}
+            def send_request(self):
+                return NotServed()
+        monkeypatch.setattr(chat.pollo_chat, "get_image_generator", lambda key, **kw: Gen())
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
+        msg = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
+            "content": "a fox", "mode": "image", **{**SETTINGS, "image_model": "pollo/qwenimage3prov1"}}))[-1]["message"]
+        assert "isn't available to your API key" in msg["media"][0]["error"]
