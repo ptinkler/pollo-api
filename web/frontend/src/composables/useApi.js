@@ -109,6 +109,10 @@ export const downloadJobVideo = (jobId) => apiPost(`/api/jobs/${jobId}/download`
 export const deleteJob = (jobId) => apiDelete(`/api/jobs/${jobId}`)
 export const archiveJob = (jobId) => apiPost(`/api/jobs/${jobId}/archive`)
 export const unarchiveJob = (jobId) => apiPost(`/api/jobs/${jobId}/unarchive`)
+// Starred generations (per media file) — the home page's Favourites tab
+export const fetchFavourites = () => apiGet('/api/favourites')
+export const addFavourite = (jobId, filename) => apiPost('/api/favourites', { job_id: jobId, filename })
+export const removeFavourite = (filename) => apiDelete(`/api/favourites/${encodeURIComponent(filename)}`)
 export const bulkMoveJobs = (jobIds, targetProject) =>
   apiPost('/api/jobs/bulk-move', { job_ids: jobIds, target_project: targetProject })
 

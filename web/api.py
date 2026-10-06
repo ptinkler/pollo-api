@@ -2073,6 +2073,64 @@ def _set_job_archived(job_id: str, archived: bool) -> JobArchivedResult:
     return {"archived": archived, "job_id": job_id}
 
 
+# ── Favourite generations ───────────────────────────────────────────
+
+class FavouriteIn(BaseModel):
+    job_id: str
+    filename: str
+
+
+def _job_files(job) -> set[str]:
+    """Every media filename a job produced (multi-image jobs have several)."""
+    names = {Path(job.video_path).name} if job.video_path else set()
+    if job.params_json:
+        try:
+            names |= {Path(p).name for p in json.loads(job.params_json).get("result_paths", [])}
+        except Exception:
+            pass
+    return names
+
+
+@app.post("/api/favourites")
+def api_add_favourite(data: FavouriteIn, _api_key: str = Depends(verify_api_key)):
+    _safe_filename(data.filename)
+    db = get_db()
+    job = db.get_job(data.job_id)
+    if not job or data.filename not in _job_files(job):
+        raise HTTPException(status_code=404, detail="Generation not found")
+    db.add_favourite(data.job_id, data.filename)
+    return {"favourite": True, "filename": data.filename}
+
+
+@app.delete("/api/favourites/{filename}")
+def api_remove_favourite(filename: str, _api_key: str = Depends(verify_api_key)):
+    _safe_filename(filename)
+    get_db().remove_favourite(filename)
+    return {"favourite": False, "filename": filename}
+
+
+@app.get("/api/favourites")
+def api_list_favourites(_api_key: str = Depends(verify_api_key)):
+    """Starred generations from every project, newest star first, shaped like a
+    project's gallery items plus the project they're in now. Stars whose job
+    or file is gone (deleted another way) are left out."""
+    db = get_db()
+    projects = {p.slug: p for p in db.get_all_projects()}
+    items = []
+    for fav in db.list_favourites():
+        job = db.get_job(fav.job_id)
+        proj = projects.get(job.project) if job else None
+        if not proj or not (ASSETS_DIR / proj.assets_folder / fav.filename).exists():
+            continue
+        jd = job.to_dict()
+        items.append({
+            "filename": fav.filename, "favourite": True, "job": jd,
+            "media_type": "image" if (getattr(job, "job_type", "video") or "video") == "image" else "video",
+            "project": proj.slug, "project_name": proj.name, "favourited_at": iso(fav.created_at),
+        })
+    return {"items": items}
+
+
 @app.post("/api/jobs/{job_id}/archive")
 def api_archive_job(job_id: str, _api_key: str = Depends(verify_api_key)):
     """Archive a job (hide from gallery)."""
@@ -2206,9 +2264,10 @@ def api_get_project(project: str, archived: bool | None = None, _api_key: str = 
     all_media.sort(key=lambda x: x[1], reverse=True)
 
     # Build media list with associated job info, filtering by archived status
+    favourites = db.favourite_filenames()
     video_list = []
     for v, mtime in all_media:
-        video_info = {"filename": v.name, "mtime": mtime}
+        video_info = {"filename": v.name, "mtime": mtime, "favourite": v.name in favourites}
 
         matched_job = job_by_filename.get(v.name)
         if matched_job:
@@ -2457,6 +2516,7 @@ def api_delete_video(project: str, filename: str, _api_key: str = Depends(verify
 
         # Delete associated download record
         db.delete_download_by_path(filename)
+        db.remove_favourite(filename)
 
         # Invalidate caches for this project
         _invalidate_project_caches()

@@ -2175,3 +2175,73 @@ class TestStaticFile:
     def test_traversal_falls_back_to_index(self, static, path):
         from web.api import _static_file
         assert _static_file(path, static) == static / "index.html"
+
+
+# ── API: Favourite generations ───────────────────────────────────────
+
+class TestFavourites:
+    def _generation(self, db, name="Fav Project", filename="vid_a.mp4", job_id="job-a", job_type="video",
+                    extra=()):
+        import json as _json
+        import web.api as api_mod
+        proj = db.create_project(name=name)
+        assets = api_mod.ASSETS_DIR / proj.assets_folder
+        assets.mkdir(parents=True, exist_ok=True)
+        for f in (filename, *extra):
+            (assets / f).write_bytes(b"\x00")
+        db.create_job(job_id=job_id, project=proj.slug, model="seedance20fastv1", prompt="a fox",
+                      job_type=job_type, params={"result_paths": [str(assets / f) for f in (filename, *extra)]}
+                      if extra else None)
+        db.update_job(job_id, status="done", video_path=str(assets / filename))
+        return proj, assets
+
+    def test_star_shows_in_gallery_and_favourites(self, client, db):
+        proj, _ = self._generation(db)
+        assert client.post("/api/favourites", json={"job_id": "job-a", "filename": "vid_a.mp4"}).status_code == 200
+        gallery = client.get(f"/api/projects/{proj.slug}").json()["videos"]
+        assert [(v["filename"], v["favourite"]) for v in gallery] == [("vid_a.mp4", True)]
+        items = client.get("/api/favourites").json()["items"]
+        assert [(i["filename"], i["project"], i["project_name"], i["media_type"]) for i in items] == [
+            ("vid_a.mp4", proj.slug, "Fav Project", "video")]
+        assert items[0]["job"]["prompt"] == "a fox"
+
+    def test_unstar(self, client, db):
+        self._generation(db)
+        client.post("/api/favourites", json={"job_id": "job-a", "filename": "vid_a.mp4"})
+        assert client.delete("/api/favourites/vid_a.mp4").json() == {"favourite": False, "filename": "vid_a.mp4"}
+        assert client.get("/api/favourites").json()["items"] == []
+
+    def test_one_image_of_a_multi_image_job(self, client, db):
+        proj, _ = self._generation(db, filename="img_1.png", job_type="image", extra=("img_2.png",))
+        client.post("/api/favourites", json={"job_id": "job-a", "filename": "img_2.png"})
+        gallery = {v["filename"]: v["favourite"] for v in client.get(f"/api/projects/{proj.slug}").json()["videos"]}
+        assert gallery == {"img_1.png": False, "img_2.png": True}
+
+    def test_rejects_files_the_job_didnt_make(self, client, db):
+        self._generation(db)
+        assert client.post("/api/favourites", json={"job_id": "job-a", "filename": "other.mp4"}).status_code == 404
+        assert client.post("/api/favourites", json={"job_id": "nope", "filename": "vid_a.mp4"}).status_code == 404
+        assert client.post("/api/favourites", json={"job_id": "job-a", "filename": "../x.mp4"}).status_code == 400
+
+    def test_deleting_the_file_drops_the_star(self, client, db):
+        proj, _ = self._generation(db)
+        client.post("/api/favourites", json={"job_id": "job-a", "filename": "vid_a.mp4"})
+        assert client.delete(f"/api/videos/{proj.slug}/vid_a.mp4").status_code == 200
+        assert db.favourite_filenames() == set()
+
+    def test_follows_a_file_moved_to_another_project(self, client, db):
+        import web.api as api_mod
+        proj, assets = self._generation(db)
+        client.post("/api/favourites", json={"job_id": "job-a", "filename": "vid_a.mp4"})
+        other = db.create_project(name="Elsewhere")
+        dest = api_mod.ASSETS_DIR / other.assets_folder
+        dest.mkdir(parents=True)
+        (assets / "vid_a.mp4").rename(dest / "vid_a.mp4")
+        db.update_job("job-a", project=other.slug, video_path=str(dest / "vid_a.mp4"))
+        assert [i["project_name"] for i in client.get("/api/favourites").json()["items"]] == ["Elsewhere"]
+
+    def test_missing_files_are_left_out(self, client, db):
+        _, assets = self._generation(db)
+        client.post("/api/favourites", json={"job_id": "job-a", "filename": "vid_a.mp4"})
+        (assets / "vid_a.mp4").unlink()
+        assert client.get("/api/favourites").json()["items"] == []

@@ -10,9 +10,13 @@ const props = defineProps({
   showMove: { type: Boolean, default: true },
   selectable: { type: Boolean, default: false },
   selected: { type: Boolean, default: false },
+  // The Favourites tab shows cards from many projects: no project-scoped
+  // actions (regenerate, ref, archive, move, delete), and a project label
+  manage: { type: Boolean, default: true },
+  projectName: { type: String, default: '' },
 })
 
-defineEmits(['click', 'regenerate', 'use-as-ref', 'archive', 'unarchive', 'move', 'delete', 'toggle-select'])
+defineEmits(['click', 'regenerate', 'use-as-ref', 'archive', 'unarchive', 'move', 'delete', 'toggle-select', 'toggle-favourite'])
 
 const job = computed(() => props.video.job || {})
 const isImageJob = computed(() => job.value.media_type === 'image' || job.value.job_type === 'image')
@@ -50,6 +54,7 @@ function handleThumbError() {
       <div class="gallery-card-body">
         <div class="video-model">{{ model }}</div>
         <div class="video-prompt">{{ prompt }}</div>
+        <div v-if="projectName" class="video-project">📁 {{ projectName }}</div>
         <div class="video-meta">
           <span v-if="job.aspect_ratio">{{ job.aspect_ratio }}</span>
           <span v-if="job.length">{{ job.length }}s</span>
@@ -60,6 +65,14 @@ function handleThumbError() {
 
     <div class="card-actions">
       <button
+        v-if="job.job_id"
+        :class="['action-btn', 'fav-btn', { on: video.favourite }]"
+        :title="video.favourite ? 'Remove from favourites' : 'Add to favourites'"
+        :aria-pressed="!!video.favourite"
+        @click.stop="$emit('toggle-favourite', video)"
+      >{{ video.favourite ? '★' : '☆' }}</button>
+      <button
+        v-if="manage"
         class="action-btn"
         title="Regenerate"
         @click.stop="$emit('regenerate', video)"
@@ -70,6 +83,7 @@ function handleThumbError() {
         </svg>
       </button>
       <button
+        v-if="manage"
         class="action-btn"
         title="Use as Ref"
         @click.stop="$emit('use-as-ref', video)"
@@ -81,7 +95,7 @@ function handleThumbError() {
         </svg>
       </button>
 <button
-        v-if="showArchive"
+        v-if="manage && showArchive"
         class="action-btn"
         title="Archive"
         @click.stop="$emit('archive', video)"
@@ -93,7 +107,7 @@ function handleThumbError() {
         </svg>
       </button>
       <button
-        v-if="showUnarchive"
+        v-if="manage && showUnarchive"
         class="action-btn"
         title="Unarchive"
         @click.stop="$emit('unarchive', video)"
@@ -106,7 +120,7 @@ function handleThumbError() {
         </svg>
       </button>
       <button
-        v-if="showMove"
+        v-if="manage && showMove"
         class="action-btn"
         title="Move to project"
         @click.stop="$emit('move', video)"
@@ -117,6 +131,7 @@ function handleThumbError() {
         </svg>
       </button>
       <button
+        v-if="manage"
         class="action-btn action-btn-danger"
         title="Delete"
         @click.stop="$emit('delete', video)"
@@ -193,6 +208,21 @@ function handleThumbError() {
   background: linear-gradient(135deg, #1e1e2e 0%, #2a2a3a 100%);
   color: var(--text2);
   font-size: 2rem;
+}
+
+.fav-btn {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.fav-btn.on {
+  color: var(--yellow, #fdcb6e);
+}
+
+.video-project {
+  font-size: 0.75rem;
+  color: var(--text2);
+  margin-top: 4px;
 }
 
 .gallery-card-body {

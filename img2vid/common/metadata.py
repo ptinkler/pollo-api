@@ -166,6 +166,17 @@ class Job(Base):
         return result
 
 
+class GenerationFavourite(Base):
+    """A starred generation (one media file — a job can have several, e.g. a
+    4-image result). Keyed by filename, which stays the same when a file is
+    moved between projects; the job says which project it's in now."""
+    __tablename__ = "generation_favourites"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    filename: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    job_id: Mapped[str] = mapped_column(String(50), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
 class ChatConversation(Base):
     __tablename__ = "chat_conversations"
     id: Mapped[str] = mapped_column(String(50), primary_key=True)
@@ -704,6 +715,33 @@ class MetadataDB:
                 session.commit()
                 return True
             return False
+
+    # ── Favourite generations ────────────────────────────────────────
+
+    def add_favourite(self, job_id: str, filename: str) -> None:
+        with self._session() as session:
+            if not session.query(GenerationFavourite).filter(GenerationFavourite.filename == filename).first():
+                session.add(GenerationFavourite(job_id=job_id, filename=filename))
+                session.commit()
+
+    def remove_favourite(self, filename: str) -> bool:
+        with self._session() as session:
+            n = session.query(GenerationFavourite).filter(GenerationFavourite.filename == filename).delete()
+            session.commit()
+            return bool(n)
+
+    def list_favourites(self) -> list[GenerationFavourite]:
+        """Newest first."""
+        with self._session() as session:
+            items = session.query(GenerationFavourite).order_by(GenerationFavourite.created_at.desc(),
+                                                                GenerationFavourite.id.desc()).all()
+            for i in items:
+                session.expunge(i)
+            return items
+
+    def favourite_filenames(self) -> set[str]:
+        with self._session() as session:
+            return {row[0] for row in session.query(GenerationFavourite.filename).all()}
 
     # ── Chat methods ─────────────────────────────────────────────────
 

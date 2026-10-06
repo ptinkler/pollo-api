@@ -14,7 +14,7 @@ const emit = defineEmits(['open-video', 'regenerate', 'use-as-ref', 'video-delet
 
 const {
   videos, loading, load,
-  handleDelete, openVideo, handleRegenerate,
+  handleDelete, openVideo, handleRegenerate, handleToggleFavourite,
   getVideoByFilename, removeVideo, showToast,
 } = useVideoList(props, { archived: true, emit })
 
@@ -142,6 +142,7 @@ defineExpose({ refresh, getVideoByFilename, removeVideo })
           @unarchive="handleUnarchive"
           @move="handleCardMove"
           @delete="handleDelete"
+          @toggle-favourite="handleToggleFavourite"
           @toggle-select="toggleSelect"
         />
       </div>

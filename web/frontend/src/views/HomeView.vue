@@ -1,8 +1,10 @@
 <script setup>
-import { ref, onMounted, inject } from 'vue'
+import { ref, computed, onMounted, inject } from 'vue'
 import { useRouter } from 'vue-router'
 import ProjectCard from '../components/ProjectCard.vue'
-import { fetchProjects, createProject, archiveProject, unarchiveProject, deleteProject } from '../composables/useApi'
+import VideoCard from '../components/VideoCard.vue'
+import { fetchProjects, createProject, archiveProject, unarchiveProject, deleteProject, fetchFavourites } from '../composables/useApi'
+import { toggleFavourite } from '../composables/useVideoList'
 
 const router = useRouter()
 const showToast = inject('showToast')
@@ -10,9 +12,38 @@ const showToast = inject('showToast')
 const projects = ref([])
 const newProjectName = ref('')
 const loading = ref(true)
-const activeTab = ref('active')  // 'active' or 'archived'
+const activeTab = ref('active')  // 'active' | 'archived' | 'favourites'
+
+// ── Favourites: starred generations from every project ──
+const favourites = ref([])
+const favFilter = ref('all')   // all | video | image
+const shownFavourites = computed(() =>
+  favFilter.value === 'all' ? favourites.value : favourites.value.filter(f => f.media_type === favFilter.value))
+
+async function loadFavourites() {
+  loading.value = true
+  try {
+    favourites.value = (await fetchFavourites()).items
+  } catch {
+    showToast('Failed to load favourites', 'error')
+  } finally {
+    loading.value = false
+  }
+}
+
+function openFavourite(item) {
+  // Archived generations aren't in the gallery, so open the project's Archive tab
+  if (item.job?.archived) return router.push({ name: 'project-archive', params: { project: item.project } })
+  router.push({ name: 'project-video', params: { project: item.project, videoFilename: item.filename } })
+}
+
+async function unstar(item) {
+  await toggleFavourite(item, showToast)
+  if (!item.favourite) favourites.value = favourites.value.filter(f => f !== item)
+}
 
 async function loadProjects() {
+  if (activeTab.value === 'favourites') return loadFavourites()
   loading.value = true
   try {
     const archived = activeTab.value === 'archived'
@@ -103,9 +134,38 @@ onMounted(loadProjects)
         :class="{ active: activeTab === 'archived' }"
         @click="switchTab('archived')"
       >Archived</button>
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'favourites' }"
+        @click="switchTab('favourites')"
+      >★ Favourites</button>
     </div>
 
-    <div v-if="loading" class="loading">
+    <template v-if="activeTab === 'favourites'">
+      <div v-if="favourites.length" class="fav-filters">
+        <button v-for="f in [['all', 'All'], ['video', 'Videos'], ['image', 'Images']]" :key="f[0]"
+          :class="['fav-filter', { active: favFilter === f[0] }]" @click="favFilter = f[0]">{{ f[1] }}</button>
+      </div>
+      <div v-if="loading" class="loading"><p>Loading...</p></div>
+      <div v-else-if="!shownFavourites.length" class="empty-state">
+        <h3>{{ favourites.length ? 'Nothing here with this filter' : 'No favourites yet' }}</h3>
+        <p>Star (☆) any video or image in a project's gallery to keep it here.</p>
+      </div>
+      <div v-else class="fav-grid">
+        <VideoCard
+          v-for="item in shownFavourites"
+          :key="item.filename"
+          :video="item"
+          :project="item.project"
+          :project-name="item.project_name"
+          :manage="false"
+          @click="openFavourite"
+          @toggle-favourite="unstar"
+        />
+      </div>
+    </template>
+
+    <div v-else-if="loading" class="loading">
       <p>Loading...</p>
     </div>
 
@@ -137,6 +197,33 @@ onMounted(loadProjects)
 </template>
 
 <style scoped>
+.fav-filters {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.fav-filter {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.fav-filter.active {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.fav-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
 .home-bar {
   display: flex;
   align-items: center;

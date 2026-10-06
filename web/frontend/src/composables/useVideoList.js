@@ -1,5 +1,5 @@
 import { ref, watch, inject } from 'vue'
-import { fetchProject, deleteVideo } from './useApi'
+import { fetchProject, deleteVideo, addFavourite, removeFavourite } from './useApi'
 
 /**
  * Shared composable for video list panels (Gallery, Archive).
@@ -48,6 +48,10 @@ export function useVideoList(props, { archived, emit }) {
     emit('regenerate', video)
   }
 
+  async function handleToggleFavourite(video) {
+    await toggleFavourite(video, showToast)
+  }
+
   function getVideoByFilename(filename) {
     return videos.value.find(v => v.filename === filename)
   }
@@ -68,9 +72,23 @@ export function useVideoList(props, { archived, emit }) {
     handleDelete,
     openVideo,
     handleRegenerate,
+    handleToggleFavourite,
     getVideoByFilename,
     removeVideo,
     showToast,
   }
 }
 
+/** Star / unstar one generated file (updates `video.favourite` in place). */
+export async function toggleFavourite(video, showToast) {
+  const starring = !video.favourite
+  if (starring && !video.job?.job_id) return showToast('Cannot favourite: no job record', 'error')
+  video.favourite = starring   // optimistic
+  try {
+    if (starring) await addFavourite(video.job.job_id, video.filename)
+    else await removeFavourite(video.filename)
+  } catch {
+    video.favourite = !starring
+    showToast(`Failed to ${starring ? 'add to' : 'remove from'} favourites`, 'error')
+  }
+}
