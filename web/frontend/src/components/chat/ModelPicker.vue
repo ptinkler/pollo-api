@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
 import { useModelFavourites } from '../../composables/useModelFavourites'
+import { useShowHidden } from '../../composables/useShowHidden'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -25,6 +26,13 @@ const current = computed(() => props.models.find(m => m.id === props.modelValue)
 
 const { favourites, isFavourite, toggleFavourite } = useModelFavourites()
 
+// Models not enabled for this API key (`hidden`) only show behind "Show
+// hidden" — except the current pick, so the picker never loses it
+const { showHidden } = useShowHidden()
+const hiddenCount = computed(() => props.models.filter(m => m.hidden).length)
+const visibleModels = computed(() =>
+  showHidden.value ? props.models : props.models.filter(m => !m.hidden || m.id === props.modelValue))
+
 // ── Provider tabs: Pollo models ("pollo/…", billed in Pollo credits) vs
 // OpenRouter ones. Only shown when the catalogue has both.
 const PROVIDERS = {
@@ -39,8 +47,8 @@ const tab = ref('pollo')
 const searched = computed(() => {
   const q = query.value.trim().toLowerCase()
   return q
-    ? props.models.filter(m => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
-    : props.models
+    ? visibleModels.value.filter(m => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
+    : visibleModels.value
 })
 const matches = computed(() =>
   showTabs.value ? searched.value.filter(m => providerOf(m.id) === tab.value) : searched.value)
@@ -79,6 +87,7 @@ function perMillion(price) {
 
 function badges(m) {
   const out = []
+  if (m.hidden) out.push({ t: 'not enabled', title: m.hidden })
   if (props.kind === 'text') {
     if (m.input_modalities?.includes('image')) out.push({ t: 'vision', title: 'Accepts images' })
     if (m.supports_tools) out.push({ t: 'tools', title: 'Can create images/videos in Auto mode' })
@@ -153,7 +162,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
         ref="searchInput"
         v-model="query"
         class="picker-search"
-        :placeholder="`Search ${models.length} ${label.toLowerCase()} models…`"
+        :placeholder="`Search ${visibleModels.length} ${label.toLowerCase()} models…`"
         @keydown="onKeydown"
       />
       <div v-if="showTabs" class="picker-tabs" role="tablist">
@@ -169,6 +178,10 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
           @click="tab = id; searchInput?.focus()"
         >{{ p.label }} <span class="tab-count">{{ tabCounts[id] }}</span></button>
       </div>
+      <label v-if="hiddenCount" class="show-hidden" title="Models not enabled for this API key">
+        <input v-model="showHidden" type="checkbox" @change="searchInput?.focus()" />
+        Show hidden ({{ hiddenCount }})
+      </label>
       <div class="picker-list">
         <template v-for="section in sections" :key="section.id">
           <div v-if="section.label" class="picker-section">{{ section.label }}</div>
@@ -370,6 +383,17 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
   border: none;
   color: var(--accent2);
   font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.show-hidden {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.75rem;
+  color: var(--text2);
   cursor: pointer;
 }
 

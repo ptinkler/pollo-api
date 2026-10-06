@@ -439,6 +439,7 @@ MODEL_INFO = {
     },
     "qwenimage": {
         "label": "Qwen Image", "type": "image",
+        "hidden": "Not enabled for API access on this key (403)",   # checked with real requests 2026-10-06
         "ratios": ["1:1", "3:4", "4:3", "16:9", "9:16"],   # text-to-image only; an edit keeps the image's shape
         "options": ["images"],
         "legacy": True,
@@ -446,30 +447,35 @@ MODEL_INFO = {
     },
     "seedreamflashv1": {
         "label": "Seedream 5.0 Flash", "type": "image",
+        "hidden": "Not enabled for API access on this key (403)",   # checked with real requests 2026-10-06
         "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
         "resolutions": ["1K", "1.5K", "2K"],
         "options": ["images"],
     },
     "seedreamprov1": {
         "label": "Seedream 5.0 Pro", "type": "image",
+        "hidden": "Not enabled for API access on this key (403)",   # checked with real requests 2026-10-06
         "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
         "resolutions": ["1K", "2K"],
         "options": ["images"],
     },
     "qwenimage3v1": {
         "label": "Qwen Image 3", "type": "image",
+        "hidden": "Pollo doesn't serve it to this key yet (404)",   # checked with real requests 2026-10-06
         "ratios": ["1:1", "3:4", "4:3", "16:9", "9:16"],
         "resolutions": ["1K", "2K"],
         "options": ["images"],
     },
     "qwenimage3prov1": {
         "label": "Qwen Image 3 Pro", "type": "image",
+        "hidden": "Pollo doesn't serve it to this key yet (404)",   # checked with real requests 2026-10-06
         "ratios": ["1:1", "3:4", "4:3", "16:9", "9:16"],
         "resolutions": ["1K", "2K"],
         "options": ["images"],
     },
     "qwenimageflashv1": {
         "label": "Qwen Image Flash", "type": "image",
+        "hidden": "Not enabled for API access on this key (403)",   # checked with real requests 2026-10-06
         "ratios": ["1:1", "3:4", "4:3", "16:9", "9:16"],
         "options": [],
     },

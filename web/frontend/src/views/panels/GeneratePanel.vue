@@ -4,6 +4,7 @@ import { RatioPicker, LengthSlider, ToggleSwitch, SleekTextarea, SleekSelect, Sl
 import { generateVideo, generateImage, uploadSourceImage, deleteSourceImage, getSourceImageUrl, uploadRefImage, getRefImageUrl, fetchCreditEstimate } from '../../composables/useApi'
 import { useProjectSettings } from '../../composables/useProjectSettings'
 import { useJobsQueue } from '../../composables/useJobsQueue'
+import { useShowHidden } from '../../composables/useShowHidden'
 
 const props = defineProps({
   project: { type: String, required: true },
@@ -164,13 +165,16 @@ function modelGroup(label) {
   return brand || label.split(' ')[0]
 }
 
-// Format models for SleekSelect — hide deprecated models, grouped by brand
+// Format models for SleekSelect — hide deprecated models, and models not
+// enabled for this API key (`hidden`) unless "Show hidden" is on; grouped by brand
+const { showHidden } = useShowHidden()
+const hiddenModelCount = computed(() => Object.values(props.models).filter(i => i.hidden && !i.deprecated).length)
 const modelSelectOptions = computed(() => {
   return Object.entries(props.models)
-    .filter(([, info]) => !info.deprecated)
+    .filter(([key, info]) => !info.deprecated && (!info.hidden || showHidden.value || key === settings.value.model))
     .map(([key, info]) => ({
       value: key,
-      label: `${info.label}${info.type === 'ref' ? ' (ref)' : ''}`,
+      label: `${info.label}${info.type === 'ref' ? ' (ref)' : ''}${info.hidden ? ' (not enabled)' : ''}`,
       group: modelGroup(info.label)
     }))
 })
@@ -541,6 +545,13 @@ async function handleSubmit() {
         <span class="legacy-mode-hint">
           {{ legacyMode ? 'Showing old (pre-v1) API models' : 'Showing current (v1) API models' }}
         </span>
+        <ToggleSwitch
+          v-if="hiddenModelCount"
+          id="show_hidden_models"
+          v-model="showHidden"
+          :label="`Show hidden (${hiddenModelCount})`"
+          title="Models not enabled for this API key"
+        />
       </div>
 
       <!-- Source Image & Model Row -->

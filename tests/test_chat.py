@@ -1517,3 +1517,13 @@ class TestPolloImageModels:
     def test_pollo_content_rejection_is_still_moderation(self, chat):
         assert chat._is_moderation_error(chat.pollo_chat.PolloError("Pollo: prompt flagged as sensitive content", 400))
         assert chat._is_moderation_error(chat.openrouter.OpenRouterError("Forbidden", 403))   # OpenRouter's 403 still is
+
+    def test_models_not_enabled_for_the_key_are_flagged_hidden(self, chat, monkeypatch, pollo):
+        for fn in ("list_text_models", "list_image_models", "list_video_models"):
+            monkeypatch.setattr(chat.openrouter, fn, lambda: [])
+        images = {m["id"]: m for m in chat.get_models(refresh=True)["image"]}
+        hidden = {k for k, m in images.items() if m["hidden"]}
+        assert hidden == {"pollo/seedreamprov1", "pollo/seedreamflashv1", "pollo/qwenimage",
+                          "pollo/qwenimageflashv1", "pollo/qwenimage3v1", "pollo/qwenimage3prov1"}
+        assert "403" in images["pollo/seedreamprov1"]["hidden"]
+        assert images["pollo/klingv3imagev1"]["hidden"] is None   # confirmed working

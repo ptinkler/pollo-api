@@ -90,6 +90,8 @@ def list_image_models() -> list[dict[str, Any]]:
         "resolutions": list(cls.VALID_RESOLUTIONS) or None,
         "created": None,
         "conversational": False,
+        # Not enabled for this key — listed only behind "Show hidden"
+        "hidden": meta.get("hidden") or None,
     } for key, cls, meta in _catalogue(_image_generators())]
 
 
@@ -104,6 +106,7 @@ def list_video_models() -> list[dict[str, Any]]:
         "frame_images": ["first_frame"],          # all animate a source image
         "generate_audio": "generate_audio" in meta.get("options", []),
         "created": None,
+        "hidden": meta.get("hidden") or None,
     } for key, cls, meta in _catalogue(GENERATORS_V1)]
 
 

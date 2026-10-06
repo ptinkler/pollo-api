@@ -4,6 +4,7 @@ import { copyText } from '../composables/useClipboard'
 import { nextTick } from 'vue'
 import ModelPicker from '../components/chat/ModelPicker.vue'
 import { useModelFavourites } from '../composables/useModelFavourites'
+import { useShowHidden } from '../composables/useShowHidden'
 
 const MODELS = [
   { id: 'a/alpha', name: 'Alpha' },
@@ -235,6 +236,42 @@ describe('ModelPicker provider tabs', () => {
     expect(hint.text()).toContain('1 match in OpenRouter')
     await hint.trigger('click')
     expect(modelNames(w)).toEqual(['Gemini Image'])
+    w.unmount()
+  })
+})
+
+describe('ModelPicker hidden models', () => {
+  const WITH_HIDDEN = [
+    { id: 'pollo/seedreamv1', name: 'Pollo: Seedream 5.0 Lite' },
+    { id: 'pollo/seedreamprov1', name: 'Pollo: Seedream 5.0 Pro', hidden: 'Not enabled for API access on this key (403)' },
+  ]
+  const modelNames = (w) => names(w).filter(n => n !== 'None')
+
+  beforeEach(() => {
+    localStorage.clear()
+    useShowHidden().showHidden.value = false
+  })
+
+  it('hides them until "Show hidden" is ticked, then badges them', async () => {
+    const w = await openPicker({ models: WITH_HIDDEN, modelValue: 'pollo/seedreamv1' })
+    expect(modelNames(w)).toEqual(['Pollo: Seedream 5.0 Lite'])
+    expect(w.find('.show-hidden').text()).toBe('Show hidden (1)')
+    await w.find('.show-hidden input').setValue(true)
+    expect(modelNames(w)).toEqual(['Pollo: Seedream 5.0 Lite', 'Pollo: Seedream 5.0 Pro'])
+    const badge = w.findAll('.item-badge').find(b => b.text() === 'not enabled')
+    expect(badge.attributes('title')).toContain('403')
+    w.unmount()
+  })
+
+  it('keeps a hidden model that is already selected', async () => {
+    const w = await openPicker({ models: WITH_HIDDEN, modelValue: 'pollo/seedreamprov1' })
+    expect(modelNames(w)).toEqual(['Pollo: Seedream 5.0 Lite', 'Pollo: Seedream 5.0 Pro'])
+    w.unmount()
+  })
+
+  it('has no checkbox when nothing is hidden', async () => {
+    const w = await openPicker()
+    expect(w.find('.show-hidden').exists()).toBe(false)
     w.unmount()
   })
 })
