@@ -147,6 +147,9 @@ watch(videoInfo, (info) => {
 const modeWarning = computed(() => {
   if (mode.value === 'image' && !selected.image) return 'Pick an image model to use Image mode.'
   if (mode.value === 'video' && !selected.video) return 'Pick a video model to use Video mode.'
+  if (mode.value === 'image' && attachments.value.length && imageInfo.value
+      && !imageInfo.value.input_modalities?.includes('image'))
+    return `${imageInfo.value.name} can't take reference images — pick one tagged “edits” or “context” to use the attached image.`
   if (mode.value === 'auto' && textInfo.value && !textInfo.value.supports_tools)
     return `${textInfo.value.name} can't call tools, so Auto mode will only chat. Use Image/Video mode, or pick a model tagged “tools”.`
   if (attachments.value.length && textInfo.value && !textInfo.value.input_modalities?.includes('image') && ['auto', 'text'].includes(mode.value))
@@ -346,11 +349,11 @@ async function addFiles(files) {
   }
 }
 
-// "Make a video from this image": attach an image already in this chat
-// (generated or uploaded — however far up) and switch to Video mode. Being
-// attached to the new message also makes it the latest image, so Auto mode
-// animates it too if the user switches back.
-function animateImage(file) {
+// "Picture / video from this image": attach an image already in this chat
+// (generated or uploaded — however far up) and switch to Image or Video
+// mode. Being attached to the new message also makes it the latest image,
+// so Auto mode uses it too if the user switches back.
+function useImage({ file, mode: target }) {
   lightbox.value = null
   if (!attachments.value.some(a => a.file === file)) {
     if (attachments.value.length >= 8) return showToast('Up to 8 attachments per message', 'error')
@@ -358,8 +361,21 @@ function animateImage(file) {
       key: Math.random().toString(36).slice(2), file, preview: chatMediaUrl(convId.value, file), uploading: false,
     }))
   }
-  mode.value = 'video'
+  mode.value = target
   nextTick(() => textarea.value?.focus())
+}
+
+// "Picture / video from this reply": the reply (or the selected part) becomes
+// the prompt, editable before sending. Anything already typed is kept.
+function useText({ text, mode: target }) {
+  if (!text) return
+  draft.value = draft.value.trim() ? `${draft.value.trim()}\n\n${text}` : text
+  mode.value = target
+  autosize()
+  nextTick(() => {
+    textarea.value?.focus()
+    textarea.value?.setSelectionRange(draft.value.length, draft.value.length)
+  })
 }
 
 function removeAttachment(att) {
@@ -905,7 +921,8 @@ onBeforeUnmount(() => {
             @edit="content => editMessage(m, content)"
             @resend="resendMessage(m)"
             @branch="switchBranch"
-            @animate="animateImage"
+            @use-image="useImage"
+            @use-text="useText"
             @regenerate="payload => regenerateMedia(m, payload)"
             @stop="stop"
             @open-media="openMedia"
@@ -961,7 +978,10 @@ onBeforeUnmount(() => {
       <div v-if="lightbox" class="lightbox" @click="lightbox = null">
         <img :src="lightbox.url" alt="" @click.stop />
         <p v-if="lightbox.prompt" class="lightbox-caption" @click.stop>{{ lightbox.prompt }}</p>
-        <button v-if="lightbox.file" class="lightbox-animate" @click.stop="animateImage(lightbox.file)">🎬 Make a video from this</button>
+        <div v-if="lightbox.file" class="lightbox-actions" @click.stop>
+          <button class="lightbox-animate" @click="useImage({ file: lightbox.file, mode: 'image' })">🖼 Make a picture from this</button>
+          <button class="lightbox-animate" @click="useImage({ file: lightbox.file, mode: 'video' })">🎬 Make a video from this</button>
+        </div>
       </div>
     </Teleport>
   </div>
@@ -1546,6 +1566,11 @@ onBeforeUnmount(() => {
   object-fit: contain;
   border-radius: 8px;
   cursor: default;
+}
+
+.lightbox-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .lightbox-animate {

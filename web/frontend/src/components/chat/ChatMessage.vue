@@ -13,7 +13,7 @@ const props = defineProps({
   canEdit: { type: Boolean, default: false },
   canSwitch: { type: Boolean, default: false },   // ‹ › arrows usable (not mid-reply)
 })
-const emit = defineEmits(['retry', 'open-media', 'stop', 'edit', 'resend', 'regenerate', 'branch', 'animate'])
+const emit = defineEmits(['retry', 'open-media', 'stop', 'edit', 'resend', 'regenerate', 'branch', 'use-image', 'use-text'])
 
 // Model catalogues, provided by ChatView, for "Try another model"
 const chatModels = inject('chatModels', { image: [], video: [] })
@@ -75,6 +75,16 @@ function url(item) {
 // Prompts sent outside Auto mode say so — an edit or retry reruns them in that mode
 const MODE_TAGS = { image: '🖼 Image', video: '🎬 Video', text: '💬 Text only' }
 const modeTag = computed(() => MODE_TAGS[props.message.mode] || '')
+
+// "Picture / video from this": hand an image, or this reply's text, to the
+// composer in Image/Video mode. A selection inside the reply narrows the text.
+const replyEl = ref(null)
+function replyText() {
+  const sel = window.getSelection?.()
+  const picked = sel && !sel.isCollapsed && replyEl.value?.contains(sel.anchorNode) ? sel.toString().trim() : ''
+  return picked || displayText.value
+}
+const useText = (mode) => emit('use-text', { text: replyText(), mode })
 
 // ── Branches: other versions of this turn (from edits/retries) ──
 const siblings = computed(() => props.message.siblings || [])
@@ -146,7 +156,10 @@ function fmtCost(c) {
             alt="attachment"
             @click="emit('open-media', { url: url(item), kind: 'image', file: item.file })"
           />
-          <button class="animate-btn" title="Make a video from this image" @click="emit('animate', item.file)">🎬</button>
+          <span class="use-btns">
+            <button title="Make a picture from this image" @click="emit('use-image', { file: item.file, mode: 'image' })">🖼</button>
+            <button title="Make a video from this image" @click="emit('use-image', { file: item.file, mode: 'video' })">🎬</button>
+          </span>
         </div>
       </div>
 
@@ -182,7 +195,7 @@ function fmtCost(c) {
       </div>
 
       <template v-if="!isUser">
-        <div v-if="html" class="markdown" v-html="html"></div>
+        <div v-if="html" ref="replyEl" class="markdown" v-html="html"></div>
         <div v-else-if="streaming && !message.media?.length" class="thinking">
           <span></span><span></span><span></span>
         </div>
@@ -204,7 +217,10 @@ function fmtCost(c) {
               />
               <video v-else :src="url(item)" controls loop playsinline preload="metadata"></video>
               <div class="media-overlay">
-                <button v-if="item.kind === 'image'" class="media-btn" title="Make a video from this image" @click.stop="emit('animate', item.file)">🎬</button>
+                <template v-if="item.kind === 'image'">
+                  <button class="media-btn" title="Make a picture from this image" @click.stop="emit('use-image', { file: item.file, mode: 'image' })">🖼</button>
+                  <button class="media-btn" title="Make a video from this image" @click.stop="emit('use-image', { file: item.file, mode: 'video' })">🎬</button>
+                </template>
                 <a :href="url(item)" :download="item.file" class="media-btn" title="Download" @click.stop>⤓</a>
               </div>
             </template>
@@ -273,6 +289,11 @@ function fmtCost(c) {
           <button v-if="streaming" class="meta-btn" @click="emit('stop')">■ Stop</button>
           <template v-else>
             <button v-if="displayText" class="meta-btn" @click="copy(displayText, 'reply')">{{ copiedKey === 'reply' ? '✓ Copied' : '⧉ Copy' }}</button>
+            <!-- mousedown.prevent keeps a selection in the reply alive for the click -->
+            <button v-if="displayText" class="meta-btn" title="Make a picture from this reply (or the part you've selected)"
+              @mousedown.prevent @click="useText('image')">🖼 Picture</button>
+            <button v-if="displayText" class="meta-btn" title="Make a video from this reply (or the part you've selected)"
+              @mousedown.prevent @click="useText('video')">🎬 Video</button>
             <button v-if="canRetry" class="meta-btn" @click="emit('retry')">↻ Retry</button>
           </template>
           <span v-if="modelShort && showTextModel" class="meta-info" :title="message.model">💬 {{ modelShort }}</span>
@@ -443,10 +464,17 @@ function fmtCost(c) {
   position: relative;
 }
 
-.animate-btn {
+.use-btns {
   position: absolute;
   top: 6px;
   right: 6px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.use-btns button {
   width: 28px;
   height: 28px;
   border: none;
@@ -454,17 +482,15 @@ function fmtCost(c) {
   background: rgba(0, 0, 0, 0.65);
   font-size: 0.85rem;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s;
 }
 
-.attachment:hover .animate-btn,
-.animate-btn:focus-visible {
+.attachment:hover .use-btns,
+.use-btns:focus-within {
   opacity: 1;
 }
 
 @media (hover: none) {
-  .animate-btn {
+  .use-btns {
     opacity: 1;
   }
 }
