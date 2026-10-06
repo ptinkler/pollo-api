@@ -12,7 +12,9 @@ not by probing the live API (probes cost real money).
 import base64
 import json
 import os
+import socket
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
@@ -29,6 +31,38 @@ class OpenRouterError(Exception):
     def __init__(self, message: str, status: int | None = None):
         super().__init__(message)
         self.status = status
+
+
+def _keepalive_socket_options() -> list[tuple[int, int, int]]:
+    """TCP keepalive probes every 15s while a request waits. Image and video
+    calls sit silent for a minute or more (Seedream 5.0 Pro with references:
+    ~2 min), and some networks — VPNs, NAT routers, NAS/Docker hosts — drop
+    connections idle that long, surfacing as httpx.RemoteProtocolError
+    "Server disconnected without sending a response"."""
+    options = [(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)]
+    for name, value in (("TCP_KEEPIDLE", 15), ("TCP_KEEPINTVL", 15), ("TCP_KEEPCNT", 8)):
+        if hasattr(socket, name):   # Linux names; other platforms keep OS defaults
+            options.append((socket.IPPROTO_TCP, getattr(socket, name), value))
+    return options
+
+
+# One shared, thread-safe client so every OpenRouter connection gets keepalive
+_client = httpx.Client(transport=httpx.HTTPTransport(socket_options=_keepalive_socket_options()))
+
+
+@contextmanager
+def _connection_guard(waiting_for: str):
+    """Turn a dropped connection into an OpenRouterError (so the chat marks the
+    media failed instead of leaving it pending), saying how long it waited."""
+    start = time.monotonic()
+    try:
+        yield
+    except (httpx.RemoteProtocolError, httpx.ReadError, httpx.WriteError) as e:
+        waited = round(time.monotonic() - start)
+        raise OpenRouterError(
+            f"The connection to OpenRouter dropped after {waited}s waiting for the {waiting_for} "
+            f"({type(e).__name__}) — usually a network/VPN closing idle connections. "
+            "It may still have been billed: check OpenRouter's activity before retrying.") from e
 
 
 def get_api_key() -> str:
@@ -79,7 +113,7 @@ def _raise_for_response(resp: httpx.Response) -> None:
 
 
 def _get(path: str, params: dict | None = None) -> dict:
-    resp = httpx.get(f"{OPENROUTER_BASE}{path}", headers=_headers(), params=params, timeout=DEFAULT_TIMEOUT)
+    resp = _client.get(f"{OPENROUTER_BASE}{path}", headers=_headers(), params=params, timeout=DEFAULT_TIMEOUT)
     _raise_for_response(resp)
     return resp.json()
 
@@ -201,7 +235,7 @@ def stream_chat(model: str, messages: list[dict], tools: list[dict] | None = Non
     if session_id:
         body["session_id"] = session_id
 
-    with httpx.stream("POST", f"{OPENROUTER_BASE}/chat/completions", headers=_headers(),
+    with _client.stream("POST", f"{OPENROUTER_BASE}/chat/completions", headers=_headers(),
                       json=body, timeout=CHAT_TIMEOUT) as resp:
         if resp.status_code >= 400:
             resp.read()
@@ -245,7 +279,8 @@ def generate_image(model: str, prompt: str, aspect_ratio: str | None = None,
     if session_id:
         body["session_id"] = session_id
 
-    resp = httpx.post(f"{OPENROUTER_BASE}/images", headers=_headers(), json=body, timeout=IMAGE_TIMEOUT)
+    with _connection_guard("image"):
+        resp = _client.post(f"{OPENROUTER_BASE}/images", headers=_headers(), json=body, timeout=IMAGE_TIMEOUT)
     _raise_for_response(resp)
     data = resp.json()
     images = [
@@ -267,7 +302,9 @@ def generate_image_chat(model: str, messages: list[dict], aspect_ratio: str | No
         body["image_config"] = {"aspect_ratio": aspect_ratio}
     if session_id:
         body["session_id"] = session_id
-    resp = httpx.post(f"{OPENROUTER_BASE}/chat/completions", headers=_headers(), json=body, timeout=IMAGE_TIMEOUT)
+    with _connection_guard("image"):
+        resp = _client.post(f"{OPENROUTER_BASE}/chat/completions", headers=_headers(), json=body,
+                            timeout=IMAGE_TIMEOUT)
     _raise_for_response(resp)
     data = resp.json()
     message = ((data.get("choices") or [{}])[0].get("message") or {})
@@ -278,7 +315,7 @@ def generate_image_chat(model: str, messages: list[dict], aspect_ratio: str | No
             header, _, b64 = url.partition(",")
             images.append((base64.b64decode(b64), header[5:].split(";")[0] or "image/png"))
         elif url:
-            r = httpx.get(url, timeout=IMAGE_TIMEOUT, follow_redirects=True)
+            r = _client.get(url, timeout=IMAGE_TIMEOUT, follow_redirects=True)
             r.raise_for_status()
             images.append((r.content, r.headers.get("content-type", "image/png").split(";")[0]))
     if not images:
@@ -310,7 +347,8 @@ def submit_video(model: str, prompt: str, duration: int | None = None,
     if session_id:
         body["session_id"] = session_id
 
-    resp = httpx.post(f"{OPENROUTER_BASE}/videos", headers=_headers(), json=body, timeout=IMAGE_TIMEOUT)
+    with _connection_guard("video job to start"):
+        resp = _client.post(f"{OPENROUTER_BASE}/videos", headers=_headers(), json=body, timeout=IMAGE_TIMEOUT)
     _raise_for_response(resp)
     return resp.json()
 
@@ -322,7 +360,7 @@ def get_video(job_id: str) -> dict:
 
 def download_video(job_id: str, dest: Path, index: int = 0) -> None:
     tmp = dest.with_suffix(dest.suffix + ".part")
-    with httpx.stream("GET", f"{OPENROUTER_BASE}/videos/{job_id}/content", headers=_headers(),
+    with _client.stream("GET", f"{OPENROUTER_BASE}/videos/{job_id}/content", headers=_headers(),
                       params={"index": index}, timeout=IMAGE_TIMEOUT, follow_redirects=True) as resp:
         if resp.status_code >= 400:
             resp.read()

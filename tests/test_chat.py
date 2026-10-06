@@ -835,14 +835,14 @@ class TestStallProtection:
             yield ": OPENROUTER PROCESSING"
 
     def test_deadline_breaks_a_keepalive_only_stream(self, chat, monkeypatch):
-        monkeypatch.setattr(chat.openrouter.httpx, "stream", lambda *a, **k: self._FakeStream(self._keepalives()))
+        monkeypatch.setattr(chat.openrouter._client, "stream", lambda *a, **k: self._FakeStream(self._keepalives()))
         with pytest.raises(chat.openrouter.OpenRouterError) as e:
             list(chat.openrouter.stream_chat("m", [], max_seconds=0.2))
         assert e.value.status == 504
 
     def test_stop_is_noticed_during_keepalives(self, chat, monkeypatch):
         import threading, time as _t
-        monkeypatch.setattr(chat.openrouter.httpx, "stream", lambda *a, **k: self._FakeStream(self._keepalives()))
+        monkeypatch.setattr(chat.openrouter._client, "stream", lambda *a, **k: self._FakeStream(self._keepalives()))
         stop = threading.Event()
         threading.Timer(0.1, stop.set).start()
         t0 = _t.monotonic()
@@ -1045,7 +1045,7 @@ class TestOpenRouterChatImages:
         import base64
         sent = {}
         b64 = base64.b64encode(_png_bytes()).decode()
-        monkeypatch.setattr(chat.openrouter.httpx, "post", lambda url, **kw: (sent.update(kw["json"]), self._resp({
+        monkeypatch.setattr(chat.openrouter._client, "post", lambda url, **kw: (sent.update(kw["json"]), self._resp({
             "choices": [{"message": {"content": "Here", "images": [
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}]}}],
             "usage": {"cost": 0.039}}))[1])
@@ -1054,7 +1054,7 @@ class TestOpenRouterChatImages:
         assert images == [(_png_bytes(), "image/png")] and cost == 0.039
 
     def test_no_image_reports_models_text(self, chat, monkeypatch):
-        monkeypatch.setattr(chat.openrouter.httpx, "post", lambda url, **kw: self._resp(
+        monkeypatch.setattr(chat.openrouter._client, "post", lambda url, **kw: self._resp(
             {"choices": [{"message": {"content": "I can't draw that."}}]}))
         with pytest.raises(chat.openrouter.OpenRouterError) as e:
             chat.openrouter.generate_image_chat("g/img", [])
@@ -1527,3 +1527,25 @@ class TestPolloImageModels:
                           "pollo/qwenimageflashv1", "pollo/qwenimage3v1", "pollo/qwenimage3prov1"}
         assert "403" in images["pollo/seedreamprov1"]["hidden"]
         assert images["pollo/klingv3imagev1"]["hidden"] is None   # confirmed working
+
+
+class TestOpenRouterConnection:
+    def test_connections_use_tcp_keepalive(self, chat):
+        import socket
+        opts = chat.openrouter._keepalive_socket_options()
+        assert (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1) in opts
+        if hasattr(socket, "TCP_KEEPIDLE"):
+            assert (socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 15) in opts
+
+    def test_dropped_connection_fails_the_card_with_an_explanation(self, client, conv, chat, monkeypatch):
+        """httpx.RemoteProtocolError used to escape as a raw error and leave the image pending."""
+        import httpx
+        def drop(*a, **k):
+            raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+        monkeypatch.setattr(chat.openrouter._client, "post", drop)
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
+        msg = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                                  json={"content": "a fox", "mode": "image", **SETTINGS}))[-1]["message"]
+        item = msg["media"][0]
+        assert item["status"] == "error" and item["moderated"] is False
+        assert "connection to OpenRouter dropped after" in item["error"] and "RemoteProtocolError" in item["error"]
