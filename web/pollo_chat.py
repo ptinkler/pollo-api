@@ -30,6 +30,12 @@ from img2vid.pollo.pollo_img2vid import (GENERATORS_V1, IMAGE_GENERATORS, IMAGE_
 
 from .openrouter import OpenRouterError
 
+
+class PolloError(OpenRouterError):
+    """A Pollo failure. Subclasses OpenRouterError so chat handles it the
+    same way — except moderation detection: Pollo answers 403 for "This model
+    is not enabled for API access", which isn't a content block."""
+
 PREFIX = "pollo/"
 JOB_PREFIX = "pollo:"
 FOLLOW_IMAGE_RATIOS = ("adaptive", "auto")   # values meaning "match the input image"
@@ -103,10 +109,10 @@ def list_video_models() -> list[dict[str, Any]]:
 
 def _generator_key(model_id: str, generators: dict) -> str:
     if not is_configured():
-        raise OpenRouterError("POLLO_API_KEY is not set on the server")
+        raise PolloError("POLLO_API_KEY is not set on the server")
     key = model_id[len(PREFIX):]
     if key not in generators:
-        raise OpenRouterError(f"Unknown Pollo model: {key}")
+        raise PolloError(f"Unknown Pollo model: {key}")
     return key
 
 
@@ -114,7 +120,7 @@ def _upload(path: Path) -> str:
     try:
         return _web_api()._upload_image(path)
     except ValueError as e:
-        raise OpenRouterError(f"Couldn't upload the image for Pollo: {e}") from e
+        raise PolloError(f"Couldn't upload the image for Pollo: {e}") from e
 
 
 def generate_image(model_id: str, prompt: str, aspect_ratio: str | None = None,
@@ -198,14 +204,14 @@ def get_video(job_id: str) -> dict:
     failures raise, so the poller's error budget handles them."""
     task = _task_state(job_id[len(JOB_PREFIX):])
     if task["status"] == "transient":
-        raise OpenRouterError(task["error"])
+        raise PolloError(task["error"])
     return task
 
 
 def download_video(job_id: str, dest: Path, index: int = 0) -> None:
     task = get_video(job_id)
     if task["status"] != "completed":
-        raise OpenRouterError(f"Pollo video isn't ready ({task['status']})")
+        raise PolloError(f"Pollo video isn't ready ({task['status']})")
     tmp = dest.with_suffix(dest.suffix + ".part")
     try:
         with requests.get(task["urls"][index], stream=True, timeout=DOWNLOAD_TIMEOUT) as resp:
@@ -214,7 +220,7 @@ def download_video(job_id: str, dest: Path, index: int = 0) -> None:
                 for chunk in resp.iter_content(chunk_size=1 << 16):
                     f.write(chunk)
     except requests.RequestException as e:
-        raise OpenRouterError(f"Couldn't download the Pollo video: {e}") from e
+        raise PolloError(f"Couldn't download the Pollo video: {e}") from e
     tmp.replace(dest)
 
 
@@ -224,19 +230,19 @@ def _submit(generator) -> str:
     except (ConnectionError, ValueError) as e:
         # ValueError: the generator refused the request (e.g. an
         # image-to-video-only model with no image) — nothing was sent
-        raise OpenRouterError(f"Pollo: {e}") from e
+        raise PolloError(f"Pollo: {e}") from e
     try:
         body = resp.json()
     except ValueError:
-        raise OpenRouterError(f"Pollo returned non-JSON (HTTP {resp.status_code}): {resp.text[:200]}", resp.status_code)
+        raise PolloError(f"Pollo returned non-JSON (HTTP {resp.status_code}): {resp.text[:200]}", resp.status_code)
     task_id = (body.get("data") or {}).get("taskId") if isinstance(body.get("data"), dict) else None
     if not task_id and resp.status_code == 404 and body.get("message") == "Not found":
-        raise OpenRouterError("Pollo: this model isn't available to your API key (404 Not found) — "
+        raise PolloError("Pollo: this model isn't available to your API key (404 Not found) — "
                               "it may not be enabled for API access yet", 404)
     if not task_id:
         issues = (body.get("data") or {}).get("issues") if isinstance(body.get("data"), dict) else None
         detail = "; ".join(i.get("message", "") for i in issues or []) or body.get("message")
-        raise OpenRouterError(f"Pollo: {detail or f'request failed (HTTP {resp.status_code})'}", resp.status_code)
+        raise PolloError(f"Pollo: {detail or f'request failed (HTTP {resp.status_code})'}", resp.status_code)
     return task_id
 
 
@@ -272,14 +278,14 @@ def _wait(task_id: str) -> dict:
         if task["status"] == "transient":
             errors += 1
             if errors >= MAX_POLL_ERRORS:
-                raise OpenRouterError(f"{task['error']} (polling gave up)")
+                raise PolloError(f"{task['error']} (polling gave up)")
             continue
         errors = 0
         if task["status"] == "failed":
-            raise OpenRouterError(task["error"])
+            raise PolloError(task["error"])
         if task["status"] == "completed":
             return task
-    raise OpenRouterError("Pollo: timed out waiting for the image")
+    raise PolloError("Pollo: timed out waiting for the image")
 
 
 def _download(url: str) -> tuple[bytes, str]:
@@ -287,6 +293,6 @@ def _download(url: str) -> tuple[bytes, str]:
         resp = requests.get(url, timeout=DOWNLOAD_TIMEOUT)
         resp.raise_for_status()
     except requests.RequestException as e:
-        raise OpenRouterError(f"Couldn't download the Pollo image: {e}") from e
+        raise PolloError(f"Couldn't download the Pollo image: {e}") from e
     media_type = (resp.headers.get("Content-Type") or "image/png").split(";")[0].strip()
     return resp.content, media_type

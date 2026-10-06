@@ -444,6 +444,12 @@ MODEL_INFO = {
         "legacy": True,
         "legacy_only": True,   # v1 qwen/* endpoints 404 — offered in both modes
     },
+    "seedreamflashv1": {
+        "label": "Seedream 5.0 Flash", "type": "image",
+        "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+        "resolutions": ["1K", "1.5K", "2K"],
+        "options": ["images"],
+    },
     "seedreamprov1": {
         "label": "Seedream 5.0 Pro", "type": "image",
         "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],

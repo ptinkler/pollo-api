@@ -1086,7 +1086,11 @@ _MODERATION = re.compile(
 
 def _is_moderation_error(e: openrouter.OpenRouterError) -> bool:
     """OpenRouter's own moderation returns 403; providers phrase their
-    content-policy refusals in many ways, so also match on the message."""
+    content-policy refusals in many ways, so also match on the message.
+    Pollo's 403 means "model not enabled for API access", so for Pollo only
+    the message counts."""
+    if isinstance(e, pollo_chat.PolloError):
+        return bool(_MODERATION.search(str(e)))
     return e.status == 403 or bool(_MODERATION.search(str(e)))
 
 

@@ -1496,3 +1496,24 @@ class TestPolloImageModels:
         msg = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
             "content": "a fox", "mode": "image", **{**SETTINGS, "image_model": "pollo/qwenimage3prov1"}}))[-1]["message"]
         assert "isn't available to your API key" in msg["media"][0]["error"]
+
+    def test_pollo_not_enabled_is_not_called_moderation(self, client, conv, chat, monkeypatch, pollo):
+        """Pollo answers 403 for "not enabled for API access" — that's not a content block."""
+        class Refused:
+            status_code, text = 403, ""
+            def json(self):
+                return {"message": "This model is not enabled for API access.", "code": "FORBIDDEN"}
+        class Gen:
+            api_key, payload_attrs = "k", {}
+            def send_request(self):
+                return Refused()
+        monkeypatch.setattr(chat.pollo_chat, "get_image_generator", lambda key, **kw: Gen())
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
+        msg = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
+            "content": "a gym", "mode": "image", **{**SETTINGS, "image_model": "pollo/seedreamprov1"}}))[-1]["message"]
+        item = msg["media"][0]
+        assert item["error"] == "Pollo: This model is not enabled for API access." and item["moderated"] is False
+
+    def test_pollo_content_rejection_is_still_moderation(self, chat):
+        assert chat._is_moderation_error(chat.pollo_chat.PolloError("Pollo: prompt flagged as sensitive content", 400))
+        assert chat._is_moderation_error(chat.openrouter.OpenRouterError("Forbidden", 403))   # OpenRouter's 403 still is

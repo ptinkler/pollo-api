@@ -1120,6 +1120,7 @@ class TestKlingQwenImageGeneratorsV1:
         ("klingv3imagev1", "kling-ai/kling-v3-image/image"),
         ("klingv3omniimagev1", "kling-ai/kling-v3-omni/image"),
         ("seedreamprov1", "bytedance/seedream-5-0-pro/image"),
+        ("seedreamflashv1", "bytedance/seedream-5-0-flash/image"),
         ("qwenimage3v1", "qwen/qwen-image-3/image"),
         ("qwenimage3prov1", "qwen/qwen-image-3-pro/image"),
         ("qwenimageflashv1", "alibaba/pre-qwen-image-flash/image"),
@@ -1156,6 +1157,11 @@ class TestKlingQwenImageGeneratorsV1:
     def test_qwen_flash_is_text_only(self):
         payload = _v1("qwenimageflashv1", images=["https://x/a.png"]).get_payload()["input"]
         assert payload == {"prompt": "a fox", "aspectRatio": "1:1"}
+
+    def test_seedream_flash_payload(self):
+        refs = [f"https://x/{i}.png" for i in range(12)]
+        payload = _v1("seedreamflashv1", resolution="1.5K", aspect_ratio="21:9", images=refs).get_payload()["input"]
+        assert payload == {"prompt": "a fox", "aspectRatio": "21:9", "resolution": "1.5K", "images": refs[:10]}
 
     def test_omni_image_takes_4k_and_auto(self):
         payload = _v1("klingv3omniimagev1", resolution="4K", aspect_ratio="auto").get_payload()["input"]

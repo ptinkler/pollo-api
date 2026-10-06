@@ -1468,6 +1468,22 @@ class SeedreamImageGeneratorV1(BaseV1ImageGenerator):
 _SEEDREAM_RATIOS = ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3")
 
 
+class SeedreamFlashImageGeneratorV1(BaseV1ImageGenerator):
+    """Seedream 5.0 Flash — v1 API (bytedance/seedream-5-0-flash/image).
+
+    Not in Pollo's OpenAPI spec (2026-10-06) but served: an empty request
+    answers 400, not 404. Fields confirmed from live validation errors (each
+    probe carried an invalid aspectRatio, so none could generate): eight
+    ratios incl. 21:9, resolution 1K/1.5K/2K, up to 10 reference images.
+    seed/mode weren't rejected but aren't confirmed to do anything — left out.
+    """
+    V1_PROVIDER: ClassVar[str] = "bytedance"
+    V1_MODEL: ClassVar[str] = "seedream-5-0-flash"
+    VALID_RATIOS: ClassVar[tuple] = ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9")
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("1K", "1.5K", "2K")
+    MAX_IMAGES: ClassVar[int] = 10
+
+
 class SeedreamProImageGeneratorV1(BaseV1ImageGenerator):
     """Seedream 5.0 Pro — v1 API (bytedance/seedream-5-0-pro/image). From the
     spec (2026-10-06): seven ratios, 1K/2K, up to 10 reference images."""
