@@ -177,3 +177,27 @@ class TestThumbnails:
         assert list(media_mod.thumb_dir().iterdir())
         client.delete(f"/api/media/{item['id']}")
         assert not list(media_mod.thumb_dir().iterdir())
+
+    def test_at_most_two_made_at_once(self, client, monkeypatch):
+        import threading
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+        import web.media as media_mod
+        ids = [client.post("/api/media/upload", files={"file": (f"{n}.png", _png(), "image/png")}).json()["thumb_url"]
+               for n in range(8)]
+        real, lock, state = media_mod.make_thumb, threading.Lock(), {"now": 0, "peak": 0}
+
+        def slow_thumb(path):
+            with lock:
+                state["now"] += 1
+                state["peak"] = max(state["peak"], state["now"])
+            time.sleep(0.05)
+            try:
+                return real(path)
+            finally:
+                with lock:
+                    state["now"] -= 1
+        monkeypatch.setattr(media_mod, "make_thumb", slow_thumb)
+        with ThreadPoolExecutor(8) as pool:
+            codes = list(pool.map(lambda u: client.get(u).status_code, ids))
+        assert codes == [200] * 8 and state["peak"] <= media_mod.THUMB_WORKERS

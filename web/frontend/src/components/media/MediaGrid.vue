@@ -2,16 +2,16 @@
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { mediaOrigin } from '../../composables/useMedia'
 
-// A grid of media-library items, lazy all the way down: tiles are added a
-// page at a time as the end of the grid scrolls near, and each tile's
-// small server-made thumbnail loads only when the tile is near the screen.
+// A grid of media-library items with infinite scroll: tiles are added a
+// small batch at a time as you near the bottom, and each tile's small
+// server-made thumbnail loads only when the tile is near the screen.
 // With `selectable`, clicking toggles an item's selection ('toggle');
 // otherwise it opens it ('open').
 const props = defineProps({
   items: { type: Array, default: () => [] },
   selected: { type: Set, default: () => new Set() },
   selectable: { type: Boolean, default: false },
-  pageSize: { type: Number, default: 60 },
+  pageSize: { type: Number, default: 20 },
 })
 const emit = defineEmits(['toggle', 'open'])
 
@@ -20,8 +20,8 @@ const visible = computed(() => props.items.slice(0, shown.value))
 // New filters or search: start from the top again
 watch(() => props.items, () => { shown.value = props.pageSize })
 
-// Add the next page when the sentinel after the last tile comes within
-// ~2 screens. Without IntersectionObserver (old browsers, tests) show all.
+// Add the next batch when the sentinel after the last tile comes within
+// ~a row of the screen. Without IntersectionObserver (old browsers, tests) show all.
 const sentinel = ref(null)
 let observer = null
 watch(sentinel, (el) => {
@@ -41,10 +41,24 @@ watch(sentinel, (el) => {
       observer.unobserve(sentinel.value)
       observer.observe(sentinel.value)
     })
-  }, { rootMargin: '200% 0px' })
+  }, { rootMargin: '300px 0px' })
   observer.observe(el)
 })
 onBeforeUnmount(() => observer?.disconnect())
+
+// A thumbnail that fails (e.g. the server was busy) is retried once, then
+// the tile shows a placeholder
+const retried = ref(new Set())
+const failed = ref(new Set())
+function onThumbError(item, e) {
+  if (!retried.value.has(item.id)) {
+    retried.value = new Set(retried.value).add(item.id)
+    const img = e.target
+    setTimeout(() => { img.src = `${item.thumb_url}?retry=1` }, 2000)
+  } else {
+    failed.value = new Set(failed.value).add(item.id)
+  }
+}
 </script>
 
 <template>
@@ -58,7 +72,8 @@ onBeforeUnmount(() => observer?.disconnect())
       :title="item.prompt || item.name"
       @click="selectable ? emit('toggle', item) : emit('open', item)"
     >
-      <img :src="item.thumb_url" alt="" loading="lazy" decoding="async" />
+      <span v-if="failed.has(item.id)" class="no-thumb">{{ item.kind === 'video' ? '🎬' : '🖼' }}</span>
+      <img v-else :src="item.thumb_url" alt="" loading="lazy" decoding="async" @error="onThumbError(item, $event)" />
       <span v-if="item.kind === 'video'" class="badge video">▶</span>
       <span class="badge source">{{ item.source === 'upload' ? '⬆' : '✨' }}</span>
       <span class="caption">{{ mediaOrigin(item) }}</span>
@@ -100,6 +115,14 @@ onBeforeUnmount(() => observer?.disconnect())
   object-fit: cover;
   display: block;
   pointer-events: none;
+}
+
+.no-thumb {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  font-size: 1.6rem;
+  opacity: 0.5;
 }
 
 .sentinel {

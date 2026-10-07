@@ -84,7 +84,7 @@ describe('MediaPicker', () => {
 })
 
 describe('MediaGrid lazy rendering', () => {
-  it('renders a page of thumbnail tiles, then more as the end scrolls into view', async () => {
+  it('renders a batch of thumbnail tiles, then more as the end scrolls into view', async () => {
     const { default: MediaGrid } = await import('../components/media/MediaGrid.vue')
     let trigger
     const observed = []
@@ -116,6 +116,30 @@ describe('MediaGrid lazy rendering', () => {
     await w.setProps({ items: items.slice(0, 80) })
     expect(w.findAll('.tile')).toHaveLength(50)
     delete globalThis.IntersectionObserver
+    w.unmount()
+  })
+})
+
+
+describe('MediaGrid thumbnails', () => {
+  it('defaults to batches of 20, retries a failed thumbnail once, then shows a placeholder', async () => {
+    vi.useFakeTimers()
+    const { default: MediaGrid } = await import('../components/media/MediaGrid.vue')
+    globalThis.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} }
+    const items = Array.from({ length: 30 }, (_, n) => ({
+      id: `lib:${n}.png`, kind: 'image', source: 'upload', origin: 'library', name: `${n}.png`, thumb_url: `/thumb/${n}`,
+    }))
+    const w = mount(MediaGrid, { props: { items } })
+    await flushPromises()
+    expect(w.findAll('.tile')).toHaveLength(20)
+    const img = w.find('.tile img')
+    await img.trigger('error')
+    vi.advanceTimersByTime(2000)
+    expect(img.element.getAttribute('src')).toBe('/thumb/0?retry=1')
+    await img.trigger('error')
+    expect(w.findAll('.tile')[0].find('.no-thumb').exists()).toBe(true)
+    delete globalThis.IntersectionObserver
+    vi.useRealTimers()
     w.unmount()
   })
 })

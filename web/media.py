@@ -18,14 +18,17 @@ Using an item (as a character image, a Generate source/ref image or a chat
 attachment) copies the file to that destination — the way uploads already
 work there — so deleting it from the library never breaks what used it.
 """
+import asyncio
 import hashlib
 import io
 import shutil
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
+import anyio
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from PIL import Image, ImageOps
@@ -42,6 +45,7 @@ router = APIRouter(prefix="/api/media", dependencies=[Depends(verify_api_key)])
 
 VIDEO_EXTS = {".mp4"}
 THUMB_SIZE = 320              # px, the thumbnail's shorter side (grid tiles are square, cropped to fill)
+THUMB_WORKERS = 2             # thumbnails made at once — a grid asks for many together, and a NAS CPU is slow
 PROJECT_SKIP = {"thumb.jpg"}   # generated project thumbnail, not media
 
 
@@ -136,12 +140,13 @@ def make_thumb(path: Path) -> Path | None:
                 return None
             img = Image.open(io.BytesIO(frame))
         else:
-            img = ImageOps.exif_transpose(Image.open(path))
-        img = img.convert("RGB")
+            img = Image.open(path)
         w, h = img.size
-        scale = THUMB_SIZE / min(w, h)
-        if scale < 1:
-            img = img.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.LANCZOS)
+        scale = min(1.0, THUMB_SIZE / min(w, h))
+        target = (max(1, round(w * scale)), max(1, round(h * scale)))
+        img.draft("RGB", target)   # JPEGs decode straight at a reduced size — much faster
+        img = ImageOps.exif_transpose(img).convert("RGB")
+        img.thumbnail(target, Image.LANCZOS, reducing_gap=2.0)
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp = out.with_suffix(".part")
         img.save(tmp, "JPEG", quality=80)
@@ -151,10 +156,19 @@ def make_thumb(path: Path) -> Path | None:
         return None
 
 
+# New thumbnails are made on their own small pool, THUMB_WORKERS at a time
+_thumb_pool = ThreadPoolExecutor(max_workers=THUMB_WORKERS, thread_name_prefix="media-thumb")
+
+
 @router.get("/thumb/{media_id:path}")
-def api_media_thumb(media_id: str):
-    _, path, _ = resolve(media_id)
-    thumb = make_thumb(path)
+async def api_media_thumb(media_id: str):
+    """Cached thumbnails come straight back; new ones queue for the thumbnail
+    pool. Async, so requests waiting in that queue don't tie up the worker
+    threads every other (sync) endpoint runs on."""
+    _, path, _ = await anyio.to_thread.run_sync(resolve, media_id)
+    thumb = _thumb_path(path)
+    if not thumb.is_file():
+        thumb = await asyncio.wrap_future(_thumb_pool.submit(make_thumb, path))
     if not thumb:
         raise HTTPException(404, "No thumbnail")
     return FileResponse(thumb, media_type="image/jpeg",
