@@ -2,6 +2,7 @@
 import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
 import { useModelFavourites } from '../../composables/useModelFavourites'
 import { useShowHidden } from '../../composables/useShowHidden'
+import { chatImageModelTakesCharacters } from '../../composables/useCharacters'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -97,6 +98,7 @@ function badges(m) {
   } else if (props.kind === 'image') {
     if (m.conversational) out.push({ t: 'context', title: 'Sees the conversation (text and earlier images), like the Gemini app' })
     else if (m.input_modalities?.includes('image')) out.push({ t: 'edits', title: 'Takes reference images (tends to edit them)' })
+    if (chatImageModelTakesCharacters(m)) out.push({ t: '👤', title: 'Can use characters (sends their reference images)' })
   } else if (props.kind === 'video') {
     if (m.frame_images?.includes('first_frame')) out.push({ t: 'img→vid', title: 'Can animate an image' })
     if (m.durations?.length) out.push({ t: `${Math.min(...m.durations)}–${Math.max(...m.durations)}s`, title: 'Durations' })

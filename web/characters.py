@@ -14,6 +14,7 @@ saved character (conversation_id None), which can be attached anywhere.
 Images live under <data>/characters/<id>/. Elsewhere they're referred to as
 "char:<id>/<file>" (e.g. in a chat image's stored reference list).
 """
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -72,6 +73,32 @@ def require(ids: list[int] | None, db=None) -> list:
     return chars
 
 
+def available(conv_id: str | None, db=None) -> list:
+    """The characters a chat can use: every saved one plus its own ad-hoc ones."""
+    db = db or get_db()
+    return [c for c in db.list_characters() if c.conversation_id is None or c.conversation_id == conv_id]
+
+
+def mentioned(chars: list, text: str) -> list:
+    """The characters whose name appears in the text as a whole word (any case)."""
+    return [c for c in chars
+            if c.name.strip() and re.search(rf"(?<!\w){re.escape(c.name.strip())}(?!\w)", text, re.IGNORECASE)]
+
+
+def create_from_files(name: str, description: str, files: list[Path], conversation_id: str | None, db=None):
+    """A new character with copies of these image files (ad hoc in `conversation_id` if set)."""
+    db = db or get_db()
+    char = db.create_character(name, description, conversation_id)
+    d = char_dir(char.id)
+    d.mkdir(parents=True, exist_ok=True)
+    names = []
+    for f in files[:MAX_IMAGES]:
+        name_on_disk = f"img_{uuid.uuid4().hex[:12]}{f.suffix.lower()}"
+        shutil.copyfile(f, d / name_on_disk)
+        names.append(name_on_disk)
+    return db.update_character(char.id, images=names)
+
+
 def describe(chars: list) -> str:
     """The characters as a prompt block ('' for none)."""
     if not chars:
@@ -87,16 +114,17 @@ def with_characters(prompt: str, chars: list) -> str:
     return f"{prompt}\n\n{block}" if block else prompt
 
 
-def reference_refs(chars: list, limit: int) -> list[str]:
-    """Up to `limit` "char:" image refs: each character's first image, then
-    their second, and so on — so every character gets in before any gets two."""
+def reference_refs(chars: list, limit: int | None = None) -> list[str]:
+    """The characters' "char:" image refs (up to `limit`, None = all): each
+    character's first image, then their second, and so on — so every
+    character gets in before any gets two."""
     refs: list[str] = []
     for i in range(MAX_IMAGES):
         for c in chars:
             files = c.images
             if i < len(files) and (char_dir(c.id) / files[i]).is_file():
                 refs.append(image_ref(c.id, files[i]))
-                if len(refs) >= limit:
+                if limit is not None and len(refs) >= limit:
                     return refs
     return refs
 

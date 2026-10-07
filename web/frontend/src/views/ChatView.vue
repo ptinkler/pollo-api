@@ -9,7 +9,7 @@ import ChatLibrary from '../components/chat/ChatLibrary.vue'
 import InstructionsDialog from '../components/chat/InstructionsDialog.vue'
 import CharacterPicker from '../components/characters/CharacterPicker.vue'
 import CharacterEditor from '../components/characters/CharacterEditor.vue'
-import { fetchCharacters } from '../composables/useCharacters'
+import { fetchCharacters, chatImageModelTakesCharacters } from '../composables/useCharacters'
 import {
   fetchChatStatus, fetchChatModels, fetchConversations, fetchConversation,
   createConversation, deleteConversation, fetchChatMessage,
@@ -39,7 +39,9 @@ const STORE_KEY = 'chat.prefs'
 // Memory slider stops: how many past messages the chat model gets (null = all)
 const MEMORY_STEPS = [2, 4, 6, 10, 14, 20, 30, 40, 60, 80, 100, null]
 const DEFAULT_MEMORY = 20
-const MAX_CONTEXT_IMAGES = 4   // mirrors MAX_HISTORY_IMAGES in web/chat.py
+// Image slider stops: how many recent chat images go with each request (null = all)
+const IMAGE_STEPS = [0, 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, null]
+const DEFAULT_IMAGES = 6   // mirrors DEFAULT_IMAGE_LIMIT in web/chat.py
 
 // ── Persistent prefs (per browser) ───────────────────────────────────
 function loadPrefs() {
@@ -57,15 +59,21 @@ const memoryIndex = ref((() => {
   return i === -1 ? MEMORY_STEPS.indexOf(DEFAULT_MEMORY) : i
 })())
 const historyLimit = computed(() => MEMORY_STEPS[memoryIndex.value])
+const imageIndex = ref((() => {
+  const i = IMAGE_STEPS.indexOf('images' in prefs ? prefs.images : DEFAULT_IMAGES)
+  return i === -1 ? IMAGE_STEPS.indexOf(DEFAULT_IMAGES) : i
+})())
+const imageLimit = computed(() => IMAGE_STEPS[imageIndex.value])
 // Composer settings for generated media, used in every mode (Auto too).
 // '' = let the chat model choose (Auto), else the media model's default.
 const imageOpts = reactive({ aspect_ratio: '', resolution: '', ...prefs.imageOpts })
 const videoOpts = reactive({ aspect_ratio: '', resolution: '', duration: '', generate_audio: true, ...prefs.videoOpts })
 
-watch([() => ({ ...selected }), mode, memoryIndex, () => ({ ...imageOpts }), () => ({ ...videoOpts })], () => {
+watch([() => ({ ...selected }), mode, memoryIndex, imageIndex, () => ({ ...imageOpts }), () => ({ ...videoOpts })], () => {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify({
-      ...selected, mode: mode.value, memory: historyLimit.value, imageOpts: { ...imageOpts }, videoOpts: { ...videoOpts },
+      ...selected, mode: mode.value, memory: historyLimit.value, images: imageLimit.value,
+      imageOpts: { ...imageOpts }, videoOpts: { ...videoOpts },
     }))
   } catch { /* storage unavailable */ }
 }, { deep: true })
@@ -101,7 +109,8 @@ let skipLoadFor = null
 const memoryHint = computed(() => {
   const total = messages.value.length + 1
   const limit = historyLimit.value
-  const imgs = `the ${MAX_CONTEXT_IMAGES} most recent images`
+  const n = imageLimit.value
+  const imgs = n === null ? 'every image' : n === 0 ? 'no images' : `the ${n === 1 ? 'latest image' : `${n} most recent images`}`
   if (!limit || limit >= total) {
     return messages.value.length
       ? `Sending the whole chat (${total} messages) plus ${imgs}.`
@@ -247,6 +256,22 @@ const characterIds = ref([])        // attached to this chat (or the next new on
 const charEditor = reactive({ open: false, character: null, conversationId: null, seed: [] })
 const attachedCharacters = computed(() =>
   characterIds.value.map(id => characters.value.find(c => c.id === id)).filter(Boolean))
+
+// Whether the current mode + models can use characters (mirrors _characters_usable
+// in web/chat.py). When they can't, attached ones stay attached but unused.
+// Unknown models (catalogue still loading) count as able, like on the server.
+const characterSupport = computed(() => {
+  if (mode.value === 'text') return { ok: true }
+  if (mode.value === 'video') return { ok: false, reason: "Video mode doesn't use characters." }
+  if (!selected.image) return { ok: false, reason: 'Pick an image model to use characters.' }
+  if (imageInfo.value && !chatImageModelTakesCharacters(imageInfo.value)) {
+    return { ok: false, reason: `${imageInfo.value.name} can't take reference images, so it can't use characters.` }
+  }
+  if (mode.value === 'auto' && textInfo.value && !textInfo.value.supports_tools) {
+    return { ok: false, reason: `${textInfo.value.name} can't call tools, so Auto mode can't use characters.` }
+  }
+  return { ok: true }
+})
 
 async function loadCharacters() {
   try {
@@ -472,6 +497,7 @@ function turnSettings(turnMode = null) {
   const body = {
     mode: turnMode || mode.value,
     history_limit: historyLimit.value,
+    image_limit: imageLimit.value,
     text_model: selected.text || null,
     image_model: selected.image || null,
     video_model: selected.video || null,
@@ -517,6 +543,16 @@ function handleEvent(ev, tempUser) {
       if (j === -1) media.push(ev.item)
       else media.splice(j, 1, ev.item)
       scrollToBottom()
+      break
+    }
+    case 'characters': {
+      // The chat model used (or created) a character: it's attached now
+      for (const c of ev.characters) {
+        const i = characters.value.findIndex(x => x.id === c.id)
+        if (i === -1) characters.value.push(c)
+        else characters.value.splice(i, 1, c)
+      }
+      characterIds.value = ev.character_ids
       break
     }
     case 'title': {
@@ -875,7 +911,15 @@ onBeforeUnmount(() => {
             <span>Characters</span>
             <button class="mini-btn" title="All characters" @click="router.push({ name: 'characters' })">Manage</button>
           </div>
+          <template v-if="!characterSupport.ok">
+            <p class="side-warn">{{ characterSupport.reason }}</p>
+            <p v-if="attachedCharacters.length" class="mode-hint">
+              {{ attachedCharacters.map(c => c.name).join(', ') }} {{ attachedCharacters.length === 1 ? 'stays' : 'stay' }}
+              attached and will be used again when you switch back.
+            </p>
+          </template>
           <CharacterPicker
+            v-else
             :model-value="characterIds"
             :characters="characters"
             create-label="＋ New character (this chat)"
@@ -883,9 +927,8 @@ onBeforeUnmount(() => {
             @edit="editCharacter"
             @create="newCharacter()"
           />
-          <p v-if="attachedCharacters.length" class="mode-hint">
+          <p v-if="characterSupport.ok && attachedCharacters.length" class="mode-hint">
             {{ mode === 'auto' ? 'The chat model knows them and sends their description and images when it puts one in a picture.'
-              : mode === 'video' ? 'Their descriptions go into the video prompt.'
               : mode === 'image' ? 'Their descriptions and images go with every image.'
               : 'The chat model knows them.' }}
           </p>
@@ -906,6 +949,26 @@ onBeforeUnmount(() => {
             aria-label="Messages of history sent to the chat model"
           />
           <p class="mode-hint">{{ memoryHint }} More memory means better continuity but more tokens per reply.</p>
+        </div>
+
+        <div v-if="mode !== 'video'" class="side-section">
+          <div class="side-heading">
+            <span>Chat images</span>
+            <span class="heading-value">{{ imageLimit === null ? 'All' : imageLimit }}</span>
+          </div>
+          <input
+            v-model.number="imageIndex"
+            class="memory-slider"
+            type="range"
+            min="0"
+            :max="IMAGE_STEPS.length - 1"
+            step="1"
+            aria-label="Recent chat images sent with each request"
+          />
+          <p class="mode-hint">
+            Recent chat images the models see, and the most sent as references with a new picture.
+            Character images always go on top. More helps consistency but makes bigger, pricier requests.
+          </p>
         </div>
 
         <div v-if="showImageOpts" class="side-section">
@@ -1051,7 +1114,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div v-if="attachedCharacters.length" class="pinned-row">
+          <div v-if="characterSupport.ok && attachedCharacters.length" class="pinned-row">
             <span>👤 {{ attachedCharacters.map(c => c.name).join(', ') }}</span>
             <button @click="sidebarOpen = true">Change</button>
           </div>

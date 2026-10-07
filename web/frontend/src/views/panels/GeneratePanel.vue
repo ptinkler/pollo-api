@@ -5,7 +5,7 @@ import { generateVideo, generateImage, uploadSourceImage, deleteSourceImage, upl
 import { useProjectSettings } from '../../composables/useProjectSettings'
 import { useJobsQueue } from '../../composables/useJobsQueue'
 import { useShowHidden } from '../../composables/useShowHidden'
-import { fetchCharacters } from '../../composables/useCharacters'
+import { fetchCharacters, generateModelTakesCharacters } from '../../composables/useCharacters'
 import CharacterPicker from '../../components/characters/CharacterPicker.vue'
 import CharacterEditor from '../../components/characters/CharacterEditor.vue'
 
@@ -71,13 +71,12 @@ const savedCharacters = ref([])
 const charEditor = reactive({ open: false, character: null })
 const attachedCharacters = computed(() =>
   (settings.value.character_ids || []).map(id => savedCharacters.value.find(c => c.id === id)).filter(Boolean))
-const characterImagesSent = computed(() =>
-  modelType.value === 'image' ? modelOptions.value.includes('images') : showRefFields.value)
-const characterHint = computed(() => {
-  if (!attachedCharacters.value.length) return ''
-  if (characterImagesSent.value) return 'Their descriptions go into the prompt and their images are sent as references.'
-  if (refModeInfo.value) return 'Their descriptions go into the prompt. Turn on Ref mode to send their images too.'
-  return "Their descriptions go into the prompt (this model can't take their images)."
+// Characters need a model that takes reference images; with one that can't,
+// attached characters stay selected but aren't sent
+const characterSupport = computed(() => {
+  if (generateModelTakesCharacters(selectedModel.value, inV1RefMode.value)) return { ok: true }
+  if (refModeInfo.value) return { ok: false, reason: 'Turn on Ref mode to use characters with this model.' }
+  return { ok: false, reason: "This model can't take reference images, so it can't use characters." }
 })
 
 async function loadCharacters() {
@@ -212,7 +211,8 @@ const modelSelectOptions = computed(() => {
     .filter(([key, info]) => !info.deprecated && (!info.hidden || showHidden.value || key === settings.value.model))
     .map(([key, info]) => ({
       value: key,
-      label: `${info.label}${info.type === 'ref' ? ' (ref)' : ''}${info.hidden ? ' (not enabled)' : ''}`,
+      // 👤 = can use characters (takes reference images; video models in Ref mode)
+      label: `${info.label}${info.type === 'ref' ? ' (ref)' : ''}${generateModelTakesCharacters(info, true) ? ' 👤' : ''}${info.hidden ? ' (not enabled)' : ''}`,
       group: modelGroup(info.label)
     }))
 })
@@ -420,11 +420,11 @@ async function handleSubmit() {
     generate_audio: settings.value.generate_audio,
     web_search: settings.value.web_search,
     image_tail: settings.value.image_tail,
-    character_ids: attachedCharacters.value.map(c => c.id),
+    character_ids: characterSupport.value.ok ? attachedCharacters.value.map(c => c.id) : [],
     ref_mode: inV1RefMode.value,
   }
   // Character images count as references in ref mode
-  const characterRefs = characterImagesSent.value && attachedCharacters.value.some(c => c.images.length)
+  const characterRefs = characterSupport.value.ok && attachedCharacters.value.some(c => c.images.length)
 
   // Seed (optional number)
   if (showSeedOption.value && settings.value.seed) {
@@ -559,13 +559,26 @@ async function handleSubmit() {
       <!-- Characters -->
       <div class="form-section">
         <span class="char-label">Characters <span class="char-optional">optional</span></span>
-        <CharacterPicker
-          v-model="settings.character_ids"
-          :characters="savedCharacters"
-          @edit="openCharacter"
-          @create="openCharacter(null)"
-        />
-        <p v-if="characterHint" class="char-hint">{{ characterHint }}</p>
+        <template v-if="!characterSupport.ok">
+          <p class="char-hint">
+            {{ characterSupport.reason }}
+            <template v-if="attachedCharacters.length">
+              {{ attachedCharacters.map(c => c.name).join(', ') }} {{ attachedCharacters.length === 1 ? 'stays' : 'stay' }}
+              selected for when you switch back.
+            </template>
+          </p>
+        </template>
+        <template v-else>
+          <CharacterPicker
+            v-model="settings.character_ids"
+            :characters="savedCharacters"
+            @edit="openCharacter"
+            @create="openCharacter(null)"
+          />
+          <p v-if="attachedCharacters.length" class="char-hint">
+            Their descriptions go into the prompt and their images are sent as references.
+          </p>
+        </template>
       </div>
 
       <!-- Legacy mode toggle -->

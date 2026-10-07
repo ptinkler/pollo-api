@@ -19,11 +19,14 @@ Media item shape (stored in ChatMessage.media_json, sent to the frontend):
       "credits": optional             # Pollo images bill in credits, not dollars
     }
 
-Characters attached to the chat (web/characters.py) are described to the
-chat model, which names the ones in each picture via the tools'
-`characters` argument; their descriptions go into the media prompt and
-their images go to the image model as references. Image/Video modes use
-every attached character.
+Characters (web/characters.py): the chat model is told about every
+character the chat can use — attached ones in full, the user's other saved
+ones by name — and names the ones in each picture via the tools'
+`characters` argument (a name in the image prompt counts too, in case it
+forgets). Their descriptions go into the media prompt and their images go
+to the image model as references; using one attaches it to the chat. It can
+also save a character from images in the chat (create_character). Image
+mode uses every attached character plus any named in the prompt.
 
 Image and video models come from OpenRouter, plus Pollo's own models
 ("pollo/<key>", see web/pollo_chat.py) when POLLO_API_KEY is set.
@@ -67,9 +70,10 @@ router = APIRouter(prefix="/api/chat", dependencies=[Depends(verify_api_key)])
 
 MAX_TOOL_ROUNDS = 4
 CONSISTENCY_REFS = 2              # recent images passed to the image model to keep characters consistent
-MAX_REF_IMAGES = 6                # cap on reference images per generation (edit source + characters + pins + recent)
-CHARACTER_REFS = 4                # of which character images (spread across the characters in the picture)
-MAX_HISTORY_IMAGES = 4            # most recent images (uploaded or generated) sent to the chat model as pixels
+DEFAULT_IMAGE_LIMIT = 6           # chat images per request unless the composer's slider says otherwise: the most
+                                  # recent images sent to the chat model as pixels, and the cap on chat images sent
+                                  # as references (edit source + recent + pins + attachments). Character images
+                                  # come on top, uncapped (each model trims to its own maximum).
 MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024   # larger images are downscaled before sending
 MODELS_CACHE_TTL = 30 * 60
 CHAT_ROUND_SECONDS = 300          # cap on one LLM call (long stories stream for a while)
@@ -111,6 +115,30 @@ TOOLS_IMAGE = {
                                                    "has pinned are always sent as references."},
             },
             "required": ["prompt"],
+        },
+    },
+}
+
+TOOLS_CREATE_CHARACTER = {
+    "type": "function",
+    "function": {
+        "name": "create_character",
+        "description": "Save a character (person, creature, mascot…) from the most recent image(s) in the "
+                       "conversation, so later images keep their look: from then on their description and "
+                       "reference images are sent to the image model whenever they appear. Use it when the user "
+                       "asks to make, save or keep using a character from an image. It's kept in this chat; "
+                       "the user can save it for use in other chats.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "The character's name, as the user calls them."},
+                "description": {"type": "string",
+                                "description": "Their appearance in detail, from the image: face, hair, build, "
+                                               "age, clothing, distinctive features, art style."},
+                "images": {"type": "integer", "minimum": 1, "maximum": 4,
+                           "description": "How many of the most recent images show them (default 1: the latest)."},
+            },
+            "required": ["name", "description"],
         },
     },
 }
@@ -171,6 +199,7 @@ class TurnOptions(BaseModel):
 class TurnSettings(BaseModel):
     mode: str = "auto"                 # auto | text | image | video
     history_limit: int | None = Field(default=None, ge=1)   # past messages sent to the chat model; None = all
+    image_limit: int | None = Field(default=DEFAULT_IMAGE_LIMIT, ge=0)   # chat images per request; None = all
     text_model: str | None = None
     image_model: str | None = None
     video_model: str | None = None
@@ -656,7 +685,10 @@ class Turn:
         self.history = _branch_to(self.db.get_chat_messages(conv_id), message_id)[:-1]
         self.instructions = _conversation_instructions(conv_id)
         conv = self.db.get_conversation(conv_id)
-        self.characters = characters.load(conv.character_ids if conv else [], self.db)
+        self.characters, self.available = [], []
+        if self._characters_usable():   # attached ones stay attached, just unused, otherwise
+            self.characters = characters.load(conv.character_ids if conv else [], self.db)   # attached
+            self.available = characters.available(conv_id, self.db)                         # usable here
         self.content = ""
         self.cost = 0.0
         self.media: list[dict] = []
@@ -695,11 +727,13 @@ class Turn:
         prompt = (user.content if user else "").strip()
         if not prompt:
             raise openrouter.OpenRouterError("Image mode needs a text prompt")
+        # Every attached character, plus any other the prompt names ("Linh at the beach")
+        self._attach(characters.mentioned(self.available, prompt))
+        chars = self.characters
         refs = [m["file"] for m in (user.media if user else []) if m["kind"] == "image" and m.get("file")]
         if self._accepts_refs():
-            refs = _dedupe(refs + characters.reference_refs(self.characters, CHARACTER_REFS)
-                           + self._pinned_images())[:MAX_REF_IMAGES]
-        self._generate_image(prompt, self.s.image_options.aspect_ratio, refs, chars=self.characters)
+            refs = _with_character_refs(refs + self._pinned_images(), chars, self.s.image_limit, after=len(refs))
+        self._generate_image(prompt, self.s.image_options.aspect_ratio, refs, chars=chars)
 
     def _direct_video(self) -> None:
         user = self._last_user()
@@ -714,20 +748,16 @@ class Turn:
     def _chat(self, tools_enabled: bool) -> None:
         if not self.s.text_model:
             raise openrouter.OpenRouterError("No text model selected")
-        tools = []
         info = _model_info("text", self.s.text_model)
-        if tools_enabled and (info is None or info.get("supports_tools")):
-            names = [c.name for c in self.characters]
-            if self.s.image_model:
-                tools.append(_with_character_arg(TOOLS_IMAGE, names))
-            if self.s.video_model:
-                tools.append(_with_character_arg(TOOLS_VIDEO, names))
+        use_tools = tools_enabled and (info is None or info.get("supports_tools"))
         vision = info is None or "image" in (info.get("input_modalities") or [])
-        messages = self._build_llm_messages(vision, as_tool_calls=bool(tools))
+        messages = self._build_llm_messages(vision, as_tool_calls=bool(use_tools and self._tools()))
 
         offer_tools = True
         for round_no in range(MAX_TOOL_ROUNDS):
-            # Last round: withhold tools so the loop can't run forever
+            # Last round: withhold tools so the loop can't run forever. Rebuilt
+            # each round: a character created mid-turn joins the name lists.
+            tools = self._tools() if use_tools else []
             round_tools = (tools or None) if offer_tools and round_no < MAX_TOOL_ROUNDS - 1 else None
             text, tool_calls = self._stream_round(messages, round_tools)
             if self.cancel.is_set() or not tool_calls:
@@ -744,7 +774,9 @@ class Turn:
             # another model on the failed card (no automatic re-attempt)
             if any(r.get("moderated") for r in results):
                 return
-            if all(r.get("ok") for r in results):
+            # Saving a character makes nothing to show — carry on (usually to draw them)
+            made_media = any(c["function"]["name"] != "create_character" for c in tool_calls)
+            if made_media and all(r.get("ok") for r in results):
                 # The media was made. If the model also wrote its reply, the
                 # reply is complete — asking it to continue just makes it
                 # start over (duplicate story + duplicate image). If it called
@@ -754,6 +786,15 @@ class Turn:
                 offer_tools = False
             # (After a non-moderation failure the model keeps its tools and
             # can explain or try again.)
+
+    def _tools(self) -> list[dict]:
+        names = [c.name for c in self.available]
+        tools = [TOOLS_CREATE_CHARACTER] if self.s.image_model else []
+        if self.s.image_model:
+            tools.insert(0, _with_character_arg(TOOLS_IMAGE, names))
+        if self.s.video_model:
+            tools.append(_with_character_arg(TOOLS_VIDEO, names))
+        return tools
 
     def _stream_round(self, messages: list[dict], tools: list[dict] | None) -> tuple[str, list[dict]]:
         """One chat completion, streamed to the UI."""
@@ -803,6 +844,8 @@ class Turn:
             args = json.loads(call["function"]["arguments"] or "{}")
         except json.JSONDecodeError:
             return {"ok": False, "error": "Arguments were not valid JSON"}
+        if name == "create_character":
+            return self._create_character(args)
         prompt = str(args.get("prompt") or "").strip()
         if not prompt:
             return {"ok": False, "error": "prompt is required"}
@@ -811,7 +854,7 @@ class Turn:
             return {"ok": False, "error": "There is no earlier image in the conversation to use"}
         # A setting picked in the composer beats the model's guess. When
         # animating an image, the image's own shape beats the guess too.
-        chars = self._named_characters(args.get("characters"))
+        chars = self._pick_characters(args.get("characters"), prompt)
         opts = self.s.video_options if name == "generate_video" else self.s.image_options
         guess = None if name == "generate_video" and source else args.get("aspect_ratio")
         ratio = opts.aspect_ratio or guess
@@ -861,10 +904,60 @@ class Turn:
                 if item.get("pinned") and item["kind"] == "image" and item.get("status", "done") == "done"
                 and item.get("file")]
 
-    def _named_characters(self, names) -> list:
-        """The attached characters the model named in a tool call."""
+    def _pick_characters(self, names, prompt: str) -> list:
+        """The characters in a picture: those the model named in the tool call,
+        plus any whose name is in its prompt (models sometimes forget the
+        argument). Using one attaches it to the chat."""
         wanted = {str(n).strip().lower() for n in names or [] if str(n).strip()}
-        return [c for c in self.characters if c.name.strip().lower() in wanted]
+        named = [c for c in self.available if c.name.strip().lower() in wanted]
+        chars = list({c.id: c for c in named + characters.mentioned(self.available, prompt)}.values())
+        self._attach(chars)
+        return chars
+
+    def _attach(self, chars: list) -> None:
+        """Attach characters to the chat (they stay for later turns) and tell the UI."""
+        new = [c for c in chars if c.id not in {a.id for a in self.characters}]
+        if not new:
+            return
+        self.characters += new
+        self.db.update_conversation(self.conv_id, character_ids=[c.id for c in self.characters])
+        self.emit({"type": "characters", "character_ids": [c.id for c in self.characters],
+                   "characters": [c.to_dict() for c in self.characters]})
+
+    def _create_character(self, args: dict) -> dict:
+        name = str(args.get("name") or "").strip()[:100]
+        if not name:
+            return {"ok": False, "error": "name is required"}
+        if any(c.name.strip().lower() == name.lower() for c in self.available):
+            return {"ok": False, "error": f"There's already a character called {name}; use it by name"}
+        try:
+            n = max(1, min(4, int(args.get("images") or 1)))
+        except (TypeError, ValueError):
+            n = 1
+        files = [p for p in (_conv_dir(self.conv_id) / f for f in self._latest_images(n)) if p.is_file()]
+        if not files:
+            return {"ok": False, "error": "There is no image in the conversation to make the character from"}
+        char = characters.create_from_files(name, str(args.get("description") or "").strip()[:4000], files,
+                                            self.conv_id, self.db)
+        self.available.append(char)
+        self._attach([char])
+        return {"ok": True, "result": f"Character {name} saved with {len(files)} reference image(s) and attached "
+                                      f"to this chat. Name them in generate_image's `characters` to use them."}
+
+    def _characters_usable(self) -> bool:
+        """Whether this turn can use characters — mirrors characterSupport in
+        ChatView. Their point is reference images, so it takes an image model
+        that accepts them (and, in Auto, a chat model that can call it).
+        Chat mode just tells the chat model about them; Video mode doesn't
+        use them."""
+        if self.s.mode == "text":
+            return True
+        if self.s.mode == "video" or not self.s.image_model or not self._accepts_refs():
+            return False
+        if self.s.mode == "auto":
+            info = _model_info("text", self.s.text_model)
+            return info is None or bool(info.get("supports_tools"))
+        return True
 
     def _accepts_refs(self) -> bool:
         info = _model_info("image", self.s.image_model)
@@ -882,7 +975,7 @@ class Turn:
         if args.get("keep_consistent") is True:
             refs += [f for f in self._latest_images(CONSISTENCY_REFS) if f not in pinned]
         refs = _dedupe(refs)[:max(CONSISTENCY_REFS, 1)]
-        return _dedupe(refs + characters.reference_refs(chars, CHARACTER_REFS) + pinned)[:MAX_REF_IMAGES]
+        return _with_character_refs(refs + pinned, chars, self.s.image_limit, after=len(refs))
 
     # ― generation ―
     def _add_media(self, item: dict) -> None:
@@ -907,13 +1000,16 @@ class Turn:
             params["ref_args"] = ref_args   # the model's own reference choices, replayed in history
         if chars:
             params["characters"] = [c.id for c in chars]   # described in the prompt at generation time
+            params["character_names"] = [c.name for c in chars]   # for display
         context = None
         if _is_conversational(self.s.image_model):
             # Like the Gemini app: the image model gets the conversation
             direct = self.s.mode == "image"
-            params.update(context=True, direct=direct, history_limit=self.s.history_limit)
+            params.update(context=True, direct=direct, history_limit=self.s.history_limit,
+                          image_limit=self.s.image_limit)
             context = _image_context(self.conv_id, self.history, self.s.history_limit, self.content,
-                                     None if direct else prompt, ref_files, self.instructions, chars)
+                                     None if direct else prompt, ref_files, self.instructions, chars,
+                                     self.s.image_limit)
         item = _new_media("image", "generated", prompt=prompt, model=self.s.image_model, params=params)
         self._add_media(item)
         try:
@@ -957,9 +1053,11 @@ class Turn:
         if self.instructions:
             # The user's own custom instructions, verbatim
             messages.append({"role": "system", "content": self.instructions})
-        if self.characters:
-            messages.append({"role": "system", "content": _characters_note(self.characters)})
-        return messages + _conversation(self.conv_id, self.history, self.s.history_limit, vision, as_tool_calls)
+        note = _characters_note(self.characters, [c for c in self.available if c not in self.characters])
+        if note:
+            messages.append({"role": "system", "content": note})
+        return messages + _conversation(self.conv_id, self.history, self.s.history_limit, vision, as_tool_calls,
+                                        self.s.image_limit)
 
     def _maybe_title(self) -> None:
         conv = self.db.get_conversation(self.conv_id)
@@ -976,7 +1074,7 @@ class Turn:
 
 
 def _with_character_arg(tool: dict, names: list[str]) -> dict:
-    """A generate_* tool with a `characters` argument listing the attached characters."""
+    """A generate_* tool with a `characters` argument listing the usable characters."""
     if not names:
         return tool
     fn = tool["function"]
@@ -990,9 +1088,31 @@ def _with_character_arg(tool: dict, names: list[str]) -> dict:
     }}}}
 
 
-def _characters_note(chars: list) -> str:
-    return ("The user has attached these characters to the chat. When one appears in an image or video you "
-            "make, name it in the tool's `characters` argument.\n\n" + characters.describe(chars))
+def _characters_note(attached: list, others: list) -> str:
+    """What the chat model is told about characters ('' when there are none)."""
+    parts = []
+    if attached:
+        parts.append("The user has attached these characters to the chat:\n\n" + characters.describe(attached))
+    if others:
+        lines = "\n".join(f"- {c.name}" + (f": {c.description.strip()[:150]}" if c.description.strip() else "")
+                          for c in others[:50])
+        parts.append("The user's other saved characters, which they may ask for by name:\n" + lines)
+    if not parts:
+        return ""
+    parts.append("Whenever one of these characters is in an image or video you make, name them in the tool's "
+                 "`characters` argument: their description and reference images are then sent to the model "
+                 "for you, so they look the same as before.")
+    return "\n\n".join(parts)
+
+
+def _with_character_refs(chat_refs: list[str], chars: list, image_limit: int | None,
+                         after: int | None = None) -> list[str]:
+    """Chat images (up to `image_limit`, None = all) plus every image of the
+    characters in the picture, which aren't capped. The character images go
+    after the first `after` chat images (default: all of them)."""
+    chat_refs = _dedupe(chat_refs)[:image_limit]
+    split = len(chat_refs) if after is None else min(after, len(chat_refs))
+    return chat_refs[:split] + characters.reference_refs(chars) + chat_refs[split:]
 
 
 def _param_characters(params: dict) -> list:
@@ -1017,9 +1137,10 @@ def _history_window(history: list, limit: int | None) -> list:
 
 
 def _conversation(conv_id: str, history: list, history_limit: int | None, vision: bool,
-                  as_tool_calls: bool = False) -> list[dict]:
+                  as_tool_calls: bool = False, image_limit: int | None = DEFAULT_IMAGE_LIMIT) -> list[dict]:
     """The chat history as OpenRouter messages (no system prompt): the last
-    `history_limit` messages, with the most recent images as pixels.
+    `history_limit` messages, with the `image_limit` most recent images as
+    pixels (None = all).
     Shared by the chat model and conversational image models.
 
     `as_tool_calls` (only when tools are offered — providers reject tool
@@ -1032,7 +1153,7 @@ def _conversation(conv_id: str, history: list, history_limit: int | None, vision
     # The most recent few images — uploaded or generated — go over as
     # pixels so the model can see what's actually in them; older ones
     # are described by a note instead.
-    image_budget = MAX_HISTORY_IMAGES if vision else 0
+    image_budget = (float("inf") if image_limit is None else image_limit) if vision else 0
     pixel_files: set[str] = set()
     for msg in reversed(history):
         for item in reversed(msg.media):
@@ -1092,12 +1213,12 @@ def _conversation(conv_id: str, history: list, history_limit: int | None, vision
 
 def _image_context(conv_id: str, history: list, history_limit: int | None, reply_text: str,
                    prompt: str | None, refs: list[str], instructions: str | None = None,
-                   chars: list | None = None) -> list[dict]:
+                   chars: list | None = None, image_limit: int | None = DEFAULT_IMAGE_LIMIT) -> list[dict]:
     """What a conversational image model is sent: the conversation, then —
     when the chat model called the tool — its reply so far and its prompt,
     verbatim, with any reference images it asked for. In Image mode
     (prompt=None) the user's own message is already the last one."""
-    messages = _conversation(conv_id, history, history_limit, vision=True)
+    messages = _conversation(conv_id, history, history_limit, vision=True, image_limit=image_limit)
     system = [s for s in (instructions, characters.describe(chars or [])) if s]
     messages[:0] = [{"role": "system", "content": s} for s in system]
     if prompt is not None:
@@ -1311,7 +1432,8 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
                 direct = params.get("direct", False)
                 context = _image_context(conv_id, history, params.get("history_limit"), msg.content if msg else "",
                                          None if direct else item["prompt"], params.get("refs") or [],
-                                         _conversation_instructions(conv_id), _param_characters(params))
+                                         _conversation_instructions(conv_id), _param_characters(params),
+                                         params.get("image_limit", DEFAULT_IMAGE_LIMIT))
             params["context"] = context is not None
             names, cost, credits, sent = _run_image_generation(conv_id, model, item["prompt"], params, context)
             db.update_chat_media_item(message_id, media_id, status="done", file=names[0], cost=cost,

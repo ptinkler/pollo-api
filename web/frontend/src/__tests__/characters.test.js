@@ -70,3 +70,41 @@ describe('CharacterEditor', () => {
     w.unmount()
   })
 })
+
+describe('which models can use characters', () => {
+  it('chat image models: reference images or conversational', async () => {
+    const { chatImageModelTakesCharacters: ok } = await import('../composables/useCharacters')
+    expect(ok({ input_modalities: ['text', 'image'] })).toBe(true)
+    expect(ok({ input_modalities: ['text'], conversational: true })).toBe(true)
+    expect(ok({ input_modalities: ['text'] })).toBe(false)
+    expect(ok(null)).toBe(false)
+  })
+
+  it('Generate models: image models with "images", ref models, v1 models in Ref mode', async () => {
+    const { generateModelTakesCharacters: ok } = await import('../composables/useCharacters')
+    expect(ok({ type: 'image', options: ['images'] })).toBe(true)
+    expect(ok({ type: 'image', options: [] })).toBe(false)
+    expect(ok({ type: 'ref' })).toBe(true)
+    const v1 = { type: 'img2vid', ref_mode: { types: ['image'], max: 9 } }
+    expect(ok(v1, false)).toBe(false)
+    expect(ok(v1, true)).toBe(true)
+    expect(ok({ type: 'img2vid' }, true)).toBe(false)
+  })
+
+  it('the chat model picker badges image models that can', async () => {
+    const { nextTick } = await import('vue')
+    const ModelPicker = (await import('../components/chat/ModelPicker.vue')).default
+    const w = mount(ModelPicker, {
+      props: { kind: 'image', label: 'Image', modelValue: '', models: [
+        { id: 'a/refs', name: 'Refs', input_modalities: ['text', 'image'] },
+        { id: 'b/prompt', name: 'Prompt only', input_modalities: ['text'] },
+      ] },
+      attachTo: document.body,
+    })
+    await w.find('.picker-btn').trigger('click')
+    await nextTick()
+    const badged = w.findAll('.picker-item').filter(i => i.findAll('.item-badge').some(b => b.text() === '👤'))
+    expect(badged.map(i => i.find('.item-name').text())).toEqual(['Refs'])
+    w.unmount()
+  })
+})

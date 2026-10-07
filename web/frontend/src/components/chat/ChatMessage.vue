@@ -65,6 +65,7 @@ function specs(item) {
   if (p.resolution) out.push(p.resolution)
   if (p.aspect_ratio) out.push(p.aspect_ratio)
   if (item.kind === 'video' && p.generate_audio != null) out.push(p.generate_audio ? 'audio' : 'no audio')
+  if (p.character_names?.length) out.push(`👤 ${p.character_names.join(', ')}`)
   return out
 }
 

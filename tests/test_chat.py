@@ -188,7 +188,7 @@ class TestTurns:
 
         ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
                                  json={"content": "a story about a cat, with a picture", "mode": "auto", **SETTINGS}))
-        assert [t["function"]["name"] for t in calls[0][1]] == ["generate_image", "generate_video"]
+        assert [t["function"]["name"] for t in calls[0][1]] == ["generate_image", "create_character", "generate_video"]
         assert len(calls) == 1  # reply written + image made → complete
         assert img_args["model"] == "i/model" and img_args["prompt"] == "a cat"
         assert img_args["aspect_ratio"] == "16:9"
@@ -768,15 +768,22 @@ class TestContext:
         assert seen["msgs"][-3]["tool_calls"][0]["function"]["name"] == "generate_image"
         assert seen["msgs"][-2]["role"] == "tool"
 
-    def test_only_most_recent_images_as_pixels(self, client, conv, chat, db, monkeypatch):
-        for i in range(6):
+    def _pixels_sent(self, client, conv, chat, db, monkeypatch, **settings):
+        for i in range(8):
             db.add_chat_message(conv["id"], "user", f"draw {i}")
             db.add_chat_message(conv["id"], "assistant", "ok", media=[self._img(chat, conv, f"g{i}.png")])
         seen = self._capture(chat, monkeypatch)
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "next", **SETTINGS}))
-        n_pixels = sum(1 for m in seen["msgs"] if isinstance(m["content"], list)
-                       for p in m["content"] if p["type"] == "image_url")
-        assert n_pixels == chat.MAX_HISTORY_IMAGES
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                            json={"content": "next", **SETTINGS, **settings}))
+        return sum(1 for m in seen["msgs"] if isinstance(m["content"], list)
+                   for p in m["content"] if p["type"] == "image_url")
+
+    def test_only_most_recent_images_as_pixels(self, client, conv, chat, db, monkeypatch):
+        assert self._pixels_sent(client, conv, chat, db, monkeypatch) == chat.DEFAULT_IMAGE_LIMIT == 6
+
+    @pytest.mark.parametrize("limit,expected", [(2, 2), (0, 0), (None, 8)])
+    def test_image_slider_sets_how_many(self, client, conv, chat, db, monkeypatch, limit, expected):
+        assert self._pixels_sent(client, conv, chat, db, monkeypatch, image_limit=limit) == expected
 
     def test_no_pixels_for_text_only_models(self, client, conv, chat, db, monkeypatch):
         chat._models_cache.update(at=9e18, data={"image": [], "video": [], "text": [

@@ -1267,23 +1267,20 @@ def _publish_file(source: Path | None, ref: str, what: str) -> str:
     return url
 
 
-CHARACTER_REFS = 4   # character images sent per generation (spread across the characters)
-
-
 def _publish_character_ref(ref: str) -> str:
     """Upload a character image ("char:<id>/<file>") and return its public URL."""
     return _publish_file(characters.ref_path(ref), ref, "character image")
 
 
 def _character_ref_room(refs: list, is_ref_model: bool, ref_mode: dict | None) -> int:
-    """How many character images still fit beside the user's own refs."""
+    """How many character images fit beside the user's own refs (the model's ref limits)."""
     if is_ref_model:
-        return min(CHARACTER_REFS, 13 - len(refs))
+        return max(0, 13 - len(refs))
     image_refs = sum(1 for r in refs if r.get("type", "image") == "image")
     room = ref_mode["max"] - len(refs)
     if "image" in ref_mode.get("limits", {}):
         room = min(room, ref_mode["limits"]["image"] - image_refs)
-    return max(0, min(CHARACTER_REFS, room)) if "image" in ref_mode["types"] else 0
+    return max(0, room) if "image" in ref_mode["types"] else 0
 
 
 def _source_upload_params(local_ref: str | None, uploaded_url: str | None) -> dict:
@@ -1587,11 +1584,12 @@ def api_generate_image(data: GenerateImageRequest, _api_key: str = Depends(verif
     # Resolve local: refs in images list
     images = [_publish_local_image(assets_path, u.strip()) if u.strip().startswith("local:") else u.strip()
               for u in data.images or []] or None
-    # Characters' images go in as reference images after the user's own
-    # (models without an "images" option get just the description)
+    # Characters' images (all of them — the generator trims to the model's
+    # maximum) go in as reference images after the user's own; models
+    # without an "images" option get just the description
     char_images = []
     if "images" in MODEL_INFO.get(model, {}).get("options", []):
-        char_images = [_publish_character_ref(r) for r in characters.reference_refs(chars, CHARACTER_REFS)]
+        char_images = [_publish_character_ref(r) for r in characters.reference_refs(chars)]
 
     kwargs = {
         "api_key": os.getenv("POLLO_API_KEY"),
