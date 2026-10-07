@@ -7,6 +7,9 @@ import ModelPicker from '../components/chat/ModelPicker.vue'
 import ChatMessage from '../components/chat/ChatMessage.vue'
 import ChatLibrary from '../components/chat/ChatLibrary.vue'
 import InstructionsDialog from '../components/chat/InstructionsDialog.vue'
+import CharacterPicker from '../components/characters/CharacterPicker.vue'
+import CharacterEditor from '../components/characters/CharacterEditor.vue'
+import { fetchCharacters } from '../composables/useCharacters'
 import {
   fetchChatStatus, fetchChatModels, fetchConversations, fetchConversation,
   createConversation, deleteConversation, fetchChatMessage,
@@ -238,6 +241,65 @@ async function onInstructionsChanged({ saved, deleted }) {
   if (saved && instructionId.value == null) setInstruction(saved.id)
 }
 
+// ── Characters ───────────────────────────────────────────────────────
+const characters = ref([])          // saved ones plus this chat's ad-hoc ones
+const characterIds = ref([])        // attached to this chat (or the next new one)
+const charEditor = reactive({ open: false, character: null, conversationId: null, seed: [] })
+const attachedCharacters = computed(() =>
+  characterIds.value.map(id => characters.value.find(c => c.id === id)).filter(Boolean))
+
+async function loadCharacters() {
+  try {
+    characters.value = await fetchCharacters({ conversationId: convId.value })
+  } catch { /* 401 handled by auth prompt */ }
+}
+
+async function setCharacters(ids) {
+  characterIds.value = ids
+  if (!convId.value) return   // new chats get them on creation
+  try {
+    await patchConversation(convId.value, { character_ids: ids })
+  } catch (e) {
+    showToast(`Couldn't update characters: ${e.message}`, 'error')
+  }
+}
+
+function editCharacter(c) {
+  Object.assign(charEditor, { open: true, character: c, conversationId: null, seed: [] })
+}
+
+// Characters made in a chat belong to it (ad hoc) until saved
+async function newCharacter(seed = []) {
+  let id
+  try {
+    id = await ensureConversation()
+  } catch (e) {
+    return showToast(e.message, 'error')
+  }
+  Object.assign(charEditor, { open: true, character: null, conversationId: id, seed })
+}
+
+function characterFromImage(file) {
+  lightbox.value = null
+  newCharacter([{ kind: 'chat', conversationId: convId.value, file, preview: chatMediaUrl(convId.value, file) }])
+}
+
+function onCharacterSaved(c) {
+  const i = characters.value.findIndex(x => x.id === c.id)
+  if (i === -1) characters.value.push(c)
+  else characters.value.splice(i, 1, c)
+  if (charEditor.character?.id === c.id) charEditor.character = c
+  // Made here: the server attached it to this chat
+  if (c.conversation_id === convId.value && !characterIds.value.includes(c.id)) {
+    characterIds.value = [...characterIds.value, c.id]
+  }
+}
+
+function onCharacterDeleted(id) {
+  characters.value = characters.value.filter(c => c.id !== id)
+  characterIds.value = characterIds.value.filter(x => x !== id)   // the server detaches it too
+}
+
 async function loadConversations() {
   try {
     conversations.value = (await fetchConversations()).conversations
@@ -246,10 +308,12 @@ async function loadConversations() {
 
 async function loadConversation(id) {
   stopPolling()
+  loadCharacters()
   if (!id) {
     conversation.value = null
     messages.value = []
     instructionId.value = defaultInstructionId()
+    characterIds.value = []
     return
   }
   loadingConv.value = true
@@ -262,6 +326,7 @@ async function loadConversation(id) {
     if (c.image_model) selected.image = c.image_model
     if (c.video_model) selected.video = c.video_model
     instructionId.value = c.instruction_id ?? null
+    characterIds.value = c.character_ids || []
     document.title = `${c.title} — Chat`
     scrollToBottom(true)
     ensurePolling()
@@ -291,6 +356,7 @@ async function ensureConversation() {
     image_model: selected.image || null,
     video_model: selected.video || null,
     instruction_id: instructionId.value,   // explicit, so "None" sticks
+    character_ids: characterIds.value,
   })
   conversation.value = conv
   conversations.value = [conv, ...conversations.value]
@@ -804,6 +870,27 @@ onBeforeUnmount(() => {
           </p>
         </div>
 
+        <div class="side-section">
+          <div class="side-heading">
+            <span>Characters</span>
+            <button class="mini-btn" title="All characters" @click="router.push({ name: 'characters' })">Manage</button>
+          </div>
+          <CharacterPicker
+            :model-value="characterIds"
+            :characters="characters"
+            create-label="＋ New character (this chat)"
+            @update:model-value="setCharacters"
+            @edit="editCharacter"
+            @create="newCharacter()"
+          />
+          <p v-if="attachedCharacters.length" class="mode-hint">
+            {{ mode === 'auto' ? 'The chat model knows them and sends their description and images when it puts one in a picture.'
+              : mode === 'video' ? 'Their descriptions go into the video prompt.'
+              : mode === 'image' ? 'Their descriptions and images go with every image.'
+              : 'The chat model knows them.' }}
+          </p>
+        </div>
+
         <div v-if="mode === 'auto' || mode === 'text'" class="side-section">
           <div class="side-heading">
             <span>Memory</span>
@@ -964,6 +1051,11 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
+          <div v-if="attachedCharacters.length" class="pinned-row">
+            <span>👤 {{ attachedCharacters.map(c => c.name).join(', ') }}</span>
+            <button @click="sidebarOpen = true">Change</button>
+          </div>
+
           <div v-if="pinned.length && mode !== 'text'" class="pinned-row">
             <span>📌 {{ pinned.length }} image{{ pinned.length !== 1 ? 's' : '' }} pinned: sent as references with every new image</span>
             <button @click="unpinAll">Unpin all</button>
@@ -993,6 +1085,16 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
+    <CharacterEditor
+      :open="charEditor.open"
+      :character="charEditor.character"
+      :conversation-id="charEditor.conversationId"
+      :seed="charEditor.seed"
+      @close="charEditor.open = false"
+      @saved="onCharacterSaved"
+      @deleted="onCharacterDeleted"
+    />
+
     <InstructionsDialog
       :open="instructionsOpen"
       :instructions="instructions"
@@ -1009,6 +1111,7 @@ onBeforeUnmount(() => {
         <div v-if="lightbox.file" class="lightbox-actions" @click.stop>
           <button class="lightbox-animate" @click="useImage({ file: lightbox.file, mode: 'image' })">🖼 Make a picture from this</button>
           <button class="lightbox-animate" @click="useImage({ file: lightbox.file, mode: 'video' })">🎬 Make a video from this</button>
+          <button class="lightbox-animate" @click="characterFromImage(lightbox.file)">👤 Make a character from this</button>
         </div>
       </div>
     </Teleport>

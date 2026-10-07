@@ -52,6 +52,8 @@ def client(tmp_path, db, monkeypatch):
     # own get_db import — patch it too so no test touches the real database
     import web.chat as chat_mod
     monkeypatch.setattr(chat_mod, "get_db", lambda: db)
+    import web.characters as characters_mod
+    monkeypatch.setattr(characters_mod, "get_db", lambda: db)
 
     # Clear caches
     api_mod._project_lookup_cache.clear()

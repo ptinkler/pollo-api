@@ -18,6 +18,7 @@ export function useProjectSettings(projectName) {
     video_num: 1,
     max_images: '1',
     thinking_level: 'minimal',
+    character_ids: [],
   })
 
   function load() {
@@ -67,8 +68,10 @@ export function useProjectSettings(projectName) {
     settings.value.seed = params.seed !== null && params.seed !== undefined ? String(params.seed) : ''
     settings.value.video_num = params.video_num || 1
     settings.value.max_images = params.max_images ? String(params.max_images) : ''
-    // Map stored ref format back to UI format (stored: image/video/audio key, UI: url key)
-    settings.value.refs = (params.refs || []).map(r => {
+    settings.value.character_ids = params.character_ids || []
+    // Map stored ref format back to UI format (stored: image/video/audio key, UI: url key).
+    // Refs that came from characters are re-added from the characters themselves.
+    settings.value.refs = (params.refs || []).filter(r => !r._character).map(r => {
       if (r.type === 'subject') {
         // For subject refs prefer the preserved local url if available
         const images = (r.images || []).map(img => {
@@ -83,7 +86,7 @@ export function useProjectSettings(projectName) {
       return { type: r.type || 'image', name: r.name || '', url, order: r.order || 0 }
     })
     // v1 models only take refs in ref mode, so a job that used refs was one
-    settings.value.ref_mode = settings.value.refs.length > 0
+    settings.value.ref_mode = (params.refs || []).length > 0
 
     // Prefer the recorded local reference (if present in job params) so the
     // regenerate Source Image input shows the permanent local file instead

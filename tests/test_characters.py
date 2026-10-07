@@ -1,0 +1,231 @@
+"""Tests for web.characters — characters shared by chat and generations."""
+import json
+from unittest.mock import patch
+
+import pytest
+
+from tests.test_chat import (SETTINGS, _events, _png_bytes, _text_chunks, _tool_chunks,  # noqa: F401
+                             chat, client, conv, db)
+
+
+def _make(client, name="Linh", description="Short black hair, red scarf", images=1, **extra):
+    c = client.post("/api/characters", json={"name": name, "description": description, **extra}).json()
+    for i in range(images):
+        c = client.post(f"/api/characters/{c['id']}/images",
+                        files={"file": (f"{i}.png", _png_bytes(color=(i * 50, 0, 0)), "image/png")}).json()
+    return c
+
+
+class TestManagement:
+    def test_crud(self, client):
+        c = _make(client, images=2)
+        assert c["name"] == "Linh" and len(c["images"]) == 2 and c["adhoc"] is False
+        img = client.get(f"/api/characters/{c['id']}/images/{c['images'][0]}")
+        assert img.status_code == 200 and img.headers["content-type"] == "image/png"
+
+        r = client.patch(f"/api/characters/{c['id']}", json={"name": " Linh Tran ", "images": [c["images"][1]]})
+        assert r.json()["name"] == "Linh Tran" and r.json()["images"] == [c["images"][1]]
+        # The dropped image's file is gone
+        assert client.get(f"/api/characters/{c['id']}/images/{c['images'][0]}").status_code == 404
+
+        assert client.delete(f"/api/characters/{c['id']}").status_code == 200
+        assert client.get(f"/api/characters/{c['id']}").status_code == 404
+
+    def test_unknown_image_in_reorder_is_rejected(self, client):
+        c = _make(client)
+        assert client.patch(f"/api/characters/{c['id']}", json={"images": ["nope.png"]}).status_code == 400
+
+    def test_image_limit(self, client, monkeypatch):
+        import web.characters as characters_mod
+        monkeypatch.setattr(characters_mod, "MAX_IMAGES", 1)
+        c = _make(client)
+        r = client.post(f"/api/characters/{c['id']}/images", files={"file": ("a.png", _png_bytes(), "image/png")})
+        assert r.status_code == 400
+
+    def test_copy_image_from_chat(self, client, conv, chat):
+        (chat._conv_dir(conv["id"]) / "g.png").write_bytes(_png_bytes())
+        c = _make(client, images=0)
+        r = client.post(f"/api/characters/{c['id']}/images/from-chat", json={"conversation_id": conv["id"], "file": "g.png"})
+        assert len(r.json()["images"]) == 1
+        bad = client.post(f"/api/characters/{c['id']}/images/from-chat",
+                          json={"conversation_id": conv["id"], "file": "../x.png"})
+        assert bad.status_code == 400
+
+    def test_adhoc_characters_belong_to_their_chat(self, client, conv, db):
+        other = client.post("/api/chat/conversations", json={}).json()
+        saved = _make(client, name="Saved", images=0)
+        adhoc = _make(client, name="Adhoc", images=0, conversation_id=conv["id"])
+        assert adhoc["adhoc"] is True
+        # Created in a chat = attached to it
+        assert db.get_conversation(conv["id"]).character_ids == [adhoc["id"]]
+
+        names = lambda q: [c["name"] for c in client.get(f"/api/characters{q}").json()["characters"]]  # noqa: E731
+        assert names(f"?conversation_id={conv['id']}") == ["Adhoc", "Saved"]
+        assert names(f"?conversation_id={other['id']}") == ["Saved"]
+        assert names("?include_adhoc=true") == ["Adhoc", "Saved"]
+        assert saved["adhoc"] is False
+
+    def test_promote(self, client, conv):
+        adhoc = _make(client, images=0, conversation_id=conv["id"])
+        r = client.post(f"/api/characters/{adhoc['id']}/promote").json()
+        assert r["adhoc"] is False and r["conversation_id"] is None
+        # Promoted characters survive their chat
+        client.delete(f"/api/chat/conversations/{conv['id']}")
+        assert client.get(f"/api/characters/{adhoc['id']}").status_code == 200
+
+    def test_deleting_a_chat_deletes_its_adhoc_characters(self, client, conv):
+        adhoc = _make(client, conversation_id=conv["id"])
+        client.delete(f"/api/chat/conversations/{conv['id']}")
+        assert client.get(f"/api/characters/{adhoc['id']}").status_code == 404
+
+    def test_attach_to_chat(self, client, conv):
+        c = _make(client, images=0)
+        r = client.patch(f"/api/chat/conversations/{conv['id']}", json={"character_ids": [c["id"]]})
+        assert r.json()["character_ids"] == [c["id"]]
+        assert client.patch(f"/api/chat/conversations/{conv['id']}", json={"character_ids": [999]}).status_code == 400
+        # Deleting a character detaches it
+        client.delete(f"/api/characters/{c['id']}")
+        assert client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["character_ids"] == []
+
+
+class TestInChat:
+    def _attach(self, client, conv, *chars):
+        client.patch(f"/api/chat/conversations/{conv['id']}", json={"character_ids": [c["id"] for c in chars]})
+
+    def _capture(self, chat, monkeypatch):
+        got = {}
+        monkeypatch.setattr(chat.openrouter, "generate_image",
+                            lambda model, prompt, **kw: (got.update(prompt=prompt, **kw),
+                                                         ([(_png_bytes(), "image/png")], None))[1])
+        return got
+
+    def test_chat_model_is_told_and_tool_lists_names(self, client, conv, chat, monkeypatch):
+        linh = _make(client)
+        self._attach(client, conv, linh)
+        seen = {}
+
+        def stream(model, messages, tools=None, **kw):
+            seen.update(messages=messages, tools=tools)
+            return _text_chunks("Hi")
+        monkeypatch.setattr(chat.openrouter, "stream_chat", stream)
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", **SETTINGS}))
+        system = " ".join(m["content"] for m in seen["messages"] if m["role"] == "system")
+        assert "Linh: Short black hair, red scarf" in system
+        image_tool = next(t for t in seen["tools"] if t["function"]["name"] == "generate_image")
+        assert image_tool["function"]["parameters"]["properties"]["characters"]["items"]["enum"] == ["Linh"]
+
+    def test_named_character_sends_description_and_images(self, client, conv, chat, monkeypatch):
+        linh, bao = _make(client, images=2), _make(client, name="Bao", description="Tall", images=1)
+        self._attach(client, conv, linh, bao)
+        replies = iter([_tool_chunks("generate_image", {"prompt": "Linh at the beach", "characters": ["linh"]},
+                                     text="Here."), _text_chunks("Done.")])
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+        got = self._capture(chat, monkeypatch)
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "go", **SETTINGS}))
+        item = ev[-1]["message"]["media"][0]
+        assert item["prompt"] == "Linh at the beach"                 # stored as the model wrote it
+        assert "Linh: Short black hair" in got["prompt"] and "Bao" not in got["prompt"]
+        assert item["params"]["refs"] == [f"char:{linh['id']}/{f}" for f in linh["images"]]
+        assert item["params"]["characters"] == [linh["id"]]
+        assert len(got["input_images"]) == 2
+
+    def test_image_mode_uses_every_attached_character(self, client, conv, chat, monkeypatch):
+        linh, bao = _make(client), _make(client, name="Bao", images=1)
+        self._attach(client, conv, linh, bao)
+        got = self._capture(chat, monkeypatch)
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                                 json={"content": "both at the park", **SETTINGS, "mode": "image"}))
+        item = ev[-1]["message"]["media"][0]
+        assert item["params"]["refs"] == [f"char:{linh['id']}/{linh['images'][0]}", f"char:{bao['id']}/{bao['images'][0]}"]
+        assert "Linh:" in got["prompt"] and "- Bao" in got["prompt"]
+
+    def test_character_refs_are_shared_round_robin(self, chat, client):
+        a, b = _make(client, name="A", images=3), _make(client, name="B", images=3)
+        import web.characters as characters_mod
+        refs = characters_mod.reference_refs(characters_mod.load([a["id"], b["id"]]), 3)
+        assert refs == [f"char:{a['id']}/{a['images'][0]}", f"char:{b['id']}/{b['images'][0]}",
+                        f"char:{a['id']}/{a['images'][1]}"]
+
+    def test_video_prompt_gets_descriptions(self, client, conv, chat, monkeypatch):
+        linh = _make(client)
+        self._attach(client, conv, linh)
+        sent = {}
+        monkeypatch.setattr(chat.openrouter, "submit_video",
+                            lambda model, prompt, **kw: (sent.update(prompt=prompt), {"id": "job1"})[1])
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                            json={"content": "Linh dancing", **SETTINGS, "mode": "video"}))
+        assert sent["prompt"].startswith("Linh dancing") and "Short black hair" in sent["prompt"]
+
+
+class TestInGenerations:
+    @pytest.fixture()
+    def project(self, db, tmp_path, monkeypatch):
+        import web.api as api_mod
+        monkeypatch.setattr(api_mod, "ASSETS_DIR", tmp_path / "assets")
+        monkeypatch.setattr(api_mod, "get_db", lambda: db)
+        api_mod._project_lookup_cache.clear()
+        proj = db.create_project(name="Chars")
+        (api_mod.ASSETS_DIR / proj.assets_folder).mkdir(parents=True, exist_ok=True)
+        return proj
+
+    @pytest.fixture()
+    def uploads(self, monkeypatch):
+        import web.api as api_mod
+        sent = []
+        monkeypatch.setattr(api_mod, "_upload_image", lambda p: (sent.append(p), f"https://tmp/{p.name}")[1])
+        return sent
+
+    def _job(self, db, resp):
+        assert resp.status_code == 200, resp.text
+        job = db.get_job(resp.json()["job_id"])
+        return job, json.loads(job.params_json)
+
+    @patch("web.api.threading.Thread")
+    def test_image_generation(self, thread, client, db, project, uploads):
+        linh = _make(client, images=2)
+        r = client.post("/api/generate-image", json={"model": "seedream", "project": project.slug,
+                                                    "prompt": "Linh reading", "character_ids": [linh["id"]]})
+        job, params = self._job(db, r)
+        kwargs = thread.call_args.kwargs["args"][2]
+        assert job.prompt == "Linh reading" and params["character_ids"] == [linh["id"]]
+        assert "Short black hair" in kwargs["prompt"]
+        assert kwargs["images"] == [f"https://tmp/{f}" for f in linh["images"]]
+
+    @patch("web.api.threading.Thread")
+    def test_unknown_character_is_400(self, thread, client, project):
+        r = client.post("/api/generate-image", json={"model": "seedream", "project": project.slug,
+                                                    "prompt": "x", "character_ids": [999]})
+        assert r.status_code == 400
+
+    @patch("web.api.threading.Thread")
+    def test_video_outside_ref_mode_gets_description_only(self, thread, client, db, project, uploads):
+        linh = _make(client)
+        r = client.post("/api/generate", json={"model": "seedance20v1", "project": project.slug,
+                                              "prompt": "Linh waves", "image_url": "https://img/x.jpg",
+                                              "character_ids": [linh["id"]]})
+        self._job(db, r)
+        kwargs = thread.call_args.kwargs["args"][2]
+        assert "Short black hair" in kwargs["prompt"] and "refs" not in kwargs and not uploads
+
+    @patch("web.api.threading.Thread")
+    def test_v1_ref_mode_adds_character_refs(self, thread, client, db, project, uploads):
+        linh = _make(client, images=2)
+        r = client.post("/api/generate", json={"model": "seedance20v1", "project": project.slug,
+                                              "prompt": "Linh waves", "ref_mode": True, "refs": [],
+                                              "character_ids": [linh["id"]]})
+        job, params = self._job(db, r)
+        kwargs = thread.call_args.kwargs["args"][2]
+        assert [r["url"] for r in kwargs["refs"]] == [f"https://tmp/{f}" for f in linh["images"]]
+        assert all(r["_character"].startswith("char:") for r in params["refs"])
+        assert kwargs["image_url"] is None
+
+    @patch("web.api.threading.Thread")
+    def test_legacy_ref_model_names_character_refs(self, thread, client, db, project, uploads):
+        linh = _make(client)
+        r = client.post("/api/generate", json={"model": "seedanceref", "project": project.slug,
+                                              "prompt": "Linh waves", "character_ids": [linh["id"]],
+                                              "refs": [{"type": "image", "name": "bg", "image": "https://x/bg.jpg",
+                                                        "order": 1}]})
+        self._job(db, r)
+        refs = thread.call_args.kwargs["args"][2]["refs"]
+        assert refs[1]["name"] == "Linh" and refs[1]["order"] == 2 and refs[1]["image"].startswith("https://tmp/")

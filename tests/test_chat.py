@@ -51,6 +51,8 @@ def db(tmp_path):
 def chat(monkeypatch, db):
     import web.chat as chat_mod
     monkeypatch.setattr(chat_mod, "get_db", lambda: db)
+    import web.characters as characters_mod
+    monkeypatch.setattr(characters_mod, "get_db", lambda: db)
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
     monkeypatch.setattr(chat_mod, "VIDEO_POLL_INTERVAL", 0)
     monkeypatch.setattr(chat_mod, "start_video_poller", lambda *a: None)

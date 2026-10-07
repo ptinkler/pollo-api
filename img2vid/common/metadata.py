@@ -189,6 +189,8 @@ class ChatConversation(Base):
     # The last message of the branch being shown (messages form a tree: an
     # edit or retry adds a sibling instead of deleting what came after)
     current_leaf_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Characters attached to this chat (Character.id list, JSON)
+    character_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
     messages: Mapped[list["ChatMessage"]] = relationship(
@@ -207,6 +209,56 @@ class ChatConversation(Base):
             "video_model": self.video_model,
             "instruction_id": self.instruction_id,
             "current_leaf_id": self.current_leaf_id,
+            "character_ids": self.character_ids,
+            "created_at": iso(self.created_at),
+            "updated_at": iso(self.updated_at),
+        }
+
+    @property
+    def character_ids(self) -> list[int]:
+        try:
+            return json.loads(self.character_ids_json) if self.character_ids_json else []
+        except json.JSONDecodeError:
+            return []
+
+    @character_ids.setter
+    def character_ids(self, ids: list[int] | None) -> None:
+        self.character_ids_json = json.dumps(list(dict.fromkeys(ids or [])))
+
+
+class Character(Base):
+    """A reusable character: a name, a description and a few reference images
+    (files under <data>/characters/<id>/, see web/characters.py), attachable
+    to chats and generations. With `conversation_id` set it's ad hoc — made
+    in that chat and deleted with it — until promoted (conversation_id None)."""
+    __tablename__ = "characters"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))
+    description: Mapped[str] = mapped_column(Text, default="")
+    images_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    conversation_id: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    @property
+    def images(self) -> list[str]:
+        try:
+            return json.loads(self.images_json) if self.images_json else []
+        except json.JSONDecodeError:
+            return []
+
+    @images.setter
+    def images(self, files: list[str]) -> None:
+        self.images_json = json.dumps(list(files))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "images": self.images,
+            "conversation_id": self.conversation_id,
+            "adhoc": self.conversation_id is not None,
             "created_at": iso(self.created_at),
             "updated_at": iso(self.updated_at),
         }
@@ -345,7 +397,8 @@ class MetadataDB:
     # missing *tables*; Docker runs Alembic on start, but a local dev server
     # doesn't, so add them here too (same as the Alembic migration).
     _LATE_COLUMNS = {
-        "chat_conversations": {"instruction_id": "INTEGER", "current_leaf_id": "INTEGER"},
+        "chat_conversations": {"instruction_id": "INTEGER", "current_leaf_id": "INTEGER",
+                               "character_ids_json": "TEXT"},
         "chat_messages": {"parent_id": "INTEGER", "mode": "VARCHAR(10)"},
     }
     # Run once when the column is added: chats from before branching were
@@ -835,6 +888,54 @@ class MetadataDB:
             session.query(ChatConversation).filter(ChatConversation.instruction_id == instruction_id)\
                 .update({ChatConversation.instruction_id: None})
             session.delete(item)
+            session.commit()
+            return True
+
+    # ── Character methods ────────────────────────────────────────────
+
+    def create_character(self, name: str, description: str = "", conversation_id: str | None = None) -> Character:
+        with self._session() as session:
+            char = Character(name=name, description=description, conversation_id=conversation_id, images=[])
+            session.add(char)
+            session.commit()
+            session.refresh(char)
+            session.expunge(char)
+            return char
+
+    def get_character(self, character_id: int) -> Character | None:
+        with self._session() as session:
+            char = session.get(Character, character_id)
+            if char:
+                session.expunge(char)
+            return char
+
+    def list_characters(self) -> list[Character]:
+        with self._session() as session:
+            chars = session.query(Character).order_by(func.lower(Character.name), Character.id).all()
+            for c in chars:
+                session.expunge(c)
+            return chars
+
+    def update_character(self, character_id: int, **fields) -> Character | None:
+        """Set name / description / images (list of filenames) / conversation_id."""
+        with self._session() as session:
+            char = session.get(Character, character_id)
+            if not char:
+                return None
+            for key, value in fields.items():
+                setattr(char, key, value)
+            char.updated_at = datetime.now()
+            session.commit()
+            session.refresh(char)
+            session.expunge(char)
+            return char
+
+    def delete_character(self, character_id: int) -> bool:
+        with self._session() as session:
+            char = session.get(Character, character_id)
+            if not char:
+                return False
+            session.delete(char)
             session.commit()
             return True
 

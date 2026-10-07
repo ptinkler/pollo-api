@@ -1,0 +1,349 @@
+<script setup>
+import { ref, computed, watch, nextTick, inject } from 'vue'
+import {
+  createCharacter, updateCharacter, deleteCharacter, promoteCharacter, uploadCharacterImage,
+  copyChatImageToCharacter, copyGenerationImageToCharacter, characterImageUrl,
+} from '../../composables/useCharacters'
+
+const MAX_IMAGES = 6   // mirrors MAX_IMAGES in web/characters.py
+
+const props = defineProps({
+  open: { type: Boolean, default: false },
+  character: { type: Object, default: null },        // edit this one; null = create
+  conversationId: { type: String, default: null },   // create as ad hoc in this chat
+  // Images to start a new character with: { kind: 'chat', conversationId, file, preview }
+  // or { kind: 'generation', project, filename, preview }
+  seed: { type: Array, default: () => [] },
+})
+const emit = defineEmits(['close', 'saved', 'deleted'])
+const showToast = inject('showToast', () => {})
+
+const name = ref('')
+const description = ref('')
+const kept = ref([])      // existing image filenames, main first
+const pending = ref([])   // images to add on save
+const saving = ref(false)
+const nameInput = ref(null)
+let keySeq = 0
+
+const isNew = computed(() => !props.character)
+const total = computed(() => kept.value.length + pending.value.length)
+
+watch(() => props.open, (open) => {
+  if (!open) return
+  name.value = props.character?.name ?? ''
+  description.value = props.character?.description ?? ''
+  kept.value = [...(props.character?.images ?? [])]
+  pending.value = props.seed.map(s => ({ ...s, key: ++keySeq }))
+  nextTick(() => nameInput.value?.focus())
+})
+
+function addFiles(files) {
+  for (const file of [...files].filter(f => f.type.startsWith('image/'))) {
+    if (total.value >= MAX_IMAGES) return showToast(`Up to ${MAX_IMAGES} images per character`, 'error')
+    pending.value.push({ kind: 'file', file, preview: URL.createObjectURL(file), key: ++keySeq })
+  }
+}
+
+function removePending(p) {
+  if (p.kind === 'file') URL.revokeObjectURL(p.preview)
+  pending.value = pending.value.filter(x => x !== p)
+}
+
+function makeMain(file) {
+  kept.value = [file, ...kept.value.filter(f => f !== file)]
+}
+
+function addImage(id, p) {
+  if (p.kind === 'chat') return copyChatImageToCharacter(id, p.conversationId, p.file)
+  if (p.kind === 'generation') return copyGenerationImageToCharacter(id, p.project, p.filename)
+  return uploadCharacterImage(id, p.file)
+}
+
+async function save() {
+  if (!name.value.trim()) return showToast('Give the character a name', 'error')
+  saving.value = true
+  try {
+    const fields = { name: name.value.trim(), description: description.value.trim() }
+    let c = isNew.value
+      ? await createCharacter({ ...fields, conversation_id: props.conversationId })
+      : await updateCharacter(props.character.id, { ...fields, images: kept.value })
+    for (const p of pending.value) c = await addImage(c.id, p)
+    emit('saved', c)
+    emit('close')
+  } catch (e) {
+    showToast(`Save failed: ${e.message}`, 'error')
+  } finally {
+    saving.value = false
+  }
+}
+
+async function promote() {
+  try {
+    emit('saved', await promoteCharacter(props.character.id))
+    showToast(`${props.character.name} saved — attach it to any chat or generation`, 'success')
+  } catch (e) {
+    showToast(`Couldn't save: ${e.message}`, 'error')
+  }
+}
+
+async function remove() {
+  if (!confirm(`Delete “${props.character.name}” and its images?`)) return
+  try {
+    await deleteCharacter(props.character.id)
+    emit('deleted', props.character.id)
+    emit('close')
+  } catch (e) {
+    showToast(`Delete failed: ${e.message}`, 'error')
+  }
+}
+</script>
+
+<template>
+  <Teleport to="body">
+    <div v-if="open" class="backdrop" @click.self="emit('close')" @keydown.esc="emit('close')">
+      <div class="dialog" role="dialog" aria-label="Character">
+        <div class="head">
+          <h3>{{ isNew ? 'New character' : character.name }}</h3>
+          <span v-if="character?.adhoc || (isNew && conversationId)" class="tag" title="Only in this chat until saved">this chat only</span>
+          <button class="x" title="Close" @click="emit('close')">✕</button>
+        </div>
+        <p class="sub">
+          The description is added to prompts and the images go to the model as references, so the
+          character looks the same every time. The first image is the main one.
+        </p>
+
+        <label for="char-name">Name</label>
+        <input id="char-name" ref="nameInput" v-model="name" maxlength="100" placeholder="e.g. Linh" />
+        <label for="char-desc">Description</label>
+        <textarea
+          id="char-desc"
+          v-model="description"
+          maxlength="4000"
+          placeholder="Appearance and anything that should stay the same: age, hair, build, clothing, style…"
+        ></textarea>
+
+        <label>Images <span class="count">{{ total }}/{{ MAX_IMAGES }}</span></label>
+        <div class="images" @dragover.prevent @drop.prevent="addFiles($event.dataTransfer?.files || [])">
+          <div v-for="(f, i) in kept" :key="f" class="img" :class="{ main: i === 0 }">
+            <img :src="characterImageUrl(character.id, f)" alt="" />
+            <span v-if="i === 0" class="main-tag">main</span>
+            <button v-else class="img-btn star" title="Make this the main image" @click="makeMain(f)">★</button>
+            <button class="img-btn x-btn" title="Remove" @click="kept = kept.filter(k => k !== f)">✕</button>
+          </div>
+          <div v-for="p in pending" :key="p.key" class="img pending">
+            <img :src="p.preview" alt="" />
+            <button class="img-btn x-btn" title="Remove" @click="removePending(p)">✕</button>
+          </div>
+          <label v-if="total < MAX_IMAGES" class="img add" title="Add images (or drop them here)">
+            ＋
+            <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden
+                   @change="addFiles($event.target.files); $event.target.value = ''" />
+          </label>
+        </div>
+
+        <div class="actions">
+          <button v-if="character" class="btn btn-danger" @click="remove">Delete</button>
+          <button v-if="character?.adhoc" class="btn btn-secondary" title="Keep it after this chat, and use it anywhere" @click="promote">
+            ⭐ Save to characters
+          </button>
+          <span class="spacer"></span>
+          <button class="btn btn-secondary" @click="emit('close')">Cancel</button>
+          <button class="btn btn-primary" :disabled="saving || !name.trim()" @click="save">
+            {{ saving ? 'Saving…' : isNew ? 'Create' : 'Save' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+</template>
+
+<style scoped>
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  background: rgba(0, 0, 0, 0.7);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.dialog {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 20px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.head h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--surface2);
+  color: var(--yellow);
+}
+
+.x {
+  background: none;
+  border: none;
+  color: var(--text2);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.x:hover {
+  background: var(--surface2);
+  color: var(--text);
+}
+
+.sub {
+  font-size: 0.8rem;
+  color: var(--text2);
+  margin-bottom: 8px;
+  line-height: 1.45;
+}
+
+label {
+  font-size: 0.75rem;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 4px;
+}
+
+.count {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+input,
+textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+textarea {
+  min-height: 110px;
+  resize: vertical;
+}
+
+.images {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 8px;
+}
+
+.img {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+}
+
+.img.main {
+  border-color: var(--accent);
+}
+
+.img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.img.add {
+  display: grid;
+  place-items: center;
+  font-size: 1.6rem;
+  color: var(--text2);
+  cursor: pointer;
+  border-style: dashed;
+  margin: 0;
+  text-transform: none;
+}
+
+.img.add:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.main-tag {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  font-size: 0.62rem;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+}
+
+.img-btn {
+  position: absolute;
+  top: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.x-btn {
+  right: 4px;
+}
+
+.star {
+  left: 4px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.actions .btn {
+  padding: 8px 14px;
+}
+
+.spacer {
+  flex: 1;
+}
+</style>

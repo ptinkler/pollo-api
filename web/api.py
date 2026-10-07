@@ -43,6 +43,7 @@ from img2vid.common.metadata import get_db, iso
 
 # ── Authentication ───────────────────────────────────────────────────
 from .auth import verify_api_key, is_auth_enabled, get_api_keys
+from . import characters
 from .chat import router as chat_router, startup_resume_chat
 from .uploads import image_media_type, read_image_upload, safe_filename
 
@@ -610,6 +611,8 @@ class GenerateRequest(BaseModel):
     refs: list | None = None  # ref2video: array of {type, name, image, order, avatarId?}
     video_num: int | None = None  # ref2video: 1-4
     image_meta: list | None = None  # ref2video: array of {url, order, name?, cropper?}
+    character_ids: list[int] = []   # see web/characters.py
+    ref_mode: bool = False          # v1 "Ref mode" is on (character images go in as refs even with no other refs)
 
 
 class BulkMoveRequest(BaseModel):
@@ -629,6 +632,7 @@ class GenerateImageRequest(BaseModel):
     resolution: str | None = None
     max_images: int | None = None
     thinking_level: str | None = None
+    character_ids: list[int] = []   # see web/characters.py
 
 
 class ProjectCreate(BaseModel):
@@ -1249,8 +1253,11 @@ def _project_for_generation(project_slug: str | None):
 def _publish_local_image(assets_path: Path, ref: str, what: str = "image") -> str:
     """Upload a "local:<file>" image to a temporary public host (Pollo only
     takes URLs) and return its URL. 400 if the file is gone, 502 if every host fails."""
-    source = _get_local_image_path(assets_path, ref)
-    if not source:
+    return _publish_file(_get_local_image_path(assets_path, ref), ref, what)
+
+
+def _publish_file(source: Path | None, ref: str, what: str) -> str:
+    if not source or not source.is_file():
         raise HTTPException(status_code=400, detail=f"{what[:1].upper()}{what[1:]} not found: {ref}")
     try:
         url = _upload_image(source)
@@ -1258,6 +1265,25 @@ def _publish_local_image(assets_path: Path, ref: str, what: str = "image") -> st
         raise HTTPException(status_code=502, detail=f"Failed to upload {what}: {exc}")
     print(f"[Generate] Uploaded {what}: {url}")
     return url
+
+
+CHARACTER_REFS = 4   # character images sent per generation (spread across the characters)
+
+
+def _publish_character_ref(ref: str) -> str:
+    """Upload a character image ("char:<id>/<file>") and return its public URL."""
+    return _publish_file(characters.ref_path(ref), ref, "character image")
+
+
+def _character_ref_room(refs: list, is_ref_model: bool, ref_mode: dict | None) -> int:
+    """How many character images still fit beside the user's own refs."""
+    if is_ref_model:
+        return min(CHARACTER_REFS, 13 - len(refs))
+    image_refs = sum(1 for r in refs if r.get("type", "image") == "image")
+    room = ref_mode["max"] - len(refs)
+    if "image" in ref_mode.get("limits", {}):
+        room = min(room, ref_mode["limits"]["image"] - image_refs)
+    return max(0, min(CHARACTER_REFS, room)) if "image" in ref_mode["types"] else 0
 
 
 def _source_upload_params(local_ref: str | None, uploaded_url: str | None) -> dict:
@@ -1301,6 +1327,7 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
         raise HTTPException(status_code=400, detail="Prompt is required")
 
     db = get_db()
+    chars = characters.require(data.character_ids, db)
     project, assets_path = _project_for_generation(data.project)
     project_slug = project.slug
 
@@ -1345,7 +1372,7 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
     kwargs = {
         "api_key": os.getenv("POLLO_API_KEY"),
         "project": project.assets_folder,  # Use assets folder for file storage
-        "prompt": prompt,
+        "prompt": characters.with_characters(prompt, chars),
         "image_url": image_url,
         "aspect_ratio": aspect_ratio,
         "resolution": resolution,
@@ -1375,22 +1402,41 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
     is_ref_model = MODEL_INFO.get(model, {}).get("type") == "ref"
     # v1 models take refs on their regular endpoint ("Ref mode" in the UI)
     ref_mode = MODEL_INFO.get(model, {}).get("ref_mode")
-    v1_ref_mode = bool(data.refs) and ref_mode is not None
+    # In ref mode, characters' images go in as image refs after the user's
+    # own (the description goes in the prompt either way)
+    user_refs = list(data.refs or [])
+    char_refs: list[dict] = []
+    if chars and (is_ref_model or (ref_mode is not None and (user_refs or data.ref_mode))):
+        room = _character_ref_room(user_refs, is_ref_model, ref_mode)
+        char_refs = [{"type": "image", "_character": r} for r in characters.reference_refs(chars, room)]
+    all_refs = user_refs + char_refs
+    v1_ref_mode = bool(all_refs) and ref_mode is not None
     if v1_ref_mode:
-        _validate_v1_refs(data.refs, ref_mode)
+        _validate_v1_refs(all_refs, ref_mode)
         # The ref branch has no source image or end frame
         kwargs["image_url"] = None
         kwargs.pop("image_tail", None)
 
     if is_ref_model or v1_ref_mode:
         # ref uses refs array
-        if data.refs:
+        if all_refs:
             # Handle local: refs by uploading them
+            names = {c.id: c.name for c in chars}
+            order = sum(1 for r in user_refs if r.get("type") != "subject")
             resolved_refs = []
-            for ref in data.refs:
+            for ref in all_refs:
                 ref = dict(ref)  # shallow copy
                 ref_type = ref.get("type", "image")
-                if ref_type == "image":
+                if ref.get("_character"):
+                    # Kept on the stored ref, so a regenerate knows it came from a character
+                    public_url = _publish_character_ref(ref["_character"])
+                    if is_ref_model:
+                        order += 1
+                        cid = int(ref["_character"][len(characters.REF_PREFIX):].split("/")[0])
+                        ref.update(name=names.get(cid, "character")[:20], image=public_url, order=order)
+                    else:
+                        ref["url"] = public_url
+                elif ref_type == "image":
                     url = ref.get("image") or ref.get("url") or ""
                     if url.startswith("local:"):
                         public_url = _publish_local_image(assets_path, url, "ref image")
@@ -1431,6 +1477,7 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
         "num_outputs": kwargs.get("num_outputs", None),
         "video_num": kwargs.get("video_num", None),
         "refs": kwargs.get("refs", []) or [],
+        "character_ids": [c.id for c in chars],
         **_source_upload_params(local_image_ref, uploaded_image_url),
     }
     db.create_job(
@@ -1524,6 +1571,7 @@ def api_generate_image(data: GenerateImageRequest, _api_key: str = Depends(verif
     if not prompt:
         raise HTTPException(status_code=400, detail="Prompt is required")
 
+    chars = characters.require(data.character_ids, get_db())
     project, assets_path = _project_for_generation(data.project)
     project_slug = project.slug
 
@@ -1539,17 +1587,22 @@ def api_generate_image(data: GenerateImageRequest, _api_key: str = Depends(verif
     # Resolve local: refs in images list
     images = [_publish_local_image(assets_path, u.strip()) if u.strip().startswith("local:") else u.strip()
               for u in data.images or []] or None
+    # Characters' images go in as reference images after the user's own
+    # (models without an "images" option get just the description)
+    char_images = []
+    if "images" in MODEL_INFO.get(model, {}).get("options", []):
+        char_images = [_publish_character_ref(r) for r in characters.reference_refs(chars, CHARACTER_REFS)]
 
     kwargs = {
         "api_key": os.getenv("POLLO_API_KEY"),
         "project": project.assets_folder,
-        "prompt": prompt,
+        "prompt": characters.with_characters(prompt, chars),
         "image_url": image_url,
         "aspect_ratio": data.aspect_ratio,
         "seed": data.seed,
     }
-    if images:
-        kwargs["images"] = images
+    if images or char_images:
+        kwargs["images"] = (images or []) + char_images
     if data.style is not None:
         kwargs["style"] = data.style
     if data.resolution is not None:
@@ -1564,6 +1617,7 @@ def api_generate_image(data: GenerateImageRequest, _api_key: str = Depends(verif
         "seed": data.seed,
         "style": data.style or "",
         "images": images or [],
+        "character_ids": [c.id for c in chars],
     }
     if data.resolution:
         extra_params["resolution"] = data.resolution
@@ -3060,6 +3114,7 @@ def vpn_countries():
 # ── Chat mode (OpenRouter) — see web/chat.py ─────────────────────────
 # Must be registered before the SPA catch-all below.
 app.include_router(chat_router)
+app.include_router(characters.router)
 
 
 # ── Serve Vue frontend (production build) ────────────────────────────

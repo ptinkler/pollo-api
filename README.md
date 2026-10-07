@@ -10,6 +10,7 @@ Originally built for rapid on-the-fly D&D resource creation — generating atmos
 - Project-based organisation with per-project galleries
 - Credit usage tracking and balance display
 - Source and reference image uploads (stored locally)
+- Characters: a name, description and reference images, attachable to chats and generations so a character looks the same everywhere (made ad hoc in a chat, or saved and managed on the Characters page)
 - VPN country rotation via Gluetun control API
 - Background job polling with automatic recovery on restart
 - Cookie-based authentication (HttpOnly session cookie)
@@ -67,7 +68,7 @@ WIREGUARD_ADDRESSES=...
 
 ## Data
 
-All data (videos, source images, SQLite DB) is stored in `POLLO_HOST_DATA_DIR` on the host. Back this up.
+All data (videos, source images, chat media, character images, SQLite DB) is stored in `POLLO_HOST_DATA_DIR` on the host. Back this up.
 
 ## NAS / Synology
 

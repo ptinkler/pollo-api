@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from '../views/HomeView.vue'
 import ProjectView from '../views/ProjectView.vue'
 import UsageView from '../views/UsageView.vue'
+import CharactersView from '../views/CharactersView.vue'
 // Lazy: chat pulls in the markdown renderer, which the video pages don't need
 const ChatView = () => import('../views/ChatView.vue')
 
@@ -20,6 +21,12 @@ const routes = [
     name: 'usage',
     component: UsageView,
     meta: { title: 'Credit Usage — Pollo' }
+  },
+  {
+    path: '/characters',
+    name: 'characters',
+    component: CharactersView,
+    meta: { title: 'Characters — Pollo' }
   },
   {
     path: '/chat',

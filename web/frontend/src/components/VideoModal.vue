@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch, onMounted, onUnmounted, inject } from 'vue'
 import { getVideoUrl, deleteVideo } from '../composables/useApi'
+import CharacterEditor from './characters/CharacterEditor.vue'
 
 const props = defineProps({
   video: { type: Object, default: null },
@@ -38,8 +39,18 @@ function close() {
   emit('close')
 }
 
+// "Make a character": a new saved character starting from this image
+const characterOpen = ref(false)
+const characterSeed = computed(() => props.video ? [{
+  kind: 'generation', project: props.project, filename: props.video.filename, preview: videoUrl.value,
+}] : [])
+
+function onCharacterSaved(c) {
+  showToast(`Character “${c.name}” created`, 'success')
+}
+
 function handleKeydown(e) {
-  if (e.key === 'Escape' && props.visible) {
+  if (e.key === 'Escape' && props.visible && !characterOpen.value) {
     close()
   }
 }
@@ -103,6 +114,7 @@ onUnmounted(() => {
           <div class="modal-actions">
             <button class="btn btn-primary" @click="$emit('regenerate', video)">🔄 Regenerate</button>
             <button class="btn btn-primary" @click="$emit('use-as-ref', video)">🎯 Use as Ref</button>
+            <button v-if="isImageJob" class="btn btn-secondary" @click="characterOpen = true">👤 Make character</button>
 <button class="btn btn-secondary" @click="$emit(isArchived ? 'unarchive' : 'archive', video)">
               📦 {{ isArchived ? 'Unarchive' : 'Archive' }}
             </button>
@@ -111,6 +123,12 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+    <CharacterEditor
+      :open="characterOpen"
+      :seed="characterSeed"
+      @close="characterOpen = false"
+      @saved="onCharacterSaved"
+    />
   </Teleport>
 </template>
 

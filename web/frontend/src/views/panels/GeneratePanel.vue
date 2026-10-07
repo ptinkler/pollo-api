@@ -1,10 +1,13 @@
 <script setup>
-import { ref, computed, watch, inject } from 'vue'
+import { ref, reactive, computed, watch, inject } from 'vue'
 import { RatioPicker, LengthSlider, ToggleSwitch, SleekTextarea, SleekSelect, SleekInput } from '../../components/form'
 import { generateVideo, generateImage, uploadSourceImage, deleteSourceImage, uploadRefImage, fetchCreditEstimate, localImageFilename, getLocalImagePreviewUrl } from '../../composables/useApi'
 import { useProjectSettings } from '../../composables/useProjectSettings'
 import { useJobsQueue } from '../../composables/useJobsQueue'
 import { useShowHidden } from '../../composables/useShowHidden'
+import { fetchCharacters } from '../../composables/useCharacters'
+import CharacterPicker from '../../components/characters/CharacterPicker.vue'
+import CharacterEditor from '../../components/characters/CharacterEditor.vue'
 
 const props = defineProps({
   project: { type: String, required: true },
@@ -62,6 +65,47 @@ const resolutions = computed(() => modelResolutions.value || ['480p', '720p', '1
 const showVideoNumOption = computed(() => modelOptions.value.includes('video_num'))
 const showThinkingLevelOption = computed(() => modelOptions.value.includes('thinking_level'))
 const isDeprecatedModel = computed(() => !!selectedModel.value.deprecated)
+
+// Characters (saved ones): description into the prompt, images as references
+const savedCharacters = ref([])
+const charEditor = reactive({ open: false, character: null })
+const attachedCharacters = computed(() =>
+  (settings.value.character_ids || []).map(id => savedCharacters.value.find(c => c.id === id)).filter(Boolean))
+const characterImagesSent = computed(() =>
+  modelType.value === 'image' ? modelOptions.value.includes('images') : showRefFields.value)
+const characterHint = computed(() => {
+  if (!attachedCharacters.value.length) return ''
+  if (characterImagesSent.value) return 'Their descriptions go into the prompt and their images are sent as references.'
+  if (refModeInfo.value) return 'Their descriptions go into the prompt. Turn on Ref mode to send their images too.'
+  return "Their descriptions go into the prompt (this model can't take their images)."
+})
+
+async function loadCharacters() {
+  try {
+    savedCharacters.value = await fetchCharacters()
+  } catch { /* 401 handled by auth prompt */ }
+}
+loadCharacters()
+
+function openCharacter(c) {
+  Object.assign(charEditor, { open: true, character: c })
+}
+
+function onCharacterSaved(c) {
+  const i = savedCharacters.value.findIndex(x => x.id === c.id)
+  if (i === -1) {
+    savedCharacters.value.push(c)
+    settings.value.character_ids = [...(settings.value.character_ids || []), c.id]
+  } else {
+    savedCharacters.value.splice(i, 1, c)
+  }
+  if (charEditor.character?.id === c.id) charEditor.character = c
+}
+
+function onCharacterDeleted(id) {
+  savedCharacters.value = savedCharacters.value.filter(c => c.id !== id)
+  settings.value.character_ids = (settings.value.character_ids || []).filter(x => x !== id)
+}
 
 // Credit cost estimate — Pollo has no pre-flight pricing API, so this looks up
 // what identical past generations actually cost and shows that on the button.
@@ -376,7 +420,11 @@ async function handleSubmit() {
     generate_audio: settings.value.generate_audio,
     web_search: settings.value.web_search,
     image_tail: settings.value.image_tail,
+    character_ids: attachedCharacters.value.map(c => c.id),
+    ref_mode: inV1RefMode.value,
   }
+  // Character images count as references in ref mode
+  const characterRefs = characterImagesSent.value && attachedCharacters.value.some(c => c.images.length)
 
   // Seed (optional number)
   if (showSeedOption.value && settings.value.seed) {
@@ -402,7 +450,7 @@ async function handleSubmit() {
     const counts = {}
     validRefs.forEach(r => { counts[r.type] = (counts[r.type] || 0) + 1 })
     const error = (() => {
-      if (!validRefs.some(r => r.type !== 'audio')) return 'At least one non-audio reference is required'
+      if (!characterRefs && !validRefs.some(r => r.type !== 'audio')) return 'At least one non-audio reference (or a character with images) is required'
       const badType = validRefs.find(r => !info.types.includes(r.type))
       if (badType) return `This model doesn't accept ${REF_TYPE_LABELS[badType.type] || badType.type} references`
       if (validRefs.length > info.max) return `Too many references (max ${info.max})`
@@ -447,8 +495,8 @@ async function handleSubmit() {
         validRefs.push({ type: 'image', name, image: r.url.trim(), order: order++ })
       }
     }
-    if (validRefs.length === 0) {
-      showToast('At least one reference is required', 'error')
+    if (validRefs.length === 0 && !characterRefs) {
+      showToast('At least one reference (or a character with images) is required', 'error')
       isSubmitting.value = false
       return
     }
@@ -490,6 +538,13 @@ async function handleSubmit() {
 
 <template>
   <div class="generate-panel">
+    <CharacterEditor
+      :open="charEditor.open"
+      :character="charEditor.character"
+      @close="charEditor.open = false"
+      @saved="onCharacterSaved"
+      @deleted="onCharacterDeleted"
+    />
     <form @submit.prevent="handleSubmit">
       <!-- Prompt -->
       <div class="form-section">
@@ -499,6 +554,18 @@ async function handleSubmit() {
           placeholder="Describe what you want to generate..."
           :rows="4"
         />
+      </div>
+
+      <!-- Characters -->
+      <div class="form-section">
+        <span class="char-label">Characters <span class="char-optional">optional</span></span>
+        <CharacterPicker
+          v-model="settings.character_ids"
+          :characters="savedCharacters"
+          @edit="openCharacter"
+          @create="openCharacter(null)"
+        />
+        <p v-if="characterHint" class="char-hint">{{ characterHint }}</p>
       </div>
 
       <!-- Legacy mode toggle -->
@@ -874,6 +941,24 @@ async function handleSubmit() {
 <style scoped>
 .form-section {
   margin-bottom: 20px;
+}
+
+.char-label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--text2);
+  margin-bottom: 6px;
+}
+
+.char-optional {
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+
+.char-hint {
+  font-size: 0.75rem;
+  color: var(--text2);
+  margin-top: 6px;
 }
 
 .form-row {
