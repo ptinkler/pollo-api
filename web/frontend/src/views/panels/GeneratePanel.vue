@@ -6,6 +6,8 @@ import { useProjectSettings } from '../../composables/useProjectSettings'
 import { useJobsQueue } from '../../composables/useJobsQueue'
 import { useShowHidden } from '../../composables/useShowHidden'
 import { fetchCharacters, generateModelTakesCharacters } from '../../composables/useCharacters'
+import { importMedia } from '../../composables/useMedia'
+import MediaPicker from '../../components/media/MediaPicker.vue'
 import CharacterPicker from '../../components/characters/CharacterPicker.vue'
 import CharacterEditor from '../../components/characters/CharacterEditor.vue'
 
@@ -157,21 +159,57 @@ async function handleFileUpload(event) {
       createImageBitmap(file),
     ])
     settings.value.image_url = result.image_url  // "local:src-abc123.jpg"
-    if (modelRatios.value.length) {
-      const { width, height } = bitmap
-      bitmap.close()
-      const imageRatio = width / height
-      settings.value.aspect_ratio = modelRatios.value.reduce((best, r) => {
-        const [a, b] = r.split(':').map(Number)
-        const [ba, bb] = best.split(':').map(Number)
-        return Math.abs(a / b - imageRatio) < Math.abs(ba / bb - imageRatio) ? r : best
-      })
-    }
+    fitAspectRatio(bitmap.width, bitmap.height)
+    bitmap.close()
     showToast('Source image uploaded', 'success')
   } catch (err) {
     showToast('Upload failed: ' + err.message, 'error')
   } finally {
     isUploading.value = false
+  }
+}
+
+// Frame the video like its source image: the model's closest ratio
+function fitAspectRatio(width, height) {
+  const numeric = modelRatios.value.filter(r => r.includes(':'))
+  if (!numeric.length || !width || !height) return
+  const imageRatio = width / height
+  const off = (r) => { const [a, b] = r.split(':').map(Number); return Math.abs(a / b - imageRatio) }
+  settings.value.aspect_ratio = numeric.reduce((best, r) => (off(r) < off(best) ? r : best))
+}
+
+// Picking from the media library: the image is copied into this project,
+// just like an upload. `libraryTarget` says where it goes.
+const libraryTarget = ref(null)   // { kind: 'source' } | { kind: 'ref', target, busyKey }
+
+function imageSize(url) {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => resolve([img.naturalWidth, img.naturalHeight])
+    img.onerror = () => resolve([0, 0])
+    img.src = url
+  })
+}
+
+async function onLibraryPick([item]) {
+  const t = libraryTarget.value
+  if (!item || !t) return
+  const source = t.kind === 'source'
+  if (source) isUploading.value = true
+  else uploadingRefIndex.value = t.busyKey
+  try {
+    const { image_url } = await importMedia(item.id, { target: 'project', project: props.project, prefix: source ? 'src' : 'ref' })
+    if (source) {
+      settings.value.image_url = image_url
+      fitAspectRatio(...await imageSize(item.url))
+    } else {
+      t.target.url = image_url
+    }
+  } catch (err) {
+    showToast("Couldn't use that image: " + err.message, 'error')
+  } finally {
+    isUploading.value = false
+    uploadingRefIndex.value = null
   }
 }
 
@@ -540,6 +578,13 @@ async function handleSubmit() {
 
 <template>
   <div class="generate-panel">
+    <MediaPicker
+      :open="!!libraryTarget"
+      :multiple="false"
+      :title="libraryTarget?.kind === 'source' ? 'Choose a source image' : 'Choose a reference image'"
+      @pick="onLibraryPick"
+      @close="libraryTarget = null"
+    />
     <CharacterEditor
       :open="charEditor.open"
       :character="charEditor.character"
@@ -637,6 +682,8 @@ async function handleSubmit() {
                 <span v-if="isUploading" class="btn-spinner"></span>
                 <span v-else>📁</span>
               </button>
+              <button type="button" class="btn-upload" title="Choose from your uploads and creations"
+                      :disabled="isUploading" @click="libraryTarget = { kind: 'source' }">🗂</button>
             </div>
             <input
               ref="fileInputRef"
@@ -809,6 +856,9 @@ async function handleSubmit() {
                 <span v-if="uploadingRefIndex === index" class="btn-spinner"></span>
                 <span v-else>📁</span>
               </button>
+              <button type="button" class="btn-upload" title="Choose from your uploads and creations"
+                      :disabled="uploadingRefIndex === index"
+                      @click="libraryTarget = { kind: 'ref', target: refItem, busyKey: index }">🗂</button>
             </div>
             <input
               :ref="(el) => setRefFileInput(index, el)"
@@ -887,6 +937,9 @@ async function handleSubmit() {
                     <span v-if="uploadingRefIndex === `subject-${imgIdx}`" class="btn-spinner"></span>
                     <span v-else>📁</span>
                   </button>
+                  <button type="button" class="btn-upload btn-upload-small" title="Choose from your uploads and creations"
+                          :disabled="uploadingRefIndex === `subject-${imgIdx}`"
+                          @click="libraryTarget = { kind: 'ref', target: img, busyKey: `subject-${imgIdx}` }">🗂</button>
                 </template>
                 <input
                   :ref="(el) => setSubjectFileInput(index, imgIdx, el)"

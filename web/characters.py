@@ -256,7 +256,8 @@ def _add_image(char, content: bytes, ext: str) -> dict:
     return get_db().update_character(char.id, images=char.images + [name]).to_dict()
 
 
-def _copy_image(char, source: Path) -> dict:
+def add_image_from_file(char, source: Path) -> dict:
+    """Copy an image file into the character (used by the media library too)."""
     if not source.is_file() or not image_media_type(source):
         raise HTTPException(404, "Image not found")
     return _add_image(char, source.read_bytes(), source.suffix.lower())
@@ -273,7 +274,7 @@ async def api_upload_character_image(character_id: int, file: UploadFile = File(
 def api_character_image_from_chat(character_id: int, data: CopyFromChat):
     """Copy an image from a chat (uploaded or generated) into the character."""
     char = _require_char(character_id)
-    return _copy_image(char, config.ROOT_DIR / "chat" / safe_filename(data.conversation_id) / safe_filename(data.file))
+    return add_image_from_file(char, config.ROOT_DIR / "chat" / safe_filename(data.conversation_id) / safe_filename(data.file))
 
 
 @router.post("/{character_id}/images/from-generation")
@@ -284,7 +285,7 @@ def api_character_image_from_generation(character_id: int, data: CopyFromGenerat
     proj = get_db().get_project_by_slug(data.project)
     if not proj:
         raise HTTPException(404, "Project not found")
-    return _copy_image(char, api.ASSETS_DIR / proj.assets_folder / safe_filename(data.filename))
+    return add_image_from_file(char, api.ASSETS_DIR / proj.assets_folder / safe_filename(data.filename))
 
 
 @router.get("/{character_id}/images/{filename}")

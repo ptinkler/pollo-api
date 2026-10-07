@@ -54,6 +54,8 @@ def client(tmp_path, db, monkeypatch):
     monkeypatch.setattr(chat_mod, "get_db", lambda: db)
     import web.characters as characters_mod
     monkeypatch.setattr(characters_mod, "get_db", lambda: db)
+    import web.media as media_mod
+    monkeypatch.setattr(media_mod, "get_db", lambda: db)
 
     # Clear caches
     api_mod._project_lookup_cache.clear()

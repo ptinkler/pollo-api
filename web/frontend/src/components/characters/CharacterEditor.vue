@@ -1,5 +1,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, inject } from 'vue'
+import MediaPicker from '../media/MediaPicker.vue'
+import { importMedia } from '../../composables/useMedia'
 import {
   createCharacter, updateCharacter, deleteCharacter, promoteCharacter, uploadCharacterImage,
   copyChatImageToCharacter, copyGenerationImageToCharacter, characterImageUrl,
@@ -11,8 +13,8 @@ const props = defineProps({
   open: { type: Boolean, default: false },
   character: { type: Object, default: null },        // edit this one; null = create
   conversationId: { type: String, default: null },   // create as ad hoc in this chat
-  // Images to start a new character with: { kind: 'chat', conversationId, file, preview }
-  // or { kind: 'generation', project, filename, preview }
+  // Images to start a new character with: { kind: 'chat', conversationId, file, preview },
+  // { kind: 'generation', project, filename, preview } or { kind: 'media', mediaId, preview }
   seed: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['close', 'saved', 'deleted'])
@@ -23,6 +25,7 @@ const description = ref('')
 const kept = ref([])      // existing image filenames, main first
 const pending = ref([])   // images to add on save
 const saving = ref(false)
+const pickerOpen = ref(false)
 const nameInput = ref(null)
 let keySeq = 0
 
@@ -45,6 +48,12 @@ function addFiles(files) {
   }
 }
 
+function addFromLibrary(items) {
+  for (const i of items.slice(0, MAX_IMAGES - total.value)) {
+    pending.value.push({ kind: 'media', mediaId: i.id, preview: i.thumb_url || i.url, key: ++keySeq })
+  }
+}
+
 function removePending(p) {
   if (p.kind === 'file') URL.revokeObjectURL(p.preview)
   pending.value = pending.value.filter(x => x !== p)
@@ -57,6 +66,7 @@ function makeMain(file) {
 function addImage(id, p) {
   if (p.kind === 'chat') return copyChatImageToCharacter(id, p.conversationId, p.file)
   if (p.kind === 'generation') return copyGenerationImageToCharacter(id, p.project, p.filename)
+  if (p.kind === 'media') return importMedia(p.mediaId, { target: 'character', character_id: id })
   return uploadCharacterImage(id, p.file)
 }
 
@@ -135,12 +145,27 @@ async function remove() {
             <img :src="p.preview" alt="" />
             <button class="img-btn x-btn" title="Remove" @click="removePending(p)">✕</button>
           </div>
-          <label v-if="total < MAX_IMAGES" class="img add" title="Add images (or drop them here)">
-            ＋
-            <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden
-                   @change="addFiles($event.target.files); $event.target.value = ''" />
-          </label>
+          <template v-if="total < MAX_IMAGES">
+            <label class="img add" title="Upload from this computer (or drop images here)">
+              ＋
+              <span class="add-label">Upload</span>
+              <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden
+                     @change="addFiles($event.target.files); $event.target.value = ''" />
+            </label>
+            <button type="button" class="img add" title="Choose from your uploads and creations" @click="pickerOpen = true">
+              🗂
+              <span class="add-label">Library</span>
+            </button>
+          </template>
         </div>
+
+        <MediaPicker
+          :open="pickerOpen"
+          title="Add images to the character"
+          :max="MAX_IMAGES - total"
+          @pick="addFromLibrary"
+          @close="pickerOpen = false"
+        />
 
         <div class="actions">
           <button v-if="character" class="btn btn-danger" @click="remove">Delete</button>
@@ -284,14 +309,21 @@ textarea {
 }
 
 .img.add {
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
   font-size: 1.6rem;
   color: var(--text2);
   cursor: pointer;
   border-style: dashed;
   margin: 0;
   text-transform: none;
+}
+
+.add-label {
+  font-size: 0.68rem;
 }
 
 .img.add:hover {

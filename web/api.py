@@ -43,7 +43,7 @@ from img2vid.common.metadata import get_db, iso
 
 # ── Authentication ───────────────────────────────────────────────────
 from .auth import verify_api_key, is_auth_enabled, get_api_keys
-from . import characters
+from . import characters, media
 from .chat import router as chat_router, startup_resume_chat
 from .uploads import image_media_type, read_image_upload, safe_filename
 
@@ -3142,6 +3142,7 @@ def vpn_countries():
 # Must be registered before the SPA catch-all below.
 app.include_router(chat_router)
 app.include_router(characters.router)
+app.include_router(media.router)
 
 
 # ── Serve Vue frontend (production build) ────────────────────────────

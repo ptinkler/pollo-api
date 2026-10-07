@@ -10,6 +10,8 @@ import InstructionsDialog from '../components/chat/InstructionsDialog.vue'
 import CharacterPicker from '../components/characters/CharacterPicker.vue'
 import CharacterEditor from '../components/characters/CharacterEditor.vue'
 import { fetchCharacters, chatImageModelTakesCharacters } from '../composables/useCharacters'
+import { importMedia } from '../composables/useMedia'
+import MediaPicker from '../components/media/MediaPicker.vue'
 import {
   fetchChatStatus, fetchChatModels, fetchConversations, fetchConversation,
   createConversation, deleteConversation, fetchChatMessage,
@@ -439,6 +441,29 @@ async function addFiles(files) {
       .catch(e => {
         showToast(e.message, 'error')
         removeAttachment(att)
+      })
+      .finally(() => { att.uploading = false })
+  }
+}
+
+// Attach images from the media library (copied into this chat)
+const libraryOpen = ref(false)
+
+async function attachFromLibrary(items) {
+  let id
+  try {
+    id = await ensureConversation()
+  } catch (e) {
+    return showToast(e.message, 'error')
+  }
+  for (const item of items.slice(0, 8 - attachments.value.length)) {
+    const att = reactive({ key: Math.random().toString(36).slice(2), file: null, preview: item.thumb_url || item.url, uploading: true })
+    attachments.value.push(att)
+    importMedia(item.id, { target: 'chat', conversation_id: id })
+      .then(r => { att.file = r.file })
+      .catch(e => {
+        showToast(e.message, 'error')
+        attachments.value = attachments.value.filter(a => a !== att)
       })
       .finally(() => { att.uploading = false })
   }
@@ -1129,6 +1154,7 @@ onBeforeUnmount(() => {
               📎
               <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden @change="addFiles($event.target.files); $event.target.value = ''" />
             </label>
+            <button class="icon-btn" title="Attach from your uploads and creations" @click="libraryOpen = true">🗂</button>
             <button class="mode-chip" :title="`Mode: ${currentMode.label} — click to switch`" @click="cycleMode">
               {{ currentMode.icon }} {{ currentMode.label }}
             </button>
@@ -1147,6 +1173,14 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </section>
+
+    <MediaPicker
+      :open="libraryOpen"
+      title="Attach images"
+      :max="Math.max(1, 8 - attachments.length)"
+      @pick="attachFromLibrary"
+      @close="libraryOpen = false"
+    />
 
     <CharacterEditor
       :open="charEditor.open"
@@ -1664,6 +1698,11 @@ onBeforeUnmount(() => {
   color: var(--text2);
   cursor: pointer;
   font-size: 1.05rem;
+}
+
+button.icon-btn {
+  border: none;
+  background: none;
 }
 
 .icon-btn:hover {

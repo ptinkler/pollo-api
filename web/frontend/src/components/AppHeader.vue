@@ -14,6 +14,7 @@ const { hasKey, showKeyModal } = useAuth()
       <h1>🎬 <span>Pollo</span> Video Generator</h1>
     </RouterLink>
     <div class="header-right">
+      <RouterLink to="/media" class="nav-link" :class="{ active: route.path.startsWith('/media') }">🗂<span class="nav-text"> Media</span></RouterLink>
       <RouterLink to="/characters" class="nav-link" :class="{ active: route.path.startsWith('/characters') }">👤<span class="nav-text"> Characters</span></RouterLink>
       <RouterLink to="/chat" class="nav-link" :class="{ active: route.path.startsWith('/chat') }">💬<span class="nav-text"> Chat</span></RouterLink>
       <CreditDisplay />
