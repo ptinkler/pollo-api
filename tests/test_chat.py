@@ -915,6 +915,77 @@ class TestConsistencyReferences:
         assert item["params"]["refs"] == ["g1.png"]
 
 
+    def _pin(self, client, db, conv, media_id, pinned=True):
+        msg = next(m for m in db.get_chat_messages(conv["id"]) if any(i["id"] == media_id for i in m.media))
+        r = client.post(f"/api/chat/messages/{msg.id}/media/{media_id}/pin", json={"pinned": pinned})
+        assert r.status_code == 200
+        return r.json()
+
+    def test_pinned_images_are_sent_without_the_model_asking(self, client, conv, chat, db, monkeypatch):
+        self._prior_images(chat, db, conv, 3)
+        out = self._pin(client, db, conv, "g0")
+        assert out["media"][0]["pinned"] is True
+        got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "next scene"})
+        assert item["params"]["refs"] == ["g0.png"] and len(got["input_images"]) == 1
+
+    def test_pins_come_after_the_models_own_picks(self, client, conv, chat, db, monkeypatch):
+        self._prior_images(chat, db, conv, 3)
+        self._pin(client, db, conv, "g0")
+        got, item = self._run(client, conv, chat, monkeypatch,
+                              {"prompt": "make it night", "source_image": "latest", "keep_consistent": True})
+        assert item["params"]["refs"] == ["g2.png", "g1.png", "g0.png"]
+        assert item["params"]["ref_args"] == {"source_image": "latest", "keep_consistent": True}
+
+    def test_unpinned_images_stop_being_sent(self, client, conv, chat, db, monkeypatch):
+        self._prior_images(chat, db, conv, 2)
+        self._pin(client, db, conv, "g0")
+        self._pin(client, db, conv, "g0", pinned=False)
+        got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "next"})
+        assert item["params"]["refs"] == []
+
+    def test_pinned_upload_is_a_reference_in_image_mode(self, client, conv, chat, db, monkeypatch):
+        (chat._conv_dir(conv["id"]) / "u.png").write_bytes(_png_bytes())
+        db.add_chat_message(conv["id"], "user", "this is Linh", media=[
+            {"id": "u1", "kind": "image", "source": "upload", "status": "done", "file": "u.png"}])
+        db.add_chat_message(conv["id"], "assistant", "Nice photo.")
+        self._pin(client, db, conv, "u1")
+        got = {}
+        monkeypatch.setattr(chat.openrouter, "generate_image",
+                            lambda model, prompt, **kw: (got.update(kw), ([(_png_bytes(), "image/png")], None))[1])
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                                 json={"content": "Linh at the beach", **SETTINGS, "mode": "image"}))
+        assert ev[-1]["message"]["media"][0]["params"]["refs"] == ["u.png"]
+
+    def test_pins_ignored_for_image_models_without_reference_support(self, client, conv, chat, db, monkeypatch):
+        chat._models_cache.update(at=9e18, data={"text": [], "video": [], "image": [
+            {"id": "i/model", "input_modalities": ["text"]}]})
+        self._prior_images(chat, db, conv, 1)
+        self._pin(client, db, conv, "g0")
+        got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "next"})
+        assert got.get("input_images") is None
+
+    def test_only_finished_images_can_be_pinned(self, client, conv, chat, db):
+        db.add_chat_message(conv["id"], "user", "go")
+        msg = db.add_chat_message(conv["id"], "assistant", "", media=[
+            {"id": "v", "kind": "video", "source": "generated", "status": "done", "file": "v.mp4", "prompt": "p"},
+            {"id": "e", "kind": "image", "source": "generated", "status": "error", "prompt": "p"}])
+        for mid in ("v", "e", "nope"):
+            assert client.post(f"/api/chat/messages/{msg.id}/media/{mid}/pin", json={"pinned": True}).status_code == 404
+
+    def test_history_replays_reference_choices(self, client, conv, chat, db, monkeypatch):
+        db.add_chat_message(conv["id"], "user", "draw Linh again")
+        db.add_chat_message(conv["id"], "assistant", "Here!", media=[
+            {"id": "a", "kind": "image", "source": "generated", "status": "done", "file": "x.png", "prompt": "Linh",
+             "params": {"refs": ["p.png", "q.png"], "ref_args": {"keep_consistent": True}}}])
+        seen = {}
+        monkeypatch.setattr(chat.openrouter, "stream_chat",
+                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1])
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "nice", **SETTINGS}))
+        call = seen["msgs"][2]["tool_calls"][0]
+        assert json.loads(call["function"]["arguments"]) == {"prompt": "Linh", "keep_consistent": True}
+        assert json.loads(seen["msgs"][3]["content"]) == {"ok": True, "result": chat.IMAGE_TOOL_RESULT,
+                                                          "reference_images": 2}
+
 class TestModelDecides:
     """The app never adds instructions or extra calls to steer the model."""
 

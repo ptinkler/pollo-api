@@ -13,7 +13,7 @@ const props = defineProps({
   canEdit: { type: Boolean, default: false },
   canSwitch: { type: Boolean, default: false },   // ‹ › arrows usable (not mid-reply)
 })
-const emit = defineEmits(['retry', 'open-media', 'stop', 'edit', 'resend', 'regenerate', 'branch', 'use-image', 'use-text'])
+const emit = defineEmits(['retry', 'open-media', 'stop', 'edit', 'resend', 'regenerate', 'branch', 'use-image', 'use-text', 'pin'])
 
 // Model catalogues, provided by ChatView, for "Try another model"
 const chatModels = inject('chatModels', { image: [], video: [] })
@@ -84,6 +84,12 @@ function replyText() {
   const picked = sel && !sel.isCollapsed && replyEl.value?.contains(sel.anchorNode) ? sel.toString().trim() : ''
   return picked || displayText.value
 }
+// Only saved images (not a reply still streaming) can be pinned as references
+const canPin = (item) => item.kind === 'image' && !!item.file && typeof props.message.id === 'number'
+const pinTitle = (item) => item.pinned
+  ? 'Pinned: sent as a reference with every new image. Click to unpin'
+  : 'Pin as a reference: send it with every new image in this chat'
+
 const useText = (mode) => emit('use-text', { text: replyText(), mode })
 
 // ── Branches: other versions of this turn (from edits/retries) ──
@@ -150,6 +156,13 @@ function fmtCost(c) {
       <!-- User attachments sit above their text, like Gemini -->
       <div v-if="isUser && message.media?.length" class="attachments">
         <div v-for="item in message.media" :key="item.id" class="attachment">
+          <button
+            v-if="canPin(item)"
+            :class="['pin-btn', { on: item.pinned }]"
+            :title="pinTitle(item)"
+            :aria-pressed="!!item.pinned"
+            @click.stop="emit('pin', { mediaId: item.id, pinned: !item.pinned })"
+          >📌</button>
           <img
             :src="url(item)"
             class="attachment-thumb"
@@ -216,6 +229,13 @@ function fmtCost(c) {
                 @click="emit('open-media', { url: url(item), kind: 'image', prompt: item.prompt, file: item.file })"
               />
               <video v-else :src="url(item)" controls loop playsinline preload="metadata"></video>
+              <button
+                v-if="canPin(item)"
+                :class="['pin-btn', { on: item.pinned }]"
+                :title="pinTitle(item)"
+                :aria-pressed="!!item.pinned"
+                @click.stop="emit('pin', { mediaId: item.id, pinned: !item.pinned })"
+              >📌</button>
               <div class="media-overlay">
                 <template v-if="item.kind === 'image'">
                   <button class="media-btn" title="Make a picture from this image" @click.stop="emit('use-image', { file: item.file, mode: 'image' })">🖼</button>
@@ -462,6 +482,42 @@ function fmtCost(c) {
 
 .attachment {
   position: relative;
+}
+
+/* Pin as reference: top-left, shown on hover, always shown once pinned */
+.pin-btn {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 1;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.65);
+  font-size: 0.85rem;
+  cursor: pointer;
+  opacity: 0;
+  filter: grayscale(1);
+  transition: opacity 0.15s;
+}
+
+.attachment:hover .pin-btn,
+.media-item:hover .pin-btn,
+.pin-btn:focus-visible,
+.pin-btn.on {
+  opacity: 1;
+}
+
+.pin-btn.on {
+  filter: none;
+  background: var(--accent);
+}
+
+@media (hover: none) {
+  .pin-btn {
+    opacity: 1;
+  }
 }
 
 .use-btns {

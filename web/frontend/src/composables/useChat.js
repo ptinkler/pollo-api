@@ -18,6 +18,9 @@ export const switchChatBranch = (convId, messageId) =>
   apiPost(`/api/chat/conversations/${enc(convId)}/branch`, { message_id: messageId })
 export const regenerateChatMedia = (messageId, mediaId, model = null) =>
   apiPost(`/api/chat/messages/${messageId}/media/${enc(mediaId)}/regenerate`, { model })
+// Pinned images go to the image model as references with every new image on this branch
+export const pinChatMedia = (messageId, mediaId, pinned) =>
+  apiPost(`/api/chat/messages/${messageId}/media/${enc(mediaId)}/pin`, { pinned })
 export const fetchChatLibrary = () => apiGet('/api/chat/library')
 export const deleteLibraryItem = (mediaId) => apiDelete(`/api/chat/library/${enc(mediaId)}`)
 

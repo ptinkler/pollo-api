@@ -14,6 +14,7 @@ Media item shape (stored in ChatMessage.media_json, sent to the frontend):
       "source": "upload" | "generated",
       "status": "pending" | "done" | "error",
       "file": "img_….png" | None,    # under <data>/chat/<conversation_id>/
+      "pinned": optional bool,        # user pinned this image: sent as a reference with every new image
       "prompt", "model", "job_id", "error", "cost": optional,
       "credits": optional             # Pollo images bill in credits, not dollars
     }
@@ -59,6 +60,7 @@ router = APIRouter(prefix="/api/chat", dependencies=[Depends(verify_api_key)])
 
 MAX_TOOL_ROUNDS = 4
 CONSISTENCY_REFS = 2              # recent images passed to the image model to keep characters consistent
+MAX_REF_IMAGES = 4                # cap on reference images per generation (edit source + pins + recent)
 MAX_HISTORY_IMAGES = 4            # most recent images (uploaded or generated) sent to the chat model as pixels
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024   # larger images are downscaled before sending
@@ -99,7 +101,8 @@ TOOLS_IMAGE = {
                                  "description": "'latest' to edit/transform the most recent image in the conversation."},
                 "keep_consistent": {"type": "boolean",
                                     "description": "true = also send the 2 most recent images in the conversation to the "
-                                                   "image model as reference images. Default false."},
+                                                   "image model as reference images. Default false. Images the user "
+                                                   "has pinned are always sent as references."},
             },
             "required": ["prompt"],
         },
@@ -690,6 +693,8 @@ class Turn:
         if not prompt:
             raise openrouter.OpenRouterError("Image mode needs a text prompt")
         refs = [m["file"] for m in (user.media if user else []) if m["kind"] == "image" and m.get("file")]
+        if self._accepts_refs():
+            refs = _dedupe(refs + self._pinned_images())[:MAX_REF_IMAGES]
         self._generate_image(prompt, self.s.image_options.aspect_ratio, refs)
 
     def _direct_video(self) -> None:
@@ -806,8 +811,18 @@ class Turn:
         ratio = opts.aspect_ratio or guess
         try:
             if name == "generate_image":
-                self._generate_image(prompt, ratio, self._image_refs(args, source))
-                return {"ok": True, "result": IMAGE_TOOL_RESULT}
+                refs = self._image_refs(args, source)
+                ref_args = {k: args[k] for k in ("source_image", "keep_consistent") if k in args}
+                self._generate_image(prompt, ratio, refs, ref_args)
+                result = {"ok": True, "result": IMAGE_TOOL_RESULT}
+                if refs:
+                    result["reference_images"] = len(refs)
+                    pinned = len(set(refs) & set(self._pinned_images()))
+                    if pinned:
+                        result["pinned_by_user"] = pinned
+                elif (ref_args or self._pinned_images()) and not self._accepts_refs():
+                    result["note"] = "The selected image model can't take reference images, so none were sent."
+                return result
             if name == "generate_video":
                 duration = opts.duration or args.get("duration")
                 self._generate_video(prompt, duration, ratio, source)
@@ -832,21 +847,29 @@ class Turn:
                     found.append(item["file"])
         return found[:n]
 
-    def _image_refs(self, args: dict, source: str | None) -> list[str]:
-        """Reference images for generate_image, as the model asked for: the
-        edit source (source_image) and/or the most recent images
-        (keep_consistent). The app never adds references on its own."""
-        refs = [source] if source else []
-        info = _model_info("image", self.s.image_model)
-        if info and "image" not in (info.get("input_modalities") or []):
-            return []  # this image model can't take references
-        keep = args.get("keep_consistent") is True
+    def _pinned_images(self) -> list[str]:
+        """Images the user pinned on this branch, oldest first."""
+        return [item["file"] for msg in self.history for item in msg.media
+                if item.get("pinned") and item["kind"] == "image" and item.get("status", "done") == "done"
+                and item.get("file")]
 
-        if keep:
-            for f in self._latest_images(CONSISTENCY_REFS):
-                if f not in refs:
-                    refs.append(f)
-        return refs[:max(CONSISTENCY_REFS, 1)]
+    def _accepts_refs(self) -> bool:
+        info = _model_info("image", self.s.image_model)
+        return not info or "image" in (info.get("input_modalities") or [])
+
+    def _image_refs(self, args: dict, source: str | None) -> list[str]:
+        """Reference images for generate_image: the edit source (source_image),
+        the images the user pinned, and the most recent images if the model
+        asked (keep_consistent). Pins are the user's choice; the app never
+        adds references on its own."""
+        if not self._accepts_refs():
+            return []  # this image model can't take references
+        refs = [source] if source else []
+        pinned = self._pinned_images()
+        if args.get("keep_consistent") is True:
+            refs += [f for f in self._latest_images(CONSISTENCY_REFS) if f not in pinned]
+        refs = _dedupe(refs)[:max(CONSISTENCY_REFS, 1)]
+        return _dedupe(refs + pinned)[:MAX_REF_IMAGES]
 
     # ― generation ―
     def _add_media(self, item: dict) -> None:
@@ -859,13 +882,16 @@ class Turn:
         self.db.update_chat_media_item(self.message_id, item["id"], **fields)
         self.emit({"type": "media", "message_id": self.message_id, "item": dict(item)})
 
-    def _generate_image(self, prompt: str, aspect_ratio: str | None, ref_files: list[str]) -> None:
+    def _generate_image(self, prompt: str, aspect_ratio: str | None, ref_files: list[str],
+                        ref_args: dict | None = None) -> None:
         if not self.s.image_model:
             raise openrouter.OpenRouterError("No image model selected")
         # Params are stored on the item so a failed image can be retried as-is
         params = {"aspect_ratio": aspect_ratio,
                   "resolution": self.s.image_options.resolution,
                   "refs": ref_files}
+        if ref_args:
+            params["ref_args"] = ref_args   # the model's own reference choices, replayed in history
         context = None
         if _is_conversational(self.s.image_model):
             # Like the Gemini app: the image model gets the conversation
@@ -1051,11 +1077,19 @@ def _is_conversational(image_model: str | None) -> bool:
     return bool(info and info.get("conversational"))
 
 
+def _dedupe(files: list[str]) -> list[str]:
+    return list(dict.fromkeys(files))
+
+
 def _history_tool_call(item: dict) -> dict:
+    params = item.get("params") or {}
     args: dict[str, Any] = {"prompt": item["prompt"]}
-    ratio = (item.get("params") or {}).get("aspect_ratio")
-    if ratio:
-        args["aspect_ratio"] = ratio
+    if params.get("aspect_ratio"):
+        args["aspect_ratio"] = params["aspect_ratio"]
+    # Replay the reference choices too, so the history doesn't read as a
+    # run of reference-free calls that the model then imitates
+    if item["kind"] == "image":
+        args.update(params.get("ref_args") or {})
     return {"id": f"call_{item['id']}", "type": "function",
             "function": {"name": "generate_image" if item["kind"] == "image" else "generate_video",
                          "arguments": json.dumps(args)}}
@@ -1064,7 +1098,11 @@ def _history_tool_call(item: dict) -> dict:
 def _history_tool_result(item: dict) -> dict:
     if item.get("status") == "error":
         return {"ok": False, "error": item.get("error") or "failed"}
-    return {"ok": True, "result": IMAGE_TOOL_RESULT if item["kind"] == "image" else VIDEO_TOOL_RESULT}
+    result: dict[str, Any] = {"ok": True, "result": IMAGE_TOOL_RESULT if item["kind"] == "image" else VIDEO_TOOL_RESULT}
+    refs = (item.get("params") or {}).get("refs") or []
+    if item["kind"] == "image" and refs:
+        result["reference_images"] = len(refs)
+    return result
 
 
 def _media_note(item: dict) -> str:
@@ -1151,6 +1189,22 @@ def _add_message_cost(message_id: int, cost: float | None) -> None:
     msg = db.get_chat_message(message_id)
     if msg:
         db.update_chat_message(message_id, cost=round((msg.cost or 0) + float(cost), 6))
+
+
+class PinMedia(BaseModel):
+    pinned: bool
+
+
+@router.post("/messages/{message_id}/media/{media_id}/pin")
+def api_pin_media(message_id: int, media_id: str, data: PinMedia):
+    """Pin an image as a reference: it's sent with every image generated
+    later on this branch of the chat, until unpinned."""
+    db = get_db()
+    msg = db.get_chat_message(message_id)
+    item = next((i for i in msg.media if i.get("id") == media_id), None) if msg else None
+    if not item or item["kind"] != "image" or not item.get("file") or item.get("status", "done") != "done":
+        raise HTTPException(404, "Image not found")
+    return _message_out(db.update_chat_media_item(message_id, media_id, pinned=data.pinned))
 
 
 class RegenerateMedia(BaseModel):

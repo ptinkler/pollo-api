@@ -11,7 +11,7 @@ import {
   fetchChatStatus, fetchChatModels, fetchConversations, fetchConversation,
   createConversation, deleteConversation, renameConversation, fetchChatMessage,
   cancelChatMessage, uploadChatAttachment, chatMediaUrl, sendChatMessage, retryChatMessage,
-  editChatMessage, switchChatBranch, fetchOpenRouterCredits, regenerateChatMedia, fetchInstructions, patchConversation,
+  editChatMessage, switchChatBranch, fetchOpenRouterCredits, regenerateChatMedia, pinChatMedia, fetchInstructions, patchConversation,
 } from '../composables/useChat'
 
 const route = useRoute()
@@ -163,6 +163,10 @@ const canSend = computed(() =>
   !attachments.value.some(a => a.uploading) &&
   (mode.value === 'image' ? selected.image : mode.value === 'video' ? selected.video : selected.text),
 )
+
+// Images pinned as references on the shown branch (the server uses the same set)
+const pinned = computed(() => messages.value.flatMap(m =>
+  (m.media || []).filter(i => i.pinned && i.kind === 'image').map(i => ({ msg: m, mediaId: i.id }))))
 
 const lastAssistantId = computed(() => {
   const last = messages.value[messages.value.length - 1]
@@ -573,6 +577,20 @@ async function regenerateMedia(msg, { mediaId, model }) {
   }
 }
 
+async function pinMedia(msg, { mediaId, pinned: on }) {
+  try {
+    const fresh = await pinChatMedia(msg.id, mediaId, on)
+    const i = messages.value.findIndex(m => m.id === msg.id)
+    if (i !== -1) messages.value.splice(i, 1, { ...messages.value[i], media: fresh.media })
+  } catch (e) {
+    showToast(e.message, 'error')
+  }
+}
+
+async function unpinAll() {
+  for (const p of pinned.value) await pinMedia(p.msg, { mediaId: p.mediaId, pinned: false })
+}
+
 async function stop() {
   if (streamingId.value) {
     try { await cancelChatMessage(streamingId.value) } catch { abort?.abort() }
@@ -924,6 +942,7 @@ onBeforeUnmount(() => {
             @use-image="useImage"
             @use-text="useText"
             @regenerate="payload => regenerateMedia(m, payload)"
+            @pin="payload => pinMedia(m, payload)"
             @stop="stop"
             @open-media="openMedia"
           />
@@ -939,6 +958,11 @@ onBeforeUnmount(() => {
               <div v-if="a.uploading" class="att-busy"><div class="spinner"></div></div>
               <button class="att-x" @click="removeAttachment(a)" title="Remove">✕</button>
             </div>
+          </div>
+
+          <div v-if="pinned.length && mode !== 'text'" class="pinned-row">
+            <span>📌 {{ pinned.length }} image{{ pinned.length !== 1 ? 's' : '' }} pinned: sent as references with every new image</span>
+            <button @click="unpinAll">Unpin all</button>
           </div>
 
           <div class="composer-row">
@@ -988,6 +1012,25 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.pinned-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px 0;
+  font-size: 0.75rem;
+  color: var(--text2);
+}
+
+.pinned-row button {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0;
+}
+
 .chat-layout {
   display: flex;
   height: 100vh;

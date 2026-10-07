@@ -104,3 +104,31 @@ describe('ChatMessage "make a picture" and text-to-media', () => {
     expect(w.find('button[title^="Make a picture from this reply"]').exists()).toBe(false)
   })
 })
+
+describe('ChatMessage pin as reference', () => {
+  it('is offered on generated images and uploads, not videos, and toggles', async () => {
+    const w = mount(ChatMessage, { props: { convId: 'c1', message: {
+      id: 5, role: 'assistant', content: '', status: 'done', media: [image, video] } } })
+    const pins = w.findAll('.pin-btn')
+    expect(pins).toHaveLength(1)
+    await pins[0].trigger('click')
+    expect(w.emitted('pin')).toEqual([[{ mediaId: 'm1', pinned: true }]])
+    await w.setProps({ message: { id: 5, role: 'assistant', content: '', status: 'done',
+      media: [{ ...image, pinned: true }, video] } })
+    expect(w.find('.pin-btn').classes()).toContain('on')
+    await w.find('.pin-btn').trigger('click')
+    expect(w.emitted('pin')[1]).toEqual([{ mediaId: 'm1', pinned: false }])
+
+    const u = mount(ChatMessage, { props: { convId: 'c1', message: {
+      id: 6, role: 'user', content: 'this is Linh', status: 'done',
+      media: [{ id: 'u1', kind: 'image', source: 'upload', status: 'done', file: 'up_b.png' }] } } })
+    expect(u.findAll('.pin-btn')).toHaveLength(1)
+  })
+
+  it('is not offered before the message is saved', () => {
+    const w = mount(ChatMessage, { props: { convId: 'c1', message: {
+      id: 'tmp-1', role: 'user', content: 'x', status: 'done',
+      media: [{ id: 'u1', kind: 'image', source: 'upload', status: 'done', file: 'up_b.png' }] } } })
+    expect(w.find('.pin-btn').exists()).toBe(false)
+  })
+})
