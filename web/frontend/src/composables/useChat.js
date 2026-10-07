@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiPut, apiDelete } from './useApi'
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete, apiUpload } from './useApi'
 import { useAuth } from './useAuth'
 
 const enc = encodeURIComponent
@@ -30,43 +30,9 @@ export const createInstruction = (data) => apiPost('/api/chat/instructions', dat
 export const updateInstruction = (id, data) => apiPut(`/api/chat/instructions/${id}`, data)
 export const deleteInstruction = (id) => apiDelete(`/api/chat/instructions/${id}`)
 
-export async function patchConversation(id, data) {
-  const res = await fetch(`/api/chat/conversations/${enc(id)}`, {
-    method: 'PATCH',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.detail || `API error: ${res.status}`)
-  }
-  return res.json()
-}
-
-export async function renameConversation(id, title) {
-  const res = await fetch(`/api/chat/conversations/${enc(id)}`, {
-    method: 'PATCH',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title }),
-  })
-  if (!res.ok) throw new Error(`API error: ${res.status}`)
-  return res.json()
-}
-
-export async function uploadChatAttachment(convId, file) {
-  const form = new FormData()
-  form.append('file', file)
-  const res = await fetch(`/api/chat/conversations/${enc(convId)}/attachments`, {
-    method: 'POST', credentials: 'same-origin', body: form,
-  })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.detail || `Upload failed: ${res.status}`)
-  }
-  return res.json()
-}
+export const patchConversation = (id, data) => apiPatch(`/api/chat/conversations/${enc(id)}`, data)
+export const uploadChatAttachment = (convId, file) =>
+  apiUpload(`/api/chat/conversations/${enc(convId)}/attachments`, file)
 
 export const chatMediaUrl = (convId, file) => `/api/chat/media/${enc(convId)}/${enc(file)}`
 

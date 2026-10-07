@@ -19,8 +19,6 @@ from contextlib import asynccontextmanager
 
 import requests as _requests
 from bs4 import BeautifulSoup as _BeautifulSoup
-import io as _io
-from PIL import Image as _PILImage
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Cookie, Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -46,6 +44,7 @@ from img2vid.common.metadata import get_db, iso
 # ── Authentication ───────────────────────────────────────────────────
 from .auth import verify_api_key, is_auth_enabled, get_api_keys
 from .chat import router as chat_router, startup_resume_chat
+from .uploads import image_media_type, read_image_upload, safe_filename
 
 
 @asynccontextmanager
@@ -507,7 +506,6 @@ SEND_RETRY_BACKOFF = 2      # seconds between send retries (simple linear backof
 # Litterbox (temporary image hosting for source uploads)
 LITTERBOX_URL = "https://litterbox.catbox.moe/resources/internals/api.php"
 LITTERBOX_EXPIRY = "1h"  # 1h, 12h, 24h, 72h
-SOURCE_IMAGE_MAX_SIZE = 20 * 1024 * 1024  # 20 MB
 
 print(f"📁 Pollo root: {POLLO_ROOT}")
 print(f"📁 Assets directory: {ASSETS_DIR}")
@@ -838,6 +836,37 @@ def _send_and_extract_task(generator, job_id: str, db) -> tuple[str, str] | None
     return task_id, api_status
 
 
+def _submit_and_poll(generator, job_id: str, db) -> tuple[str, list] | None:
+    """Send the generator's request and poll it to completion. Returns
+    (task_id, results), or None once the job has been marked as failed."""
+    db.update_job(job_id, status="sending", message="Sending request to API...")
+    sent = _send_and_extract_task(generator, job_id, db)
+    if sent is None:
+        return None
+    task_id, _api_status = sent
+    db.update_job(job_id, status="processing", task_id=task_id,
+                  message=f"Task {task_id} processing...")
+    results = _poll_task(job_id, task_id, generator.api_key)
+    if results is None:
+        return None  # Error already recorded by _poll_task
+    return task_id, results
+
+
+def _result_urls(results: list) -> list[str]:
+    """The media URLs of a finished task's successful outputs."""
+    return [r[2] for r in results if r[0] in SUCCESS_STATUSES and r[2]]
+
+
+def _credits_used(results: list) -> int | None:
+    return sum(r[3] for r in results if r[3] is not None) or None
+
+
+def _refresh_job_project(job_id: str, assets_folder: str) -> None:
+    """After a job saved new media: refresh caches and its project's thumbnail."""
+    job = get_db().get_job(job_id)
+    _refresh_project_media(assets_folder, job.project if job else None)
+
+
 def run_generation(job_id: str, model: str, kwargs: dict):
     """Run video generation in a background thread, updating the DB."""
     db = get_db()
@@ -856,26 +885,11 @@ def run_generation(job_id: str, model: str, kwargs: dict):
             else:
                 download_image(generator.image_url, project)
 
-        db.update_job(job_id, status="sending", message="Sending request to API...")
-
-        result = _send_and_extract_task(generator, job_id, db)
-        if result is None:
+        polled = _submit_and_poll(generator, job_id, db)
+        if polled is None:
             return
-        task_id, api_status = result
-
-        db.update_job(job_id, status="processing", task_id=task_id,
-                       message=f"Task {task_id} processing...")
-
-        # Poll for completion with retry/backoff
-        results = _poll_task(job_id, task_id, generator.api_key)
-        if results is None:
-            return  # Error already recorded by _poll_task
-
-        # Extract credit cost from API response
-        credits_used = sum(r[3] for r in results if r[3] is not None) or None
-
-        # Collect all successful video URLs
-        video_urls = [r[2] for r in results if r[0] in SUCCESS_STATUSES and r[2]]
+        task_id, results = polled
+        video_urls = _result_urls(results)
 
         if not video_urls:
             db.update_job(job_id, status="error", message="No video URL in result")
@@ -893,16 +907,8 @@ def run_generation(job_id: str, model: str, kwargs: dict):
             )
 
         db.update_job(job_id, status="done", message="Video ready!",
-                       video_path=filepath, credits_used=credits_used)
-
-        # Invalidate caches for this project
-        _invalidate_project_caches()
-
-        # Force-regenerate project thumbnail from the newly downloaded video
-        # Get slug from the job record for archive-aware thumbnail
-        job_rec = db.get_job(job_id)
-        project_slug = job_rec.project if job_rec else None
-        _update_project_thumbnail(ASSETS_DIR / project, project_slug=project_slug, force=True)
+                       video_path=filepath, credits_used=_credits_used(results))
+        _refresh_job_project(job_id, project)
 
     except Exception as e:
         db.update_job(job_id, status="error", message=str(e))
@@ -917,6 +923,38 @@ def _get_assets_path(project_slug: str) -> Path | None:
     if not assets_folder:
         return None
     return ASSETS_DIR / assets_folder
+
+
+def _require_project(slug: str):
+    """The project with this slug, or 404."""
+    proj = get_db().get_project_by_slug(slug)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return proj
+
+
+def _refresh_project_media(assets_folder: str, project_slug: str | None, force: bool = True) -> None:
+    """After a project's media changed: drop cached lookups and rebuild its thumbnail."""
+    _invalidate_project_caches()
+    _update_project_thumbnail(ASSETS_DIR / assets_folder, project_slug=project_slug, force=force)
+
+
+def _job_params(job) -> dict:
+    """A job's stored params (empty if missing or unreadable)."""
+    try:
+        return json.loads(job.params_json) if job.params_json else {}
+    except (TypeError, ValueError):
+        return {}
+
+
+def _job_media_type(job) -> str:
+    return "image" if (getattr(job, "job_type", "video") or "video") == "image" else "video"
+
+
+def _job_files(job) -> set[str]:
+    """Every media filename a job produced (multi-image jobs have several)."""
+    names = {Path(job.video_path).name} if job.video_path else set()
+    return names | {Path(p).name for p in _job_params(job).get("result_paths", [])}
 
 
 def _enrich_job_result(result: dict, job, assets_path: Path | None = None) -> dict:
@@ -1192,6 +1230,45 @@ def _extract_first_frame(video_path: Path) -> bytes | None:
 
 # ── Generate ────────────────────────────────────────────────────────
 
+def _project_for_generation(project_slug: str | None):
+    """The named project (404 if missing) or, with no name, a new one.
+    Returns (project, assets path); the assets folder exists either way."""
+    db = get_db()
+    slug = (project_slug or "").strip()
+    if slug:
+        project = db.get_project_by_slug(slug)
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Project not found: {slug}")
+    else:
+        project = db.create_project(name=f"Generation {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    assets_path = ASSETS_DIR / project.assets_folder
+    assets_path.mkdir(parents=True, exist_ok=True)
+    return project, assets_path
+
+
+def _publish_local_image(assets_path: Path, ref: str, what: str = "image") -> str:
+    """Upload a "local:<file>" image to a temporary public host (Pollo only
+    takes URLs) and return its URL. 400 if the file is gone, 502 if every host fails."""
+    source = _get_local_image_path(assets_path, ref)
+    if not source:
+        raise HTTPException(status_code=400, detail=f"{what[:1].upper()}{what[1:]} not found: {ref}")
+    try:
+        url = _upload_image(source)
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to upload {what}: {exc}")
+    print(f"[Generate] Uploaded {what}: {url}")
+    return url
+
+
+def _source_upload_params(local_ref: str | None, uploaded_url: str | None) -> dict:
+    """Job params recording a source image uploaded for this generation: the
+    permanent local ref plus the temporary public URL and when it was made,
+    so regenerations use the URL until it expires, then the local file."""
+    if not (local_ref and uploaded_url):
+        return {}
+    return {"source_local": local_ref, "source_uploaded": uploaded_url, "source_uploaded_at": int(time.time())}
+
+
 def _validate_v1_refs(refs: list, ref_mode: dict) -> None:
     """Reject refs that a v1 model's Reference-To-Video branch can't take
     (see "ref_mode" in MODEL_INFO), before anything is uploaded or billed."""
@@ -1223,22 +1300,9 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
     if not prompt:
         raise HTTPException(status_code=400, detail="Prompt is required")
 
-    # Get or create project
     db = get_db()
-    project_slug = (data.project or "").strip()
-
-    if project_slug:
-        project = db.get_project_by_slug(project_slug)
-        if not project:
-            raise HTTPException(status_code=404, detail=f"Project not found: {project_slug}")
-    else:
-        # Auto-create a new project
-        project = db.create_project(name=f"Generation {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-        project_slug = project.slug
-
-    # Ensure assets folder exists
-    assets_path = ASSETS_DIR / project.assets_folder
-    assets_path.mkdir(parents=True, exist_ok=True)
+    project, assets_path = _project_for_generation(data.project)
+    project_slug = project.slug
 
     image_url = (data.image_url or "").strip() or None
     video_url = (data.video_url or "").strip() or None
@@ -1252,19 +1316,10 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
     uploaded_image_url = None
     local_image_ref = None
     if image_url and image_url.startswith("local:"):
-        assets_path = ASSETS_DIR / project.assets_folder
-        source = _get_local_image_path(assets_path, image_url)
-        if not source:
-            raise HTTPException(status_code=400, detail="Source image not found — it may have been deleted")
-        try:
-            uploaded_image_url = _upload_image(source)
-            print(f"[Generate] Uploaded source image: {uploaded_image_url}")
-            # Keep the local ref for the project and for long-term storage
-            local_image_ref = image_url
-            # For the generator use the uploaded public URL
-            image_url = uploaded_image_url
-        except ValueError as exc:
-            raise HTTPException(status_code=502, detail=f"Failed to upload image: {exc}")
+        # Keep the local ref for the project and for long-term storage;
+        # the generator gets the uploaded public URL
+        local_image_ref = image_url
+        image_url = uploaded_image_url = _publish_local_image(assets_path, image_url, "source image")
 
     # Update project with URLs if provided. Important: if we uploaded the image above, do NOT overwrite
     # the project's image_url with the temporary uploaded URL — keep the local reference as the canonical
@@ -1330,8 +1385,7 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
     if is_ref_model or v1_ref_mode:
         # ref uses refs array
         if data.refs:
-            # Handle local: refs by uploading to litterbox
-            assets_path = ASSETS_DIR / project.assets_folder
+            # Handle local: refs by uploading them
             resolved_refs = []
             for ref in data.refs:
                 ref = dict(ref)  # shallow copy
@@ -1339,14 +1393,7 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
                 if ref_type == "image":
                     url = ref.get("image") or ref.get("url") or ""
                     if url.startswith("local:"):
-                        source = _get_local_image_path(assets_path, url)
-                        if not source:
-                            raise HTTPException(status_code=400, detail=f"Ref image not found: {url}")
-                        try:
-                            public_url = _upload_image(source)
-                            print(f"[Generate] Uploaded ref image: {public_url}")
-                        except ValueError as exc:
-                            raise HTTPException(status_code=502, detail=f"Failed to upload ref image: {exc}")
+                        public_url = _publish_local_image(assets_path, url, "ref image")
                         # Preserve the original local reference so regenerations can fall back to it
                         ref["_local_image"] = url
                         ref["image"] = public_url
@@ -1359,17 +1406,9 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
                         img = dict(img) if isinstance(img, dict) else {"url": str(img)}
                         url = img.get("url", "")
                         if url.startswith("local:"):
-                            source = _get_local_image_path(assets_path, url)
-                            if not source:
-                                raise HTTPException(status_code=400, detail=f"Subject ref image not found: {url}")
-                            try:
-                                public_url = _upload_image(source)
-                                print(f"[Generate] Uploaded subject ref image: {public_url}")
-                            except ValueError as exc:
-                                raise HTTPException(status_code=502, detail=f"Failed to upload subject ref image: {exc}")
                             # Preserve local reference for regen fallback
                             img["_local_url"] = url
-                            img["url"] = public_url
+                            img["url"] = _publish_local_image(assets_path, url, "subject ref image")
                         resolved_images.append(img)
                     ref["images"] = resolved_images
                 resolved_refs.append(ref)
@@ -1392,16 +1431,8 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
         "num_outputs": kwargs.get("num_outputs", None),
         "video_num": kwargs.get("video_num", None),
         "refs": kwargs.get("refs", []) or [],
+        **_source_upload_params(local_image_ref, uploaded_image_url),
     }
-    # If we uploaded a temporary public image for this generation, record both the local ref and
-    # the uploaded URL + timestamp so regenerations can prefer the uploaded URL until it expires.
-    if local_image_ref and uploaded_image_url:
-        extra_params["source_local"] = local_image_ref
-        extra_params["source_uploaded"] = uploaded_image_url
-        try:
-            extra_params["source_uploaded_at"] = int(time.time())
-        except Exception:
-            extra_params["source_uploaded_at"] = None
     db.create_job(
         job_id=job_id, project=project_slug, model=model, prompt=prompt,
         image_url=image_url, source_video_url=video_url,
@@ -1425,22 +1456,12 @@ def run_image_generation(job_id: str, model: str, kwargs: dict):
         generator = get_image_generator(model, **kwargs)
         project = generator.project
 
-        db.update_job(job_id, status="sending", message="Sending request to API...")
-
-        result = _send_and_extract_task(generator, job_id, db)
-        if result is None:
+        polled = _submit_and_poll(generator, job_id, db)
+        if polled is None:
             return
-        task_id, api_status = result
-
-        db.update_job(job_id, status="processing", task_id=task_id,
-                      message=f"Task {task_id} processing...")
-
-        results = _poll_task(job_id, task_id, generator.api_key)
-        if results is None:
-            return
-
-        credits_used = sum(r[3] for r in results if r[3] is not None) or None
-        image_urls = [r[2] for r in results if r[0] in SUCCESS_STATUSES and r[2]]
+        task_id, results = polled
+        credits_used = _credits_used(results)
+        image_urls = _result_urls(results)
 
         if not image_urls:
             db.update_job(job_id, status="error", message="No image URL in result")
@@ -1487,12 +1508,7 @@ def run_image_generation(job_id: str, model: str, kwargs: dict):
         else:
             db.update_job(job_id, status="done", message=done_msg,
                           video_path=primary_path, credits_used=credits_used)
-
-        _invalidate_project_caches()
-
-        job_rec = db.get_job(job_id)
-        project_slug = job_rec.project if job_rec else None
-        _update_project_thumbnail(ASSETS_DIR / project, project_slug=project_slug, force=True)
+        _refresh_job_project(job_id, project)
 
     except Exception as e:
         db.update_job(job_id, status="error", message=str(e))
@@ -1508,54 +1524,21 @@ def api_generate_image(data: GenerateImageRequest, _api_key: str = Depends(verif
     if not prompt:
         raise HTTPException(status_code=400, detail="Prompt is required")
 
-    db = get_db()
-    project_slug = (data.project or "").strip()
-
-    if project_slug:
-        project = db.get_project_by_slug(project_slug)
-        if not project:
-            raise HTTPException(status_code=404, detail=f"Project not found: {project_slug}")
-    else:
-        project = db.create_project(name=f"Generation {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-        project_slug = project.slug
-
-    assets_path = ASSETS_DIR / project.assets_folder
-    assets_path.mkdir(parents=True, exist_ok=True)
+    project, assets_path = _project_for_generation(data.project)
+    project_slug = project.slug
 
     image_url = (data.image_url or "").strip() or None
 
-    # Handle local source image: upload to litterbox to get a public URL
+    # Handle local source image: upload it to get a public URL
     uploaded_image_url = None
     local_image_ref = None
     if image_url and image_url.startswith("local:"):
-        source = _get_local_image_path(assets_path, image_url)
-        if not source:
-            raise HTTPException(status_code=400, detail="Source image not found — it may have been deleted")
-        try:
-            uploaded_image_url = _upload_image(source)
-            local_image_ref = image_url
-            image_url = uploaded_image_url
-        except ValueError as exc:
-            raise HTTPException(status_code=502, detail=f"Failed to upload image: {exc}")
+        local_image_ref = image_url
+        image_url = uploaded_image_url = _publish_local_image(assets_path, image_url, "source image")
 
     # Resolve local: refs in images list
-    images = data.images or None
-    if images:
-        resolved = []
-        for img_url in images:
-            img_url = img_url.strip()
-            if img_url.startswith("local:"):
-                source = _get_local_image_path(assets_path, img_url)
-                if not source:
-                    raise HTTPException(status_code=400, detail=f"Image not found: {img_url}")
-                try:
-                    public_url = _upload_image(source)
-                    resolved.append(public_url)
-                except ValueError as exc:
-                    raise HTTPException(status_code=502, detail=f"Failed to upload image: {exc}")
-            else:
-                resolved.append(img_url)
-        images = resolved
+    images = [_publish_local_image(assets_path, u.strip()) if u.strip().startswith("local:") else u.strip()
+              for u in data.images or []] or None
 
     kwargs = {
         "api_key": os.getenv("POLLO_API_KEY"),
@@ -1588,13 +1571,9 @@ def api_generate_image(data: GenerateImageRequest, _api_key: str = Depends(verif
         extra_params["max_images"] = data.max_images
     if data.thinking_level:
         extra_params["thinking_level"] = data.thinking_level
-    if local_image_ref and uploaded_image_url:
-        extra_params["source_local"] = local_image_ref
-        extra_params["source_uploaded"] = uploaded_image_url
-        try:
-            extra_params["source_uploaded_at"] = int(time.time())
-        except Exception:
-            extra_params["source_uploaded_at"] = None
+    extra_params.update(_source_upload_params(local_image_ref, uploaded_image_url))
+
+    db = get_db()
 
     db.create_job(
         job_id=job_id, project=project_slug, model=model, prompt=prompt,
@@ -1679,34 +1658,58 @@ def _recover_stale_job_inner(job):
         return
 
     try:
-        results = get_task_status(job.task_id, api_key)
-        if not results:
-            db.update_job(job.job_id, status="error",
-                          message="No status returned from API")
-            return
-        api_status, fail_msg, url, _credits = results[0]
-        if api_status in SUCCESS_STATUSES:
-            if url:
-                # Trigger background download instead of marking done without file
-                db.update_job(job.job_id, status="downloading", video_url=url,
-                              message="Downloading video (recovered)...")
-                threading.Thread(
-                    target=_download_recovered_job,
-                    args=(job.job_id, url),
-                    daemon=True
-                ).start()
-            else:
-                db.update_job(job.job_id, status="error",
-                              message="Task succeeded but no URL returned")
-        elif api_status in ERROR_STATUSES:
-            db.update_job(job.job_id, status="error",
-                          message=fail_msg or "Generation failed")
-        else:
-            # Still genuinely processing — don't touch it
-            pass
+        # A task that's still genuinely processing is left alone
+        _apply_remote_task_status(job.job_id, job.task_id, api_key)
     except Exception as e:
         db.update_job(job.job_id, status="error",
                       message=f"Recovery check failed: {e}")
+
+
+def _apply_remote_task_status(job_id: str, task_id: str, api_key: str) -> bool:
+    """Check a task on the API and settle its job: a finished task starts
+    a background download, a failed one marks the job as errored. Returns
+    False if the task is still running (the job is left alone)."""
+    db = get_db()
+    results = get_task_status(task_id, api_key)
+    if not results:
+        db.update_job(job_id, status="error", message="No status returned from API")
+        return True
+    api_status, fail_msg, url, _credits = results[0]
+    if api_status in SUCCESS_STATUSES:
+        if url:
+            # Trigger background download instead of marking done without file
+            db.update_job(job_id, status="downloading", video_url=url,
+                          message="Downloading video (recovered)...")
+            threading.Thread(target=_download_recovered_job, args=(job_id, url), daemon=True).start()
+        else:
+            db.update_job(job_id, status="error", message="Task succeeded but no URL returned")
+        return True
+    if api_status in ERROR_STATUSES:
+        db.update_job(job_id, status="error", message=fail_msg or "Generation failed")
+        return True
+    return False
+
+
+def _recover_if_stale(job):
+    """Recover a non-terminal job that hasn't updated in a while (e.g. stuck
+    at "downloading"); returns the job as it stands afterwards."""
+    if job.status in ("done", "error"):
+        return job
+    age = (datetime.now() - job.updated_at).total_seconds() if job.updated_at else float("inf")
+    if age <= STALE_JOB_SECONDS:
+        return job
+    _recover_stale_job(job)
+    return get_db().get_job(job.job_id)
+
+
+def _with_preferred_image_url(job_dict: dict) -> dict:
+    """Swap in the image_url the UI should show / regenerate from (see
+    _choose_preferred_image_url_from_job_dict)."""
+    try:
+        job_dict["image_url"] = _choose_preferred_image_url_from_job_dict(job_dict) or job_dict.get("image_url")
+    except Exception:
+        pass
+    return job_dict
 
 
 def _download_and_complete_job(job_id: str, video_url: str, label: str = "download") -> str | None:
@@ -1741,10 +1744,7 @@ def _download_and_complete_job(job_id: str, video_url: str, label: str = "downlo
 
     db.update_job(job_id, status="done", message="Video ready!",
                   video_path=filepath)
-
-    _invalidate_project_caches()
-    _update_project_thumbnail(ASSETS_DIR / assets_folder,
-                              project_slug=job.project, force=True)
+    _refresh_project_media(assets_folder, job.project)
 
     print(f"[{label}] Job {job_id} download complete: {filepath}", flush=True)
     return filepath
@@ -1826,26 +1826,8 @@ def api_job_status(job_id: str, _api_key: str = Depends(verify_api_key)):
     job = get_db().get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-
-    # Auto-recover stale non-terminal jobs (e.g. stuck at "downloading")
-    if job.status not in ("done", "error"):
-        age = (datetime.now() - job.updated_at).total_seconds() if job.updated_at else float("inf")
-        if age > STALE_JOB_SECONDS:
-            _recover_stale_job(job)
-            job = get_db().get_job(job_id)  # Re-fetch after recovery
-
-    result = job.to_dict()
-    _enrich_job_result(result, job)
-
-    # Provide a preferred image_url for the UI: prefer the temporary uploaded public URL while
-    # it's still valid, otherwise fall back to the local reference stored in job params.
-    try:
-        preferred = _choose_preferred_image_url_from_job_dict(result)
-        result['image_url'] = preferred or result.get('image_url')
-    except Exception:
-        pass
-
-    return result
+    job = _recover_if_stale(job)
+    return _with_preferred_image_url(_enrich_job_result(job.to_dict(), job))
 
 
 @app.post("/api/jobs/{job_id}/check")
@@ -1872,28 +1854,7 @@ def api_check_job(job_id: str, _api_key: str = Depends(verify_api_key)):
         raise HTTPException(status_code=500, detail="API key not configured")
 
     try:
-        results = get_task_status(job.task_id, api_key)
-        if not results:
-            db.update_job(job_id, status="error", message="No status returned from API")
-            return db.get_job(job_id).to_dict()
-
-        api_status, fail_msg, url, _credits = results[0]
-
-        if api_status in SUCCESS_STATUSES:
-            if url:
-                db.update_job(job_id, status="downloading", video_url=url,
-                             message="Downloading video (recovered)...")
-                threading.Thread(
-                    target=_download_recovered_job,
-                    args=(job_id, url),
-                    daemon=True
-                ).start()
-            else:
-                db.update_job(job_id, status="error", message="Task succeeded but no URL returned")
-        elif api_status in ERROR_STATUSES:
-            db.update_job(job_id, status="error", message=fail_msg or "Generation failed")
-        else:
-            # Still processing
+        if not _apply_remote_task_status(job_id, job.task_id, api_key):
             db.update_job(job_id, status="processing", message=f"Task {job.task_id} still processing...")
 
         result = db.get_job(job_id).to_dict()
@@ -1953,11 +1914,7 @@ def api_download_job_video(job_id: str, _api_key: str = Depends(verify_api_key))
         db.update_job(job_id, status="done", message="Video ready!",
                      video_path=filepath)
 
-        # Invalidate caches for this project
-        _invalidate_project_caches()
-
-        # Update project thumbnail with latest video
-        _update_project_thumbnail(ASSETS_DIR / assets_folder, project_slug=job.project)
+        _refresh_project_media(assets_folder, job.project, force=False)
 
         result = db.get_job(job_id).to_dict()
         result["video_exists"] = True
@@ -1993,27 +1950,10 @@ def api_jobs(status: str | None = None, project: str | None = None, active: bool
     # Include video_exists for each job with smart detection
     result = []
     for j in jobs:
-        # Auto-recover stale non-terminal jobs
-        if j.status not in ("done", "error"):
-            age = (datetime.now() - j.updated_at).total_seconds() if j.updated_at else float("inf")
-            if age > STALE_JOB_SECONDS:
-                _recover_stale_job(j)
-                j = db.get_job(j.job_id)  # Re-fetch after recovery
-
-        d = j.to_dict()
-
+        j = _recover_if_stale(j)
         # Use cached assets_path if same project, otherwise let function look it up
         job_assets_path = assets_path if (project and j.project == project) else None
-        _enrich_job_result(d, j, job_assets_path)
-
-        # Normalize image_url for UI/regenerate preference
-        try:
-            preferred = _choose_preferred_image_url_from_job_dict(d)
-            d['image_url'] = preferred or d.get('image_url')
-        except Exception:
-            pass
-
-        result.append(d)
+        result.append(_with_preferred_image_url(_enrich_job_result(j.to_dict(), j, job_assets_path)))
     return result
 
 
@@ -2048,8 +1988,7 @@ def api_delete_job(job_id: str, _api_key: str = Depends(verify_api_key)):
 
     # Invalidate caches and regenerate thumbnail if we deleted a video
     if video_deleted and proj:
-        _invalidate_project_caches()
-        _update_project_thumbnail(ASSETS_DIR / proj.assets_folder, project_slug=job.project, force=True)
+        _refresh_project_media(proj.assets_folder, job.project)
         _cleanup_thumb_cache()
 
     return {"deleted": True, "job_id": job_id, "video_deleted": video_deleted}
@@ -2067,8 +2006,7 @@ def _set_job_archived(job_id: str, archived: bool) -> JobArchivedResult:
     # Regenerate thumbnail since the (un)archived video affects which is latest
     proj = db.get_project_by_slug(job.project)
     if proj:
-        _invalidate_project_caches()
-        _update_project_thumbnail(ASSETS_DIR / proj.assets_folder, project_slug=job.project, force=True)
+        _refresh_project_media(proj.assets_folder, job.project)
 
     return {"archived": archived, "job_id": job_id}
 
@@ -2080,20 +2018,9 @@ class FavouriteIn(BaseModel):
     filename: str
 
 
-def _job_files(job) -> set[str]:
-    """Every media filename a job produced (multi-image jobs have several)."""
-    names = {Path(job.video_path).name} if job.video_path else set()
-    if job.params_json:
-        try:
-            names |= {Path(p).name for p in json.loads(job.params_json).get("result_paths", [])}
-        except Exception:
-            pass
-    return names
-
-
 @app.post("/api/favourites")
 def api_add_favourite(data: FavouriteIn, _api_key: str = Depends(verify_api_key)):
-    _safe_filename(data.filename)
+    safe_filename(data.filename)
     db = get_db()
     job = db.get_job(data.job_id)
     if not job or data.filename not in _job_files(job):
@@ -2104,7 +2031,7 @@ def api_add_favourite(data: FavouriteIn, _api_key: str = Depends(verify_api_key)
 
 @app.delete("/api/favourites/{filename}")
 def api_remove_favourite(filename: str, _api_key: str = Depends(verify_api_key)):
-    _safe_filename(filename)
+    safe_filename(filename)
     get_db().remove_favourite(filename)
     return {"favourite": False, "filename": filename}
 
@@ -2122,10 +2049,9 @@ def api_list_favourites(_api_key: str = Depends(verify_api_key)):
         proj = projects.get(job.project) if job else None
         if not proj or not (ASSETS_DIR / proj.assets_folder / fav.filename).exists():
             continue
-        jd = job.to_dict()
         items.append({
-            "filename": fav.filename, "favourite": True, "job": jd,
-            "media_type": "image" if (getattr(job, "job_type", "video") or "video") == "image" else "video",
+            "filename": fav.filename, "favourite": True, "job": job.to_dict(),
+            "media_type": _job_media_type(job),
             "project": proj.slug, "project_name": proj.name, "favourited_at": iso(fav.created_at),
         })
     return {"items": items}
@@ -2193,9 +2119,7 @@ def api_list_projects(archived: bool | None = None, _api_key: str = Depends(veri
 @app.get("/api/projects/{project}")
 def api_get_project(project: str, archived: bool | None = None, _api_key: str = Depends(verify_api_key)):
     db = get_db()
-    proj = db.get_project_by_slug(project)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
+    proj = _require_project(project)
 
     assets_path = ASSETS_DIR / proj.assets_folder
 
@@ -2211,15 +2135,9 @@ def api_get_project(project: str, archived: bool | None = None, _api_key: str = 
             filename = Path(j.video_path).name
             job_by_filename[filename] = j
         # Also index extra result_paths from multi-image jobs
-        if getattr(j, 'job_type', 'video') == 'image' and j.params_json:
-            try:
-                params = json.loads(j.params_json)
-                for extra_path in params.get('result_paths', []):
-                    extra_name = Path(extra_path).name
-                    if extra_name not in job_by_filename:
-                        job_by_filename[extra_name] = j
-            except Exception:
-                pass
+        if _job_media_type(j) == 'image':
+            for extra_path in _job_params(j).get('result_paths', []):
+                job_by_filename.setdefault(Path(extra_path).name, j)
 
     # Fallback: for any video files on disk that didn't match a job above,
     # search all jobs whose video_path filename lands in this folder.
@@ -2240,15 +2158,7 @@ def api_get_project(project: str, archived: bool | None = None, _api_key: str = 
         if getattr(j, 'job_type', 'video') != 'image' or j.status != 'done':
             continue
         # Use result_paths if present (multi-image jobs), else fall back to video_path
-        paths_to_add: list[Path] = []
-        if j.params_json:
-            try:
-                params = json.loads(j.params_json)
-                result_paths = params.get('result_paths', [])
-                if result_paths:
-                    paths_to_add = [Path(p) for p in result_paths]
-            except Exception:
-                pass
+        paths_to_add = [Path(p) for p in _job_params(j).get('result_paths', [])]
         if not paths_to_add and j.video_path:
             paths_to_add = [Path(j.video_path)]
         for p in paths_to_add:
@@ -2271,10 +2181,8 @@ def api_get_project(project: str, archived: bool | None = None, _api_key: str = 
 
         matched_job = job_by_filename.get(v.name)
         if matched_job:
-            jd = matched_job.to_dict()
-            video_info["job"] = jd
-            job_type = getattr(matched_job, 'job_type', 'video') or 'video'
-            video_info["media_type"] = "image" if job_type == "image" else "video"
+            video_info["job"] = matched_job.to_dict()
+            video_info["media_type"] = _job_media_type(matched_job)
 
         # Filter by archived status if specified
         if archived is not None:
@@ -2284,16 +2192,7 @@ def api_get_project(project: str, archived: bool | None = None, _api_key: str = 
 
         video_list.append(video_info)
 
-    # Build job dicts and normalize image_url for UI/regenerate preference
-    job_dicts = []
-    for j in jobs:
-        jd = j.to_dict()
-        try:
-            preferred = _choose_preferred_image_url_from_job_dict(jd)
-            jd['image_url'] = preferred or jd.get('image_url')
-        except Exception:
-            pass
-        job_dicts.append(jd)
+    job_dicts = [_with_preferred_image_url(j.to_dict()) for j in jobs]
 
     return {
         "slug": proj.slug,
@@ -2347,9 +2246,7 @@ def api_create_project(data: ProjectCreate, _api_key: str = Depends(verify_api_k
 @app.put("/api/projects/{project}")
 def api_update_project(project: str, data: ProjectUpdate, _api_key: str = Depends(verify_api_key)):
     db = get_db()
-    proj = db.get_project_by_slug(project)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
+    proj = _require_project(project)
 
     updates = {}
     if data.name is not None:
@@ -2373,12 +2270,8 @@ def api_update_project(project: str, data: ProjectUpdate, _api_key: str = Depend
 
 def _set_project_archived(project: str, archived: bool) -> ProjectArchivedResult:
     """Toggle archive status on a project."""
-    db = get_db()
-    proj = db.get_project_by_slug(project)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    db.update_project(project, archived=archived)
+    _require_project(project)
+    get_db().update_project(project, archived=archived)
     _invalidate_project_caches()
 
     return {"archived": archived, "slug": project}
@@ -2400,9 +2293,7 @@ def api_unarchive_project(project: str, _api_key: str = Depends(verify_api_key))
 def api_delete_project(project: str, _api_key: str = Depends(verify_api_key)):
     """Delete a project, all its jobs, and all its video/asset files."""
     db = get_db()
-    proj = db.get_project_by_slug(project)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
+    proj = _require_project(project)
 
     assets_path = ASSETS_DIR / proj.assets_folder
 
@@ -2429,24 +2320,13 @@ def api_delete_project(project: str, _api_key: str = Depends(verify_api_key)):
 
 # ── Video/Image serving ─────────────────────────────────────────────
 
-def _safe_filename(filename: str) -> str:
-    if ".." in filename or "/" in filename or "\\" in filename:
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    return filename
-
-
-_MEDIA_TYPES = {
-    "mp4": "video/mp4",
-    "jpg": "image/jpeg", "jpeg": "image/jpeg",
-    "png": "image/png", "webp": "image/webp",
-    "gif": "image/gif",
-}
+IMMUTABLE_CACHE = {"Cache-Control": "public, max-age=31536000, immutable"}
 
 
 @app.get("/video/{project}/{filename}")
 def serve_video(project: str, filename: str):
     """Serve a video or generated image file. Project can be slug or assets_folder."""
-    _safe_filename(filename)
+    safe_filename(filename)
     assets_folder = _get_project_assets_folder(project)
     if not assets_folder:
         assets_folder = project
@@ -2455,19 +2335,13 @@ def serve_video(project: str, filename: str):
     if not video_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    media_type = _MEDIA_TYPES.get(ext, "video/mp4")
-    return FileResponse(
-        video_path,
-        media_type=media_type,
-        headers={"Cache-Control": "public, max-age=31536000, immutable"}
-    )
+    return FileResponse(video_path, media_type=image_media_type(filename) or "video/mp4", headers=IMMUTABLE_CACHE)
 
 
 @app.get("/video-thumb/{project}/{filename}")
 def serve_video_thumb(project: str, filename: str):
     """Serve a thumbnail for a video (first frame) or image file (directly)."""
-    _safe_filename(filename)
+    safe_filename(filename)
     assets_folder = _get_project_assets_folder(project)
     if not assets_folder:
         assets_folder = project
@@ -2476,33 +2350,22 @@ def serve_video_thumb(project: str, filename: str):
     if not media_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    if ext in ("jpg", "jpeg", "png", "webp", "gif"):
-        media_type = _MEDIA_TYPES.get(ext, "image/jpeg")
-        return FileResponse(
-            media_path,
-            media_type=media_type,
-            headers={"Cache-Control": "public, max-age=31536000, immutable"}
-        )
+    media_type = image_media_type(filename)
+    if media_type:
+        return FileResponse(media_path, media_type=media_type, headers=IMMUTABLE_CACHE)
 
     frame_data = _extract_first_frame(media_path)
     if frame_data:
-        return Response(
-            content=frame_data,
-            media_type="image/jpeg",
-            headers={"Cache-Control": "public, max-age=31536000, immutable"}
-        )
+        return Response(content=frame_data, media_type="image/jpeg", headers=IMMUTABLE_CACHE)
     raise HTTPException(status_code=404, detail="Could not extract frame")
 
 
 @app.delete("/api/videos/{project}/{filename}")
 def api_delete_video(project: str, filename: str, _api_key: str = Depends(verify_api_key)):
     """Delete a video file and its associated database records."""
-    _safe_filename(filename)
+    safe_filename(filename)
     db = get_db()
-    proj = db.get_project_by_slug(project)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
+    proj = _require_project(project)
 
     video_path = ASSETS_DIR / proj.assets_folder / filename
     if not video_path.exists():
@@ -2518,11 +2381,7 @@ def api_delete_video(project: str, filename: str, _api_key: str = Depends(verify
         db.delete_download_by_path(filename)
         db.remove_favourite(filename)
 
-        # Invalidate caches for this project
-        _invalidate_project_caches()
-
-        # Update project thumbnail to reflect new latest video (force since we deleted)
-        _update_project_thumbnail(ASSETS_DIR / proj.assets_folder, project_slug=project, force=True)
+        _refresh_project_media(proj.assets_folder, project)
 
         # Clean up orphaned thumbnail cache for the deleted video
         _cleanup_thumb_cache()
@@ -2561,13 +2420,7 @@ def serve_image(project: str):
     for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
         img = assets_path / f"image{ext}"
         if img.exists():
-            mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
-                    "webp": "image/webp", "gif": "image/gif"}[ext.lstrip(".")]
-            return FileResponse(
-                img, 
-                media_type=mime,
-                headers={"Cache-Control": "public, max-age=3600"}
-            )
+            return FileResponse(img, media_type=image_media_type(img), headers={"Cache-Control": "public, max-age=3600"})
 
     raise HTTPException(status_code=404, detail="Image not found")
 
@@ -2770,14 +2623,6 @@ def api_cleanup_thumbnails(_api_key: str = Depends(verify_api_key)):
 
 # ── Source image upload (tmpfiles.org primary, litterbox fallback) ────
 
-SOURCE_IMAGE_ALLOWED_TYPES = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
-}
-
-
 def _get_local_image_path(assets_path: Path, image_url: str) -> Path | None:
     """Resolve a local:filename image_url to a file path. Returns None if not found."""
     if not image_url or not image_url.startswith("local:"):
@@ -2812,7 +2657,7 @@ def _upload_to_litterbox(filepath: Path) -> str:
     except _requests.exceptions.Timeout as exc:
         reason = f"timed out ({exc})"
         print(f"[Litterbox] Upload failed — {reason}")
-        raise ValueError(f"Litterbox upload timed out — cycle VPN if blocked") from exc
+        raise ValueError("Litterbox upload timed out — cycle VPN if blocked") from exc
     except (
         _requests.exceptions.SSLError,
         _requests.exceptions.ConnectionError,
@@ -2937,37 +2782,12 @@ async def _save_uploaded_image(project: str, file: UploadFile, prefix: str) -> d
     Returns:
         dict with uploaded info including the project object reference
     """
-    db = get_db()
-    proj = db.get_project_by_slug(project)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    content_type = file.content_type or ""
-    if content_type not in SOURCE_IMAGE_ALLOWED_TYPES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported image type: {content_type}. "
-                   f"Allowed: {', '.join(SOURCE_IMAGE_ALLOWED_TYPES.keys())}",
-        )
-
-    data = await file.read()
-    if len(data) > SOURCE_IMAGE_MAX_SIZE:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Image too large ({len(data) // 1024 // 1024}MB). Max: {SOURCE_IMAGE_MAX_SIZE // 1024 // 1024}MB",
-        )
-
-    # Validate actual file content regardless of client-supplied content-type
-    try:
-        img = _PILImage.open(_io.BytesIO(data))
-        img.verify()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid image file — could not be parsed as an image")
+    proj = _require_project(project)
+    data, ext = await read_image_upload(file)
 
     assets_path = ASSETS_DIR / proj.assets_folder
     assets_path.mkdir(parents=True, exist_ok=True)
 
-    ext = SOURCE_IMAGE_ALLOWED_TYPES[content_type]
     filename = f"{prefix}-{uuid.uuid4().hex[:12]}{ext}"
     dest = assets_path / filename
     dest.write_bytes(data)
@@ -3006,17 +2826,13 @@ def api_get_source_image(project: str, f: str | None = None, _api_key: str = Dep
     If ?f=filename is given, serve that specific file.
     Otherwise serve the project's current image_url if it's local.
     """
-    db = get_db()
-    proj = db.get_project_by_slug(project)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-
+    proj = _require_project(project)
     assets_path = ASSETS_DIR / proj.assets_folder
 
     # Determine which file to serve
     if f:
         # Serve specific file by name
-        _safe_filename(f)
+        safe_filename(f)
         source = assets_path / f
     else:
         # Serve project's current local image
@@ -3027,17 +2843,8 @@ def api_get_source_image(project: str, f: str | None = None, _api_key: str = Dep
     if not source or not source.exists():
         raise HTTPException(status_code=404, detail="Source image not found")
 
-    ext = source.suffix.lower()
-    media_types = {
-        ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-        ".png": "image/png", ".webp": "image/webp",
-        ".gif": "image/gif",
-    }
-    return FileResponse(
-        source,
-        media_type=media_types.get(ext, "application/octet-stream"),
-        headers={"Cache-Control": "public, max-age=31536000, immutable"},
-    )
+    return FileResponse(source, media_type=image_media_type(source) or "application/octet-stream",
+                        headers=IMMUTABLE_CACHE)
 
 
 @app.post("/api/projects/{project}/ref-image")
@@ -3059,14 +2866,12 @@ def api_delete_source_image(project: str, f: str | None = None, _api_key: str = 
     Otherwise delete the project's current local image.
     """
     db = get_db()
-    proj = db.get_project_by_slug(project)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
+    proj = _require_project(project)
 
     assets_path = ASSETS_DIR / proj.assets_folder
 
     if f:
-        _safe_filename(f)
+        safe_filename(f)
         target = assets_path / f
     else:
         target = _get_local_image_path(assets_path, proj.image_url or "")
@@ -3125,7 +2930,7 @@ def resume_polling_job(job):
             url = current.video_url
             print(f"[Job {job.job_id}] Recovered to done without video, downloading...", flush=True)
         else:
-            video_urls = [r[2] for r in results if r[0] in SUCCESS_STATUSES and r[2]]
+            video_urls = _result_urls(results)
             if not video_urls:
                 db.update_job(job.job_id, status="error", message="No video URL in result")
                 return

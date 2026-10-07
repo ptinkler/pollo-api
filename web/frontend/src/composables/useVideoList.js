@@ -1,8 +1,9 @@
 import { ref, watch, inject } from 'vue'
-import { fetchProject, deleteVideo, addFavourite, removeFavourite } from './useApi'
+import { fetchProject, deleteVideo, deleteJob, archiveJob, unarchiveJob, bulkMoveJobs, addFavourite, removeFavourite } from './useApi'
 
 /**
- * Shared composable for video list panels (Gallery, Archive).
+ * Shared composable for video list panels (Gallery, Archive): loading,
+ * delete, favourites, (un)archive, and select mode with bulk move/delete.
  *
  * @param {Object} props - Component props (must include `project` and `active`)
  * @param {Object} options
@@ -60,6 +61,87 @@ export function useVideoList(props, { archived, emit }) {
     videos.value = videos.value.filter(v => v.filename !== filename)
   }
 
+  const plural = (n) => `${n} video${n !== 1 ? 's' : ''}`
+
+  // Archive / unarchive one card — either way it leaves this list
+  async function setArchived(video, archive) {
+    const verb = archive ? 'archive' : 'unarchive'
+    if (!video.job?.job_id) return showToast(`Cannot ${verb}: no job ID`, 'error')
+    try {
+      await (archive ? archiveJob : unarchiveJob)(video.job.job_id)
+      removeVideo(video.filename)
+      showToast(`Video ${verb}d`, 'success')
+    } catch (err) {
+      showToast(`Failed to ${verb}`, 'error')
+    }
+  }
+
+  // ── Select mode ──
+  const selectMode = ref(false)
+  const selectedFilenames = ref(new Set())
+  const selectedVideos = () => videos.value.filter(v => selectedFilenames.value.has(v.filename))
+
+  function toggleSelectMode() {
+    selectMode.value = !selectMode.value
+    if (!selectMode.value) selectedFilenames.value = new Set()
+  }
+
+  function toggleSelect(video) {
+    const next = new Set(selectedFilenames.value)
+    next.has(video.filename) ? next.delete(video.filename) : next.add(video.filename)
+    selectedFilenames.value = next
+  }
+
+  // Move modal — holds the job IDs to move (single card or bulk selection)
+  const showMoveModal = ref(false)
+  const pendingMoveJobIds = ref([])
+
+  function openMoveModal(jobIds) {
+    pendingMoveJobIds.value = jobIds
+    showMoveModal.value = true
+  }
+
+  function handleCardMove(video) {
+    if (!video.job?.job_id) return showToast('Cannot move: no job ID', 'error')
+    openMoveModal([video.job.job_id])
+  }
+
+  function handleBulkMove() {
+    openMoveModal(selectedVideos().map(v => v.job?.job_id).filter(Boolean))
+  }
+
+  async function handleMove(targetProject) {
+    showMoveModal.value = false
+    const jobIds = pendingMoveJobIds.value
+    if (!jobIds.length) return
+    const movedFilenames = new Set(
+      videos.value.filter(v => jobIds.includes(v.job?.job_id)).map(v => v.filename)
+    )
+    try {
+      await bulkMoveJobs(jobIds, targetProject)
+      videos.value = videos.value.filter(v => !movedFilenames.has(v.filename))
+      selectedFilenames.value = new Set([...selectedFilenames.value].filter(f => !movedFilenames.has(f)))
+      if (selectedFilenames.value.size === 0) selectMode.value = false
+      showToast(`Moved ${plural(jobIds.length)}`, 'success')
+    } catch (err) {
+      showToast('Failed to move videos', 'error')
+    }
+  }
+
+  async function handleBulkDelete() {
+    const toDelete = selectedVideos()
+    if (!toDelete.length) return
+    if (!confirm(`Delete ${plural(toDelete.length)} permanently?`)) return
+    const results = await Promise.allSettled(
+      toDelete.map(v => v.job?.job_id ? deleteJob(v.job.job_id) : Promise.reject())
+    )
+    const deletedFilenames = new Set(toDelete.filter((_, i) => results[i].status === 'fulfilled').map(v => v.filename))
+    videos.value = videos.value.filter(v => !deletedFilenames.has(v.filename))
+    selectedFilenames.value = new Set()
+    selectMode.value = false
+    showToast(`Deleted ${plural(deletedFilenames.size)}`, 'success')
+  }
+
   // Load when active or when project changes
   watch([() => props.active, () => props.project], ([active]) => {
     if (active) load()
@@ -76,6 +158,18 @@ export function useVideoList(props, { archived, emit }) {
     getVideoByFilename,
     removeVideo,
     showToast,
+    handleArchive: (video) => setArchived(video, true),
+    handleUnarchive: (video) => setArchived(video, false),
+    selectMode,
+    selectedFilenames,
+    toggleSelectMode,
+    toggleSelect,
+    showMoveModal,
+    pendingMoveJobIds,
+    handleCardMove,
+    handleBulkMove,
+    handleMove,
+    handleBulkDelete,
   }
 }
 

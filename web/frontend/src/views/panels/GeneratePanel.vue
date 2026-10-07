@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch, inject } from 'vue'
 import { RatioPicker, LengthSlider, ToggleSwitch, SleekTextarea, SleekSelect, SleekInput } from '../../components/form'
-import { generateVideo, generateImage, uploadSourceImage, deleteSourceImage, getSourceImageUrl, uploadRefImage, getRefImageUrl, fetchCreditEstimate } from '../../composables/useApi'
+import { generateVideo, generateImage, uploadSourceImage, deleteSourceImage, uploadRefImage, fetchCreditEstimate, localImageFilename, getLocalImagePreviewUrl } from '../../composables/useApi'
 import { useProjectSettings } from '../../composables/useProjectSettings'
 import { useJobsQueue } from '../../composables/useJobsQueue'
 import { useShowHidden } from '../../composables/useShowHidden'
@@ -94,15 +94,9 @@ watch(estimateParams, (params) => {
 // Source image upload
 const isUploading = ref(false)
 const fileInputRef = ref(null)
-const hasLocalImage = computed(() => (settings.value.image_url || '').startsWith('local:'))
-const localImageFilename = computed(() => {
-  const url = settings.value.image_url || ''
-  return url.startsWith('local:') ? url.slice(6) : ''
-})
-const sourceImagePreviewUrl = computed(() => {
-  if (!hasLocalImage.value) return null
-  return getSourceImageUrl(props.project) + '?f=' + encodeURIComponent(localImageFilename.value)
-})
+// Preview of an image uploaded into the project ("local:<file>"), else null
+const previewUrl = (url) => getLocalImagePreviewUrl(props.project, url)
+const sourceImagePreviewUrl = computed(() => previewUrl(settings.value.image_url))
 
 function triggerFileInput() {
   fileInputRef.value?.click()
@@ -140,7 +134,7 @@ async function handleFileUpload(event) {
 
 async function removeSourceImage() {
   try {
-    await deleteSourceImage(props.project, localImageFilename.value)
+    await deleteSourceImage(props.project, localImageFilename(settings.value.image_url))
     settings.value.image_url = ''
     showToast('Source image removed', 'success')
   } catch (err) {
@@ -332,50 +326,23 @@ function setSubjectFileInput(index, imgIdx, el) {
   else delete subjectFileInputRefs.value[key]
 }
 
-async function handleRefFileUpload(event, index) {
+// Upload a picked file into the project and point `target.url` (a ref, or
+// one of a subject ref's images) at it. `busyKey` drives that row's spinner.
+async function handleRefFileUpload(event, target, busyKey, label = 'Ref image') {
   const file = event.target.files?.[0]
   if (!file) return
   event.target.value = ''
 
-  uploadingRefIndex.value = index
+  uploadingRefIndex.value = busyKey
   try {
     const result = await uploadRefImage(props.project, file)
-    settings.value.refs[index].url = result.image_url  // "local:ref-abc123.jpg"
-    showToast('Ref image uploaded', 'success')
+    target.url = result.image_url  // "local:ref-abc123.jpg"
+    showToast(`${label} uploaded`, 'success')
   } catch (err) {
     showToast('Upload failed: ' + err.message, 'error')
   } finally {
     uploadingRefIndex.value = null
   }
-}
-
-async function handleSubjectRefFileUpload(event, refItem, imgIndex) {
-  const file = event.target.files?.[0]
-  if (!file) return
-  event.target.value = ''
-
-  uploadingRefIndex.value = `subject-${imgIndex}`
-  try {
-    const result = await uploadRefImage(props.project, file)
-    refItem.images[imgIndex].url = result.image_url
-    showToast('Subject image uploaded', 'success')
-  } catch (err) {
-    showToast('Upload failed: ' + err.message, 'error')
-  } finally {
-    uploadingRefIndex.value = null
-  }
-}
-
-function getRefPreviewUrl(refItem) {
-  const url = refItem.url || ''
-  if (!url.startsWith('local:')) return null
-  return getRefImageUrl(props.project, url.slice(6))
-}
-
-function getSubjectImagePreviewUrl(img) {
-  const url = img.url || ''
-  if (!url.startsWith('local:')) return null
-  return getRefImageUrl(props.project, url.slice(6))
 }
 
 function removeRefLocalImage(refItem) {
@@ -559,7 +526,7 @@ async function handleSubmit() {
         <div class="form-row source-row">
           <div v-if="!showRefFields" class="image-input-group flex2">
             <!-- Uploaded local image preview -->
-            <div v-if="hasLocalImage" class="source-preview">
+            <div v-if="sourceImagePreviewUrl" class="source-preview">
               <img :src="sourceImagePreviewUrl" alt="Source" class="source-thumb" />
               <div class="source-preview-info">
                 <span class="source-label">Uploaded image</span>
@@ -731,8 +698,8 @@ async function handleSubmit() {
           <!-- Image / Video / Audio: single URL -->
           <div v-if="refItem.type === 'image'" class="ref-item-body">
             <!-- Local image preview -->
-            <div v-if="refItem.url && refItem.url.startsWith('local:')" class="ref-preview">
-              <img :src="getRefPreviewUrl(refItem)" alt="Ref" class="ref-thumb" />
+            <div v-if="previewUrl(refItem.url)" class="ref-preview">
+              <img :src="previewUrl(refItem.url)" alt="Ref" class="ref-thumb" />
               <div class="ref-preview-info">
                 <span class="source-label">Uploaded ref image</span>
                 <div class="source-actions">
@@ -766,7 +733,7 @@ async function handleSubmit() {
               type="file"
               accept="image/jpeg,image/png,image/webp,image/gif"
               style="display: none"
-              @change="handleRefFileUpload($event, index)"
+              @change="handleRefFileUpload($event, refItem, index)"
             />
           </div>
 
@@ -815,8 +782,8 @@ async function handleSubmit() {
                 class="subject-image-row"
               >
                 <!-- Local image preview for subject -->
-                <div v-if="img.url && img.url.startsWith('local:')" class="ref-preview ref-preview-inline">
-                  <img :src="getSubjectImagePreviewUrl(img)" alt="Subject" class="ref-thumb-small" />
+                <div v-if="previewUrl(img.url)" class="ref-preview ref-preview-inline">
+                  <img :src="previewUrl(img.url)" alt="Subject" class="ref-thumb-small" />
                   <span class="source-label">Uploaded</span>
                   <button type="button" class="btn-remove" @click="img.url = ''">✕</button>
                 </div>
@@ -844,7 +811,7 @@ async function handleSubmit() {
                   type="file"
                   accept="image/jpeg,image/png,image/webp,image/gif"
                   style="display: none"
-                  @change="handleSubjectRefFileUpload($event, refItem, imgIdx)"
+                  @change="handleRefFileUpload($event, img, `subject-${imgIdx}`, 'Subject image')"
                 />
                 <button
                   v-if="refItem.images.length > 1"

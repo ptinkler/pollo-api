@@ -55,6 +55,7 @@ from img2vid.common.metadata import get_db, iso
 
 from . import openrouter, pollo_chat
 from .auth import verify_api_key
+from .uploads import read_image_upload, safe_filename
 
 router = APIRouter(prefix="/api/chat", dependencies=[Depends(verify_api_key)])
 
@@ -62,7 +63,6 @@ MAX_TOOL_ROUNDS = 4
 CONSISTENCY_REFS = 2              # recent images passed to the image model to keep characters consistent
 MAX_REF_IMAGES = 4                # cap on reference images per generation (edit source + pins + recent)
 MAX_HISTORY_IMAGES = 4            # most recent images (uploaded or generated) sent to the chat model as pixels
-MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024   # larger images are downscaled before sending
 MODELS_CACHE_TTL = 30 * 60
 CHAT_ROUND_SECONDS = 300          # cap on one LLM call (long stories stream for a while)
@@ -71,7 +71,6 @@ VIDEO_POLL_TIMEOUT = 45 * 60
 VIDEO_MAX_POLL_ERRORS = 10
 DEFAULT_TITLE = "New chat"
 
-ALLOWED_UPLOAD_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
 IMAGE_EXTS = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/svg+xml": ".svg"}
 
 SYSTEM_PROMPT = """You are an assistant in a chat app. You have generate_image and generate_video \
@@ -203,16 +202,14 @@ def _conv_dir(conv_id: str) -> Path:
     return d
 
 
-def _safe_name(name: str) -> str:
-    safe = Path(name).name
-    if not safe or safe != name or safe.startswith("."):
-        raise HTTPException(400, "Invalid filename")
-    return safe
-
-
 def _new_media(kind: str, source: str, **fields) -> dict[str, Any]:
     return {"id": uuid.uuid4().hex[:8], "kind": kind, "source": source,
             "status": "pending", "file": None, **fields}
+
+
+def _saved_media(kind: str, source: str, file: str, **fields) -> dict[str, Any]:
+    """A media item whose file is already on disk."""
+    return {**_new_media(kind, source, **fields), "status": "done", "file": file}
 
 
 def _file_to_data_url(path: Path) -> str:
@@ -449,16 +446,7 @@ def api_delete_conversation(conv_id: str):
 @router.post("/conversations/{conv_id}/attachments")
 async def api_upload_attachment(conv_id: str, file: UploadFile = File(...)):
     _require_conv(conv_id)
-    ext = ALLOWED_UPLOAD_TYPES.get(file.content_type or "")
-    if not ext:
-        raise HTTPException(400, f"Unsupported file type: {file.content_type}. Use PNG, JPEG, WebP or GIF.")
-    content = await file.read()
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(400, "File too large (max 20 MB)")
-    try:
-        Image.open(io.BytesIO(content)).verify()
-    except Exception:
-        raise HTTPException(400, "File is not a valid image")
+    content, ext = await read_image_upload(file)
     name = f"up_{uuid.uuid4().hex[:12]}{ext}"
     (_conv_dir(conv_id) / name).write_bytes(content)
     return {"file": name}
@@ -466,7 +454,7 @@ async def api_upload_attachment(conv_id: str, file: UploadFile = File(...)):
 
 @router.get("/media/{conv_id}/{filename}")
 def api_chat_media(conv_id: str, filename: str):
-    path = _chat_root() / _safe_name(conv_id) / _safe_name(filename)
+    path = _chat_root() / safe_filename(conv_id) / safe_filename(filename)
     if not path.is_file():
         raise HTTPException(404, "Not found")
     return FileResponse(path, headers={"Cache-Control": "private, max-age=31536000, immutable"})
@@ -504,7 +492,7 @@ def api_delete_library_item(media_id: str):
         raise HTTPException(404, "Not in the library (only unattached items can be deleted here)")
     db.delete_chat_library_item(media_id)
     if lib.item.get("file"):
-        (_chat_root() / lib.conversation_id / _safe_name(lib.item["file"])).unlink(missing_ok=True)
+        (_chat_root() / lib.conversation_id / safe_filename(lib.item["file"])).unlink(missing_ok=True)
     return {"deleted": media_id}
 
 
@@ -537,9 +525,9 @@ def api_send_message(conv_id: str, data: SendMessage):
     conv_dir = _conv_dir(conv_id)
     media = []
     for name in data.attachments[:8]:
-        if not (conv_dir / _safe_name(name)).is_file():
+        if not (conv_dir / safe_filename(name)).is_file():
             raise HTTPException(400, f"Attachment not found: {name}")
-        media.append({**_new_media("image", "upload"), "status": "done", "file": name})
+        media.append(_saved_media("image", "upload", name))
 
     db = get_db()
     user_msg = db.add_chat_message(conv_id, "user", content, media=media, mode=data.mode)
@@ -913,8 +901,7 @@ class Turn:
                 self._update_media(item, status="done", file=name, cost=cost, credits=credits,
                                    params={**params, **sent})
             else:
-                self._add_media({**_new_media("image", "generated", prompt=prompt, model=self.s.image_model),
-                                 "status": "done", "file": name})
+                self._add_media(_saved_media("image", "generated", name, prompt=prompt, model=self.s.image_model))
 
     def _generate_video(self, prompt: str, duration: int | None, aspect_ratio: str | None,
                         first_frame: str | None) -> None:
@@ -1191,6 +1178,10 @@ def _add_message_cost(message_id: int, cost: float | None) -> None:
         db.update_chat_message(message_id, cost=round((msg.cost or 0) + float(cost), 6))
 
 
+def _find_media(msg, media_id: str) -> dict | None:
+    return next((i for i in msg.media if i.get("id") == media_id), None) if msg else None
+
+
 class PinMedia(BaseModel):
     pinned: bool
 
@@ -1201,7 +1192,7 @@ def api_pin_media(message_id: int, media_id: str, data: PinMedia):
     later on this branch of the chat, until unpinned."""
     db = get_db()
     msg = db.get_chat_message(message_id)
-    item = next((i for i in msg.media if i.get("id") == media_id), None) if msg else None
+    item = _find_media(msg, media_id)
     if not item or item["kind"] != "image" or not item.get("file") or item.get("status", "done") != "done":
         raise HTTPException(404, "Image not found")
     return _message_out(db.update_chat_media_item(message_id, media_id, pinned=data.pinned))
@@ -1222,7 +1213,7 @@ def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia):
         raise HTTPException(404, "Message not found")
     if msg.status == "streaming":
         raise HTTPException(409, "Wait for the reply to finish first")
-    item = next((i for i in msg.media if i.get("id") == media_id), None)
+    item = _find_media(msg, media_id)
     if not item or item.get("source") != "generated":
         raise HTTPException(404, "Media not found")
     if item.get("status") != "error":
@@ -1256,8 +1247,8 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
             db.update_chat_media_item(message_id, media_id, status="done", file=names[0], cost=cost,
                                       credits=credits, params={**params, **sent})
             for extra in names[1:]:
-                db.append_chat_media_item(message_id, {**_new_media("image", "generated", prompt=item["prompt"],
-                                                                    model=model), "status": "done", "file": extra})
+                db.append_chat_media_item(message_id, _saved_media("image", "generated", extra,
+                                                                   prompt=item["prompt"], model=model))
             _add_message_cost(message_id, cost)
         else:
             # A different model may support different durations/ratios

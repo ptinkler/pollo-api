@@ -4,6 +4,7 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { chatMediaUrl } from '../../composables/useChat'
 import { useCopy } from '../../composables/useClipboard'
+import { shortModel, fmtCost } from '../../utils/format'
 import ModelPicker from './ModelPicker.vue'
 
 const props = defineProps({
@@ -35,7 +36,6 @@ const html = computed(() => {
 // Image/Video mode failures already show on the media card — don't repeat them
 const errorShownOnMedia = computed(() =>
   props.message.media?.some(m => m.status === 'error' && m.error === props.message.error))
-const shortModel = (id) => (id || '').split('/').pop()
 const modelShort = computed(() => shortModel(props.message.model))
 // Media-only replies (Image/Video mode) have no text model to name
 const showTextModel = computed(() => !!props.message.content || !props.message.media?.length)
@@ -141,11 +141,6 @@ function onEditKeydown(e) {
 }
 
 const { copiedKey, copy } = useCopy()
-
-function fmtCost(c) {
-  if (!c) return ''
-  return c < 0.01 ? `$${c.toFixed(4)}` : `$${c.toFixed(2)}`
-}
 </script>
 
 <template>

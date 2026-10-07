@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount, inject } from 'vue'
 import { RouterLink } from 'vue-router'
 import { fetchChatLibrary, deleteLibraryItem, chatMediaUrl } from '../../composables/useChat'
 import { useCopy } from '../../composables/useClipboard'
+import { shortModel, fmtCost } from '../../utils/format'
 
 const emit = defineEmits(['open-media'])
 const { copiedKey, copy } = useCopy()
@@ -61,8 +62,6 @@ async function remove(item) {
 }
 
 const url = (i) => chatMediaUrl(i.conversation_id, i.file)
-const shortModel = (id) => (id || '').split('/').pop()
-const fmtCost = (c) => (!c ? '' : c < 0.01 ? `$${c.toFixed(4)}` : `$${c.toFixed(2)}`)
 const fmtDate = (iso) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
 </script>
 

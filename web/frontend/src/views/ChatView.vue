@@ -9,7 +9,7 @@ import ChatLibrary from '../components/chat/ChatLibrary.vue'
 import InstructionsDialog from '../components/chat/InstructionsDialog.vue'
 import {
   fetchChatStatus, fetchChatModels, fetchConversations, fetchConversation,
-  createConversation, deleteConversation, renameConversation, fetchChatMessage,
+  createConversation, deleteConversation, fetchChatMessage,
   cancelChatMessage, uploadChatAttachment, chatMediaUrl, sendChatMessage, retryChatMessage,
   editChatMessage, switchChatBranch, fetchOpenRouterCredits, regenerateChatMedia, pinChatMedia, fetchInstructions, patchConversation,
 } from '../composables/useChat'
@@ -322,7 +322,7 @@ async function rename(c) {
   const title = prompt('Rename chat', c.title)
   if (!title || title === c.title) return
   try {
-    const updated = await renameConversation(c.id, title)
+    const updated = await patchConversation(c.id, { title })
     c.title = updated.title
     if (conversation.value?.id === c.id) conversation.value.title = updated.title
   } catch (e) {
@@ -568,9 +568,7 @@ function openLibrary() {
 // runs it in the background; polling picks up the result.
 async function regenerateMedia(msg, { mediaId, model }) {
   try {
-    const fresh = await regenerateChatMedia(msg.id, mediaId, model)
-    const i = messages.value.findIndex(m => m.id === msg.id)
-    if (i !== -1) messages.value.splice(i, 1, fresh)
+    replaceMessage(await regenerateChatMedia(msg.id, mediaId, model))
     ensurePolling()
   } catch (e) {
     showToast(e.message, 'error')
@@ -579,9 +577,10 @@ async function regenerateMedia(msg, { mediaId, model }) {
 
 async function pinMedia(msg, { mediaId, pinned: on }) {
   try {
-    const fresh = await pinChatMedia(msg.id, mediaId, on)
-    const i = messages.value.findIndex(m => m.id === msg.id)
-    if (i !== -1) messages.value.splice(i, 1, { ...messages.value[i], media: fresh.media })
+    const { media } = await pinChatMedia(msg.id, mediaId, on)
+    // Keep the shown copy's other fields (it may be fresher than `msg`)
+    const current = messages.value.find(m => m.id === msg.id)
+    if (current) replaceMessage({ ...current, media })
   } catch (e) {
     showToast(e.message, 'error')
   }
@@ -595,6 +594,12 @@ async function stop() {
   if (streamingId.value) {
     try { await cancelChatMessage(streamingId.value) } catch { abort?.abort() }
   }
+}
+
+// Swap in a fresher copy of a shown message (matched by id)
+function replaceMessage(fresh) {
+  const i = messages.value.findIndex(m => m.id === fresh.id)
+  if (i !== -1) messages.value.splice(i, 1, fresh)
 }
 
 function bumpConversation(id) {
@@ -634,8 +639,7 @@ async function pollOnce() {
   for (const m of pending) {
     try {
       const fresh = await fetchChatMessage(m.id)
-      const i = messages.value.findIndex(x => x.id === m.id)
-      if (i !== -1) messages.value.splice(i, 1, fresh)
+      replaceMessage(fresh)
       finished ||= !hasPending(fresh)
     } catch { /* retry next tick */ }
   }

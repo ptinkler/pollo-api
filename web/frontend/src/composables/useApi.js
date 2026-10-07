@@ -46,12 +46,15 @@ export async function apiGet(endpoint) {
   return response.json()
 }
 
-export async function apiPost(endpoint, data = {}) {
-  const response = await fetchWithRetry(`${BASE_URL}${endpoint}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
+// JSON (or FormData) request with the error's `detail` as the message
+async function apiSend(method, endpoint, data) {
+  const isForm = data instanceof FormData
+  const options = { method }
+  if (data !== undefined) {
+    options.body = isForm ? data : JSON.stringify(data)
+    if (!isForm) options.headers = { 'Content-Type': 'application/json' }
+  }
+  const response = await fetchWithRetry(`${BASE_URL}${endpoint}`, options)
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     throw new Error(body.detail || `API error: ${response.status}`)
@@ -59,39 +62,27 @@ export async function apiPost(endpoint, data = {}) {
   return response.json()
 }
 
-export async function apiPut(endpoint, data = {}) {
-  const response = await fetchWithRetry(`${BASE_URL}${endpoint}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}))
-    throw new Error(body.detail || `API error: ${response.status}`)
-  }
-  return response.json()
+export const apiPost = (endpoint, data = {}) => apiSend('POST', endpoint, data)
+export const apiPut = (endpoint, data = {}) => apiSend('PUT', endpoint, data)
+export const apiPatch = (endpoint, data = {}) => apiSend('PATCH', endpoint, data)
+export const apiDelete = (endpoint) => apiSend('DELETE', endpoint)
+
+/** POST a file as multipart form data (field "file"). */
+export function apiUpload(endpoint, file) {
+  const form = new FormData()
+  form.append('file', file)
+  return apiSend('POST', endpoint, form)
 }
 
-export async function apiDelete(endpoint) {
-  const response = await fetchWithRetry(`${BASE_URL}${endpoint}`, {
-    method: 'DELETE',
-  })
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}))
-    throw new Error(body.detail || `API error: ${response.status}`)
-  }
-  return response.json()
+// `?a=1&b=2` from an object, or '' when empty
+const query = (params) => {
+  const qs = new URLSearchParams(params).toString()
+  return qs ? `?${qs}` : ''
 }
 
 // Project APIs
-export const fetchProjects = (params = {}) => {
-  const query = new URLSearchParams(params).toString()
-  return apiGet(`/api/projects${query ? '?' + query : ''}`)
-}
-export const fetchProject = (name, params = {}) => {
-  const query = new URLSearchParams(params).toString()
-  return apiGet(`/api/projects/${encodeURIComponent(name)}${query ? '?' + query : ''}`)
-}
+export const fetchProjects = (params = {}) => apiGet(`/api/projects${query(params)}`)
+export const fetchProject = (name, params = {}) => apiGet(`/api/projects/${encodeURIComponent(name)}${query(params)}`)
 export const createProject = (data) => apiPost('/api/projects', data)
 export const updateProject = (name, data) => apiPut(`/api/projects/${encodeURIComponent(name)}`, data)
 export const archiveProject = (slug) => apiPost(`/api/projects/${encodeURIComponent(slug)}/archive`)
@@ -99,10 +90,7 @@ export const unarchiveProject = (slug) => apiPost(`/api/projects/${encodeURIComp
 export const deleteProject = (slug) => apiDelete(`/api/projects/${encodeURIComponent(slug)}`)
 
 // Job APIs
-export const fetchJobs = (params = {}) => {
-  const query = new URLSearchParams(params).toString()
-  return apiGet(`/api/jobs${query ? '?' + query : ''}`)
-}
+export const fetchJobs = (params = {}) => apiGet(`/api/jobs${query(params)}`)
 export const fetchJob = (jobId) => apiGet(`/api/jobs/${jobId}`)
 export const checkJob = (jobId) => apiPost(`/api/jobs/${jobId}/check`)
 export const downloadJobVideo = (jobId) => apiPost(`/api/jobs/${jobId}/download`)
@@ -120,36 +108,21 @@ export const bulkMoveJobs = (jobIds, targetProject) =>
 export const generateVideo = (data) => apiPost('/api/generate', data)
 export const generateImage = (data) => apiPost('/api/generate-image', data)
 
-// Source image upload
-export async function uploadSourceImage(project, file) {
-  return _uploadImage(project, file, 'source-image')
-}
-export const deleteSourceImage = (project, filename) => {
-  const query = filename ? '?f=' + encodeURIComponent(filename) : ''
-  return apiDelete(`/api/projects/${encodeURIComponent(project)}/source-image${query}`)
-}
-export const getSourceImageUrl = (project) =>
-  `/api/projects/${encodeURIComponent(project)}/source-image`
-
-// Ref image upload
-export async function uploadRefImage(project, file) {
-  return _uploadImage(project, file, 'ref-image')
-}
+// Source / ref image upload (saved in the project; returns { image_url: "local:<file>" })
+export const uploadSourceImage = (project, file) =>
+  apiUpload(`/api/projects/${encodeURIComponent(project)}/source-image`, file)
+export const uploadRefImage = (project, file) =>
+  apiUpload(`/api/projects/${encodeURIComponent(project)}/ref-image`, file)
+export const deleteSourceImage = (project, filename) =>
+  apiDelete(`/api/projects/${encodeURIComponent(project)}/source-image${filename ? query({ f: filename }) : ''}`)
 export const getRefImageUrl = (project, filename) =>
   `/api/projects/${encodeURIComponent(project)}/source-image?f=${encodeURIComponent(filename)}`
 
-async function _uploadImage(project, file, endpoint) {
-  const formData = new FormData()
-  formData.append('file', file)
-  const response = await fetchWithRetry(
-    `${BASE_URL}/api/projects/${encodeURIComponent(project)}/${endpoint}`,
-    { method: 'POST', body: formData },
-  )
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}))
-    throw new Error(err.detail || `Upload failed: ${response.status}`)
-  }
-  return response.json()
+// "local:<file>" refs (images uploaded into the project) → their preview URL, else null
+export const localImageFilename = (url) => ((url || '').startsWith('local:') ? url.slice(6) : '')
+export const getLocalImagePreviewUrl = (project, url) => {
+  const filename = localImageFilename(url)
+  return filename ? getRefImageUrl(project, filename) : null
 }
 
 // Models API

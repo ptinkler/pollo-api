@@ -1,8 +1,6 @@
 <script setup>
-import { ref } from 'vue'
 import VideoCard from '../../components/VideoCard.vue'
 import MoveToProjectModal from '../../components/MoveToProjectModal.vue'
-import { unarchiveJob, bulkMoveJobs, deleteJob } from '../../composables/useApi'
 import { useVideoList } from '../../composables/useVideoList'
 
 const props = defineProps({
@@ -14,90 +12,11 @@ const emit = defineEmits(['open-video', 'regenerate', 'use-as-ref', 'video-delet
 
 const {
   videos, loading, load,
-  handleDelete, openVideo, handleRegenerate, handleToggleFavourite,
-  getVideoByFilename, removeVideo, showToast,
+  handleDelete, openVideo, handleRegenerate, handleToggleFavourite, handleUnarchive,
+  getVideoByFilename, removeVideo,
+  selectMode, selectedFilenames, toggleSelectMode, toggleSelect,
+  showMoveModal, pendingMoveJobIds, handleCardMove, handleBulkMove, handleMove, handleBulkDelete,
 } = useVideoList(props, { archived: true, emit })
-
-// Selection state
-const selectMode = ref(false)
-const selectedFilenames = ref(new Set())
-
-// Move modal — holds the job IDs to move (single card or bulk selection)
-const showMoveModal = ref(false)
-const pendingMoveJobIds = ref([])
-
-function toggleSelectMode() {
-  selectMode.value = !selectMode.value
-  if (!selectMode.value) selectedFilenames.value = new Set()
-}
-
-function toggleSelect(video) {
-  const next = new Set(selectedFilenames.value)
-  next.has(video.filename) ? next.delete(video.filename) : next.add(video.filename)
-  selectedFilenames.value = next
-}
-
-function openMoveModal(jobIds) {
-  pendingMoveJobIds.value = jobIds
-  showMoveModal.value = true
-}
-
-function handleCardMove(video) {
-  if (!video.job?.job_id) { showToast('Cannot move: no job ID', 'error'); return }
-  openMoveModal([video.job.job_id])
-}
-
-function handleBulkMove() {
-  const jobIds = videos.value
-    .filter(v => selectedFilenames.value.has(v.filename))
-    .map(v => v.job?.job_id)
-    .filter(Boolean)
-  openMoveModal(jobIds)
-}
-
-async function handleMove(targetProject) {
-  showMoveModal.value = false
-  const jobIds = pendingMoveJobIds.value
-  if (!jobIds.length) return
-  const movedFilenames = new Set(
-    videos.value.filter(v => jobIds.includes(v.job?.job_id)).map(v => v.filename)
-  )
-  try {
-    await bulkMoveJobs(jobIds, targetProject)
-    videos.value = videos.value.filter(v => !movedFilenames.has(v.filename))
-    selectedFilenames.value = new Set([...selectedFilenames.value].filter(f => !movedFilenames.has(f)))
-    if (selectedFilenames.value.size === 0) selectMode.value = false
-    showToast(`Moved ${jobIds.length} video${jobIds.length !== 1 ? 's' : ''}`, 'success')
-  } catch (err) {
-    showToast('Failed to move videos', 'error')
-  }
-}
-
-async function handleBulkDelete() {
-  const toDelete = videos.value.filter(v => selectedFilenames.value.has(v.filename))
-  if (!toDelete.length) return
-  if (!confirm(`Delete ${toDelete.length} video${toDelete.length !== 1 ? 's' : ''} permanently?`)) return
-  const results = await Promise.allSettled(
-    toDelete.map(v => v.job?.job_id ? deleteJob(v.job.job_id) : Promise.reject())
-  )
-  const deleted = toDelete.filter((_, i) => results[i].status === 'fulfilled')
-  const deletedFilenames = new Set(deleted.map(v => v.filename))
-  videos.value = videos.value.filter(v => !deletedFilenames.has(v.filename))
-  selectedFilenames.value = new Set()
-  selectMode.value = false
-  showToast(`Deleted ${deleted.length} video${deleted.length !== 1 ? 's' : ''}`, 'success')
-}
-
-async function handleUnarchive(video) {
-  if (!video.job?.job_id) { showToast('Cannot unarchive: no job ID', 'error'); return }
-  try {
-    await unarchiveJob(video.job.job_id)
-    videos.value = videos.value.filter(v => v.filename !== video.filename)
-    showToast('Video unarchived', 'success')
-  } catch (err) {
-    showToast('Failed to unarchive', 'error')
-  }
-}
 
 function refresh() { load() }
 
