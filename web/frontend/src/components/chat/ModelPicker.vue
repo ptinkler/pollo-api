@@ -27,7 +27,7 @@ const current = computed(() => props.models.find(m => m.id === props.modelValue)
 
 const { favourites, isFavourite, toggleFavourite } = useModelFavourites()
 
-// Models not enabled for this API key (`hidden`) only show behind "Show
+// Hidden models (not enabled for this API key, or retired) only show behind "Show
 // hidden" — except the current pick, so the picker never loses it
 const { showHidden } = useShowHidden()
 const hiddenCount = computed(() => props.models.filter(m => m.hidden).length)
@@ -88,7 +88,7 @@ function perMillion(price) {
 
 function badges(m) {
   const out = []
-  if (m.hidden) out.push({ t: 'not enabled', title: m.hidden })
+  if (m.hidden) out.push({ t: 'hidden', title: m.hidden })
   if (props.kind === 'text') {
     if (m.input_modalities?.includes('image')) out.push({ t: 'vision', title: 'Accepts images' })
     if (m.supports_tools) out.push({ t: 'tools', title: 'Can create images/videos in Auto mode' })
@@ -180,7 +180,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
           @click="tab = id; searchInput?.focus()"
         >{{ p.label }} <span class="tab-count">{{ tabCounts[id] }}</span></button>
       </div>
-      <label v-if="hiddenCount" class="show-hidden" title="Models not enabled for this API key">
+      <label v-if="hiddenCount" class="show-hidden" title="Models left out of the list: not enabled for this API key, or retired">
         <input v-model="showHidden" type="checkbox" @change="searchInput?.focus()" />
         Show hidden ({{ hiddenCount }})
       </label>

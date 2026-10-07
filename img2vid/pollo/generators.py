@@ -752,6 +752,47 @@ class PolloDance20FastVideoGeneratorV1(PolloDance20VideoGeneratorV1):
     VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "720p")
 
 
+class Pollo30VideoGeneratorV1(PolloDance20VideoGeneratorV1):
+    """
+    Pollo 3.0 — v1 API (pollo-ai/pollo-v3-0/video).
+
+    Confirmed from Pollo's OpenAPI spec (2026-10-07): the same three
+    branches and fields as Pollo Dance 2.0 (seed, imageTail, webSearch,
+    generateAudio, refs of up to 9 images / 3 videos / 3 audios, aspectRatio
+    on the image branch incl. "adaptive"), plus a "4K" resolution, a seed on
+    the ref branch too, and "mode" ("basic"/"pro"). 1080p and 4K require
+    pro mode — basic only does 480p/720p — so the mode is picked from the
+    resolution rather than offered separately.
+
+    Not enabled for API access on our key yet (403 "This model is not
+    enabled for API access", 2026-10-07), so MODEL_INFO marks it hidden.
+    """
+    V1_MODEL: ClassVar[str] = "pollo-v3-0"
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "720p", "1080p", "4K")
+    REF_HAS_SEED: ClassVar[bool] = True
+    HAS_MODE: ClassVar[bool] = True
+    PRO_RESOLUTIONS: ClassVar[tuple] = ("1080p", "4K")
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.mode = "pro" if self.resolution.upper() in {r.upper() for r in self.PRO_RESOLUTIONS} else "basic"
+
+
+class Pollo30FastVideoGeneratorV1(PolloDance20VideoGeneratorV1):
+    """
+    Pollo 3.0 Fast — v1 API (pollo-ai/pollo-v3-0-fast/video).
+
+    Confirmed from Pollo's OpenAPI spec (2026-10-07): Pollo Dance 2.0 Fast's
+    schema (480p/720p, no mode, no seed on the ref branch) except that no
+    branch offers the "adaptive" aspect ratio. The API currently answers
+    400 "The model used to create this video is currently unavailable"
+    (2026-10-07), so MODEL_INFO marks it hidden.
+    """
+    V1_MODEL: ClassVar[str] = "pollo-v3-0-fast"
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "720p")
+    VALID_RATIOS: ClassVar[tuple] = ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9")
+
+
 class Seedance20VideoGeneratorV1(BaseV1VideoGenerator):
     """
     Seedance 2.0 — v1 API (bytedance/seedance-2-0/video).

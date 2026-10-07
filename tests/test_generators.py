@@ -12,6 +12,7 @@ from img2vid.pollo.generators import (
     Wan30VideoGenerator, Wan30PrimeVideoGenerator, MinimaxH3MaxVideoGenerator,
     BaseV1VideoGenerator, Pollo20VideoGeneratorV1, Pollo25VideoGeneratorV1,
     PolloDance20VideoGeneratorV1, PolloDance20FastVideoGeneratorV1,
+    Pollo30VideoGeneratorV1, Pollo30FastVideoGeneratorV1,
     Seedance20VideoGeneratorV1, Seedance20FastVideoGeneratorV1,
     Seedance20MiniVideoGeneratorV1, Seedance25VideoGeneratorV1,
     MinimaxH3VideoGeneratorV1, Wan27VideoGeneratorV1, Wan30VideoGeneratorV1,
@@ -821,6 +822,51 @@ class TestPolloDance20FastVideoGeneratorV1:
         gen = PolloDance20FastVideoGeneratorV1(api_key="k", project="p", prompt="x")
         assert gen.model_url == "https://pollo.ai/api/platform/v1/generation/pollo-ai/pollo-dance-2-0-fast/video"
         assert PolloDance20FastVideoGeneratorV1.VALID_RESOLUTIONS == ("480p", "720p")
+
+
+@pytest.fixture()
+def no_project_files(monkeypatch):
+    """Generators look up the project's prompt/image on disk — not here."""
+    import img2vid.pollo.generators as gen_mod
+    monkeypatch.setattr(gen_mod, "get_prompt", lambda *a, **k: "p")
+    monkeypatch.setattr(gen_mod, "get_image_url", lambda *a, **k: None)
+    monkeypatch.setattr(gen_mod, "get_image_path", lambda *a, **k: None)
+
+
+@pytest.mark.usefixtures("no_project_files")
+class TestPollo30VideoGeneratorV1:
+    def test_model_url(self):
+        gen = Pollo30VideoGeneratorV1(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/v1/generation/pollo-ai/pollo-v3-0/video"
+
+    @pytest.mark.parametrize("resolution,mode", [("480p", "basic"), ("720p", "basic"), ("1080p", "pro"), ("4K", "pro")])
+    def test_mode_follows_resolution(self, resolution, mode):
+        # 1080p and 4K require pro mode (spec constraint)
+        gen = Pollo30VideoGeneratorV1(api_key="k", project="p", prompt="x", resolution=resolution)
+        payload = gen.get_payload()["input"]
+        assert payload["mode"] == mode and payload["resolution"] == resolution
+
+    def test_ref_branch_keeps_seed(self):
+        # Unlike Pollo Dance 2.0, 3.0's ref branch has a seed
+        gen = Pollo30VideoGeneratorV1(api_key="k", project="p", prompt="x", seed=7,
+                                      refs=[{"type": "image", "url": "https://img.com/r.jpg"}])
+        payload = gen.get_payload()["input"]
+        assert payload["seed"] == 7 and payload["refs"] == [{"url": "https://img.com/r.jpg", "type": "image"}]
+
+
+@pytest.mark.usefixtures("no_project_files")
+class TestPollo30FastVideoGeneratorV1:
+    def test_model_url_and_limits(self):
+        gen = Pollo30FastVideoGeneratorV1(api_key="k", project="p", prompt="x")
+        assert gen.model_url == "https://pollo.ai/api/platform/v1/generation/pollo-ai/pollo-v3-0-fast/video"
+        assert Pollo30FastVideoGeneratorV1.VALID_RESOLUTIONS == ("480p", "720p")
+        assert "adaptive" not in Pollo30FastVideoGeneratorV1.VALID_RATIOS
+        assert "mode" not in gen.get_payload()["input"]
+
+    def test_ref_branch_drops_seed(self):
+        gen = Pollo30FastVideoGeneratorV1(api_key="k", project="p", prompt="x", seed=7,
+                                          refs=[{"type": "image", "url": "https://img.com/r.jpg"}])
+        assert "seed" not in gen.get_payload()["input"]
 
 
 class TestSeedance20VideoGeneratorV1:

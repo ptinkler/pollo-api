@@ -258,7 +258,7 @@ describe('ModelPicker hidden models', () => {
     expect(w.find('.show-hidden').text()).toBe('Show hidden (1)')
     await w.find('.show-hidden input').setValue(true)
     expect(modelNames(w)).toEqual(['Pollo: Seedream 5.0 Lite', 'Pollo: Seedream 5.0 Pro'])
-    const badge = w.findAll('.item-badge').find(b => b.text() === 'not enabled')
+    const badge = w.findAll('.item-badge').find(b => b.text() === 'hidden')
     expect(badge.attributes('title')).toContain('403')
     w.unmount()
   })

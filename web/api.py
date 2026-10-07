@@ -78,6 +78,10 @@ app.add_middleware(
 # /api/models filters them out by default; see get_models() below).
 # Models with no "legacy" key are on the current v1 API and always shown.
 #
+# "hidden": the reason a model is left out of the model pickers unless
+# "Show hidden" is on — not enabled for our key, or retired by choice. It
+# still works if picked (and stays selected where it already is).
+#
 # "ref_mode" (v1 models only) describes the model's Reference-To-Video
 # branch, which the frontend exposes as a "Ref mode" toggle (the legacy API
 # used separate "type": "ref" models instead). From docs.pollo.ai/openapi.json:
@@ -265,6 +269,7 @@ MODEL_INFO = {
     },
     "pollodance20v1": {
         "label": "Pollo Dance 2.0", "type": "img2vid",
+        "hidden": "No longer enabled for API access on this key",   # 2026-10-07
         "lengths": list(range(4, 16)),
         "resolutions": ["480p", "720p", "1080p"],
         "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
@@ -273,9 +278,28 @@ MODEL_INFO = {
     },
     "pollodance20fastv1": {
         "label": "Pollo Dance 2.0 Fast", "type": "img2vid",
+        "hidden": "No longer enabled for API access on this key",   # 2026-10-07
         "lengths": list(range(4, 16)),
         "resolutions": ["480p", "720p"],
         "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
+        "options": ["generate_audio", "web_search", "seed", "image_tail", "refs"],
+        "ref_mode": {"types": ["image", "video", "audio"], "max": 13, "limits": {"image": 9, "video": 3, "audio": 3}, "hide_options": ["seed"]},
+    },
+    "pollo30v1": {
+        "label": "Pollo 3.0", "type": "img2vid",
+        "hidden": "Not enabled for API access on this key (403)",   # checked with a real request 2026-10-07
+        "lengths": list(range(4, 16)),
+        "resolutions": ["480p", "720p", "1080p", "4K"],   # 1080p/4K are sent with mode "pro"
+        "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
+        "options": ["generate_audio", "web_search", "seed", "image_tail", "refs"],
+        "ref_mode": {"types": ["image", "video", "audio"], "max": 13, "limits": {"image": 9, "video": 3, "audio": 3}},
+    },
+    "pollo30fastv1": {
+        "label": "Pollo 3.0 Fast", "type": "img2vid",
+        "hidden": "Pollo says it's currently unavailable (400)",   # checked with a real request 2026-10-07
+        "lengths": list(range(4, 16)),
+        "resolutions": ["480p", "720p"],
+        "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
         "options": ["generate_audio", "web_search", "seed", "image_tail", "refs"],
         "ref_mode": {"types": ["image", "video", "audio"], "max": 13, "limits": {"image": 9, "video": 3, "audio": 3}, "hide_options": ["seed"]},
     },
@@ -354,6 +378,7 @@ MODEL_INFO = {
     },
     "klingv21v1": {
         "label": "Kling 2.1", "type": "img2vid",
+        "hidden": "Superseded by the Kling 3.0 models",   # 2026-10-07
         "lengths": [5, 10],
         "resolutions": ["std", "pro"],   # quality tiers, sent as Kling's "mode"
         "ratios": ["16:9", "9:16", "1:1"],
@@ -362,12 +387,14 @@ MODEL_INFO = {
     },
     "klingv21masterv1": {
         "label": "Kling 2.1 Master", "type": "img2vid",
+        "hidden": "Superseded by the Kling 3.0 models",   # 2026-10-07
         "lengths": [5, 10],
         "ratios": ["16:9", "9:16", "1:1"],
         "options": [],
     },
     "klingv25turbov1": {
         "label": "Kling 2.5 Turbo", "type": "img2vid",
+        "hidden": "Superseded by the Kling 3.0 models",   # 2026-10-07
         "lengths": [5, 10],
         "resolutions": ["std", "pro"],   # quality tiers, sent as Kling's "mode"
         "ratios": ["16:9", "9:16", "1:1"],
@@ -375,12 +402,14 @@ MODEL_INFO = {
     },
     "klingvideoo1v1": {
         "label": "Kling Video O1", "type": "img2vid",
+        "hidden": "Superseded by the Kling 3.0 models",   # 2026-10-07
         "lengths": [5, 10],
         "ratios": ["16:9", "9:16", "1:1"],
         "options": ["image_tail"],
     },
     "klingv26v1": {
         "label": "Kling 2.6", "type": "img2vid",
+        "hidden": "Superseded by the Kling 3.0 models",   # 2026-10-07
         "lengths": [5, 10],
         "ratios": ["16:9", "9:16", "1:1"],
         "options": ["generate_audio", "image_tail"],

@@ -196,10 +196,12 @@ const DEPRECATED_REMAP = {
 // Two-word brand prefixes that shouldn't be split at the first space when
 // deriving a dropdown group from a model's label (e.g. "Nano Banana 2").
 const MULTI_WORD_BRANDS = ['Nano Banana']
+// Brands grouped under their maker
+const BRAND_GROUPS = { Seedream: 'ByteDance', Seedance: 'ByteDance' }
 
 function modelGroup(label) {
-  const brand = MULTI_WORD_BRANDS.find((b) => label.startsWith(b))
-  return brand || label.split(' ')[0]
+  const brand = MULTI_WORD_BRANDS.find((b) => label.startsWith(b)) || label.split(' ')[0]
+  return BRAND_GROUPS[brand] || brand
 }
 
 // Format models for SleekSelect — hide deprecated models, and models not
@@ -212,7 +214,7 @@ const modelSelectOptions = computed(() => {
     .map(([key, info]) => ({
       value: key,
       // 👤 = can use characters (takes reference images; video models in Ref mode)
-      label: `${info.label}${info.type === 'ref' ? ' (ref)' : ''}${generateModelTakesCharacters(info, true) ? ' 👤' : ''}${info.hidden ? ' (not enabled)' : ''}`,
+      label: `${info.label}${info.type === 'ref' ? ' (ref)' : ''}${generateModelTakesCharacters(info, true) ? ' 👤' : ''}${info.hidden ? ' (hidden)' : ''}`,
       group: modelGroup(info.label)
     }))
 })
@@ -597,7 +599,7 @@ async function handleSubmit() {
           id="show_hidden_models"
           v-model="showHidden"
           :label="`Show hidden (${hiddenModelCount})`"
-          title="Models not enabled for this API key"
+          title="Models left out of the list: not enabled for this API key, or retired"
         />
       </div>
 
