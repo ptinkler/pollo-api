@@ -79,3 +79,24 @@ describe('HomeView Favourites tab', () => {
     expect(w.findAll('.video-project').map(e => e.text())).toEqual(['📁 Posters'])
   })
 })
+
+describe('GalleryPanel favourites filter', () => {
+  it('shows only starred generations, and drops one when unstarred', async () => {
+    const { default: GalleryPanel } = await import('../views/panels/GalleryPanel.vue')
+    globalThis.fetch = vi.fn(async (url, opts = {}) => ({
+      ok: true, status: 200,
+      json: async () => String(url).includes('/api/projects/p1') && (opts.method || 'GET') === 'GET'
+        ? { videos: [video(), video({ filename: 'vid_b.mp4', favourite: true })] }
+        : {},
+    }))
+    const w = mount(GalleryPanel, { props: { project: 'p1', active: true }, global: { provide: { showToast: vi.fn() } } })
+    await flushPromises()
+    expect(w.findAll('.fav-btn')).toHaveLength(2)
+    await w.findAll('.filter-check input')[2].setValue(true)
+    expect(w.findAll('.fav-btn')).toHaveLength(1)
+    await w.find('.fav-btn').trigger('click')
+    await flushPromises()
+    expect(w.findAll('.fav-btn')).toHaveLength(0)
+    expect(w.text()).toContain('Nothing matches these filters')
+  })
+})

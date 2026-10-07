@@ -21,7 +21,9 @@ const {
 // Filter state
 const showVideos = ref(true)
 const showImages = ref(true)
+const favouritesOnly = ref(false)
 const filteredVideos = computed(() => videos.value.filter(v => {
+  if (favouritesOnly.value && !v.favourite) return false
   const mt = v.media_type || v.job?.media_type || v.job?.job_type || 'video'
   if (mt === 'image') return showImages.value
   return showVideos.value
@@ -134,6 +136,9 @@ defineExpose({ refresh, getVideoByFilename, removeVideo, addVideo })
           <label class="filter-check">
             <input type="checkbox" v-model="showImages" /> Images
           </label>
+          <label class="filter-check">
+            <input type="checkbox" v-model="favouritesOnly" /> ★ Favourites only
+          </label>
         </div>
         <button class="btn btn-secondary toolbar-btn" @click="toggleSelectMode">
           {{ selectMode ? 'Cancel' : 'Select' }}
@@ -148,7 +153,12 @@ defineExpose({ refresh, getVideoByFilename, removeVideo, addVideo })
         </div>
       </div>
 
-      <div class="gallery-grid">
+      <div v-if="!filteredVideos.length" class="empty-state">
+        <h3>Nothing matches these filters</h3>
+        <p v-if="favouritesOnly">Star (☆) a video or image to see it here.</p>
+      </div>
+
+      <div v-else class="gallery-grid">
         <VideoCard
           v-for="video in filteredVideos"
           :key="video.filename"
