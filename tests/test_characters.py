@@ -129,6 +129,47 @@ class TestInChat:
         assert item["params"]["characters"] == [linh["id"]]
         assert len(got["input_images"]) == 2
 
+    def _overlapping_names(self, client, conv):
+        chloe = _make(client, name="Chloe", description="Slim")
+        muscle = _make(client, name="Chloe Muscle", description="Bodybuilder")
+        self._attach(client, conv, muscle)
+        return chloe, muscle
+
+    def _attached_ids(self, client, conv):
+        return client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["character_ids"]
+
+    def test_short_name_means_the_attached_character_in_auto_mode(self, client, conv, chat, monkeypatch):
+        chloe, muscle = self._overlapping_names(client, conv)
+        # The model calls her by the short name, in the argument and its prompt
+        replies = iter([_tool_chunks("generate_image", {"prompt": "Chloe flexing", "characters": ["Chloe"]},
+                                     text="Here."), _text_chunks("Done.")])
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+        got = self._capture(chat, monkeypatch)
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                                 json={"content": "create an image of chloe", **SETTINGS}))
+        assert ev[-1]["message"]["media"][0]["params"]["characters"] == [muscle["id"]]
+        assert "Bodybuilder" in got["prompt"] and "Slim" not in got["prompt"]
+        assert self._attached_ids(client, conv) == [muscle["id"]]
+
+    def test_short_name_is_ignored_when_ambiguous(self, client, conv, chat, monkeypatch):
+        a, b = _make(client, name="Chloe Muscle"), _make(client, name="Chloe Slim")
+        self._attach(client, conv, a, b)
+        replies = iter([_tool_chunks("generate_image", {"prompt": "Chloe waving", "characters": ["Chloe"]}),
+                        _text_chunks("Done.")])
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+        self._capture(chat, monkeypatch)
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "go", **SETTINGS}))
+        assert "characters" not in ev[-1]["message"]["media"][0]["params"]
+
+    def test_full_name_in_prompt_does_not_also_match_the_shorter_one(self, client, conv, chat, monkeypatch):
+        chloe, muscle = _make(client, name="Chloe"), _make(client, name="Chloe Muscle")
+        self._attach(client, conv, chloe, muscle)
+        replies = iter([_tool_chunks("generate_image", {"prompt": "Chloe Muscle at the gym"}), _text_chunks("Done.")])
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+        self._capture(chat, monkeypatch)
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "go", **SETTINGS}))
+        assert ev[-1]["message"]["media"][0]["params"]["characters"] == [muscle["id"]]
+
     def test_image_mode_uses_every_attached_character(self, client, conv, chat, monkeypatch):
         linh, bao = _make(client), _make(client, name="Bao", images=1)
         self._attach(client, conv, linh, bao)
@@ -263,7 +304,7 @@ class TestInGenerations:
 
 
 class TestUseByName:
-    """'Use Linh' should work whether or not Linh is attached to the chat."""
+    """Only characters the user attached are used — a name coming up never attaches one."""
 
     def _capture(self, chat, monkeypatch):
         got = {}
@@ -272,10 +313,8 @@ class TestUseByName:
                                                          ([(_png_bytes(), "image/png")], None))[1])
         return got
 
-    def test_model_is_told_about_unattached_saved_characters(self, client, conv, chat, monkeypatch):
+    def test_model_is_not_told_about_unattached_characters(self, client, conv, chat, monkeypatch):
         _make(client, name="Linh")
-        _make(client, name="Other chat's", images=0,
-              conversation_id=client.post("/api/chat/conversations", json={}).json()["id"])
         seen = {}
 
         def stream(model, messages, tools=None, **kw):
@@ -283,41 +322,36 @@ class TestUseByName:
             return _text_chunks("Hi")
         monkeypatch.setattr(chat.openrouter, "stream_chat", stream)
         _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", **SETTINGS}))
-        system = " ".join(m["content"] for m in seen["messages"] if m["role"] == "system")
-        assert "other saved characters" in system and "- Linh: Short black hair" in system
-        assert "Other chat's" not in system
-        image_tool = next(t for t in seen["tools"] if t["function"]["name"] == "generate_image")
-        assert image_tool["function"]["parameters"]["properties"]["characters"]["items"]["enum"] == ["Linh"]
+        assert "Linh" not in json.dumps(seen["messages"]) and "Linh" not in json.dumps(seen["tools"])
 
-    def test_using_an_unattached_character_attaches_it(self, client, conv, chat, db, monkeypatch):
-        linh = _make(client)
-        replies = iter([_tool_chunks("generate_image", {"prompt": "her at the beach", "characters": ["Linh"]}),
+    def test_naming_an_unattached_character_neither_uses_nor_attaches_it(self, client, conv, chat, db, monkeypatch):
+        _make(client)
+        replies = iter([_tool_chunks("generate_image", {"prompt": "Linh at the beach", "characters": ["Linh"]}),
                         _text_chunks("Here she is.")])
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
         got = self._capture(chat, monkeypatch)
         ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
                                  json={"content": "use Linh, at the beach", **SETTINGS}))
-        assert "Short black hair" in got["prompt"] and len(got["input_images"]) == 1
-        attached = next(e for e in ev if e["type"] == "characters")
-        assert attached["character_ids"] == [linh["id"]] and attached["characters"][0]["name"] == "Linh"
-        assert db.get_conversation(conv["id"]).character_ids == [linh["id"]]
-        assert ev[-1]["message"]["media"][0]["params"]["character_names"] == ["Linh"]
+        assert "Short black hair" not in got["prompt"] and not got.get("input_images")
+        assert not any(e["type"] == "characters" for e in ev)
+        assert db.get_conversation(conv["id"]).character_ids == []
+
+    def test_image_mode_ignores_unattached_names(self, client, conv, chat, db, monkeypatch):
+        _make(client)
+        got = self._capture(chat, monkeypatch)
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                                 json={"content": "linh on a bike", **SETTINGS, "mode": "image"}))
+        assert "characters" not in ev[-1]["message"]["media"][0]["params"]
+        assert db.get_conversation(conv["id"]).character_ids == []
 
     def test_name_in_the_prompt_counts_when_the_model_forgets_the_argument(self, client, conv, chat, monkeypatch):
         linh = _make(client)
+        client.patch(f"/api/chat/conversations/{conv['id']}", json={"character_ids": [linh["id"]]})
         replies = iter([_tool_chunks("generate_image", {"prompt": "Linh reading in a café"}), _text_chunks("Done.")])
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
         self._capture(chat, monkeypatch)
         ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "go", **SETTINGS}))
         assert ev[-1]["message"]["media"][0]["params"]["characters"] == [linh["id"]]
-
-    def test_image_mode_picks_up_names_in_the_prompt(self, client, conv, chat, monkeypatch):
-        linh, _ = _make(client), _make(client, name="Bao")
-        got = self._capture(chat, monkeypatch)
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                 json={"content": "linh on a bike", **SETTINGS, "mode": "image"}))
-        item = ev[-1]["message"]["media"][0]
-        assert item["params"]["characters"] == [linh["id"]] and "Bao" not in got["prompt"]
 
     def test_create_character_from_the_latest_image_then_draw_them(self, client, conv, chat, db, monkeypatch):
         (chat._conv_dir(conv["id"]) / "g.png").write_bytes(_png_bytes())

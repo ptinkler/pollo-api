@@ -19,14 +19,14 @@ Media item shape (stored in ChatMessage.media_json, sent to the frontend):
       "credits": optional             # Pollo images bill in credits, not dollars
     }
 
-Characters (web/characters.py): the chat model is told about every
-character the chat can use — attached ones in full, the user's other saved
-ones by name — and names the ones in each picture via the tools'
-`characters` argument (a name in the image prompt counts too, in case it
-forgets). Their descriptions go into the media prompt and their images go
-to the image model as references; using one attaches it to the chat. It can
-also save a character from images in the chat (create_character). Image
-mode uses every attached character plus any named in the prompt.
+Characters (web/characters.py): only characters the user attached to the
+chat are used — never one just because its name comes up. The chat model is
+told about the attached ones and names those in each picture via the tools'
+`characters` argument (an attached name in the image prompt counts too, in
+case it forgets). Their descriptions go into the media prompt and their
+images go to the image model as references. The model can also save a new
+character from images in the chat when asked (create_character), which
+attaches it. Image mode uses every attached character.
 
 Image and video models come from OpenRouter, plus Pollo's own models
 ("pollo/<key>", see web/pollo_chat.py) when POLLO_API_KEY is set.
@@ -685,10 +685,9 @@ class Turn:
         self.history = _branch_to(self.db.get_chat_messages(conv_id), message_id)[:-1]
         self.instructions = _conversation_instructions(conv_id)
         conv = self.db.get_conversation(conv_id)
-        self.characters, self.available = [], []
+        self.characters = []            # attached by the user; the only ones a turn uses
         if self._characters_usable():   # attached ones stay attached, just unused, otherwise
-            self.characters = characters.load(conv.character_ids if conv else [], self.db)   # attached
-            self.available = characters.available(conv_id, self.db)                         # usable here
+            self.characters = characters.load(conv.character_ids if conv else [], self.db)
         self.content = ""
         self.cost = 0.0
         self.media: list[dict] = []
@@ -727,9 +726,7 @@ class Turn:
         prompt = (user.content if user else "").strip()
         if not prompt:
             raise openrouter.OpenRouterError("Image mode needs a text prompt")
-        # Every attached character, plus any other the prompt names ("Linh at the beach")
-        self._attach(characters.mentioned(self.available, prompt))
-        chars = self.characters
+        chars = self.characters   # every attached character
         refs = [m["file"] for m in (user.media if user else []) if m["kind"] == "image" and m.get("file")]
         if self._accepts_refs():
             refs = _with_character_refs(refs + self._pinned_images(), chars, self.s.image_limit, after=len(refs))
@@ -788,7 +785,7 @@ class Turn:
             # can explain or try again.)
 
     def _tools(self) -> list[dict]:
-        names = [c.name for c in self.available]
+        names = [c.name for c in self.characters]
         tools = [TOOLS_CREATE_CHARACTER] if self.s.image_model else []
         if self.s.image_model:
             tools.insert(0, _with_character_arg(TOOLS_IMAGE, names))
@@ -905,14 +902,13 @@ class Turn:
                 and item.get("file")]
 
     def _pick_characters(self, names, prompt: str) -> list:
-        """The characters in a picture: those the model named in the tool call,
-        plus any whose name is in its prompt (models sometimes forget the
-        argument). Using one attaches it to the chat."""
-        wanted = {str(n).strip().lower() for n in names or [] if str(n).strip()}
-        named = [c for c in self.available if c.name.strip().lower() in wanted]
-        chars = list({c.id: c for c in named + characters.mentioned(self.available, prompt)}.values())
-        self._attach(chars)
-        return chars
+        """The attached characters in a picture: those the model named in the
+        tool call, plus any whose name is in its prompt (models sometimes
+        forget the argument). Unattached characters are never used."""
+        named = characters.named(self.characters, names)   # "Chloe" can mean attached "Chloe Muscle"
+        # "Chloe" in the prompt of a picture of "Chloe Muscle" is her, not an attached "Chloe"
+        mentioned = characters.mentioned(self.characters, prompt, prefer=named)
+        return list({c.id: c for c in named + mentioned}.values())
 
     def _attach(self, chars: list) -> None:
         """Attach characters to the chat (they stay for later turns) and tell the UI."""
@@ -928,8 +924,12 @@ class Turn:
         name = str(args.get("name") or "").strip()[:100]
         if not name:
             return {"ok": False, "error": "name is required"}
-        if any(c.name.strip().lower() == name.lower() for c in self.available):
-            return {"ok": False, "error": f"There's already a character called {name}; use it by name"}
+        existing = next((c for c in characters.available(self.conv_id, self.db)
+                         if c.name.strip().lower() == name.lower()), None)
+        if existing:
+            how = ("use it by name" if existing.id in {c.id for c in self.characters}
+                   else "the user can attach it to this chat with the characters button")
+            return {"ok": False, "error": f"There's already a character called {name}; {how}"}
         try:
             n = max(1, min(4, int(args.get("images") or 1)))
         except (TypeError, ValueError):
@@ -939,7 +939,6 @@ class Turn:
             return {"ok": False, "error": "There is no image in the conversation to make the character from"}
         char = characters.create_from_files(name, str(args.get("description") or "").strip()[:4000], files,
                                             self.conv_id, self.db)
-        self.available.append(char)
         self._attach([char])
         return {"ok": True, "result": f"Character {name} saved with {len(files)} reference image(s) and attached "
                                       f"to this chat. Name them in generate_image's `characters` to use them."}
@@ -1053,7 +1052,7 @@ class Turn:
         if self.instructions:
             # The user's own custom instructions, verbatim
             messages.append({"role": "system", "content": self.instructions})
-        note = _characters_note(self.characters, [c for c in self.available if c not in self.characters])
+        note = _characters_note(self.characters)
         if note:
             messages.append({"role": "system", "content": note})
         return messages + _conversation(self.conv_id, self.history, self.s.history_limit, vision, as_tool_calls,
@@ -1088,17 +1087,11 @@ def _with_character_arg(tool: dict, names: list[str]) -> dict:
     }}}}
 
 
-def _characters_note(attached: list, others: list) -> str:
-    """What the chat model is told about characters ('' when there are none)."""
-    parts = []
-    if attached:
-        parts.append("The user has attached these characters to the chat:\n\n" + characters.describe(attached))
-    if others:
-        lines = "\n".join(f"- {c.name}" + (f": {c.description.strip()[:150]}" if c.description.strip() else "")
-                          for c in others[:50])
-        parts.append("The user's other saved characters, which they may ask for by name:\n" + lines)
-    if not parts:
+def _characters_note(attached: list) -> str:
+    """What the chat model is told about the attached characters ('' when there are none)."""
+    if not attached:
         return ""
+    parts = ["The user has attached these characters to the chat:\n\n" + characters.describe(attached)]
     parts.append("Whenever one of these characters is in an image or video you make, name them in the tool's "
                  "`characters` argument: their description and reference images are then sent to the model "
                  "for you, so they look the same as before.")

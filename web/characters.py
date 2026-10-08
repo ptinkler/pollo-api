@@ -79,10 +79,54 @@ def available(conv_id: str | None, db=None) -> list:
     return [c for c in db.list_characters() if c.conversation_id is None or c.conversation_id == conv_id]
 
 
-def mentioned(chars: list, text: str) -> list:
-    """The characters whose name appears in the text as a whole word (any case)."""
-    return [c for c in chars
-            if c.name.strip() and re.search(rf"(?<!\w){re.escape(c.name.strip())}(?!\w)", text, re.IGNORECASE)]
+def _has_name(text: str, name: str) -> bool:
+    name = name.strip()
+    return bool(name) and re.search(rf"(?<!\w){re.escape(name)}(?!\w)", text, re.IGNORECASE) is not None
+
+
+def _part_of(char, other) -> bool:
+    """Whether char's name is a shorter whole-word part of other's ("Chloe" in "Chloe Muscle")."""
+    return other.id != char.id and len(other.name.strip()) > len(char.name.strip()) and _has_name(other.name, char.name)
+
+
+def _short_name(char, chars: list) -> str | None:
+    """A multi-word name's first word ("Chloe" for "Chloe Muscle"), when it
+    picks out this character alone: no other character is called that or
+    shares the first word."""
+    words = char.name.split()
+    if len(words) < 2:
+        return None
+    first = words[0].lower()
+    if any(c.id != char.id and (c.name.strip().lower() == first or c.name.split()[0].lower() == first)
+           for c in chars):
+        return None
+    return words[0]
+
+
+def mentioned(chars: list, text: str, prefer: list = ()) -> list:
+    """The characters named in the text as a whole word (any case), by full
+    name or by an unambiguous short name. A name that's part of a longer
+    matched name, or of a `prefer` character's name, means that character:
+    "Chloe" in a picture of "Chloe Muscle" is her, not another "Chloe"."""
+    found = [c for c in chars if _has_name(text, c.name)]
+    covering = found + list(prefer)
+    found = [c for c in found if not any(_part_of(c, o) for o in covering)]
+    short = [c for c in chars if c not in found and c not in prefer
+             and (n := _short_name(c, chars)) and _has_name(text, n)]
+    return found + short
+
+
+def named(chars: list, names) -> list:
+    """The characters these names (from the chat model) refer to, by full
+    name or unambiguous short name."""
+    out = []
+    for n in names or []:
+        n = str(n).strip().lower()
+        hit = next((c for c in chars if c.name.strip().lower() == n), None) or \
+            next((c for c in chars if (s := _short_name(c, chars)) and s.lower() == n), None)
+        if hit and hit not in out:
+            out.append(hit)
+    return out
 
 
 def create_from_files(name: str, description: str, files: list[Path], conversation_id: str | None, db=None):
