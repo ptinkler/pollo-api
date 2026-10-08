@@ -1661,14 +1661,41 @@ class TestDeleteExchange:
         cat = next(i for i in lib if i["id"] == "c1")
         assert cat["attached"] is False and cat["file"] == "cat.png"
 
-    def test_every_reply_version_goes_and_later_turns_stay(self, client, conv, db):
+    def test_whole_turn_goes_and_only_the_shown_continuation_stays(self, client, conv, chat, db):
         u1, a1, u2, a2, u3, a3 = self._chat(db, conv)
-        retry = db.add_chat_message(conv["id"], "assistant", "Purr", parent_id=u2.id)
-        later = db.add_chat_message(conv["id"], "user", "on the retry branch", parent_id=retry.id)
-        client.delete(f"/api/chat/messages/{u2.id}")
+        # Another reply version, an edited prompt version, each with follow-ups
+        retry = db.add_chat_message(conv["id"], "assistant", "Purr", parent_id=u2.id, media=[
+            {"id": "r1", "kind": "image", "source": "generated", "status": "done", "file": "r.png", "prompt": "r"}])
+        retry_next = db.add_chat_message(conv["id"], "user", "on the retry branch", parent_id=retry.id)
+        edit = db.add_chat_message(conv["id"], "user", "now a dog", parent_id=a1.id)
+        edit_reply = db.add_chat_message(conv["id"], "assistant", "Woof", parent_id=edit.id)
+        edit_next = db.add_chat_message(conv["id"], "user", "on the edit branch", parent_id=edit_reply.id)
+        db.set_chat_leaf(conv["id"], a3.id)   # looking at the original version
+
+        info = client.get(f"/api/chat/messages/{u2.id}/delete-info").json()
+        assert info == {"other_versions": 1, "other_messages": 2}
+
+        msgs = client.delete(f"/api/chat/messages/{u2.id}").json()["messages"]
+        assert [m["content"] for m in msgs] == ["draw a fox", "Here!", "thanks", "Welcome"]
         ids = {m.id for m in db.get_chat_messages(conv["id"])}
-        assert {u2.id, a2.id, retry.id}.isdisjoint(ids) and {u3.id, later.id} <= ids
-        assert db.get_chat_message(later.id).parent_id == a1.id
+        assert ids == {u1.id, a1.id, u3.id, a3.id}
+        assert db.get_chat_message(u3.id).parent_id == a1.id
+        assert client.get(f"/api/chat/messages/{u3.id}").json()["siblings"] == [u3.id]   # no stray versions
+        lib = {i["id"] for i in client.get("/api/chat/library").json()["items"] if not i["attached"]}
+        assert {"c1", "r1"} <= lib
+
+    def test_shown_branch_decides_what_stays(self, client, conv, db):
+        u1, a1, u2, a2, u3, a3 = self._chat(db, conv)
+        edit = db.add_chat_message(conv["id"], "user", "now a dog", parent_id=a1.id)
+        edit_reply = db.add_chat_message(conv["id"], "assistant", "Woof", parent_id=edit.id)
+        edit_next = db.add_chat_message(conv["id"], "user", "walkies", parent_id=edit_reply.id)
+        db.set_chat_leaf(conv["id"], edit_next.id)   # looking at the edited version
+        msgs = client.delete(f"/api/chat/messages/{edit.id}").json()["messages"]
+        assert [m["content"] for m in msgs] == ["draw a fox", "Here!", "walkies"]
+
+    def test_info_is_quiet_without_other_versions(self, client, conv, db):
+        u1, a1, u2, *_ = self._chat(db, conv)
+        assert client.get(f"/api/chat/messages/{u2.id}/delete-info").json() == {"other_versions": 0, "other_messages": 0}
 
     def test_deleting_the_last_exchange_shows_the_one_before(self, client, conv, db):
         u1, a1, u2, a2, u3, a3 = self._chat(db, conv)

@@ -546,11 +546,23 @@ def api_get_message(message_id: int):
     return _message_out(msg)
 
 
+@router.get("/messages/{message_id}/delete-info")
+def api_delete_exchange_info(message_id: int):
+    """What deleting this prompt would also remove (other versions of it and
+    the messages that followed them), for the confirmation."""
+    msg = get_db().get_chat_message(message_id)
+    info = msg and get_db().chat_exchange_delete_info(msg.conversation_id, message_id)
+    if not info:
+        raise HTTPException(404, "Prompt not found")
+    return info
+
+
 @router.delete("/messages/{message_id}")
 def api_delete_exchange(message_id: int):
-    """Delete a prompt and its reply (every version of it) from the chat, so
-    the models no longer see them. Their generated images and videos move to
-    the library. Returns the conversation as now shown."""
+    """Delete a prompt's turn (every version of the prompt and its replies)
+    from the chat, so the models no longer see it; what followed on the shown
+    branch is kept. Generated images and videos move to the library.
+    Returns the conversation as now shown."""
     db = get_db()
     msg = db.get_chat_message(message_id)
     if not msg:

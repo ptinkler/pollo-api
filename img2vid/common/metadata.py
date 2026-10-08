@@ -1129,25 +1129,66 @@ class MetadataDB:
             session.commit()
             return detached
 
+    def _chat_exchange_plan(self, session: Session, conversation_id: str, user_message_id: int) -> dict | None:
+        """What deleting a prompt's turn removes and keeps (see delete_chat_exchange)."""
+        prompt = session.get(ChatMessage, user_message_id)
+        if not prompt or prompt.conversation_id != conversation_id or prompt.role != "user":
+            return None
+        msgs = {m.id: m for m in session.query(ChatMessage)
+                .filter(ChatMessage.conversation_id == conversation_id).all()}
+        children: dict[int | None, list[int]] = {}
+        for m in msgs.values():
+            children.setdefault(m.parent_id, []).append(m.id)
+        # The turn: every version of the prompt, and every reply to any of them
+        versions = [i for i in children.get(prompt.parent_id, []) if msgs[i].role == "user"]
+        replies = [r for v in versions for r in children.get(v, [])]
+        # The shown branch's reply in this turn: what follows it is kept
+        conv = session.get(ChatConversation, conversation_id)
+        path, node = set(), self._chat_leaf_id(session, conv) if conv else None
+        while node is not None and node in msgs and node not in path:
+            path.add(node)
+            node = msgs[node].parent_id
+        kept_reply = next((r for r in replies if r in path), None)
+        kept_next = children.get(kept_reply, []) if kept_reply else []
+        # Everything else under the turn goes: the turn itself plus what grew
+        # from its other versions/replies
+        doomed: list[int] = []
+        stack = list(versions)
+        while stack:
+            mid = stack.pop()
+            doomed.append(mid)
+            stack += [c for c in children.get(mid, []) if c not in kept_next]
+        turn = set(versions) | set(replies)
+        return {"prompt": prompt, "msgs": msgs, "doomed": doomed, "kept_next": kept_next,
+                "other_versions": len(versions) - 1,
+                "other_messages": len([d for d in doomed if d not in turn])}
+
+    def chat_exchange_delete_info(self, conversation_id: str, user_message_id: int) -> dict | None:
+        """How much deleting this prompt's turn removes, for the confirmation."""
+        with self._session() as session:
+            plan = self._chat_exchange_plan(session, conversation_id, user_message_id)
+            return plan and {"other_versions": plan["other_versions"], "other_messages": plan["other_messages"]}
+
     def delete_chat_exchange(self, conversation_id: str, user_message_id: int) -> list[dict[str, Any]]:
-        """Delete a prompt and every reply to it (all its versions), moving
-        their generated media into the library. What came after is kept:
-        the next turn is re-attached to the message before the prompt, so
-        the chat reads on as if the exchange never happened.
+        """Delete a prompt's whole turn — every version of the prompt and every
+        reply to them — moving generated media into the library. What follows
+        the shown branch's reply is kept, re-attached to the message before
+        the prompt, so the chat reads on as if the turn never happened. What
+        grew from the turn's other versions has nothing left to follow, so
+        it's deleted too (its media also goes to the library).
 
         Returns the detached media items.
         """
         with self._session() as session:
-            prompt = session.get(ChatMessage, user_message_id)
-            if not prompt or prompt.conversation_id != conversation_id:
+            plan = self._chat_exchange_plan(session, conversation_id, user_message_id)
+            if not plan:
                 return []
-            replies = session.query(ChatMessage).filter(ChatMessage.parent_id == prompt.id).all()
-            reply_ids = [r.id for r in replies]
-            if reply_ids:
-                session.query(ChatMessage).filter(ChatMessage.parent_id.in_(reply_ids)).update(
-                    {ChatMessage.parent_id: prompt.parent_id}, synchronize_session=False)
+            prompt, msgs = plan["prompt"], plan["msgs"]
+            for mid in plan["kept_next"]:
+                msgs[mid].parent_id = prompt.parent_id
             detached = []
-            for msg in [prompt, *replies]:
+            for mid in plan["doomed"]:
+                msg = msgs[mid]
                 for item in msg.media:
                     if item.get("source") == "upload" or not (item.get("file") or item.get("job_id")):
                         continue
@@ -1158,8 +1199,8 @@ class MetadataDB:
                     detached.append(item)
                 session.delete(msg)
             conv = session.get(ChatConversation, conversation_id)
-            if conv and conv.current_leaf_id in {prompt.id, *reply_ids}:
-                conv.current_leaf_id = prompt.parent_id   # the branch now ends before the exchange
+            if conv and conv.current_leaf_id in set(plan["doomed"]):
+                conv.current_leaf_id = prompt.parent_id   # the branch now ends before the turn
             session.commit()
             return detached
 

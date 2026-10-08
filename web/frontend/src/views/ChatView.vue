@@ -16,7 +16,7 @@ import {
   fetchChatStatus, fetchChatModels, fetchConversations, fetchConversation,
   createConversation, deleteConversation, fetchChatMessage,
   cancelChatMessage, uploadChatAttachment, chatMediaUrl, sendChatMessage, retryChatMessage,
-  editChatMessage, switchChatBranch, fetchOpenRouterCredits, regenerateChatMedia, pinChatMedia, deleteChatExchange, fetchInstructions, patchConversation,
+  editChatMessage, switchChatBranch, fetchOpenRouterCredits, regenerateChatMedia, pinChatMedia, deleteChatExchange, fetchDeleteInfo, fetchInstructions, patchConversation,
 } from '../composables/useChat'
 
 const route = useRoute()
@@ -674,11 +674,20 @@ async function resendMessage(msg) {
   await editMessage(msg, msg.content || '')
 }
 
+function deleteQuestion({ other_versions: versions, other_messages: after }) {
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
+  let extra = ''
+  if (versions && after) extra = ` This also removes ${plural(versions, 'other version')} and ${plural(after, 'message')} that followed them.`
+  else if (versions) extra = ` This also removes ${plural(versions, 'other version')}.`
+  else if (after) extra = ` This also removes ${plural(after, 'message')} on other branches.`
+  return `Delete this prompt and its reply?${extra} Images and videos stay in the Library.`
+}
+
 // Remove a prompt and its reply; the models stop seeing them, media stays in the Library
 async function deleteExchange(msg) {
   if (sending.value) return
-  if (!confirm('Delete this prompt and its reply? Images and videos stay in the Library.')) return
   try {
+    if (!confirm(deleteQuestion(await fetchDeleteInfo(msg.id)))) return
     const data = await deleteChatExchange(msg.id)
     conversation.value = data.conversation
     messages.value = data.messages
