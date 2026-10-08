@@ -1129,6 +1129,40 @@ class MetadataDB:
             session.commit()
             return detached
 
+    def delete_chat_exchange(self, conversation_id: str, user_message_id: int) -> list[dict[str, Any]]:
+        """Delete a prompt and every reply to it (all its versions), moving
+        their generated media into the library. What came after is kept:
+        the next turn is re-attached to the message before the prompt, so
+        the chat reads on as if the exchange never happened.
+
+        Returns the detached media items.
+        """
+        with self._session() as session:
+            prompt = session.get(ChatMessage, user_message_id)
+            if not prompt or prompt.conversation_id != conversation_id:
+                return []
+            replies = session.query(ChatMessage).filter(ChatMessage.parent_id == prompt.id).all()
+            reply_ids = [r.id for r in replies]
+            if reply_ids:
+                session.query(ChatMessage).filter(ChatMessage.parent_id.in_(reply_ids)).update(
+                    {ChatMessage.parent_id: prompt.parent_id}, synchronize_session=False)
+            detached = []
+            for msg in [prompt, *replies]:
+                for item in msg.media:
+                    if item.get("source") == "upload" or not (item.get("file") or item.get("job_id")):
+                        continue
+                    session.add(ChatLibraryItem(
+                        media_id=item["id"], conversation_id=conversation_id,
+                        item_json=json.dumps(item), created_at=msg.created_at,
+                    ))
+                    detached.append(item)
+                session.delete(msg)
+            conv = session.get(ChatConversation, conversation_id)
+            if conv and conv.current_leaf_id in {prompt.id, *reply_ids}:
+                conv.current_leaf_id = prompt.parent_id   # the branch now ends before the exchange
+            session.commit()
+            return detached
+
     def list_chat_library(self) -> list[ChatLibraryItem]:
         with self._session() as session:
             items = session.query(ChatLibraryItem).order_by(ChatLibraryItem.created_at.desc()).all()

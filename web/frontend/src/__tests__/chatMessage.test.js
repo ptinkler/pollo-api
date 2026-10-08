@@ -9,7 +9,7 @@ describe('ChatMessage "make a video from this image"', () => {
   it('is offered on generated images, not videos', async () => {
     const w = mount(ChatMessage, { props: { convId: 'c1', message: {
       id: 1, role: 'assistant', content: '', status: 'done', media: [image, video] } } })
-    const buttons = w.findAll('button[title="Make a video from this image"]')
+    const buttons = w.findAll('button[title="Animate this image into a video (attaches it to your next message)"]')
     expect(buttons).toHaveLength(1)
     await buttons[0].trigger('click')
     expect(w.emitted('use-image')).toEqual([[{ file: 'img_a.png', mode: 'video' }]])
@@ -19,7 +19,7 @@ describe('ChatMessage "make a video from this image"', () => {
     const w = mount(ChatMessage, { props: { convId: 'c1', message: {
       id: 2, role: 'user', content: 'look', status: 'done',
       media: [{ id: 'u1', kind: 'image', source: 'upload', status: 'done', file: 'up_b.png' }] } } })
-    await w.find('button[title="Make a video from this image"]').trigger('click')
+    await w.find('button[title="Animate this image into a video (attaches it to your next message)"]').trigger('click')
     expect(w.emitted('use-image')).toEqual([[{ file: 'up_b.png', mode: 'video' }]])
   })
 
@@ -69,15 +69,15 @@ describe('ChatMessage "make a picture" and text-to-media', () => {
   it('offers a picture-from-image button beside the video one', async () => {
     const w = mount(ChatMessage, { props: { convId: 'c1', message: {
       id: 7, role: 'assistant', content: '', status: 'done', media: [image] } } })
-    await w.find('button[title="Make a picture from this image"]').trigger('click')
+    await w.find('button[title="New picture from this image (attaches it to your next message)"]').trigger('click')
     expect(w.emitted('use-image')).toEqual([[{ file: 'img_a.png', mode: 'image' }]])
   })
 
   it('turns a text reply into a picture or video prompt', async () => {
     const w = mount(ChatMessage, { props: { convId: 'c1', message: {
       id: 8, role: 'assistant', content: 'A lighthouse on a cliff at dusk.', status: 'done', media: [] } } })
-    await w.find('button[title^="Make a picture from this reply"]').trigger('click')
-    await w.find('button[title^="Make a video from this reply"]').trigger('click')
+    await w.find('button[title$="as an Image-mode prompt"]').trigger('click')
+    await w.find('button[title$="as a Video-mode prompt"]').trigger('click')
     expect(w.emitted('use-text')).toEqual([
       [{ text: 'A lighthouse on a cliff at dusk.', mode: 'image' }],
       [{ text: 'A lighthouse on a cliff at dusk.', mode: 'video' }],
@@ -92,7 +92,7 @@ describe('ChatMessage "make a picture" and text-to-media', () => {
     range.selectNodeContents(para)
     window.getSelection().removeAllRanges()
     window.getSelection().addRange(range)
-    await w.find('button[title^="Make a picture from this reply"]').trigger('click')
+    await w.find('button[title$="as an Image-mode prompt"]').trigger('click')
     expect(w.emitted('use-text')[0][0]).toEqual({ text: 'Second idea: a red kite.', mode: 'image' })
     window.getSelection().removeAllRanges()
     w.unmount()
@@ -101,7 +101,7 @@ describe('ChatMessage "make a picture" and text-to-media', () => {
   it('has no text-to-media buttons on media-only replies', () => {
     const w = mount(ChatMessage, { props: { convId: 'c1', message: {
       id: 10, role: 'assistant', content: '', status: 'done', media: [image] } } })
-    expect(w.find('button[title^="Make a picture from this reply"]').exists()).toBe(false)
+    expect(w.find('button[title$="as an Image-mode prompt"]').exists()).toBe(false)
   })
 })
 
@@ -130,5 +130,17 @@ describe('ChatMessage pin as reference', () => {
       id: 'tmp-1', role: 'user', content: 'x', status: 'done',
       media: [{ id: 'u1', kind: 'image', source: 'upload', status: 'done', file: 'up_b.png' }] } } })
     expect(w.find('.pin-btn').exists()).toBe(false)
+  })
+})
+
+describe('ChatMessage delete', () => {
+  it('is offered on saved prompts, not replies', async () => {
+    const user = mount(ChatMessage, { props: { convId: 'c1', canEdit: true, message: {
+      id: 7, role: 'user', content: 'draw a cat', status: 'done', media: [] } } })
+    await user.find('button[title^="Delete this prompt"]').trigger('click')
+    expect(user.emitted('delete')).toHaveLength(1)
+    const reply = mount(ChatMessage, { props: { convId: 'c1', canEdit: false, message: {
+      id: 8, role: 'assistant', content: 'Meow', status: 'done', media: [] } } })
+    expect(reply.find('button[title^="Delete this prompt"]').exists()).toBe(false)
   })
 })

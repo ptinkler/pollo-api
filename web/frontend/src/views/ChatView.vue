@@ -16,7 +16,7 @@ import {
   fetchChatStatus, fetchChatModels, fetchConversations, fetchConversation,
   createConversation, deleteConversation, fetchChatMessage,
   cancelChatMessage, uploadChatAttachment, chatMediaUrl, sendChatMessage, retryChatMessage,
-  editChatMessage, switchChatBranch, fetchOpenRouterCredits, regenerateChatMedia, pinChatMedia, fetchInstructions, patchConversation,
+  editChatMessage, switchChatBranch, fetchOpenRouterCredits, regenerateChatMedia, pinChatMedia, deleteChatExchange, fetchInstructions, patchConversation,
 } from '../composables/useChat'
 
 const route = useRoute()
@@ -674,6 +674,19 @@ async function resendMessage(msg) {
   await editMessage(msg, msg.content || '')
 }
 
+// Remove a prompt and its reply; the models stop seeing them, media stays in the Library
+async function deleteExchange(msg) {
+  if (sending.value) return
+  if (!confirm('Delete this prompt and its reply? Images and videos stay in the Library.')) return
+  try {
+    const data = await deleteChatExchange(msg.id)
+    conversation.value = data.conversation
+    messages.value = data.messages
+  } catch (e) {
+    showToast(e.message, 'error')
+  }
+}
+
 async function switchBranch(messageId) {
   if (sending.value) return
   try {
@@ -1122,6 +1135,7 @@ onBeforeUnmount(() => {
             @use-text="useText"
             @regenerate="payload => regenerateMedia(m, payload)"
             @pin="payload => pinMedia(m, payload)"
+            @delete="deleteExchange(m)"
             @stop="stop"
             @open-media="openMedia"
           />
@@ -1240,7 +1254,41 @@ onBeforeUnmount(() => {
   height: 100vh;
   height: 100dvh;
   position: relative;
+  overflow: hidden;   /* only the panes inside scroll, never the page */
   background: var(--bg);
+}
+
+/* Slim scrollbars that only show while hovering the pane */
+.side-controls,
+.conv-list,
+.chat-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.side-controls:hover,
+.conv-list:hover,
+.chat-scroll:hover {
+  scrollbar-color: #3a3a3a transparent;
+}
+
+.side-controls::-webkit-scrollbar,
+.conv-list::-webkit-scrollbar,
+.chat-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.side-controls::-webkit-scrollbar-thumb,
+.conv-list::-webkit-scrollbar-thumb,
+.chat-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+}
+
+.side-controls:hover::-webkit-scrollbar-thumb,
+.conv-list:hover::-webkit-scrollbar-thumb,
+.chat-scroll:hover::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
 }
 
 /* ── Sidebar ─────────────────────────── */
@@ -1297,6 +1345,10 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  /* When the window is short the settings scroll, leaving room for the chats */
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .side-section {
@@ -1454,8 +1506,8 @@ onBeforeUnmount(() => {
 }
 
 .conv-list {
-  flex: 1;
-  min-height: 80px;
+  flex: 1 0 140px;
+  min-height: 140px;
   overflow-y: auto;
   padding: 0 8px 8px;
 }
@@ -1540,6 +1592,7 @@ onBeforeUnmount(() => {
 .chat-main {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -1579,6 +1632,7 @@ onBeforeUnmount(() => {
 
 .chat-scroll {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 28px 24px 12px;
 }

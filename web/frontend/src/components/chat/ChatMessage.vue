@@ -14,7 +14,7 @@ const props = defineProps({
   canEdit: { type: Boolean, default: false },
   canSwitch: { type: Boolean, default: false },   // ‹ › arrows usable (not mid-reply)
 })
-const emit = defineEmits(['retry', 'open-media', 'stop', 'edit', 'resend', 'regenerate', 'branch', 'use-image', 'use-text', 'pin'])
+const emit = defineEmits(['retry', 'open-media', 'stop', 'edit', 'resend', 'regenerate', 'branch', 'use-image', 'use-text', 'pin', 'delete'])
 
 // Model catalogues, provided by ChatView, for "Try another model"
 const chatModels = inject('chatModels', { image: [], video: [] })
@@ -166,8 +166,8 @@ const { copiedKey, copy } = useCopy()
             @click="emit('open-media', { url: url(item), kind: 'image', file: item.file })"
           />
           <span class="use-btns">
-            <button title="Make a picture from this image" @click="emit('use-image', { file: item.file, mode: 'image' })">🖼</button>
-            <button title="Make a video from this image" @click="emit('use-image', { file: item.file, mode: 'video' })">🎬</button>
+            <button title="New picture from this image (attaches it to your next message)" @click="emit('use-image', { file: item.file, mode: 'image' })">🖼</button>
+            <button title="Animate this image into a video (attaches it to your next message)" @click="emit('use-image', { file: item.file, mode: 'video' })">🎬</button>
           </span>
         </div>
       </div>
@@ -200,6 +200,8 @@ const { copiedKey, copy } = useCopy()
         <template v-if="canEdit">
           <button class="meta-btn" title="Edit and resend" @click="startEdit">✎ Edit</button>
           <button class="meta-btn" title="Resend this prompt for a different response" @click="emit('resend')">↻ Retry</button>
+          <button class="meta-btn" title="Delete this prompt and its reply from the chat (images and videos stay in the Library)"
+            @click="emit('delete')">🗑 Delete</button>
         </template>
       </div>
 
@@ -234,8 +236,8 @@ const { copiedKey, copy } = useCopy()
               >📌</button>
               <div class="media-overlay">
                 <template v-if="item.kind === 'image'">
-                  <button class="media-btn" title="Make a picture from this image" @click.stop="emit('use-image', { file: item.file, mode: 'image' })">🖼</button>
-                  <button class="media-btn" title="Make a video from this image" @click.stop="emit('use-image', { file: item.file, mode: 'video' })">🎬</button>
+                  <button class="media-btn" title="New picture from this image (attaches it to your next message)" @click.stop="emit('use-image', { file: item.file, mode: 'image' })">🖼</button>
+                  <button class="media-btn" title="Animate this image into a video (attaches it to your next message)" @click.stop="emit('use-image', { file: item.file, mode: 'video' })">🎬</button>
                 </template>
                 <a :href="url(item)" :download="item.file" class="media-btn" title="Download" @click.stop>⤓</a>
               </div>
@@ -306,10 +308,13 @@ const { copiedKey, copy } = useCopy()
           <template v-else>
             <button v-if="displayText" class="meta-btn" @click="copy(displayText, 'reply')">{{ copiedKey === 'reply' ? '✓ Copied' : '⧉ Copy' }}</button>
             <!-- mousedown.prevent keeps a selection in the reply alive for the click -->
-            <button v-if="displayText" class="meta-btn" title="Make a picture from this reply (or the part you've selected)"
-              @mousedown.prevent @click="useText('image')">🖼 Picture</button>
-            <button v-if="displayText" class="meta-btn" title="Make a video from this reply (or the part you've selected)"
-              @mousedown.prevent @click="useText('video')">🎬 Video</button>
+            <!-- These reuse the reply's words; the buttons on an image reuse the image -->
+            <button v-if="displayText" class="meta-btn"
+              title="Put this reply's text (or the part you've selected) in the message box as an Image-mode prompt"
+              @mousedown.prevent @click="useText('image')">✎ Text as picture prompt</button>
+            <button v-if="displayText" class="meta-btn"
+              title="Put this reply's text (or the part you've selected) in the message box as a Video-mode prompt"
+              @mousedown.prevent @click="useText('video')">✎ Text as video prompt</button>
             <button v-if="canRetry" class="meta-btn" @click="emit('retry')">↻ Retry</button>
           </template>
           <span v-if="modelShort && showTextModel" class="meta-info" :title="message.model">💬 {{ modelShort }}</span>

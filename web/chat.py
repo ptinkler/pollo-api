@@ -546,6 +546,23 @@ def api_get_message(message_id: int):
     return _message_out(msg)
 
 
+@router.delete("/messages/{message_id}")
+def api_delete_exchange(message_id: int):
+    """Delete a prompt and its reply (every version of it) from the chat, so
+    the models no longer see them. Their generated images and videos move to
+    the library. Returns the conversation as now shown."""
+    db = get_db()
+    msg = db.get_chat_message(message_id)
+    if not msg:
+        raise HTTPException(404, "Message not found")
+    if msg.role != "user":
+        raise HTTPException(400, "Delete the prompt; its reply goes with it")
+    _require_idle(msg.conversation_id)
+    db.delete_chat_exchange(msg.conversation_id, message_id)
+    return {"conversation": db.get_conversation(msg.conversation_id).to_dict(),
+            "messages": _shown_branch(msg.conversation_id)}
+
+
 @router.post("/messages/{message_id}/cancel")
 def api_cancel_message(message_id: int):
     ev = _cancel_events.get(message_id)

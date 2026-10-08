@@ -1631,3 +1631,53 @@ class TestOpenRouterConnection:
         item = msg["media"][0]
         assert item["status"] == "error" and item["moderated"] is False
         assert "connection to OpenRouter dropped after" in item["error"] and "RemoteProtocolError" in item["error"]
+
+
+class TestDeleteExchange:
+    def _chat(self, db, conv):
+        u1 = db.add_chat_message(conv["id"], "user", "draw a fox")
+        a1 = db.add_chat_message(conv["id"], "assistant", "Here!", media=[
+            {"id": "f1", "kind": "image", "source": "generated", "status": "done", "file": "fox.png", "prompt": "fox"}])
+        u2 = db.add_chat_message(conv["id"], "user", "now a cat", parent_id=a1.id)
+        a2 = db.add_chat_message(conv["id"], "assistant", "Meow", parent_id=u2.id, media=[
+            {"id": "c1", "kind": "image", "source": "generated", "status": "done", "file": "cat.png", "prompt": "cat"}])
+        u3 = db.add_chat_message(conv["id"], "user", "thanks", parent_id=a2.id)
+        a3 = db.add_chat_message(conv["id"], "assistant", "Welcome", parent_id=u3.id)
+        return u1, a1, u2, a2, u3, a3
+
+    def test_removes_prompt_and_reply_and_rejoins_the_chat(self, client, conv, chat, db, monkeypatch):
+        u1, a1, u2, a2, u3, a3 = self._chat(db, conv)
+        r = client.delete(f"/api/chat/messages/{u2.id}")
+        assert r.status_code == 200
+        assert [m["content"] for m in r.json()["messages"]] == ["draw a fox", "Here!", "thanks", "Welcome"]
+        # The models no longer see it
+        seen = {}
+        monkeypatch.setattr(chat.openrouter, "stream_chat",
+                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1])
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "more", **SETTINGS}))
+        assert "now a cat" not in json.dumps(seen["msgs"]) and "Meow" not in json.dumps(seen["msgs"])
+        # Its image is kept, in the library
+        lib = client.get("/api/chat/library").json()["items"]
+        cat = next(i for i in lib if i["id"] == "c1")
+        assert cat["attached"] is False and cat["file"] == "cat.png"
+
+    def test_every_reply_version_goes_and_later_turns_stay(self, client, conv, db):
+        u1, a1, u2, a2, u3, a3 = self._chat(db, conv)
+        retry = db.add_chat_message(conv["id"], "assistant", "Purr", parent_id=u2.id)
+        later = db.add_chat_message(conv["id"], "user", "on the retry branch", parent_id=retry.id)
+        client.delete(f"/api/chat/messages/{u2.id}")
+        ids = {m.id for m in db.get_chat_messages(conv["id"])}
+        assert {u2.id, a2.id, retry.id}.isdisjoint(ids) and {u3.id, later.id} <= ids
+        assert db.get_chat_message(later.id).parent_id == a1.id
+
+    def test_deleting_the_last_exchange_shows_the_one_before(self, client, conv, db):
+        u1, a1, u2, a2, u3, a3 = self._chat(db, conv)
+        msgs = client.delete(f"/api/chat/messages/{u3.id}").json()["messages"]
+        assert [m["content"] for m in msgs][-1] == "Meow"
+
+    def test_only_prompts_and_not_while_replying(self, client, conv, db):
+        u1, a1, *_ = self._chat(db, conv)
+        assert client.delete(f"/api/chat/messages/{a1.id}").status_code == 400
+        db.add_chat_message(conv["id"], "assistant", "", status="streaming")
+        assert client.delete(f"/api/chat/messages/{u1.id}").status_code == 409
+        assert client.delete("/api/chat/messages/999999").status_code == 404

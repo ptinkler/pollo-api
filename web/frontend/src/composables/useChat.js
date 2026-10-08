@@ -21,6 +21,8 @@ export const regenerateChatMedia = (messageId, mediaId, model = null) =>
 // Pinned images go to the image model as references with every new image on this branch
 export const pinChatMedia = (messageId, mediaId, pinned) =>
   apiPost(`/api/chat/messages/${messageId}/media/${enc(mediaId)}/pin`, { pinned })
+// Delete a prompt and its reply (all versions); generated media moves to the library
+export const deleteChatExchange = (messageId) => apiDelete(`/api/chat/messages/${messageId}`)
 export const fetchChatLibrary = () => apiGet('/api/chat/library')
 export const deleteLibraryItem = (mediaId) => apiDelete(`/api/chat/library/${enc(mediaId)}`)
 
