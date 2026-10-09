@@ -1372,6 +1372,7 @@ onBeforeUnmount(() => {
   flex: 0 1 auto;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .side-section {

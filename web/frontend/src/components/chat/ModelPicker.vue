@@ -123,6 +123,28 @@ function onDocClick(e) {
   if (root.value && !root.value.contains(e.target)) close()
 }
 
+// The pop-up is position: fixed, placed next to its button, so a scrolling
+// or narrow container (the chat sidebar) can't clip it. It opens upwards
+// when there's more room above, and never runs off the window.
+const popStyle = ref({})
+function place() {
+  if (!root.value) return
+  const r = root.value.getBoundingClientRect()
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const width = Math.min(420, vw - 16)
+  const left = Math.max(8, Math.min(r.left, vw - width - 8))
+  const below = vh - r.bottom - 14
+  const above = r.top - 14
+  const up = below < 320 && above > below
+  popStyle.value = {
+    left: `${left}px`,
+    width: `${width}px`,
+    maxHeight: `${Math.max(180, up ? above : below)}px`,
+    ...(up ? { bottom: `${vh - r.top + 6}px` } : { top: `${r.bottom + 6}px` }),
+  }
+}
+
 async function toggle() {
   if (open.value) return close()
   open.value = true
@@ -130,7 +152,10 @@ async function toggle() {
   // Open on the tab holding the current pick, so it's in view
   if (props.modelValue) tab.value = providerOf(props.modelValue)
   else if (!PROVIDERS.value[tab.value]) tab.value = Object.keys(PROVIDERS.value)[0] || tab.value
+  place()
   document.addEventListener('mousedown', onDocClick)
+  window.addEventListener('resize', place)
+  window.addEventListener('scroll', place, true)   // any scrolling ancestor moves the button
   await nextTick()
   searchInput.value?.focus()
 }
@@ -138,6 +163,8 @@ async function toggle() {
 function close() {
   open.value = false
   document.removeEventListener('mousedown', onDocClick)
+  window.removeEventListener('resize', place)
+  window.removeEventListener('scroll', place, true)
 }
 
 function pick(m) {
@@ -150,7 +177,7 @@ function onKeydown(e) {
   if (e.key === 'Enter' && filtered.value.length) pick(filtered.value[0])
 }
 
-onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
+onBeforeUnmount(close)
 </script>
 
 <template>
@@ -173,7 +200,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
       <span class="chev">▾</span>
     </button>
 
-    <div v-if="open" class="picker-pop">
+    <div v-if="open" class="picker-pop" :style="popStyle">
       <input
         ref="searchInput"
         v-model="query"
@@ -322,16 +349,22 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
 }
 
 .picker-pop {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 50;
+  position: fixed;
+  z-index: 100;
   width: min(420px, 92vw);
+  display: flex;
+  flex-direction: column;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
   overflow: hidden;
+}
+
+.picker-search,
+.picker-tabs,
+.show-hidden {
+  flex-shrink: 0;
 }
 
 .picker-search {
@@ -424,6 +457,8 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
 
 .picker-list {
   max-height: 360px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding: 4px;
 }

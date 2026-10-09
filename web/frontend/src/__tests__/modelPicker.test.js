@@ -265,6 +265,20 @@ describe('ModelPicker provider tabs', () => {
   })
 })
 
+describe('ModelPicker pop-up placement', () => {
+  it('floats next to its button and fits the window, so a scrolling sidebar can\'t clip it', async () => {
+    const w = mount(ModelPicker, { attachTo: document.body, props: {
+      models: [{ id: 'a/b', name: 'A' }], label: 'Chat', kind: 'text' } })
+    w.element.getBoundingClientRect = () => ({ left: 900, right: 1180, top: 100, bottom: 140, width: 280, height: 40 })
+    Object.assign(window, { innerWidth: 1200, innerHeight: 800 })
+    await w.find('.picker-btn').trigger('click')
+    const style = w.find('.picker-pop').attributes('style')
+    expect(style).toContain('top: 146px')
+    expect(style).toContain('left: 772px')        // pulled in so the 420px pop-up stays on screen
+    w.unmount()
+  })
+})
+
 describe('ModelPicker hidden models', () => {
   const WITH_HIDDEN = [
     { id: 'pollo/seedreamv1', name: 'Pollo: Seedream 5.0 Lite' },
