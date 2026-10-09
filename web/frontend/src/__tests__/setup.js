@@ -24,3 +24,10 @@ Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock })
 
 // Mock import.meta.env
 globalThis.import = globalThis.import || {}
+
+// jsdom has no ResizeObserver (the chat follows new content with one)
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
