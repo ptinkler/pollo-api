@@ -265,6 +265,34 @@ class TestImages:
         assert item["status"] == "done" and item["cost"] == 0.05
 
 
+    def test_content_violation_flag_is_a_moderation_block(self, venice):
+        v, fake = venice
+        fake.routes["/image/generate"] = httpx.Response(
+            200, json={"images": [base64.b64encode(_png_bytes()).decode()]},
+            headers={"x-venice-is-content-violation": "true"})
+        with pytest.raises(v.VeniceError, match="content filter") as e:
+            v.generate_image("venice/seedream-v5-pro", "a fox")
+        assert e.value.status == 403
+
+    def test_black_image_fails_as_moderated(self, client, conv, chat, venice):
+        """Provider filters send a solid black image instead of an error."""
+        v, fake = venice
+        black = base64.b64encode(_png_bytes(color="black")).decode()
+        fake.routes["/image/generate"] = httpx.Response(200, json={"images": [black]})
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
+            "content": "a fox", **SETTINGS, "mode": "image", "image_model": "venice/seedream-v5-pro"}))
+        item = ev[-1]["message"]["media"][0]
+        assert item["status"] == "error" and item["moderated"] is True
+        assert "black image" in item["error"]
+
+    def test_dark_but_not_black_image_is_kept(self, client, conv, chat, venice):
+        v, fake = venice
+        night = base64.b64encode(_png_bytes(color=(20, 20, 30))).decode()
+        fake.routes["/image/generate"] = httpx.Response(200, json={"images": [night]})
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
+            "content": "a fox at night", **SETTINGS, "mode": "image", "image_model": "venice/seedream-v5-pro"}))
+        assert ev[-1]["message"]["media"][0]["status"] == "done"
+
 class TestVideo:
     def _frame(self, tmp_path):
         p = tmp_path / "frame.png"

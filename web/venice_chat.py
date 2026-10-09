@@ -516,6 +516,14 @@ def _chat_cost(model_id: str, usage: dict, top_level_cost=None) -> float | None:
 
 # ── Image ───────────────────────────────────────────────────────────
 
+def _check_violation(resp: httpx.Response) -> None:
+    """Venice flags images that break its terms (x-venice-is-content-violation);
+    what comes back then isn't the picture asked for."""
+    if (resp.headers.get("x-venice-is-content-violation") or "").lower() == "true":
+        raise VeniceError("Blocked by Venice's content filter (it flagged the image as a content violation)",
+                          status=403)
+
+
 def generate_image(model_id: str, prompt: str, aspect_ratio: str | None = None, resolution: str | None = None,
                    ref_paths: list[Path] | None = None) -> tuple[list[tuple[bytes, str]], float | None, dict]:
     """Returns ([(bytes, media type)], cost in USD (from the catalogue's price),
@@ -538,6 +546,7 @@ def generate_image(model_id: str, prompt: str, aspect_ratio: str | None = None, 
         if resolution:
             body["resolution"] = resolution
         resp = _request("POST", "/image/multi-edit", json=body, timeout=IMAGE_TIMEOUT, waiting_for="image")
+        _check_violation(resp)
         media_type = (resp.headers.get("content-type") or "image/png").split(";")[0].strip()
         if not media_type.startswith("image/"):
             raise VeniceError("Venice returned no image")
@@ -553,7 +562,9 @@ def generate_image(model_id: str, prompt: str, aspect_ratio: str | None = None, 
         body["aspect_ratio"] = aspect_ratio
     if resolution:
         body["resolution"] = resolution
-    data = _request("POST", "/image/generate", json=body, timeout=IMAGE_TIMEOUT, waiting_for="image").json()
+    resp = _request("POST", "/image/generate", json=body, timeout=IMAGE_TIMEOUT, waiting_for="image")
+    _check_violation(resp)
+    data = resp.json()
     images = [(base64.b64decode(b64), "image/png") for b64 in data.get("images") or [] if b64]
     if not images:
         raise VeniceError("Venice returned no image")

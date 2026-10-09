@@ -1397,6 +1397,23 @@ def _failure_fields(e: openrouter.OpenRouterError) -> dict[str, Any]:
     return {"status": "error", "error": str(e), "moderated": _is_moderation_error(e)}
 
 
+BLACK_IMAGE_ERROR = ("Blocked by the model's content filter: it sent back a black image. "
+                     "Try again, soften the prompt, or pick another model (🔒 private or 🔞 uncensored ones "
+                     "don't filter like this)")
+
+
+def _is_blank(data: bytes) -> bool:
+    """A solid black picture: what many providers' safety filters send instead
+    of the image they blocked. Even a night scene has some brighter pixels."""
+    try:
+        with Image.open(io.BytesIO(data)) as im:
+            im = im.convert("L")
+            im.thumbnail((64, 64))
+            return im.getextrema()[1] <= 4
+    except Exception:
+        return False   # not an image Pillow reads; leave it to the caller
+
+
 def _run_image_generation(conv_id: str, model: str, prompt: str, params: dict[str, Any],
                           context: list[dict] | None = None
                           ) -> tuple[list[str], float | None, int | None, dict[str, Any]]:
@@ -1424,8 +1441,11 @@ def _run_image_generation(conv_id: str, model: str, prompt: str, params: dict[st
             model, prompt, aspect_ratio=params.get("aspect_ratio"), resolution=params.get("resolution"),
             input_images=[_file_to_data_url(f) for f in refs] or None, session_id=conv_id,
         )
+    kept = [(data, media_type) for data, media_type in images if not _is_blank(data)]
+    if images and not kept:
+        raise openrouter.OpenRouterError(BLACK_IMAGE_ERROR)
     names = []
-    for data, media_type in images:
+    for data, media_type in kept:
         name = f"img_{uuid.uuid4().hex[:12]}{IMAGE_EXTS.get(media_type, '.png')}"
         (conv_dir / name).write_bytes(data)
         names.append(name)
