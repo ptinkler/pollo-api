@@ -6,6 +6,7 @@ import { chatMediaUrl } from '../../composables/useChat'
 import { useCopy } from '../../composables/useClipboard'
 import { shortModel, fmtCost } from '../../utils/format'
 import ModelPicker from './ModelPicker.vue'
+import ForkList from './ForkList.vue'
 
 const props = defineProps({
   message: { type: Object, required: true },
@@ -13,8 +14,9 @@ const props = defineProps({
   canRetry: { type: Boolean, default: false },
   canEdit: { type: Boolean, default: false },
   canSwitch: { type: Boolean, default: false },   // ‹ › arrows usable (not mid-reply)
+  canBranch: { type: Boolean, default: false },   // ⑂ Branch on a reply (prompts go with canEdit)
 })
-const emit = defineEmits(['retry', 'open-media', 'stop', 'edit', 'resend', 'regenerate', 'branch', 'use-image', 'use-text', 'pin', 'delete', 'fork'])
+const emit = defineEmits(['retry', 'open-media', 'stop', 'edit', 'resend', 'regenerate', 'branch', 'use-image', 'use-text', 'pin', 'delete', 'fork', 'open-chat'])
 
 // Model catalogues, provided by ChatView, for "Try another model"
 const chatModels = inject('chatModels', { image: [], video: [] })
@@ -204,7 +206,8 @@ const { copiedKey, copy } = useCopy()
         </div>
       </div>
       <div v-else-if="isUser && message.content" class="bubble">{{ message.content }}</div>
-      <div v-if="isUser && !editing && (canEdit || message.content || siblings.length > 1 || modeTag)" class="user-actions">
+      <div v-if="isUser && !editing && (canEdit || message.content || siblings.length > 1 || modeTag || message.forks?.length)" class="user-actions">
+        <ForkList v-if="message.forks?.length" :forks="message.forks" align="right" @open="id => emit('open-chat', id)" />
         <span v-if="modeTag" class="mode-tag" :title="`Last run in ${modeTag} mode — retrying or editing uses the mode selected now`">{{ modeTag }}</span>
         <span v-if="siblings.length > 1" class="branch-nav">
           <button class="meta-btn" :disabled="!canSwitch || branchIndex <= 0" title="Previous version" @click="goBranch(-1)">‹</button>
@@ -335,7 +338,10 @@ const { copiedKey, copy } = useCopy()
               title="Put this reply's text (or the part you've selected) in the message box as a Video-mode prompt"
               @mousedown.prevent @click="useText('video')">✎ Text as video prompt</button>
             <button v-if="canRetry" class="meta-btn" @click="emit('retry')">↻ Retry</button>
+            <button v-if="canBranch" class="meta-btn" title="Start a new chat from here: everything up to this reply, nothing after"
+              @click="emit('fork')">⑂ Branch</button>
           </template>
+          <ForkList v-if="message.forks?.length" :forks="message.forks" @open="id => emit('open-chat', id)" />
           <span v-if="modelShort && showTextModel" class="meta-info" :title="message.model">💬 {{ modelShort }}</span>
           <span v-if="message.cost" class="meta-info" title="Total OpenRouter cost for this reply (text + media)">total {{ fmtCost(message.cost) }}</span>
         </div>

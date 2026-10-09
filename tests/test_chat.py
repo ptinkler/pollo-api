@@ -59,6 +59,7 @@ def chat(monkeypatch, db):
     monkeypatch.delenv("VENICE_API_KEY", raising=False)   # tests never reach the real Venice
     monkeypatch.setattr(chat_mod, "VIDEO_POLL_INTERVAL", 0)
     monkeypatch.setattr(chat_mod, "start_video_poller", lambda *a: None)
+    monkeypatch.setattr(chat_mod, "_generate_title", lambda model, prompt: (None, 0.0))   # tests opt in
     chat_mod._models_cache.update(at=0.0, data=None)
     return chat_mod
 
@@ -1863,9 +1864,8 @@ class TestFork:
         item = client.get(f"/api/chat/conversations/{new['id']}").json()["messages"][1]["media"][0]
         assert item["status"] == "error"
 
-    def test_only_prompts_in_this_chat_and_not_while_replying(self, client, conv, chat, db):
+    def test_only_messages_in_this_chat_and_not_while_replying(self, client, conv, chat, db):
         u1, a1, *_ = self._chat(chat, db, conv)
-        assert self._fork(client, conv, a1.id).status_code == 400
         other = client.post("/api/chat/conversations", json={}).json()
         assert self._fork(client, other, u1.id).status_code == 400
         db.add_chat_message(conv["id"], "assistant", "", status="streaming")
@@ -1905,3 +1905,131 @@ class TestFork:
         assert db.get_character(own.id) is None and db.get_character(unused.id) is None
         assert client.get(f"/api/chat/conversations/{new['id']}").json()["conversation"]["character_ids"] == [saved.id, copy_id]
         assert (characters_mod.char_dir(copy_id) / "img_bob.png").is_file()
+
+    def test_branching_from_a_reply_ends_with_that_reply(self, client, conv, chat, db):
+        u1, a1, u2, a2 = self._chat(chat, db, conv)
+        new = self._fork(client, conv, a1.id).json()
+        msgs = client.get(f"/api/chat/conversations/{new['id']}").json()["messages"]
+        assert [m["content"] for m in msgs] == ["draw a fox", "Here!"]
+
+    def test_branch_remembers_its_origin_and_the_original_lists_it(self, client, conv, chat, db):
+        u1, a1, u2, a2 = self._chat(chat, db, conv)
+        client.patch(f"/api/chat/conversations/{conv['id']}", json={"title": "Animals"})
+        new = self._fork(client, conv, u2.id).json()
+        got = client.get(f"/api/chat/conversations/{new['id']}").json()["conversation"]
+        assert got["forked_from"] == {"id": conv["id"], "title": "Animals", "message_id": u2.id, "exists": True}
+        orig = client.get(f"/api/chat/conversations/{conv['id']}").json()["messages"]
+        assert {m["id"]: m["forks"] for m in orig}[u2.id] == [{"id": new["id"], "title": "Animals (branch)"}]
+        assert all(not m["forks"] for m in orig if m["id"] != u2.id)
+        client.delete(f"/api/chat/conversations/{conv['id']}")
+        got = client.get(f"/api/chat/conversations/{new['id']}").json()["conversation"]
+        assert got["forked_from"]["exists"] is False and got["forked_from"]["title"] is None
+
+    def test_branch_spend_says_what_came_with_it(self, client, conv, chat, db):
+        u1, a1, *_ = self._chat(chat, db, conv)
+        db.update_chat_message(a1.id, media=[{**db.get_chat_message(a1.id).media[0], "credits": 30}])
+        new = self._fork(client, conv, u1.id).json()
+        u = db.add_chat_message(new["id"], "user", "more")
+        a = db.add_chat_message(new["id"], "assistant", "ok", parent_id=u.id)
+        db.update_chat_message(a.id, cost=0.01)
+        spend = client.get(f"/api/chat/conversations/{new['id']}/spend").json()
+        assert spend == {"usd": 0.03, "credits": 30, "inherited_usd": 0.02, "inherited_credits": 30}
+
+
+class TestConversationList:
+    def test_pinned_first_and_pinning_keeps_the_order_of_the_rest(self, client, db):
+        a = client.post("/api/chat/conversations", json={"title": "A"}).json()
+        b = client.post("/api/chat/conversations", json={"title": "B"}).json()
+        c = client.post("/api/chat/conversations", json={"title": "C"}).json()
+        r = client.patch(f"/api/chat/conversations/{a['id']}", json={"pinned": True})
+        assert r.json()["pinned"] is True
+        titles = lambda: [x["title"] for x in client.get("/api/chat/conversations").json()["conversations"]]
+        assert titles() == ["A", "C", "B"]
+        client.patch(f"/api/chat/conversations/{a['id']}", json={"pinned": False})
+        assert titles() == ["C", "B", "A"]
+
+    def test_says_when_older_chats_are_left_out(self, client, chat, monkeypatch):
+        monkeypatch.setattr(chat, "CONVERSATION_LIST_LIMIT", 2)
+        for t in "ABC":
+            client.post("/api/chat/conversations", json={"title": t})
+        data = client.get("/api/chat/conversations").json()
+        assert len(data["conversations"]) == 2 and data["more"] is True
+
+    def test_search_finds_titles_and_messages_on_any_branch(self, client, db):
+        fox = client.post("/api/chat/conversations", json={"title": "Fox story"}).json()
+        other = client.post("/api/chat/conversations", json={"title": "Misc"}).json()
+        client.post("/api/chat/conversations", json={"title": "Nothing here"})
+        u = db.add_chat_message(other["id"], "user", "a long intro " * 20 + "then a FOX appears in the snow " + "and more " * 20)
+        db.add_chat_message(other["id"], "user", "edited away", parent_id=None)   # another branch shown
+        res = client.get("/api/chat/conversations", params={"q": "fox"}).json()["conversations"]
+        assert {c["title"] for c in res} == {"Fox story", "Misc"}
+        by = {c["title"]: c for c in res}
+        assert by["Fox story"]["snippet"] is None
+        snip = by["Misc"]["snippet"]
+        assert "FOX appears" in snip and snip.startswith("…") and snip.endswith("…") and len(snip) <= 122
+
+    def test_search_treats_wildcards_literally(self, client):
+        client.post("/api/chat/conversations", json={"title": "100% done"})
+        client.post("/api/chat/conversations", json={"title": "1000 done"})
+        res = client.get("/api/chat/conversations", params={"q": "0%"}).json()["conversations"]
+        assert [c["title"] for c in res] == ["100% done"]
+
+
+class TestRememberedSettings:
+    def test_turn_settings_are_kept_on_the_chat_and_copied_to_branches(self, client, conv, chat, db, monkeypatch):
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
+            "content": "hi", **SETTINGS, "mode": "text", "history_limit": 10, "image_limit": 2,
+            "image_options": {"aspect_ratio": "16:9"}}))
+        got = client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["settings"]
+        assert got["mode"] == "text" and got["history_limit"] == 10 and got["image_limit"] == 2
+        assert got["image_options"]["aspect_ratio"] == "16:9"
+        new = client.post(f"/api/chat/conversations/{conv['id']}/fork",
+                          json={"message_id": ev[0]["user_message"]["id"]}).json()
+        assert new["settings"] == got
+
+
+class TestTitles:
+    def _send(self, client, conv, content="tell me about foxes in winter"):
+        return _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                                   json={"content": content, **SETTINGS, "mode": "text"}))
+
+    def test_model_title_and_its_cost(self, client, conv, chat, monkeypatch):
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok", cost=0.001))
+        seen = {}
+        monkeypatch.setattr(chat, "_generate_title",
+                            lambda model, prompt: (seen.update(model=model, prompt=prompt), ("Winter Foxes", 0.0005))[1])
+        ev = self._send(client, conv)
+        assert {"type": "title", "title": "Winter Foxes"} in ev
+        assert seen == {"model": "t/model", "prompt": "tell me about foxes in winter"}
+        assert ev[-1]["message"]["cost"] == 0.0015
+        assert client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["title"] == "Winter Foxes"
+        # Only the first turn
+        self._send(client, conv, "more")
+        assert seen["prompt"] == "tell me about foxes in winter"
+
+    def test_falls_back_to_the_prompt(self, client, conv, chat, monkeypatch):
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
+        def boom(model, prompt):
+            raise chat.openrouter.OpenRouterError("nope")
+        monkeypatch.setattr(chat, "_generate_title", boom)
+        ev = self._send(client, conv)
+        assert {"type": "title", "title": "tell me about foxes in winter"} in ev
+
+    def test_title_model_override(self, client, conv, chat, monkeypatch):
+        monkeypatch.setenv("CHAT_TITLE_MODEL", "cheap/model")
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
+        seen = {}
+        monkeypatch.setattr(chat, "_generate_title", lambda model, prompt: (seen.update(model=model), ("T", 0))[1])
+        self._send(client, conv)
+        assert seen["model"] == "cheap/model"
+
+    def test_generate_title_cleans_the_reply(self, monkeypatch):
+        import web.chat as chat_mod   # not the `chat` fixture: that stubs _generate_title out
+        monkeypatch.setattr(chat_mod.openrouter, "stream_chat",
+                            lambda model, msgs, **kw: _text_chunks('<think>hmm</think>**Title:** "Winter Foxes."\nextra', cost=0.0002))
+        assert chat_mod._generate_title("t/model", "foxes") == ("Winter Foxes", 0.0002)
+
+    def test_clean_title_rejects_rambling(self, chat):
+        assert chat._clean_title("x" * 100) is None
+        assert chat._clean_title("   ") is None

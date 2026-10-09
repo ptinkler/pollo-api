@@ -191,6 +191,17 @@ class ChatConversation(Base):
     current_leaf_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Characters attached to this chat (Character.id list, JSON)
     character_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A branch of another chat: the chat and the message it was branched at
+    # (the original may since have been deleted)
+    forked_from_id: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    forked_from_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # What the messages copied into a branch had cost, so the chat's total
+    # can say how much was spent before it branched
+    inherited_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    inherited_credits: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The composer settings last used here (mode, sliders, media options; JSON)
+    settings_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
     messages: Mapped[list["ChatMessage"]] = relationship(
@@ -210,9 +221,24 @@ class ChatConversation(Base):
             "instruction_id": self.instruction_id,
             "current_leaf_id": self.current_leaf_id,
             "character_ids": self.character_ids,
+            "forked_from_id": self.forked_from_id,
+            "forked_from_message_id": self.forked_from_message_id,
+            "pinned": bool(self.pinned),
+            "settings": self.settings,
             "created_at": iso(self.created_at),
             "updated_at": iso(self.updated_at),
         }
+
+    @property
+    def settings(self) -> dict[str, Any] | None:
+        try:
+            return json.loads(self.settings_json) if self.settings_json else None
+        except json.JSONDecodeError:
+            return None
+
+    @settings.setter
+    def settings(self, value: dict[str, Any] | None) -> None:
+        self.settings_json = json.dumps(value) if value else None
 
     @property
     def character_ids(self) -> list[int]:
@@ -398,7 +424,10 @@ class MetadataDB:
     # doesn't, so add them here too (same as the Alembic migration).
     _LATE_COLUMNS = {
         "chat_conversations": {"instruction_id": "INTEGER", "current_leaf_id": "INTEGER",
-                               "character_ids_json": "TEXT"},
+                               "character_ids_json": "TEXT", "forked_from_id": "VARCHAR(50)",
+                               "forked_from_message_id": "INTEGER", "inherited_cost": "FLOAT",
+                               "inherited_credits": "INTEGER", "pinned": "BOOLEAN NOT NULL DEFAULT 0",
+                               "settings_json": "TEXT"},
         "chat_messages": {"parent_id": "INTEGER", "mode": "VARCHAR(10)"},
     }
     # Run once when the column is added: chats from before branching were
@@ -815,12 +844,46 @@ class MetadataDB:
             return conv
 
     def list_conversations(self, limit: int = 200) -> list[ChatConversation]:
+        """Pinned chats first, then the most recently active."""
         with self._session() as session:
             convs = session.query(ChatConversation)\
-                .order_by(ChatConversation.updated_at.desc()).limit(limit).all()
+                .order_by(ChatConversation.pinned.desc(), ChatConversation.updated_at.desc()).limit(limit).all()
             for c in convs:
                 session.expunge(c)
             return convs
+
+    def search_conversations(self, query: str, limit: int = 100) -> list[tuple[ChatConversation, str | None]]:
+        """Chats whose title or any message (on any branch) contains `query`,
+        ignoring case, most recently active first. Each comes with the first
+        matching message's text, or None when only the title matched."""
+        pattern = "%" + re.sub(r"([\\%_])", r"\\\1", query) + "%"
+        with self._session() as session:
+            snippets: dict[str, str] = {}
+            for conv_id, content in session.query(ChatMessage.conversation_id, ChatMessage.content)\
+                    .filter(ChatMessage.content.ilike(pattern, escape="\\")).order_by(ChatMessage.id):
+                snippets.setdefault(conv_id, content)
+            convs = session.query(ChatConversation).filter(
+                ChatConversation.title.ilike(pattern, escape="\\") | ChatConversation.id.in_(list(snippets)),
+            ).order_by(ChatConversation.updated_at.desc()).limit(limit).all()
+            for c in convs:
+                session.expunge(c)
+            return [(c, None if query.lower() in c.title.lower() else snippets.get(c.id)) for c in convs]
+
+    def list_conversation_forks(self, conv_id: str) -> list[ChatConversation]:
+        """Chats branched off this one, oldest first."""
+        with self._session() as session:
+            convs = session.query(ChatConversation).filter(ChatConversation.forked_from_id == conv_id)\
+                .order_by(ChatConversation.created_at).all()
+            for c in convs:
+                session.expunge(c)
+            return convs
+
+    def set_conversation_pinned(self, conv_id: str, pinned: bool) -> None:
+        """Pin or unpin. Not an edit, so the chat keeps its place among the rest."""
+        with self._session() as session:
+            session.query(ChatConversation).filter(ChatConversation.id == conv_id).update(
+                {ChatConversation.pinned: pinned, ChatConversation.updated_at: ChatConversation.updated_at})
+            session.commit()
 
     def update_conversation(self, conv_id: str, **fields) -> ChatConversation | None:
         with self._session() as session:
@@ -1092,6 +1155,22 @@ class MetadataDB:
             if msg:
                 session.expunge(msg)
             return msg
+
+    def get_chat_spend(self, conversation_id: str) -> tuple[float, int]:
+        """What a chat has cost on every branch: dollars (OpenRouter/Venice —
+        a reply's cost includes its media) and Pollo credits (per media item).
+        Media detached into the library still counts; its message is gone."""
+        with self._session() as session:
+            usd, credits = 0.0, 0
+            for cost, media_json in session.query(ChatMessage.cost, ChatMessage.media_json)\
+                    .filter(ChatMessage.conversation_id == conversation_id):
+                usd += cost or 0
+                for item in json.loads(media_json) if media_json else []:
+                    credits += item.get("credits") or 0
+            for lib in session.query(ChatLibraryItem).filter(ChatLibraryItem.conversation_id == conversation_id):
+                usd += lib.item.get("cost") or 0
+                credits += lib.item.get("credits") or 0
+            return round(usd, 6), int(credits)
 
     def get_chat_messages(self, conversation_id: str) -> list[ChatMessage]:
         with self._session() as session:

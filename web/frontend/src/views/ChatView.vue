@@ -11,12 +11,12 @@ import CharacterEditor from '../components/characters/CharacterEditor.vue'
 import { fetchCharacters, chatImageModelTakesCharacters } from '../composables/useCharacters'
 import { importMedia } from '../composables/useMedia'
 import MediaPicker from '../components/media/MediaPicker.vue'
-import { shortModel } from '../utils/format'
+import { shortModel, fmtCost } from '../utils/format'
 import {
   fetchChatStatus, fetchChatModels, fetchConversations, fetchConversation,
   createConversation, deleteConversation, fetchChatMessage,
   cancelChatMessage, uploadChatAttachment, chatMediaUrl, sendChatMessage, retryChatMessage,
-  editChatMessage, switchChatBranch, forkConversation, fetchOpenRouterCredits, fetchVeniceBalance, regenerateChatMedia, pinChatMedia, deleteChatExchange, fetchDeleteInfo, fetchInstructions, patchConversation,
+  editChatMessage, switchChatBranch, forkConversation, fetchConversationSpend, fetchOpenRouterCredits, fetchVeniceBalance, regenerateChatMedia, pinChatMedia, deleteChatExchange, fetchDeleteInfo, fetchInstructions, patchConversation,
 } from '../composables/useChat'
 
 const route = useRoute()
@@ -348,8 +348,105 @@ function onCharacterDeleted(id) {
 
 async function loadConversations() {
   try {
-    conversations.value = (await fetchConversations()).conversations
+    const data = await fetchConversations()
+    conversations.value = data.conversations
+    moreConversations.value = !!data.more
   } catch { /* shown elsewhere via 401 prompt */ }
+}
+
+// ── Chat list: search, pins, date groups ─────────────────────────────
+const moreConversations = ref(false)   // older chats beyond the list's limit
+const search = ref('')
+const searchResults = ref(null)        // null = not searching
+let searchTimer = null
+watch(search, (q) => {
+  clearTimeout(searchTimer)
+  if (!q.trim()) {
+    searchResults.value = null
+    return
+  }
+  searchTimer = setTimeout(async () => {
+    try {
+      const { conversations: found } = await fetchConversations(q.trim())
+      if (search.value === q) searchResults.value = found
+    } catch (e) {
+      showToast(e.message, 'error')
+    }
+  }, 250)
+})
+
+const DAY_MS = 24 * 60 * 60 * 1000
+const conversationGroups = computed(() => {
+  if (searchResults.value) return [{ label: null, items: searchResults.value }]
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const groups = [
+    { label: 'Pinned', items: [] },
+    { label: 'Today', from: today, items: [] },
+    { label: 'Yesterday', from: today - DAY_MS, items: [] },
+    { label: 'Previous 7 days', from: today - 7 * DAY_MS, items: [] },
+    { label: 'Previous 30 days', from: today - 30 * DAY_MS, items: [] },
+    { label: 'Older', from: -Infinity, items: [] },
+  ]
+  for (const c of conversations.value) {
+    const t = Date.parse(c.updated_at) || 0
+    ;(c.pinned ? groups[0] : groups.find(g => g.from !== undefined && t >= g.from)).items.push(c)
+  }
+  return groups.filter(g => g.items.length)
+})
+
+async function togglePin(c) {
+  try {
+    const updated = await patchConversation(c.id, { pinned: !c.pinned })
+    for (const x of [...conversations.value, ...(searchResults.value || [])]) {
+      if (x.id === c.id) x.pinned = updated.pinned
+    }
+    // The server lists pinned chats first; keep the rest in their order
+    conversations.value = [...conversations.value.filter(x => x.pinned), ...conversations.value.filter(x => !x.pinned)]
+  } catch (e) {
+    showToast(`Pin failed: ${e.message}`, 'error')
+  }
+}
+
+// ── Per-chat composer settings and spend ─────────────────────────────
+// Each chat keeps the mode, sliders and media options it last ran with
+function applyChatSettings(st) {
+  if (!st) return
+  if (MODES.some(m => m.id === st.mode)) mode.value = st.mode
+  const mi = MEMORY_STEPS.indexOf(st.history_limit ?? null)
+  if (mi !== -1) memoryIndex.value = mi
+  const ii = IMAGE_STEPS.indexOf(st.image_limit ?? null)
+  if (ii !== -1) imageIndex.value = ii
+  const io = st.image_options || {}
+  Object.assign(imageOpts, { aspect_ratio: io.aspect_ratio || '', resolution: io.resolution || '' })
+  const vo = st.video_options || {}
+  Object.assign(videoOpts, {
+    aspect_ratio: vo.aspect_ratio || '', resolution: vo.resolution || '', duration: vo.duration || '',
+    generate_audio: vo.generate_audio ?? videoOpts.generate_audio,
+  })
+}
+
+const spend = computed(() => conversation.value?.spend)
+const spendLabel = computed(() => {
+  const s = spend.value
+  if (!s) return ''
+  return [s.usd ? fmtCost(s.usd) : '', s.credits ? `${s.credits.toLocaleString()} cr` : ''].filter(Boolean).join(' + ')
+})
+const spendTitle = computed(() => {
+  const s = spend.value
+  if (!s) return ''
+  const inherited = [s.inherited_usd ? fmtCost(s.inherited_usd) : '', s.inherited_credits ? `${s.inherited_credits} credits` : '']
+    .filter(Boolean).join(' + ')
+  return 'Spent on this chat, every branch included (dollars: OpenRouter/Venice; credits: Pollo)'
+    + (inherited ? `. ${inherited} of it was spent before it was branched off another chat.` : '')
+})
+
+async function refreshSpend(id) {
+  if (!id) return
+  try {
+    const data = await fetchConversationSpend(id)
+    if (conversation.value?.id === id) conversation.value.spend = data
+  } catch { /* keeps the last figure */ }
 }
 
 async function loadConversation(id) {
@@ -373,6 +470,7 @@ async function loadConversation(id) {
     if (c.video_model) selected.video = c.video_model
     instructionId.value = c.instruction_id ?? null
     characterIds.value = c.character_ids || []
+    applyChatSettings(c.settings)
     document.title = `${c.title} — Chat`
     scrollToBottom(true)
     ensurePolling()
@@ -424,6 +522,7 @@ async function removeConversation(c) {
   try {
     await deleteConversation(c.id)
     conversations.value = conversations.value.filter(x => x.id !== c.id)
+    if (searchResults.value) searchResults.value = searchResults.value.filter(x => x.id !== c.id)
     if (c.id === convId.value) router.push({ name: 'chat' })
   } catch (e) {
     showToast(`Delete failed: ${e.message}`, 'error')
@@ -640,6 +739,7 @@ async function runTurn(fn, id, body, tempUser) {
     bumpConversation(id)
     ensurePolling()
     refreshBalances()
+    refreshSpend(id)
   }
 }
 
@@ -787,7 +887,10 @@ function replaceMessage(fresh) {
 
 function bumpConversation(id) {
   const i = conversations.value.findIndex(c => c.id === id)
-  if (i > 0) conversations.value.unshift(conversations.value.splice(i, 1)[0])
+  if (i === -1) return
+  const [c] = conversations.value.splice(i, 1)
+  c.updated_at = new Date().toISOString()   // moves it into "Today"
+  conversations.value.unshift(c)
 }
 
 function onKeydown(e) {
@@ -826,7 +929,10 @@ async function pollOnce() {
       finished ||= !hasPending(fresh)
     } catch { /* retry next tick */ }
   }
-  if (finished) refreshBalances()   // a video/image landed — it was billed
+  if (finished) {   // a video/image landed — it was billed
+    refreshBalances()
+    refreshSpend(convId.value)
+  }
 }
 
 // ── Balances (top of the chat): OpenRouter and Venice dollars, Pollo credits ────
@@ -1136,21 +1242,33 @@ onBeforeUnmount(() => {
         <button class="fold" :class="{ folded: isFolded('chats') }" @click="toggleFold('chats')">Chats</button>
         <span v-if="isFolded('chats')" class="heading-value">{{ conversations.length }}</span>
       </div>
+      <div v-show="!isFolded('chats')" class="conv-search">
+        <input v-model="search" type="search" placeholder="Search chats" aria-label="Search chats" />
+      </div>
       <div v-show="!isFolded('chats')" class="conv-list">
-        <div
-          v-for="c in conversations"
-          :key="c.id"
-          class="conv-item"
-          :class="{ active: c.id === convId }"
-          @click="openConversation(c.id)"
-        >
-          <span class="conv-title">{{ c.title }}</span>
-          <span class="conv-actions" @click.stop>
-            <button title="Rename" @click="rename(c)">✎</button>
-            <button title="Delete" @click="removeConversation(c)">🗑</button>
-          </span>
-        </div>
-        <p v-if="!conversations.length" class="conv-empty">No chats yet</p>
+        <template v-for="g in conversationGroups" :key="g.label || 'results'">
+          <div v-if="g.label" class="conv-group">{{ g.label }}</div>
+          <div
+            v-for="c in g.items"
+            :key="c.id"
+            class="conv-item"
+            :class="{ active: c.id === convId }"
+            @click="openConversation(c.id)"
+          >
+            <span class="conv-text">
+              <span class="conv-title"><span v-if="c.forked_from_id" class="conv-fork" title="Branched off another chat">⑂ </span>{{ c.title }}</span>
+              <span v-if="c.snippet" class="conv-snippet">{{ c.snippet }}</span>
+            </span>
+            <span class="conv-actions" @click.stop>
+              <button :class="{ on: c.pinned }" :title="c.pinned ? 'Unpin' : 'Pin to the top'" @click="togglePin(c)">📌</button>
+              <button title="Rename" @click="rename(c)">✎</button>
+              <button title="Delete" @click="removeConversation(c)">🗑</button>
+            </span>
+          </div>
+        </template>
+        <p v-if="searchResults && !searchResults.length" class="conv-empty">No chats match</p>
+        <p v-else-if="!searchResults && !conversations.length" class="conv-empty">No chats yet</p>
+        <p v-if="!searchResults && moreConversations" class="conv-empty">Older chats aren't listed. Search to find them.</p>
       </div>
 
       <div class="side-bottom">
@@ -1174,6 +1292,7 @@ onBeforeUnmount(() => {
       <button class="sidebar-toggle" title="Chats & settings" @click="sidebarOpen = !sidebarOpen">☰</button>
 
       <div class="balances">
+        <span v-if="spendLabel" class="balance spend" :title="spendTitle">This chat <b>{{ spendLabel }}</b></span>
         <span v-if="providers.openrouter" class="balance" title="OpenRouter balance — credits bought minus used (chat text, OpenRouter images/videos)">
           OpenRouter <b>{{ fmtUsd(openrouterBalance) }}</b>
         </span>
@@ -1200,6 +1319,11 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-else ref="messagesEl" class="messages">
+          <div v-if="conversation?.forked_from" class="fork-origin">
+            ⑂ Branched from
+            <a v-if="conversation.forked_from.exists" href="#" @click.prevent="openConversation(conversation.forked_from.id)">{{ conversation.forked_from.title }}</a>
+            <span v-else>a chat that's since been deleted</span>
+          </div>
           <ChatMessage
             v-for="m in messages"
             :key="m.id"
@@ -1208,6 +1332,7 @@ onBeforeUnmount(() => {
             :can-retry="m.id === lastAssistantId && !sending"
             :can-edit="m.role === 'user' && typeof m.id === 'number' && !sending"
             :can-switch="!sending"
+            :can-branch="typeof m.id === 'number' && !sending && m.status !== 'streaming'"
             @retry="retry(m)"
             @edit="content => editMessage(m, content)"
             @resend="resendMessage(m)"
@@ -1218,6 +1343,7 @@ onBeforeUnmount(() => {
             @pin="payload => pinMedia(m, payload)"
             @delete="deleteExchange(m)"
             @fork="forkFrom(m)"
+            @open-chat="openConversation"
             @stop="stop"
             @open-media="openMedia"
           />
@@ -1654,11 +1780,50 @@ onBeforeUnmount(() => {
   color: var(--text);
 }
 
-.conv-title {
+.conv-text {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.conv-title {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.conv-fork {
+  color: var(--accent);
+}
+
+.conv-snippet {
+  font-size: 0.72rem;
+  color: var(--text2);
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conv-group {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text2);
+  opacity: 0.7;
+  padding: 10px 10px 3px;
+}
+
+.conv-search {
+  padding: 2px 12px 6px;
+}
+
+.conv-search input {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  border-radius: 8px;
 }
 
 .conv-actions {
@@ -1682,6 +1847,46 @@ onBeforeUnmount(() => {
 
 .conv-actions button:hover {
   background: var(--border);
+}
+
+.conv-actions button:not(.on):first-child {
+  opacity: 0.5;
+}
+
+/* A pinned chat's pin always shows */
+.conv-item:has(.conv-actions .on) .conv-actions {
+  display: flex;
+}
+
+.conv-item:has(.conv-actions .on) .conv-actions button:not(.on) {
+  display: none;
+}
+
+.conv-item:hover:has(.conv-actions .on) .conv-actions button:not(.on) {
+  display: inline-block;
+}
+
+.fork-origin {
+  align-self: center;
+  font-size: 0.78rem;
+  color: var(--text2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 12px;
+}
+
+.fork-origin a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.fork-origin a:hover {
+  text-decoration: underline;
+}
+
+.balance.spend b {
+  color: #7ed6a5;
 }
 
 .conv-empty {

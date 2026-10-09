@@ -46,6 +46,7 @@ import base64
 import io
 import json
 import mimetypes
+import os
 import queue
 import re
 import shutil
@@ -83,6 +84,13 @@ VIDEO_POLL_INTERVAL = 10
 VIDEO_POLL_TIMEOUT = 45 * 60
 VIDEO_MAX_POLL_ERRORS = 10
 DEFAULT_TITLE = "New chat"
+TITLE_SECONDS = 20                # cap on the title request, which runs alongside the first reply
+TITLE_WAIT_SECONDS = 8            # how long a finished first reply waits for it before using the prompt
+TITLE_PROMPT = """Write a short title, 2 to 6 words, for a chat that starts with the message below. \
+Reply with the title alone: no quotes, no "Title:", no full stop.
+
+Message:
+{prompt}"""
 
 IMAGE_EXTS = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/svg+xml": ".svg"}
 
@@ -183,6 +191,7 @@ class ConversationUpdate(BaseModel):
     video_model: str | None = None
     instruction_id: int | None = None   # explicit null detaches
     character_ids: list[int] | None = None
+    pinned: bool | None = None
 
 
 class InstructionIn(BaseModel):
@@ -230,7 +239,7 @@ class SwitchBranch(BaseModel):
 
 
 class ForkConversation(BaseModel):
-    message_id: int                    # the prompt to branch from: the new chat ends with it and its reply
+    message_id: int                    # a prompt (the new chat ends with it and its reply) or a reply
 
 
 # ── Paths & media helpers ───────────────────────────────────────────
@@ -412,9 +421,33 @@ def api_chat_models(refresh: bool = False):
 
 # ── Routes: conversations ───────────────────────────────────────────
 
+CONVERSATION_LIST_LIMIT = 200
+SNIPPET_CHARS = 120
+
+
 @router.get("/conversations")
-def api_list_conversations():
-    return {"conversations": [c.to_dict() for c in get_db().list_conversations()]}
+def api_list_conversations(q: str = ""):
+    """Pinned chats, then the most recent (`more` = older ones left out).
+    With `q`, chats whose title or messages contain it, each with a snippet
+    of the matching message when the title didn't match."""
+    db = get_db()
+    q = q.strip()
+    if q:
+        return {"conversations": [{**c.to_dict(), "snippet": _snippet(text, q) if text else None}
+                                  for c, text in db.search_conversations(q)], "more": False}
+    convs = db.list_conversations(limit=CONVERSATION_LIST_LIMIT + 1)
+    return {"conversations": [c.to_dict() for c in convs[:CONVERSATION_LIST_LIMIT]],
+            "more": len(convs) > CONVERSATION_LIST_LIMIT}
+
+
+def _snippet(text: str, q: str) -> str:
+    """The part of `text` around the first match of `q`, on one line."""
+    text = " ".join(text.split())
+    i = text.lower().find(q.lower())
+    if i == -1 or len(text) <= SNIPPET_CHARS:
+        return text[:SNIPPET_CHARS]
+    start = max(0, min(i - SNIPPET_CHARS // 3, len(text) - SNIPPET_CHARS))
+    return ("…" if start else "") + text[start:start + SNIPPET_CHARS].strip() + ("…" if start + SNIPPET_CHARS < len(text) else "")
 
 
 @router.post("/conversations")
@@ -471,7 +504,30 @@ def api_delete_instruction(instruction_id: int):
 @router.get("/conversations/{conv_id}")
 def api_get_conversation(conv_id: str):
     conv = _require_conv(conv_id)
-    return {"conversation": conv.to_dict(), "messages": _shown_branch(conv_id)}
+    db = get_db()
+    origin = None
+    if conv.forked_from_id:
+        parent = db.get_conversation(conv.forked_from_id)
+        origin = {"id": conv.forked_from_id, "title": parent.title if parent else None,
+                  "message_id": conv.forked_from_message_id, "exists": parent is not None}
+    forks: dict[int, list[dict]] = {}
+    for f in db.list_conversation_forks(conv_id):
+        forks.setdefault(f.forked_from_message_id, []).append({"id": f.id, "title": f.title})
+    return {"conversation": {**conv.to_dict(), "forked_from": origin, "spend": _spend(conv)},
+            "messages": [{**m, "forks": forks.get(m["id"], [])} for m in _shown_branch(conv_id)]}
+
+
+@router.get("/conversations/{conv_id}/spend")
+def api_conversation_spend(conv_id: str):
+    return _spend(_require_conv(conv_id))
+
+
+def _spend(conv) -> dict:
+    """What the chat cost: `usd` and `credits` in total, of which `inherited_*`
+    came with the messages copied in when it was branched off another chat."""
+    usd, credits = get_db().get_chat_spend(conv.id)
+    return {"usd": usd, "credits": credits,
+            "inherited_usd": conv.inherited_cost or 0, "inherited_credits": conv.inherited_credits or 0}
 
 
 @router.post("/conversations/{conv_id}/branch")
@@ -495,27 +551,31 @@ def api_switch_branch(conv_id: str, data: SwitchBranch):
 
 @router.post("/conversations/{conv_id}/fork")
 def api_fork_conversation(conv_id: str, data: ForkConversation):
-    """Branch a new chat off at a prompt: it gets the messages leading up to
-    that prompt, the prompt and its shown reply — nothing that came after —
-    plus this chat's models, instructions and characters. Media files are
+    """Branch a new chat off at a prompt or reply: it gets the messages
+    leading up to it, it and (for a prompt) its shown reply — nothing that
+    came after — plus this chat's models, instructions, characters and
+    composer settings. It remembers where it came from. Media files are
     linked (or copied) into the new chat and characters made in this chat
     are copied into it, so either chat can be edited or deleted on its own."""
     conv = _require_conv(conv_id)
     _require_idle(conv_id)
     db = get_db()
     messages = db.get_chat_messages(conv_id)
-    prompt = next((m for m in messages if m.id == data.message_id), None)
-    if not prompt or prompt.role != "user":
-        raise HTTPException(400, "Can only branch from a prompt in this conversation")
-    path = _branch_to(messages, prompt.id)
-    replies = [m for m in messages if m.parent_id == prompt.id]
+    at = next((m for m in messages if m.id == data.message_id), None)
+    if not at:
+        raise HTTPException(400, "Message not in this conversation")
+    path = _branch_to(messages, at.id)
+    replies = [m for m in messages if m.parent_id == at.id] if at.role == "user" else []
     if replies:
         shown = {m.id for m in _branch_to(messages, db.get_chat_leaf_id(conv_id))}
         path.append(next((m for m in replies if m.id in shown), replies[-1]))
 
     new = db.create_conversation(
         title=f"{conv.title} (branch)"[:255], text_model=conv.text_model, image_model=conv.image_model,
-        video_model=conv.video_model, instruction_id=conv.instruction_id,
+        video_model=conv.video_model, instruction_id=conv.instruction_id, settings=conv.settings,
+        forked_from_id=conv_id, forked_from_message_id=at.id,
+        inherited_cost=round(sum(m.cost or 0 for m in path), 6) or None,
+        inherited_credits=sum(i.get("credits") or 0 for m in path for i in m.media) or None,
     )
     # This chat's own characters, attached or used by the copied media, get
     # copies owned by the new chat; saved characters are shared as they are
@@ -609,6 +669,11 @@ def api_update_conversation(conv_id: str, data: ConversationUpdate):
         fields["title"] = (fields["title"] or "").strip()[:255] or DEFAULT_TITLE
     if "character_ids" in fields:
         characters.require(fields["character_ids"], get_db())
+    if "pinned" in fields:
+        # Not an edit: the chat keeps its place among the rest
+        get_db().set_conversation_pinned(conv_id, bool(fields.pop("pinned")))
+    if not fields:
+        return get_db().get_conversation(conv_id).to_dict()
     return get_db().update_conversation(conv_id, **fields).to_dict()
 
 
@@ -740,7 +805,7 @@ def api_send_message(conv_id: str, data: SendMessage):
 
     db = get_db()
     user_msg = db.add_chat_message(conv_id, "user", content, media=media, mode=data.mode)
-    _remember_models(conv, data)
+    _remember_settings(conv, data)
     return _start_turn(conv_id, data, user_msg, parent_id=user_msg.id)
 
 
@@ -757,7 +822,7 @@ def api_retry(conv_id: str, data: RetryMessage):
     # The retry runs in the mode selected now; the prompt's mode tag follows it
     if msg.parent_id:
         get_db().update_chat_message(msg.parent_id, mode=data.mode)
-    _remember_models(conv, data)
+    _remember_settings(conv, data)
     return _start_turn(conv_id, data, None, parent_id=msg.parent_id)
 
 
@@ -779,7 +844,7 @@ def api_edit(conv_id: str, data: EditMessage):
     media = [{**item, "id": uuid.uuid4().hex[:8]} for item in msg.media]
     user_msg = db.add_chat_message(conv_id, "user", content, media=media, parent_id=msg.parent_id,
                                    mode=data.mode)
-    _remember_models(conv, data)
+    _remember_settings(conv, data)
     return _start_turn(conv_id, data, user_msg, parent_id=user_msg.id)
 
 
@@ -789,10 +854,17 @@ def _require_idle(conv_id: str) -> None:
         raise HTTPException(409, "Wait for the current reply to finish (or stop it) first")
 
 
-def _remember_models(conv, settings: TurnSettings) -> None:
-    """Persist the model picks on the conversation so reopening it restores them."""
-    fields = {k: getattr(settings, k) for k in ("text_model", "image_model", "video_model")
-              if getattr(settings, k) and getattr(settings, k) != getattr(conv, k)}
+_REMEMBERED_SETTINGS = {"mode", "history_limit", "image_limit", "image_options", "video_options"}
+
+
+def _remember_settings(conv, settings: TurnSettings) -> None:
+    """Persist the model picks and composer settings on the conversation so
+    reopening it restores them."""
+    fields: dict[str, Any] = {k: getattr(settings, k) for k in ("text_model", "image_model", "video_model")
+                              if getattr(settings, k) and getattr(settings, k) != getattr(conv, k)}
+    composer = settings.model_dump(include=_REMEMBERED_SETTINGS)
+    if composer != conv.settings:
+        fields["settings"] = composer
     if fields:
         get_db().update_conversation(conv.id, **fields)
 
@@ -864,6 +936,7 @@ class Turn:
 
     # ― entry point ―
     def run(self) -> None:
+        title_job = self._start_title()
         try:
             if self.s.mode == "image":
                 self._direct_image()
@@ -878,13 +951,13 @@ class Turn:
             status, error = "error", f"{type(e).__name__}: {e}"
         if self.cancel.is_set() and status == "done":
             self.content = self.content.rstrip() + ("\n\n" if self.content else "") + "*(stopped)*"
+        self._finish_title(title_job)
         msg = self.db.update_chat_message(
             self.message_id, content=self.content, status=status, error=error,
             cost=round(self.cost, 6) if self.cost else None,
         )
         if error:
             self.emit({"type": "error", "message": error})
-        self._maybe_title()
         self.emit({"type": "done", "message": _message_out(msg) if msg else None})
 
     # ― explicit modes ―
@@ -1270,18 +1343,74 @@ class Turn:
         return messages + _conversation(self.conv_id, self.history, self.s.history_limit, vision, as_tool_calls,
                                         self.s.image_limit)
 
-    def _maybe_title(self) -> None:
+    # ― title ―
+    def _start_title(self) -> dict | None:
+        """A new chat's first turn asks a text model for a short title while
+        the reply is made (CHAT_TITLE_MODEL, else the chat model)."""
         conv = self.db.get_conversation(self.conv_id)
         if not conv or conv.title != DEFAULT_TITLE:
-            return
+            return None
         first = next((m for m in self.history if m.role == "user" and m.content), None)
         if not first:
+            return None
+        job: dict[str, Any] = {"prompt": first.content, "title": None, "cost": 0.0, "thread": None}
+        model = os.environ.get("CHAT_TITLE_MODEL") or self.s.text_model
+        if model and (venice_chat.is_configured() if venice_chat.is_venice(model) else openrouter.is_configured()):
+            def work():
+                try:
+                    job["title"], job["cost"] = _generate_title(model, first.content)
+                except Exception:  # noqa: BLE001 — no title from the model: the prompt stands in
+                    pass
+            job["thread"] = threading.Thread(target=work, daemon=True, name=f"chat-title-{self.message_id}")
+            job["thread"].start()
+        return job
+
+    def _finish_title(self, job: dict | None) -> None:
+        """Title the chat: the model's title if it came back in time, else the
+        start of the first prompt. Its cost goes on this reply."""
+        if not job:
             return
-        title = " ".join(first.content.split())
-        if len(title) > 60:
-            title = title[:57].rsplit(" ", 1)[0] + "…"
+        title = None
+        if job["thread"]:
+            job["thread"].join(timeout=TITLE_WAIT_SECONDS)
+            if not job["thread"].is_alive():
+                title = job["title"]
+                self.cost += job["cost"] or 0
+        if not title:
+            title = " ".join(job["prompt"].split())
+            if len(title) > 60:
+                title = title[:57].rsplit(" ", 1)[0] + "…"
+        conv = self.db.get_conversation(self.conv_id)
+        if not conv or conv.title != DEFAULT_TITLE:   # renamed meanwhile
+            return
         self.db.update_conversation(self.conv_id, title=title)
         self.emit({"type": "title", "title": title})
+
+
+def _generate_title(model: str, prompt: str) -> tuple[str | None, float]:
+    """(a short title for a chat starting with `prompt`, its cost in USD)."""
+    stream_chat = venice_chat.stream_chat if venice_chat.is_venice(model) else openrouter.stream_chat
+    text, cost = "", 0.0
+    for chunk in stream_chat(model, [{"role": "user", "content": TITLE_PROMPT.format(prompt=prompt[:2000])}],
+                             max_seconds=TITLE_SECONDS):
+        usage = chunk.get("usage")
+        if usage and usage.get("cost"):
+            cost += float(usage["cost"])
+        for choice in chunk.get("choices") or []:
+            text += (choice.get("delta") or {}).get("content") or ""
+    return _clean_title(text), cost
+
+
+def _clean_title(text: str) -> str | None:
+    """The model's reply as a title: its first line, without a "Title:" label,
+    quotes, markdown or a full stop. None if nothing usable is left."""
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)   # reasoning models
+    line = next((l.strip() for l in text.splitlines() if l.strip()), "")
+    line = re.sub(r"^(?:\*\*)?title(?:\*\*)?\s*:\s*", "", line, flags=re.IGNORECASE)
+    line = line.strip(" \t\"'`*#_“”‘’").rstrip(".").strip()
+    if not line or len(line) > 80:
+        return None
+    return line
 
 
 def _with_character_arg(tool: dict, names: list[str]) -> dict:

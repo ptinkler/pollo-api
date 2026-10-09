@@ -157,6 +157,28 @@ describe('ChatMessage branch to a new chat', () => {
   })
 })
 
+describe('ChatMessage branches', () => {
+  it('offers Branch on replies too', async () => {
+    const w = mount(ChatMessage, { props: { convId: 'c1', canBranch: true, message: {
+      id: 9, role: 'assistant', content: 'Meow', status: 'done', media: [] } } })
+    await w.find('button[title^="Start a new chat from here: everything up to this reply"]').trigger('click')
+    expect(w.emitted('fork')).toHaveLength(1)
+  })
+
+  it('lists the chats branched off a message and opens one', async () => {
+    const forks = [{ id: 'b1', title: 'Fox (branch)' }, { id: 'b2', title: 'Other' }]
+    const w = mount(ChatMessage, { props: { convId: 'c1', message: {
+      id: 7, role: 'user', content: 'draw a fox', status: 'done', media: [], forks } } })
+    expect(w.find('.fork-toggle').text()).toBe('⑂ 2 branches')
+    await w.find('.fork-toggle').trigger('click')
+    const items = w.findAll('.fork-item')
+    expect(items.map(i => i.text())).toEqual(['Fox (branch)', 'Other'])
+    await items[1].trigger('click')
+    expect(w.emitted('open-chat')).toEqual([['b2']])
+    expect(w.find('.fork-menu').exists()).toBe(false)
+  })
+})
+
 describe('ChatMessage refs sent', () => {
   it('says when a model took fewer reference images than were picked', () => {
     const item = { ...image, params: { refs: ['a.png', 'b.png', 'c.png'], refs_used: 1 } }
