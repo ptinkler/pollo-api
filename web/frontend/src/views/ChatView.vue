@@ -16,7 +16,7 @@ import {
   fetchChatStatus, fetchChatModels, fetchConversations, fetchConversation,
   createConversation, deleteConversation, fetchChatMessage,
   cancelChatMessage, uploadChatAttachment, chatMediaUrl, sendChatMessage, retryChatMessage,
-  editChatMessage, switchChatBranch, fetchOpenRouterCredits, regenerateChatMedia, pinChatMedia, deleteChatExchange, fetchDeleteInfo, fetchInstructions, patchConversation,
+  editChatMessage, switchChatBranch, fetchOpenRouterCredits, fetchVeniceBalance, regenerateChatMedia, pinChatMedia, deleteChatExchange, fetchDeleteInfo, fetchInstructions, patchConversation,
 } from '../composables/useChat'
 
 const route = useRoute()
@@ -82,6 +82,7 @@ watch([() => ({ ...selected }), mode, memoryIndex, imageIndex, () => ({ ...image
 
 // ── Server state ─────────────────────────────────────────────────────
 const configured = ref(true)
+const providers = reactive({ openrouter: true, venice: false })   // which API keys the server has
 const models = reactive({ text: [], image: [], video: [] })
 provide('chatModels', models)   // for "Try another model" on failed media
 const modelsLoading = ref(true)
@@ -795,16 +796,23 @@ async function pollOnce() {
   if (finished) refreshBalances()   // a video/image landed — it was billed
 }
 
-// ── Balances (top of the chat): OpenRouter dollars, Pollo credits ────
+// ── Balances (top of the chat): OpenRouter and Venice dollars, Pollo credits ────
 const { creditsRemaining: polloCredits, refreshBalance: refreshPolloBalance } = useSessionCredits()
 const openrouterBalance = ref(null)
+const veniceBalance = ref(null)
 
 async function refreshBalances() {
   refreshPolloBalance(true)
-  if (!configured.value) return
-  try {
-    openrouterBalance.value = (await fetchOpenRouterCredits()).remaining
-  } catch { /* shown as — */ }
+  if (providers.openrouter) {
+    try {
+      openrouterBalance.value = (await fetchOpenRouterCredits()).remaining
+    } catch { /* shown as — */ }
+  }
+  if (providers.venice) {
+    try {
+      veniceBalance.value = (await fetchVeniceBalance()).usd
+    } catch { /* shown as — */ }
+  }
 }
 
 const fmtUsd = (v) => (v == null ? '—' : `$${v.toFixed(2)}`)
@@ -879,7 +887,10 @@ onMounted(async () => {
   window.addEventListener('keydown', onGlobalKey)
   document.addEventListener('visibilitychange', onVisibilityChange)
   try {
-    configured.value = (await fetchChatStatus()).configured
+    const status = await fetchChatStatus()
+    configured.value = status.configured
+    providers.openrouter = status.openrouter ?? status.configured
+    providers.venice = !!status.venice
   } catch { /* 401 handled by auth prompt */ }
   loadConversations()
   loadInstructions()
@@ -1058,7 +1069,7 @@ onBeforeUnmount(() => {
 
         <p v-if="modeWarning" class="side-warn">{{ modeWarning }}</p>
         <p v-if="!configured" class="side-warn">
-          OpenRouter isn't configured. Add <code>OPENROUTER_API_KEY</code> to the server's <code>.env</code> and restart.
+          No chat provider is configured. Add <code>OPENROUTER_API_KEY</code> and/or <code>VENICE_API_KEY</code> to the server's <code>.env</code> and restart.
         </p>
       </div>
 
@@ -1103,8 +1114,11 @@ onBeforeUnmount(() => {
       <button class="sidebar-toggle" title="Chats & settings" @click="sidebarOpen = !sidebarOpen">☰</button>
 
       <div class="balances">
-        <span class="balance" title="OpenRouter balance — credits bought minus used (chat text, OpenRouter images/videos)">
+        <span v-if="providers.openrouter" class="balance" title="OpenRouter balance — credits bought minus used (chat text, OpenRouter images/videos)">
           OpenRouter <b>{{ fmtUsd(openrouterBalance) }}</b>
+        </span>
+        <span v-if="providers.venice" class="balance venice" title="Venice balance in USD (Venice text, images and videos)">
+          Venice <b>{{ fmtUsd(veniceBalance) }}</b>
         </span>
         <RouterLink to="/usage" class="balance pollo" title="Pollo credits remaining (Pollo images/videos) — open Usage">
           Pollo <b>{{ fmtCredits(polloCredits) }}</b>
@@ -1629,6 +1643,10 @@ onBeforeUnmount(() => {
   color: var(--text);
   font-family: 'SF Mono', 'Fira Code', monospace;
   font-weight: 600;
+}
+
+.balance.venice b {
+  color: #e8a33d;
 }
 
 .balance.pollo b {

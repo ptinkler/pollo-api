@@ -1,0 +1,537 @@
+"""
+Venice (https://venice.ai) text, image and video models for chat mode.
+
+Listed in the chat's catalogues as "venice/<model id>" and billed to the
+Venice account (VENICE_API_KEY), alongside OpenRouter's and Pollo's models.
+
+  • text   — POST /chat/completions (OpenAI-compatible, streamed; tools on
+             models that support function calling)
+  • image  — POST /image/generate, or /image/multi-edit when reference images
+             are sent. Venice splits these into separate models
+             ("seedream-v5-pro" / "seedream-v5-pro-edit"); one catalogue entry
+             covers both and the right one is picked per request.
+  • video  — POST /video/queue, then /video/retrieve until the MP4 comes back.
+             Text-to-video and image-to-video are separate models too
+             ("…-text-to-video…" / "…-image-to-video…"), paired the same way.
+
+Safe mode is always off (Venice blurs adult content otherwise), and Venice's
+own system prompt is never added to chats.
+
+Video job ids are "venice:<model>:<queue_id>" — retrieve needs the model.
+"""
+import base64
+import json
+import mimetypes
+import os
+import shutil
+import tempfile
+import threading
+import time
+from pathlib import Path
+from typing import Any, Callable, Iterator
+
+import httpx
+
+from .openrouter import CHAT_TIMEOUT, IMAGE_TIMEOUT, OpenRouterError, _keepalive_socket_options
+
+VENICE_BASE = os.getenv("VENICE_BASE_URL", "https://api.venice.ai/api/v1").rstrip("/")
+PREFIX = "venice/"
+JOB_PREFIX = "venice:"
+CATALOGUE_TTL = 30 * 60
+DEFAULT_TIMEOUT = httpx.Timeout(30)
+# Video variants that need inputs chat doesn't provide (reference clips,
+# end frames, camera paths…) — only plain text/image-to-video is offered
+_SKIP_VIDEO = ("reference-to-video", "video-to-video", "transition", "first-last-frame", "multi-angle",
+               "motion-control", "recast", "upscale")
+
+_client = httpx.Client(transport=httpx.HTTPTransport(socket_options=_keepalive_socket_options()))
+_catalogue: dict[str, Any] = {"at": 0.0, "data": None}
+_catalogue_lock = threading.Lock()
+_balance: dict[str, Any] = {"usd": None}          # from the x-venice-balance-usd header on each call
+_video_quotes: dict[str, float] = {}              # job id → quoted USD, recorded as its cost when done
+_download_urls: dict[str, str] = {}               # job id → download link (private models)
+_VIDEO_DIR = Path(tempfile.gettempdir()) / "venice-videos"   # finished videos between retrieve and download
+
+
+class VeniceError(OpenRouterError):
+    """A Venice failure. Subclasses OpenRouterError so chat handles it the same way."""
+
+
+def get_api_key() -> str:
+    return os.getenv("VENICE_API_KEY", "").strip()
+
+
+def is_configured() -> bool:
+    return bool(get_api_key())
+
+
+def is_venice(model_id: str | None) -> bool:
+    return bool(model_id and model_id.startswith(PREFIX))
+
+
+def is_venice_job(job_id: str | None) -> bool:
+    return bool(job_id and job_id.startswith(JOB_PREFIX))
+
+
+def _headers() -> dict[str, str]:
+    key = get_api_key()
+    if not key:
+        raise VeniceError("VENICE_API_KEY is not set on the server", 503)
+    return {"Authorization": f"Bearer {key}"}
+
+
+def _note_balance(resp: httpx.Response) -> None:
+    value = resp.headers.get("x-venice-balance-usd")
+    if value:
+        try:
+            _balance["usd"] = float(value)
+        except ValueError:
+            pass
+
+
+def _raise_for_response(resp: httpx.Response) -> None:
+    _note_balance(resp)
+    if resp.status_code < 400:
+        return
+    try:
+        body = resp.json()
+        err = body.get("error") or body.get("message") or body
+        message = err.get("message") if isinstance(err, dict) else str(err)
+        details = body.get("details") if isinstance(body, dict) else None
+        if details and isinstance(details, (dict, list)):
+            message = f"{message}: {json.dumps(details)[:300]}"
+    except (ValueError, AttributeError):
+        message = resp.text[:500]
+    raise VeniceError(f"Venice: {message or f'HTTP {resp.status_code}'}", resp.status_code)
+
+
+def _request(method: str, path: str, *, timeout=DEFAULT_TIMEOUT, waiting_for: str = "response", **kw) -> httpx.Response:
+    start = time.monotonic()
+    try:
+        resp = _client.request(method, f"{VENICE_BASE}{path}", headers=_headers(), timeout=timeout, **kw)
+    except (httpx.RemoteProtocolError, httpx.ReadError, httpx.WriteError, httpx.ConnectError) as e:
+        raise VeniceError(f"The connection to Venice dropped after {round(time.monotonic() - start)}s waiting "
+                          f"for the {waiting_for} ({type(e).__name__}). It may still have been billed.") from e
+    except httpx.TimeoutException as e:
+        raise VeniceError(f"Venice didn't answer in time ({type(e).__name__})", 504) from e
+    _raise_for_response(resp)
+    return resp
+
+
+def _data_url(path: Path) -> str:
+    media_type = mimetypes.guess_type(path.name)[0] or "image/png"
+    return f"data:{media_type};base64,{base64.b64encode(path.read_bytes()).decode()}"
+
+
+# ── Catalogue ───────────────────────────────────────────────────────
+
+def _fetch_models(kind: str) -> list[dict]:
+    return [m for m in _request("GET", "/models", params={"type": kind}).json().get("data", [])
+            if not (m.get("model_spec") or {}).get("offline")]
+
+
+def _usd(price) -> float | None:
+    if isinstance(price, dict):
+        price = price.get("usd")
+    try:
+        return float(price) if price is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _seconds(values) -> list[int]:
+    out = []
+    for v in values or []:
+        try:
+            out.append(int(str(v).lower().rstrip("s")))
+        except ValueError:
+            pass   # "auto", "1 gen" — not a length chat can ask for
+    return sorted(set(out))
+
+
+def _uncensored(*models: dict | None) -> bool | None:
+    """Venice's own "uncensored" flag on a model (on any of a pair)."""
+    return any((m.get("model_spec") or {}).get("uncensored") for m in models if m) or None
+
+
+def _edit_model_for(image_id: str, edit_ids: set[str]) -> str | None:
+    """Venice's edit twin of an image model: "x" → "x-edit", or with "-image"
+    dropped ("grok-imagine-image-quality" → "grok-imagine-quality-edit")."""
+    for candidate in (f"{image_id}-edit", image_id.replace("-image", "", 1) + "-edit"):
+        if candidate in edit_ids:
+            return candidate
+    return None
+
+
+def _build_catalogue() -> dict[str, Any]:
+    text = []
+    for m in _fetch_models("text"):
+        spec = m.get("model_spec") or {}
+        caps = spec.get("capabilities") or {}
+        pricing = spec.get("pricing") or {}
+        prompt_price, completion_price = _usd(pricing.get("input")), _usd(pricing.get("output"))
+        text.append({
+            "id": PREFIX + m["id"],
+            "name": f"Venice: {spec.get('name') or m['id']}",
+            "context_length": spec.get("availableContextTokens") or m.get("context_length"),
+            "input_modalities": ["text", "image"] if caps.get("supportsVision") else ["text"],
+            "supports_tools": bool(caps.get("supportsFunctionCalling")),
+            "uncensored": _uncensored(m),
+            # Venice prices per million tokens; the picker expects per token
+            "prompt_price": prompt_price / 1e6 if prompt_price is not None else None,
+            "completion_price": completion_price / 1e6 if completion_price is not None else None,
+            "created": m.get("created"),
+        })
+
+    edits = {m["id"]: m for m in _fetch_models("inpaint")}
+    image, paired = [], set()
+    for m in _fetch_models("image"):
+        spec = m.get("model_spec") or {}
+        c = spec.get("constraints") or {}
+        edit_id = _edit_model_for(m["id"], set(edits))
+        if edit_id:
+            paired.add(edit_id)
+        image.append({
+            "id": PREFIX + m["id"],
+            "name": f"Venice: {spec.get('name') or m['id']}",
+            "input_modalities": ["text", "image"] if edit_id else ["text"],
+            "uncensored": _uncensored(m, edits.get(edit_id)),
+            "aspect_ratios": c.get("aspectRatios"),
+            "resolutions": c.get("resolutions"),
+            "created": m.get("created"),
+            "conversational": False,
+            "_generate": m["id"], "_edit": edit_id,
+            "_max_refs": ((edits[edit_id].get("model_spec") or {}).get("constraints") or {}).get("maxInputImages")
+            if edit_id else None,
+            "_price": _usd((spec.get("pricing") or {}).get("generation")),
+            "_edit_price": _usd(((edits[edit_id].get("model_spec") or {}).get("pricing") or {}).get("inpaint"))
+            if edit_id else None,
+        })
+    # Edit models with no text-to-image twin: they only work on a reference image
+    for edit_id, m in edits.items():
+        if edit_id in paired:
+            continue
+        spec = m.get("model_spec") or {}
+        c = spec.get("constraints") or {}
+        image.append({
+            "id": PREFIX + edit_id,
+            "name": f"Venice: {spec.get('name') or edit_id} (edit only)",
+            "input_modalities": ["text", "image"],
+            "uncensored": _uncensored(m),
+            "aspect_ratios": c.get("aspectRatios"),
+            "resolutions": c.get("resolutions"),
+            "created": m.get("created"),
+            "conversational": False,
+            "_generate": None, "_edit": edit_id, "_max_refs": c.get("maxInputImages"),
+            "_price": None, "_edit_price": _usd((spec.get("pricing") or {}).get("inpaint")),
+        })
+
+    # Pair "…-text-to-video…" with "…-image-to-video…" under one entry
+    groups: dict[str, dict[str, dict]] = {}
+    for m in _fetch_models("video"):
+        spec = m.get("model_spec") or {}
+        mtype = (spec.get("constraints") or {}).get("model_type")
+        if mtype not in ("text-to-video", "image-to-video") or any(s in m["id"] for s in _SKIP_VIDEO):
+            continue
+        key = m["id"].replace("text-to-video", "*").replace("image-to-video", "*")
+        groups.setdefault(key, {})[mtype] = m
+    video = []
+    for pair in groups.values():
+        t2v, i2v = pair.get("text-to-video"), pair.get("image-to-video")
+        main = t2v or i2v
+        spec = main.get("model_spec") or {}
+        c = spec.get("constraints") or {}
+        video.append({
+            "id": PREFIX + main["id"],
+            "name": f"Venice: {spec.get('name') or main['id']}" + ("" if t2v else " (image→video only)"),
+            "durations": _seconds(c.get("durations")) or None,
+            "resolutions": c.get("resolutions") or None,
+            "aspect_ratios": c.get("aspect_ratios") or None,
+            "frame_images": ["first_frame"] if i2v else [],
+            "uncensored": _uncensored(t2v, i2v),
+            "generate_audio": bool(c.get("audio_configurable")),
+            "created": main.get("created"),
+            "_text": t2v and t2v["id"], "_image": i2v and i2v["id"],
+            "_constraints": {k: (v.get("model_spec") or {}).get("constraints") or {}
+                             for k, v in (("text", t2v), ("image", i2v)) if v},
+        })
+    return {"text": text, "image": image, "video": video}
+
+
+def _get_catalogue(refresh: bool = False) -> dict[str, Any]:
+    with _catalogue_lock:
+        if refresh or not _catalogue["data"] or time.time() - _catalogue["at"] > CATALOGUE_TTL:
+            _catalogue.update(at=time.time(), data=_build_catalogue())
+        return _catalogue["data"]
+
+
+def _public(models: list[dict]) -> list[dict]:
+    return [{k: v for k, v in m.items() if not k.startswith("_")} for m in models]
+
+
+def list_models(kind: str, refresh: bool = False) -> list[dict[str, Any]]:
+    """Venice's models of one kind (text | image | video), shaped like openrouter.list_*_models()."""
+    if not is_configured():
+        return []
+    return _public(_get_catalogue(refresh)[kind])
+
+
+def _entry(kind: str, model_id: str) -> dict:
+    entry = next((m for m in _get_catalogue()[kind] if m["id"] == model_id), None)
+    if not entry:
+        raise VeniceError(f"Unknown Venice {kind} model: {model_id[len(PREFIX):]}")
+    return entry
+
+
+def get_balance() -> float | None:
+    """The account's USD balance: the billing endpoint if this key may read
+    it, else the balance Venice reported on the latest call."""
+    try:
+        data = _request("GET", "/billing/balance").json()
+        usd = (data.get("balances") or {}).get("usd")
+        if usd is not None:
+            _balance["usd"] = float(usd)
+    except VeniceError:
+        if _balance["usd"] is None:
+            try:
+                _request("GET", "/api_keys/rate_limits")   # every response carries the balance header
+            except VeniceError:
+                pass
+    return _balance["usd"]
+
+
+# ── Text ────────────────────────────────────────────────────────────
+
+def stream_chat(model_id: str, messages: list[dict], tools: list[dict] | None = None,
+                session_id: str | None = None, max_seconds: float | None = None,
+                should_stop: Callable[[], bool] | None = None) -> Iterator[dict]:
+    """Like openrouter.stream_chat: yields chat.completion.chunk dicts, with
+    usage.cost in USD (from Venice's cost, or tokens × the model's prices)."""
+    model = model_id[len(PREFIX):]
+    deadline = time.monotonic() + max_seconds if max_seconds else None
+    body: dict[str, Any] = {
+        "model": model, "messages": messages, "stream": True,
+        "stream_options": {"include_usage": True},
+        "venice_parameters": {"include_venice_system_prompt": False},
+    }
+    if tools:
+        body["tools"] = tools
+    start = time.monotonic()
+    try:
+        with _client.stream("POST", f"{VENICE_BASE}/chat/completions", headers=_headers(), json=body,
+                            timeout=CHAT_TIMEOUT) as resp:
+            if resp.status_code >= 400:
+                resp.read()
+            _raise_for_response(resp)
+            for line in resp.iter_lines():
+                if should_stop and should_stop():
+                    return
+                if deadline and time.monotonic() > deadline:
+                    raise VeniceError(f"The model didn't finish within {int(max_seconds)}s", 504)
+                if not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if payload == "[DONE]":
+                    return
+                try:
+                    chunk = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+                if chunk.get("error"):
+                    err = chunk["error"]
+                    raise VeniceError(f"Venice: {err.get('message') if isinstance(err, dict) else err}")
+                usage = chunk.get("usage")
+                if usage:
+                    chunk["usage"] = {**usage, "cost": _chat_cost(model_id, usage, chunk.get("cost"))}
+                yield chunk
+    except (httpx.RemoteProtocolError, httpx.ReadError, httpx.WriteError) as e:
+        raise VeniceError(f"The connection to Venice dropped after {round(time.monotonic() - start)}s "
+                          f"({type(e).__name__})") from e
+
+
+def _chat_cost(model_id: str, usage: dict, top_level_cost=None) -> float | None:
+    cost = _usd(usage.get("cost")) if usage.get("cost") is not None else _usd(top_level_cost)
+    if cost is not None:
+        return cost
+    try:
+        info = _entry("text", model_id)
+    except VeniceError:
+        return None
+    if info.get("prompt_price") is None or info.get("completion_price") is None:
+        return None
+    return round((usage.get("prompt_tokens") or 0) * info["prompt_price"]
+                 + (usage.get("completion_tokens") or 0) * info["completion_price"], 6)
+
+
+# ── Image ───────────────────────────────────────────────────────────
+
+def generate_image(model_id: str, prompt: str, aspect_ratio: str | None = None, resolution: str | None = None,
+                   ref_paths: list[Path] | None = None) -> tuple[list[tuple[bytes, str]], float | None, dict]:
+    """Returns ([(bytes, media type)], cost in USD (from the catalogue's price),
+    the settings actually sent). With reference images it runs the model's
+    edit twin; without, the text-to-image model."""
+    info = _entry("image", model_id)
+    if aspect_ratio and info.get("aspect_ratios") and aspect_ratio not in info["aspect_ratios"]:
+        aspect_ratio = None
+    if resolution and info.get("resolutions") and resolution not in info["resolutions"]:
+        resolution = None
+    refs = [p for p in ref_paths or [] if p.is_file()]
+    sent: dict[str, Any] = {"aspect_ratio": aspect_ratio, "resolution": resolution}
+
+    if refs and info["_edit"]:
+        refs = refs[:info.get("_max_refs") or 1]
+        body: dict[str, Any] = {"modelId": info["_edit"], "prompt": prompt, "safe_mode": False,
+                                "images": [_data_url(p) for p in refs]}
+        if aspect_ratio:
+            body["aspect_ratio"] = aspect_ratio
+        if resolution:
+            body["resolution"] = resolution
+        resp = _request("POST", "/image/multi-edit", json=body, timeout=IMAGE_TIMEOUT, waiting_for="image")
+        media_type = (resp.headers.get("content-type") or "image/png").split(";")[0].strip()
+        if not media_type.startswith("image/"):
+            raise VeniceError("Venice returned no image")
+        return [(resp.content, media_type)], info.get("_edit_price"), {**sent, "refs_used": len(refs)}
+
+    if not info["_generate"]:
+        raise VeniceError("This Venice model only edits images: attach, pin or reference an image first")
+    body = {"model": info["_generate"], "prompt": prompt, "safe_mode": False, "hide_watermark": True,
+            "format": "png"}
+    if aspect_ratio:
+        body["aspect_ratio"] = aspect_ratio
+    if resolution:
+        body["resolution"] = resolution
+    data = _request("POST", "/image/generate", json=body, timeout=IMAGE_TIMEOUT, waiting_for="image").json()
+    images = [(base64.b64decode(b64), "image/png") for b64 in data.get("images") or [] if b64]
+    if not images:
+        raise VeniceError("Venice returned no image")
+    return images, info.get("_price"), sent
+
+
+# ── Video ───────────────────────────────────────────────────────────
+
+def _snap(value, allowed: list):
+    """value if allowed (or nothing is known), else None."""
+    return value if value and (not allowed or value in allowed) else None
+
+
+def submit_video(model_id: str, prompt: str, duration: int | None = None, aspect_ratio: str | None = None,
+                 resolution: str | None = None, generate_audio: bool | None = None,
+                 first_frame: Path | None = None) -> dict:
+    """Queue a video. Returns {"id": "venice:<model>:<queue_id>", "params":
+    the settings actually sent}, like openrouter.submit_video."""
+    info = _entry("video", model_id)
+    kind = "image" if first_frame else "text"
+    model = info["_image"] if first_frame else info["_text"]
+    if not model:
+        raise VeniceError("This Venice model needs an image to animate" if not first_frame
+                          else "This Venice model can't animate an image — pick an image→video model")
+    c = info["_constraints"][kind]
+    durations = _seconds(c.get("durations"))
+    if durations and (not duration or duration not in durations):
+        target = duration or 5
+        duration = min(durations, key=lambda d: (abs(d - target), d))
+    aspect_ratio = _snap(aspect_ratio, c.get("aspect_ratios") or [])
+    if first_frame and not c.get("aspect_ratios"):
+        aspect_ratio = None   # the image sets the shape
+    resolution = _snap(resolution, c.get("resolutions") or [])
+
+    body: dict[str, Any] = {"model": model, "prompt": prompt, "duration": f"{duration}s" if duration else "auto"}
+    if aspect_ratio:
+        body["aspect_ratio"] = aspect_ratio
+    if resolution:
+        body["resolution"] = resolution
+    if c.get("audio_configurable") and generate_audio is not None:
+        body["audio"] = bool(generate_audio)
+    if first_frame:
+        body["image_url"] = _data_url(first_frame)
+
+    quote = None
+    try:
+        quote_body = {k: v for k, v in body.items() if k in ("model", "duration", "aspect_ratio", "resolution", "audio")}
+        quote = _usd(_request("POST", "/video/quote", json=quote_body).json().get("quote"))
+    except VeniceError:
+        pass   # the price is nice to show, not needed to generate
+    data = _request("POST", "/video/queue", json=body, timeout=IMAGE_TIMEOUT, waiting_for="video job to start").json()
+    if not data.get("queue_id"):
+        raise VeniceError("Venice didn't return a job id")
+    job_id = f"{JOB_PREFIX}{model}:{data['queue_id']}"
+    if data.get("download_url"):
+        _download_urls[job_id] = data["download_url"]
+    if quote is not None:
+        _video_quotes[job_id] = quote
+    audio = body.get("audio", bool(c.get("audio")) or None)
+    return {"id": job_id, "params": {"duration": duration, "aspect_ratio": aspect_ratio,
+                                     "resolution": resolution, "generate_audio": audio}}
+
+
+def _split_job(job_id: str) -> tuple[str, str]:
+    model, _, queue_id = job_id[len(JOB_PREFIX):].rpartition(":")
+    return model, queue_id
+
+
+def _video_file(job_id: str) -> Path:
+    return _VIDEO_DIR / f"{_split_job(job_id)[1]}.mp4"
+
+
+def get_video(job_id: str) -> dict:
+    """The job in openrouter.get_video's shape (status completed | failed |
+    in_progress, "error", "usage"). Venice hands the finished MP4 straight
+    back from retrieve, so it's kept until download_video collects it.
+    Network trouble and 5xx raise, for the poller's error budget."""
+    if _video_file(job_id).is_file():
+        return {"status": "completed", "usage": {"cost": _video_quotes.get(job_id)}}
+    model, queue_id = _split_job(job_id)
+    start = time.monotonic()
+    try:
+        with _client.stream("POST", f"{VENICE_BASE}/video/retrieve", headers=_headers(),
+                            json={"model": model, "queue_id": queue_id}, timeout=IMAGE_TIMEOUT) as resp:
+            if resp.status_code >= 500 or resp.status_code == 429:
+                resp.read()
+                raise VeniceError(f"Venice: HTTP {resp.status_code} while checking the video")
+            if resp.status_code >= 400:
+                resp.read()
+                try:
+                    _raise_for_response(resp)
+                except VeniceError as e:
+                    return {"status": "failed", "error": str(e)}
+            if (resp.headers.get("content-type") or "").startswith("video/"):
+                _VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+                part = _video_file(job_id).with_suffix(".part")
+                with open(part, "wb") as f:
+                    for chunk in resp.iter_bytes():
+                        f.write(chunk)
+                part.replace(_video_file(job_id))
+                return {"status": "completed", "usage": {"cost": _video_quotes.get(job_id)}}
+            resp.read()
+            _note_balance(resp)
+            data = resp.json()
+    except (httpx.RemoteProtocolError, httpx.ReadError, httpx.WriteError, httpx.ConnectError) as e:
+        raise VeniceError(f"Venice connection dropped after {round(time.monotonic() - start)}s "
+                          f"({type(e).__name__})") from e
+    status = str(data.get("status") or "").upper()
+    if status in ("FAILED", "ERROR", "CANCELLED"):
+        return {"status": "failed", "error": f"Venice: {data.get('error') or data.get('message') or 'video failed'}"}
+    if status == "COMPLETED" and job_id in _download_urls:
+        return {"status": "completed", "usage": {"cost": _video_quotes.get(job_id)}}
+    return {"status": "in_progress"}
+
+
+def download_video(job_id: str, dest: Path, index: int = 0) -> None:
+    src = _video_file(job_id)
+    if not src.is_file():
+        url = _download_urls.get(job_id)
+        if url:   # private models hand back a short-lived download link instead
+            tmp = dest.with_suffix(dest.suffix + ".part")
+            with _client.stream("GET", url, timeout=IMAGE_TIMEOUT, follow_redirects=True) as resp:
+                if resp.status_code >= 400:
+                    resp.read()
+                    raise VeniceError(f"Couldn't download the Venice video (HTTP {resp.status_code})")
+                with open(tmp, "wb") as f:
+                    for chunk in resp.iter_bytes():
+                        f.write(chunk)
+            tmp.replace(dest)
+            return
+        if get_video(job_id)["status"] != "completed" or not src.is_file():
+            raise VeniceError("The Venice video isn't ready")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(src, dest)   # the temp dir may be on another filesystem

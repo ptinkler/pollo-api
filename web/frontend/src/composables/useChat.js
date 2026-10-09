@@ -7,6 +7,7 @@ const enc = encodeURIComponent
 export const fetchChatStatus = () => apiGet('/api/chat/status')
 export const fetchChatModels = (refresh = false) => apiGet(`/api/chat/models${refresh ? '?refresh=true' : ''}`)
 export const fetchOpenRouterCredits = () => apiGet('/api/chat/credits')
+export const fetchVeniceBalance = () => apiGet('/api/chat/venice-balance')
 export const fetchConversations = () => apiGet('/api/chat/conversations')
 export const fetchConversation = (id) => apiGet(`/api/chat/conversations/${enc(id)}`)
 export const createConversation = (data = {}) => apiPost('/api/chat/conversations', data)

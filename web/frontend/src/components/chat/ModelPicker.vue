@@ -34,16 +34,22 @@ const hiddenCount = computed(() => props.models.filter(m => m.hidden).length)
 const visibleModels = computed(() =>
   showHidden.value ? props.models : props.models.filter(m => !m.hidden || m.id === props.modelValue))
 
-// ── Provider tabs: Pollo models ("pollo/…", billed in Pollo credits) vs
-// OpenRouter ones. Only shown when the catalogue has both.
-const PROVIDERS = {
+// ── Provider tabs: Pollo ("pollo/…", billed in Pollo credits), Venice
+// ("venice/…", billed to the Venice account) and OpenRouter. Only shown when
+// the catalogue has more than one; each tab only when it has models.
+const ALL_PROVIDERS = {
   pollo: { label: 'Pollo', title: 'Runs on your Pollo account (billed in Pollo credits)' },
+  venice: { label: 'Venice', title: 'Runs on your Venice account (billed in Venice credit)' },
   openrouter: { label: 'OpenRouter', title: 'Runs on OpenRouter (billed in OpenRouter credits)' },
 }
-const providerOf = (id) => (id || '').startsWith('pollo/') ? 'pollo' : 'openrouter'
-const showTabs = computed(() =>
-  props.models.some(m => providerOf(m.id) === 'pollo') && props.models.some(m => providerOf(m.id) === 'openrouter'))
-const tab = ref('pollo')
+const providerOf = (id) => {
+  const prefix = (id || '').split('/')[0]
+  return prefix === 'pollo' || prefix === 'venice' ? prefix : 'openrouter'
+}
+const PROVIDERS = computed(() => Object.fromEntries(
+  Object.entries(ALL_PROVIDERS).filter(([id]) => props.models.some(m => providerOf(m.id) === id))))
+const showTabs = computed(() => Object.keys(PROVIDERS.value).length > 1)
+const tab = ref(Object.keys(ALL_PROVIDERS)[0])
 
 const searched = computed(() => {
   const q = query.value.trim().toLowerCase()
@@ -54,11 +60,13 @@ const searched = computed(() => {
 const matches = computed(() =>
   showTabs.value ? searched.value.filter(m => providerOf(m.id) === tab.value) : searched.value)
 const tabCounts = computed(() => {
-  const counts = { pollo: 0, openrouter: 0 }
+  const counts = Object.fromEntries(Object.keys(ALL_PROVIDERS).map(id => [id, 0]))
   for (const m of searched.value) counts[providerOf(m.id)]++
   return counts
 })
-const otherTab = computed(() => (tab.value === 'pollo' ? 'openrouter' : 'pollo'))
+// Where a search that found nothing here does find something
+const otherTab = computed(() =>
+  Object.keys(PROVIDERS.value).find(id => id !== tab.value && tabCounts.value[id]) || null)
 
 // Favourites keep the order they were starred in; models that have left
 // the catalogue are skipped rather than shown broken
@@ -86,8 +94,12 @@ function perMillion(price) {
   return `$${v < 1 ? v.toFixed(2) : v.toFixed(v < 10 ? 1 : 0)}`
 }
 
+const UNCENSORED_TITLE = 'Uncensored: the provider marks this model as having no content filtering'
+
 function badges(m) {
   const out = []
+  // First, so it's the one thing you can't miss
+  if (m.uncensored) out.push({ t: '🔞 uncensored', title: UNCENSORED_TITLE, cls: 'uncensored' })
   if (m.hidden) out.push({ t: 'hidden', title: m.hidden })
   if (props.kind === 'text') {
     if (m.input_modalities?.includes('image')) out.push({ t: 'vision', title: 'Accepts images' })
@@ -117,6 +129,7 @@ async function toggle() {
   query.value = ''
   // Open on the tab holding the current pick, so it's in view
   if (props.modelValue) tab.value = providerOf(props.modelValue)
+  else if (!PROVIDERS.value[tab.value]) tab.value = Object.keys(PROVIDERS.value)[0] || tab.value
   document.addEventListener('mousedown', onDocClick)
   await nextTick()
   searchInput.value?.focus()
@@ -150,10 +163,11 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
       <span class="picker-text">
         <span class="picker-label">{{ label }}<span
           v-if="showTabs && modelValue" class="provider-tag" :class="providerOf(modelValue)"
-          :title="PROVIDERS[providerOf(modelValue)].title"> · {{ PROVIDERS[providerOf(modelValue)].label }}</span></span>
+          :title="ALL_PROVIDERS[providerOf(modelValue)].title"> · {{ ALL_PROVIDERS[providerOf(modelValue)].label }}</span></span>
         <span class="picker-value">
           <template v-if="loading">Loading…</template>
           <template v-else>{{ current?.name || modelValue || 'None' }}</template>
+          <span v-if="!loading && current?.uncensored" class="item-badge uncensored picked" :title="UNCENSORED_TITLE">🔞 uncensored</span>
         </span>
       </span>
       <span class="chev">▾</span>
@@ -210,7 +224,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
             <span class="item-row">
               <span class="item-name">{{ m.name }}</span>
               <span class="item-badges">
-                <span v-for="b in badges(m)" :key="b.t" class="item-badge" :title="b.title">{{ b.t }}</span>
+                <span v-for="b in badges(m)" :key="b.t" class="item-badge" :class="b.cls" :title="b.title">{{ b.t }}</span>
               </span>
               <button
                 type="button"
@@ -226,9 +240,9 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
           </div>
         </template>
         <div v-if="!filtered.length" class="picker-empty">
-          No {{ showTabs ? PROVIDERS[tab].label + ' ' : '' }}models match “{{ query }}”
-          <button v-if="showTabs && tabCounts[otherTab]" type="button" class="tab-hint" @click="tab = otherTab">
-            {{ tabCounts[otherTab] }} match{{ tabCounts[otherTab] === 1 ? '' : 'es' }} in {{ PROVIDERS[otherTab].label }} →
+          No {{ showTabs ? ALL_PROVIDERS[tab].label + ' ' : '' }}models match “{{ query }}”
+          <button v-if="showTabs && otherTab" type="button" class="tab-hint" @click="tab = otherTab">
+            {{ tabCounts[otherTab] }} match{{ tabCounts[otherTab] === 1 ? '' : 'es' }} in {{ ALL_PROVIDERS[otherTab].label }} →
           </button>
         </div>
       </div>
@@ -357,6 +371,11 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
   border-bottom-color: var(--accent2);
 }
 
+.picker-tab.active.venice {
+  color: #e8a33d;
+  border-bottom-color: #e8a33d;
+}
+
 .picker-tab.active.openrouter {
   color: var(--text);
   border-bottom-color: var(--text);
@@ -376,6 +395,10 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
 
 .provider-tag.pollo {
   color: var(--accent2);
+}
+
+.provider-tag.venice {
+  color: #e8a33d;
 }
 
 .tab-hint {
@@ -457,6 +480,17 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
   border-radius: 6px;
   background: var(--surface2);
   color: var(--accent2);
+}
+
+.item-badge.uncensored {
+  background: rgba(225, 112, 85, 0.18);
+  color: #ff8a6e;
+  font-weight: 600;
+}
+
+.item-badge.picked {
+  margin-left: 6px;
+  vertical-align: middle;
 }
 
 .picker-section {

@@ -56,6 +56,7 @@ def chat(monkeypatch, db):
     import web.media as media_mod
     monkeypatch.setattr(media_mod, "get_db", lambda: db)
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    monkeypatch.delenv("VENICE_API_KEY", raising=False)   # tests never reach the real Venice
     monkeypatch.setattr(chat_mod, "VIDEO_POLL_INTERVAL", 0)
     monkeypatch.setattr(chat_mod, "start_video_poller", lambda *a: None)
     chat_mod._models_cache.update(at=0.0, data=None)
@@ -91,9 +92,11 @@ class TestConversations:
         assert client.get(f"/api/chat/conversations/{c['id']}").status_code == 404
 
     def test_status_reports_key(self, client, monkeypatch):
-        assert client.get("/api/chat/status").json() == {"configured": True}
+        assert client.get("/api/chat/status").json() == {"configured": True, "openrouter": True, "venice": False}
         monkeypatch.delenv("OPENROUTER_API_KEY")
-        assert client.get("/api/chat/status").json() == {"configured": False}
+        assert client.get("/api/chat/status").json()["configured"] is False
+        monkeypatch.setenv("VENICE_API_KEY", "v-test")   # Venice alone can run the chat
+        assert client.get("/api/chat/status").json() == {"configured": True, "openrouter": False, "venice": True}
 
     def test_openrouter_balance(self, client, chat, monkeypatch):
         monkeypatch.setattr(chat.openrouter, "_get", lambda path, params=None: (

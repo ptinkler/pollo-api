@@ -238,6 +238,31 @@ describe('ModelPicker provider tabs', () => {
     expect(modelNames(w)).toEqual(['Gemini Image'])
     w.unmount()
   })
+
+  it('adds a Venice tab, and only shows tabs for providers that have models', async () => {
+    const withVenice = [...MIXED, { id: 'venice/seedream-v5-pro', name: 'Venice: Seedream 5 Pro' }]
+    const w = await openPicker({ models: withVenice, modelValue: 'venice/seedream-v5-pro' })
+    expect(tabs(w)).toEqual(['Pollo 2', 'Venice 1', 'OpenRouter 2'])
+    expect(w.find('.picker-tab.active').text()).toContain('Venice')
+    expect(modelNames(w)).toEqual(['Venice: Seedream 5 Pro'])
+    w.unmount()
+    const noPollo = await openPicker({ models: withVenice.filter(m => !m.id.startsWith('pollo/')) })
+    expect(tabs(noPollo)).toEqual(['Venice 1', 'OpenRouter 2'])
+    noPollo.unmount()
+  })
+
+  it('marks uncensored models in the list and on the closed picker', async () => {
+    const models = [{ id: 'venice/lustify-v8', name: 'Venice: Lustify', uncensored: true },
+                    { id: 'venice/flux-2-pro', name: 'Venice: Flux 2 Pro' }]
+    const w = await openPicker({ models })
+    const badgesOf = (name) => w.findAll('.picker-item').find(i => i.text().includes(name)).findAll('.item-badge.uncensored')
+    expect(badgesOf('Lustify')).toHaveLength(1)
+    expect(badgesOf('Flux 2 Pro')).toHaveLength(0)
+    w.unmount()
+    const closed = mount(ModelPicker, { props: { models, label: 'Image', kind: 'image', modelValue: 'venice/lustify-v8' } })
+    expect(closed.find('.picker-value .uncensored').text()).toContain('uncensored')
+    closed.unmount()
+  })
 })
 
 describe('ModelPicker hidden models', () => {
