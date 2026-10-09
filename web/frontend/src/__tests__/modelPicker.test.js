@@ -296,6 +296,22 @@ describe('ModelPicker uncensored filter', () => {
   })
 })
 
+describe('ModelPicker prices', () => {
+  it('shows Venice per-image and quoted video prices', async () => {
+    const img = mount(ModelPicker, { attachTo: document.body, props: { label: 'Image', kind: 'image', models: [
+      { id: 'venice/a', name: 'A', price: { usd: 0.05, basis: '' } }, { id: 'venice/b', name: 'B', price: { usd: 0.1, basis: '1K' } }] } })
+    await img.find('.picker-btn').trigger('click')
+    expect(img.findAll('.item-badge').map(b => b.text())).toEqual(['$0.05', '$0.10'])
+    img.unmount()
+    const vid = mount(ModelPicker, { attachTo: document.body, props: { label: 'Video', kind: 'video', models: [
+      { id: 'venice/v', name: 'V', price: { usd: 0.65, basis: '5s · 720p' } }] } })
+    await vid.find('.picker-btn').trigger('click')
+    const badge = vid.findAll('.item-badge').find(b => b.text() === '$0.65')
+    expect(badge.attributes('title')).toContain('5s · 720p')
+    vid.unmount()
+  })
+})
+
 describe('ModelPicker pop-up placement', () => {
   it('floats next to its button and fits the window, so a scrolling sidebar can\'t clip it', async () => {
     const w = mount(ModelPicker, { attachTo: document.body, props: {

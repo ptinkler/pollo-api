@@ -25,8 +25,10 @@ import mimetypes
 import os
 import shutil
 import tempfile
+import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
@@ -63,7 +65,10 @@ _catalogue_lock = threading.Lock()
 _balance: dict[str, Any] = {"usd": None}          # from the x-venice-balance-usd header on each call
 _video_quotes: dict[str, float] = {}              # job id → quoted USD, recorded as its cost when done
 _download_urls: dict[str, str] = {}               # job id → download link (private models)
-_VIDEO_DIR = Path(tempfile.gettempdir()) / "venice-videos"   # finished videos between retrieve and download
+_VIDEO_DIR = Path(tempfile.gettempdir()) / "venice-videos"
+QUOTE_TTL = 24 * 3600
+QUOTE_SECONDS = 5                                 # videos are priced (for sorting) at ~5s, lowest resolution
+_quotes: dict[tuple, tuple[float, float | None]] = {}   # (model, duration, resolution) → (when, USD)   # finished videos between retrieve and download
 
 
 class VeniceError(OpenRouterError):
@@ -216,9 +221,12 @@ def _build_catalogue() -> dict[str, Any]:
             "_generate": m["id"], "_edit": edit_id,
             "_max_refs": ((edits[edit_id].get("model_spec") or {}).get("constraints") or {}).get("maxInputImages")
             if edit_id else None,
-            "_price": _usd((spec.get("pricing") or {}).get("generation")),
-            "_edit_price": _usd(((edits[edit_id].get("model_spec") or {}).get("pricing") or {}).get("inpaint"))
-            if edit_id else None,
+            "price": _price_tag(_image_price(spec.get("pricing") or {}, "generation", None,
+                                             c.get("defaultResolution")), c.get("defaultResolution")),
+            "_pricing": ("generation", spec.get("pricing") or {}, c.get("defaultResolution")),
+            "_edit_pricing": ("inpaint", (edits[edit_id].get("model_spec") or {}).get("pricing") or {},
+                              ((edits[edit_id].get("model_spec") or {}).get("constraints") or {})
+                              .get("defaultResolution")) if edit_id else None,
         })
     # Edit models with no text-to-image twin: they only work on a reference image
     for edit_id, m in edits.items():
@@ -236,7 +244,10 @@ def _build_catalogue() -> dict[str, Any]:
             "created": m.get("created"),
             "conversational": False,
             "_generate": None, "_edit": edit_id, "_max_refs": c.get("maxInputImages"),
-            "_price": None, "_edit_price": _usd((spec.get("pricing") or {}).get("inpaint")),
+            "price": _price_tag(_image_price(spec.get("pricing") or {}, "inpaint", None,
+                                             c.get("defaultResolution")), c.get("defaultResolution")),
+            "_pricing": None,
+            "_edit_pricing": ("inpaint", spec.get("pricing") or {}, c.get("defaultResolution")),
         })
 
     # Plain models: pair "…-text-to-video…" with "…-image-to-video…" under
@@ -254,9 +265,83 @@ def _build_catalogue() -> dict[str, Any]:
     for pair in groups.values():
         t2v, i2v = pair.get("text-to-video"), pair.get("image-to-video")
         video.append(_video_entry("standard", t2v, i2v))
-    by_uncensored = lambda m: not m.get("uncensored")   # noqa: E731 — uncensored first, as the user asked
-    return {"text": sorted(text, key=by_uncensored), "image": sorted(image, key=by_uncensored),
-            "video": sorted(video, key=by_uncensored)}
+    _price_videos(video)
+    for m in text:
+        m["price"] = _price_tag(m["completion_price"] * 1e6, "per 1M output tokens") \
+            if m.get("completion_price") is not None else None
+    return {"text": _by_price(text), "image": _by_price(image), "video": _by_price(video)}
+
+
+def _by_price(models: list[dict]) -> list[dict]:
+    """Uncensored first (as the user asked), then cheapest first; unpriced last."""
+    def key(m):
+        usd = (m.get("price") or {}).get("usd")
+        return (not m.get("uncensored"), usd is None, usd or 0, m["name"].lower())
+    return sorted(models, key=key)
+
+
+def _price_tag(usd: float | None, basis: str | None = None) -> dict | None:
+    return {"usd": round(usd, 4), "basis": basis or ""} if usd is not None else None
+
+
+def _image_price(pricing: dict, key: str, resolution: str | None, default_res: str | None) -> float | None:
+    """One image's USD price: the resolution's tier if priced that way, else the flat price."""
+    tiers = pricing.get("resolutions") or {}
+    for res in (resolution, None, default_res):
+        if res is None:
+            flat = _usd(pricing.get(key))
+            if flat is not None:
+                return flat
+        elif res in tiers and _usd(tiers[res]) is not None:
+            return _usd(tiers[res])
+    prices = [p for p in (_usd(v) for v in tiers.values()) if p is not None]
+    return min(prices) if prices else None
+
+
+def _res_rank(res: str) -> int:
+    """Rough vertical pixels, to find a model's lowest resolution ("480p", "768P", "2K", "4k")."""
+    s = str(res).lower()
+    if m := re.match(r"(\d+)p", s):
+        return int(m.group(1))
+    return {"1k": 1080, "2k": 1440, "4k": 2160}.get(s, 10_000)
+
+
+def _price_videos(video: list[dict]) -> None:
+    """Set each video entry's price from Venice's (free) quote endpoint, at
+    ~5s and its lowest resolution. Quotes are cached for a day; models that
+    work on a chat video (length unknown up front) stay unpriced."""
+    jobs = []
+    for m in video:
+        if m["video_input"]:
+            m["price"] = None
+            continue
+        model = m["_text"] or m["_image"]
+        c = m["_constraints"]["text" if m["_text"] else "image"]
+        seconds = _seconds(c.get("durations"))
+        duration = min(seconds, key=lambda d: (abs(d - QUOTE_SECONDS), d)) if seconds else None
+        res = min(c.get("resolutions") or [], key=_res_rank, default=None)
+        jobs.append((m, model, duration, res))
+
+    def quote(job):
+        _, model, duration, res = job
+        key = (model, duration, res)
+        cached = _quotes.get(key)
+        if cached and time.time() - cached[0] < QUOTE_TTL:
+            return cached[1]
+        body = {"model": model, "duration": f"{duration}s" if duration else "auto"}
+        if res:
+            body["resolution"] = res
+        try:
+            usd = _usd(_request("POST", "/video/quote", json=body).json().get("quote"))
+        except VeniceError:
+            usd = None
+        _quotes[key] = (time.time(), usd)
+        return usd
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for (m, _, duration, res), usd in zip(jobs, pool.map(quote, jobs)):
+            basis = " · ".join(x for x in (f"{duration}s" if duration else "", res or "") if x)
+            m["price"] = _price_tag(usd, basis)
 
 
 def _video_family(m: dict) -> str:
@@ -444,7 +529,9 @@ def generate_image(model_id: str, prompt: str, aspect_ratio: str | None = None, 
         media_type = (resp.headers.get("content-type") or "image/png").split(";")[0].strip()
         if not media_type.startswith("image/"):
             raise VeniceError("Venice returned no image")
-        return [(resp.content, media_type)], info.get("_edit_price"), {**sent, "refs_used": len(refs)}
+        key, pricing, default_res = info["_edit_pricing"]
+        cost = _image_price(pricing, key, resolution, default_res)
+        return [(resp.content, media_type)], cost, {**sent, "refs_used": len(refs)}
 
     if not info["_generate"]:
         raise VeniceError("This Venice model only edits images: attach, pin or reference an image first")
@@ -458,7 +545,8 @@ def generate_image(model_id: str, prompt: str, aspect_ratio: str | None = None, 
     images = [(base64.b64decode(b64), "image/png") for b64 in data.get("images") or [] if b64]
     if not images:
         raise VeniceError("Venice returned no image")
-    return images, info.get("_price"), sent
+    key, pricing, default_res = info["_pricing"]
+    return images, _image_price(pricing, key, resolution, default_res), sent
 
 
 # ── Video ───────────────────────────────────────────────────────────

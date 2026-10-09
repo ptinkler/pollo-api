@@ -339,6 +339,22 @@ class TestTurns:
         msgs = client.get(f"/api/chat/conversations/{conv['id']}").json()["messages"]
         assert [(m["role"], m["content"]) for m in msgs] == [("user", "hi"), ("assistant", "second")]
 
+    def test_retry_uses_the_selected_mode(self, client, conv, chat, monkeypatch):
+        """A reply sent in Chat mode, retried with Auto selected, reruns in Auto
+        (tools offered) and the prompt's mode tag follows it."""
+        offered = []
+        def stream(model, msgs, tools=None, **kw):
+            offered.append(bool(tools))
+            return _text_chunks("ok")
+        monkeypatch.setattr(chat.openrouter, "stream_chat", stream)
+        first = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
+                                    json={"content": "hi", **SETTINGS, "mode": "text"}))[-1]["message"]
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/retry",
+                            json={"message_id": first["id"], **SETTINGS, "mode": "auto"}))
+        assert offered == [False, True]
+        msgs = client.get(f"/api/chat/conversations/{conv['id']}").json()["messages"]
+        assert [(m["role"], m["mode"]) for m in msgs] == [("user", "auto"), ("assistant", "auto")]
+
     def test_history_records_past_media_as_tool_calls(self, client, conv, chat, db, monkeypatch):
         db.add_chat_message(conv["id"], "user", "draw a fox")
         db.add_chat_message(conv["id"], "assistant", "Here!", media=[

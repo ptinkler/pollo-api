@@ -524,10 +524,10 @@ function onDrop(e) {
 }
 
 // ── Sending ──────────────────────────────────────────────────────────
-// `turnMode`: rerun an edited/retried message in the mode it was sent in
-function turnSettings(turnMode = null) {
+// Retries and edits run in the mode selected now, like a new message
+function turnSettings() {
   const body = {
-    mode: turnMode || mode.value,
+    mode: mode.value,
     history_limit: historyLimit.value,
     image_limit: imageLimit.value,
     text_model: selected.text || null,
@@ -660,20 +660,21 @@ async function retry(msg) {
   const i = messages.value.findIndex(m => m.id === msg.id)
   if (i === -1) return
   messages.value = messages.value.slice(0, i)
-  // Rerun in the mode the reply was made in, not whatever the composer shows now
-  await runTurn(retryChatMessage, convId.value, { ...turnSettings(msg.mode), message_id: msg.id }, null)
+  // The prompt's mode tag follows the latest run (the server updates it too)
+  const prompt = messages.value[i - 1]
+  if (prompt?.role === 'user') prompt.mode = mode.value
+  await runTurn(retryChatMessage, convId.value, { ...turnSettings(), message_id: msg.id }, null)
 }
 
 async function editMessage(msg, content) {
   if (sending.value) return
   const i = messages.value.findIndex(m => m.id === msg.id)
   if (i === -1) return
-  const tempUser = reactive({ ...msg, id: `tmp-${Date.now()}`, content, siblings: [] })
+  const tempUser = reactive({ ...msg, id: `tmp-${Date.now()}`, content, mode: mode.value, siblings: [] })
   messages.value = [...messages.value.slice(0, i), tempUser]
   scrollToBottom(true)
-  // An edited Video-mode prompt stays a video even if the composer is back on Auto
   await runTurn(editChatMessage, convId.value,
-    { ...turnSettings(msg.mode), message_id: msg.id, content }, tempUser)
+    { ...turnSettings(), message_id: msg.id, content }, tempUser)
 }
 
 // Same as an edit with unchanged text: a new branch with a fresh reply

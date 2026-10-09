@@ -205,7 +205,7 @@ const { copiedKey, copy } = useCopy()
       </div>
       <div v-else-if="isUser && message.content" class="bubble">{{ message.content }}</div>
       <div v-if="isUser && !editing && (canEdit || message.content || siblings.length > 1 || modeTag)" class="user-actions">
-        <span v-if="modeTag" class="mode-tag" :title="`Sent in ${modeTag} mode — editing or retrying reruns it that way`">{{ modeTag }}</span>
+        <span v-if="modeTag" class="mode-tag" :title="`Last run in ${modeTag} mode — retrying or editing uses the mode selected now`">{{ modeTag }}</span>
         <span v-if="siblings.length > 1" class="branch-nav">
           <button class="meta-btn" :disabled="!canSwitch || branchIndex <= 0" title="Previous version" @click="goBranch(-1)">‹</button>
           <span>{{ branchIndex + 1 }}/{{ siblings.length }}</span>

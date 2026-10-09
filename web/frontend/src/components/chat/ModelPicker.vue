@@ -100,6 +100,9 @@ function perMillion(price) {
 
 const UNCENSORED_TITLE = 'Uncensored: the provider marks this model as having no content filtering'
 
+// Venice prices: per image, or a quote for a ~5s video at the lowest resolution
+const fmtPrice = (usd) => `$${usd < 0.1 ? usd.toFixed(3).replace(/0$/, '') : usd.toFixed(2)}`
+
 function badges(m) {
   const out = []
   // First, so it's the one thing you can't miss
@@ -111,7 +114,12 @@ function badges(m) {
     const p = perMillion(m.prompt_price)
     const c = perMillion(m.completion_price)
     if (p) out.push({ t: p === 'free' ? 'free' : `${p}/${c}`, title: 'Input/output price per million tokens' })
-  } else if (props.kind === 'image') {
+  } else if (m.price) {
+    out.push({ t: fmtPrice(m.price.usd), title: props.kind === 'video'
+      ? `Quoted price for ${m.price.basis || 'a default video'} (longer or sharper costs more)`
+      : `Price per image${m.price.basis ? ` (${m.price.basis})` : ''}` })
+  }
+  if (props.kind === 'image') {
     if (m.conversational) out.push({ t: 'context', title: 'Sees the conversation (text and earlier images), like the Gemini app' })
     else if (m.input_modalities?.includes('image')) out.push({ t: 'edits', title: 'Takes reference images (tends to edit them)' })
     if (chatImageModelTakesCharacters(m)) out.push({ t: '👤', title: 'Can use characters (sends their reference images)' })

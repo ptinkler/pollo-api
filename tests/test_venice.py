@@ -48,6 +48,10 @@ MODELS = {
 }
 
 
+QUOTES = {"wan-3-0-text-to-video": 0.65, "ovi-image-to-video": 0.4, "wan-3-0-reference-to-video": 0.3,
+          "flux-3-first-last-frame-to-video": 0.9}
+
+
 class FakeVenice:
     """Stands in for venice_chat._client; records requests, answers from `routes`."""
 
@@ -85,7 +89,10 @@ def venice(chat, monkeypatch, tmp_path):
     import web.venice_chat as v
     monkeypatch.setenv("VENICE_API_KEY", "v-test")
     fake = FakeVenice()
+    # Catalogue builds price each video model; tests that queue videos set their own quote
+    fake.routes["/video/quote"] = lambda kw: httpx.Response(200, json={"quote": QUOTES.get(kw["json"]["model"])})
     monkeypatch.setattr(v, "_client", fake)
+    v._quotes.clear()
     monkeypatch.setattr(v, "_VIDEO_DIR", tmp_path / "venice-videos")
     v._catalogue.update(at=0.0, data=None)
     v._video_quotes.clear()
@@ -152,6 +159,50 @@ class TestCatalogue:
         v, fake = venice
         monkeypatch.delenv("VENICE_API_KEY")
         assert v.list_models("image") == [] and fake.calls == []
+
+
+class TestPriceOrder:
+    def test_uncensored_first_then_cheapest(self, venice, monkeypatch):
+        v, _ = venice
+        monkeypatch.setitem(MODELS, "image", [
+            {"id": "pricey-unc", "model_spec": {"name": "B", "uncensored": True, "pricing": {"generation": {"usd": 0.09}}}},
+            {"id": "cheap-unc", "model_spec": {"name": "C", "uncensored": True, "pricing": {"generation": {"usd": 0.01}}}},
+            {"id": "tiered", "model_spec": {"name": "T", "pricing": {"resolutions": {"1K": {"usd": 0.07}, "2K": {"usd": 0.1}}},
+                                            "constraints": {"resolutions": ["1K", "2K"], "defaultResolution": "1K"}}},
+            {"id": "cheapest-safe", "model_spec": {"name": "S", "pricing": {"generation": {"usd": 0.005}}}},
+            {"id": "unpriced", "model_spec": {"name": "U"}},
+        ])
+        mine = {"pricey-unc", "cheap-unc", "tiered", "cheapest-safe", "unpriced"}
+        models = [m for m in v.list_models("image") if m["id"][7:] in mine]   # edit-only fixtures left out
+        assert [m["id"][7:] for m in models] == ["cheap-unc", "pricey-unc", "cheapest-safe", "tiered", "unpriced"]
+        assert models[3]["price"] == {"usd": 0.07, "basis": "1K"}
+
+    def test_tiered_image_is_billed_at_the_resolution_used(self, venice, monkeypatch):
+        v, fake = venice
+        monkeypatch.setitem(MODELS, "image", [
+            {"id": "tiered", "model_spec": {"name": "T", "pricing": {"resolutions": {"1K": {"usd": 0.07}, "2K": {"usd": 0.1}}},
+                                            "constraints": {"resolutions": ["1K", "2K"], "defaultResolution": "1K"}}}])
+        fake.routes["/image/generate"] = httpx.Response(200, json={"images": [base64.b64encode(_png_bytes()).decode()]})
+        assert v.generate_image("venice/tiered", "x", resolution="2K")[1] == 0.1
+        assert v.generate_image("venice/tiered", "x")[1] == 0.07
+
+    def test_videos_priced_at_5s_lowest_resolution_and_sorted(self, venice):
+        v, fake = venice
+        by_id = {m["id"][7:]: m for m in v.list_models("video")}
+        assert by_id["wan-3-0-text-to-video"]["price"] == {"usd": 0.65, "basis": "5s · 720p"}
+        wan_quote = next(c[2] for c in _calls(fake, "/video/quote") if c[2]["model"] == "wan-3-0-text-to-video")
+        assert wan_quote == {"model": "wan-3-0-text-to-video", "duration": "5s", "resolution": "720p"}
+        assert by_id["wan-2-7-video-to-video"]["price"] is None          # depends on the source video
+        ids = [m["id"][7:] for m in v.list_models("video")]
+        assert ids.index("ovi-image-to-video") < ids.index("wan-2-7-video-to-video")   # both uncensored: priced first
+        assert ids.index("wan-3-0-reference-to-video") < ids.index("wan-3-0-text-to-video")   # 0.30 < 0.65
+
+    def test_quotes_are_cached_across_catalogue_refreshes(self, venice):
+        v, fake = venice
+        v.list_models("video")
+        n = len(_calls(fake, "/video/quote"))
+        v.list_models("video", refresh=True)
+        assert len(_calls(fake, "/video/quote")) == n
 
 
 class TestImages:

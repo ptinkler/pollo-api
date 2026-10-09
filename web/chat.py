@@ -635,6 +635,9 @@ def api_retry(conv_id: str, data: RetryMessage):
     msg = get_db().get_chat_message(data.message_id)
     if not msg or msg.conversation_id != conv_id or msg.role != "assistant":
         raise HTTPException(400, "Can only retry an assistant message in this conversation")
+    # The retry runs in the mode selected now; the prompt's mode tag follows it
+    if msg.parent_id:
+        get_db().update_chat_message(msg.parent_id, mode=data.mode)
     _remember_models(conv, data)
     return _start_turn(conv_id, data, None, parent_id=msg.parent_id)
 
