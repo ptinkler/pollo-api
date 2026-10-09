@@ -162,6 +162,20 @@ class TestCatalogue:
 
 
 class TestPriceOrder:
+    def test_privacy_level(self, venice, monkeypatch):
+        """A pair is only as private as its less private half."""
+        v, _ = venice
+        monkeypatch.setitem(MODELS, "image", [
+            {"id": "own", "model_spec": {"name": "O", "privacy": "private"}},
+            {"id": "mixed", "model_spec": {"name": "M", "privacy": "private"}},
+        ])
+        monkeypatch.setitem(MODELS, "inpaint", [
+            {"id": "mixed-edit", "model_spec": {"name": "ME", "privacy": "anonymized"}},
+        ])
+        got = {m["id"][7:]: m["privacy"] for m in v.list_models("image")}
+        assert got["own"] == "private"
+        assert got["mixed"] == "anonymized"
+
     def test_uncensored_first_then_cheapest(self, venice, monkeypatch):
         v, _ = venice
         monkeypatch.setitem(MODELS, "image", [

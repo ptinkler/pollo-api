@@ -264,6 +264,22 @@ describe('ModelPicker provider tabs', () => {
     expect(closed.find('.picker-value .uncensored').text()).toContain('uncensored')
     closed.unmount()
   })
+
+  it('shows Venice privacy levels in the list and on the closed picker', async () => {
+    const models = [{ id: 'venice/lustify-v8', name: 'Venice: Lustify', privacy: 'private' },
+                    { id: 'venice/flux-2-pro', name: 'Venice: Flux 2 Pro', privacy: 'anonymized' },
+                    { id: 'venice/other', name: 'Venice: Other' }]
+    const w = await openPicker({ models })
+    const item = (name) => w.findAll('.picker-item').find(i => i.text().includes(name))
+    expect(item('Lustify').find('.item-badge.private').text()).toBe('🔒 private')
+    expect(item('Flux 2 Pro').find('.item-badge.anonymized').text()).toBe('anonymized')
+    expect(item('Other').find('.item-badge.private').exists()).toBe(false)
+    expect(item('Other').find('.item-badge.anonymized').exists()).toBe(false)
+    w.unmount()
+    const closed = mount(ModelPicker, { props: { models, label: 'Image', kind: 'image', modelValue: 'venice/lustify-v8' } })
+    expect(closed.find('.picker-value .private').text()).toContain('private')
+    closed.unmount()
+  })
 })
 
 describe('ModelPicker uncensored filter', () => {

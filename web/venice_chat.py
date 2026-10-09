@@ -172,6 +172,14 @@ def _uncensored(*models: dict | None) -> bool | None:
     return any((m.get("model_spec") or {}).get("uncensored") for m in models if m) or None
 
 
+def _privacy(*models: dict | None) -> str | None:
+    """Venice's privacy level: "private" (Venice's own servers, nothing kept)
+    or "anonymized" (a third-party provider, sent without your identity).
+    A pair is only as private as its less private half."""
+    levels = {(m.get("model_spec") or {}).get("privacy") for m in models if m} - {None}
+    return "anonymized" if "anonymized" in levels else ("private" if levels else None)
+
+
 def _edit_model_for(image_id: str, edit_ids: set[str]) -> str | None:
     """Venice's edit twin of an image model: "x" → "x-edit", or with "-image"
     dropped ("grok-imagine-image-quality" → "grok-imagine-quality-edit")."""
@@ -195,6 +203,7 @@ def _build_catalogue() -> dict[str, Any]:
             "input_modalities": ["text", "image"] if caps.get("supportsVision") else ["text"],
             "supports_tools": bool(caps.get("supportsFunctionCalling")),
             "uncensored": _uncensored(m),
+            "privacy": _privacy(m),
             # Venice prices per million tokens; the picker expects per token
             "prompt_price": prompt_price / 1e6 if prompt_price is not None else None,
             "completion_price": completion_price / 1e6 if completion_price is not None else None,
@@ -214,6 +223,7 @@ def _build_catalogue() -> dict[str, Any]:
             "name": f"Venice: {spec.get('name') or m['id']}",
             "input_modalities": ["text", "image"] if edit_id else ["text"],
             "uncensored": _uncensored(m, edits.get(edit_id)),
+            "privacy": _privacy(m, edits.get(edit_id)),
             "aspect_ratios": c.get("aspectRatios"),
             "resolutions": c.get("resolutions"),
             "created": m.get("created"),
@@ -239,6 +249,7 @@ def _build_catalogue() -> dict[str, Any]:
             "name": f"Venice: {spec.get('name') or edit_id} (edit only)",
             "input_modalities": ["text", "image"],
             "uncensored": _uncensored(m),
+            "privacy": _privacy(m),
             "aspect_ratios": c.get("aspectRatios"),
             "resolutions": c.get("resolutions"),
             "created": m.get("created"),
@@ -387,6 +398,7 @@ def _video_entry(family: str, main: dict | None, i2v: dict | None) -> dict:
         "reference_images": family == "reference",
         "video_input": family in ("video", "motion", "upscale"),
         "uncensored": _uncensored(main, i2v),
+        "privacy": _privacy(main, i2v),
         "generate_audio": bool(c.get("audio_configurable")),
         "created": first.get("created"),
         "_text": main["id"] if main and family == "standard" else None,

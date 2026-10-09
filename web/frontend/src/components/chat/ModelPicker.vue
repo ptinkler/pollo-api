@@ -100,6 +100,14 @@ function perMillion(price) {
 
 const UNCENSORED_TITLE = 'Uncensored: the provider marks this model as having no content filtering'
 
+// Venice's privacy levels
+const PRIVACY = {
+  private: { t: '🔒 private', cls: 'private',
+    title: 'Private: runs on Venice\'s own servers and nothing is stored' },
+  anonymized: { t: 'anonymized', cls: 'anonymized',
+    title: 'Anonymized: Venice passes it to a third-party provider without your identity; that provider may keep the prompts and outputs' },
+}
+
 // Venice prices: per image, or a quote for a ~5s video at the lowest resolution
 const fmtPrice = (usd) => `$${usd < 0.1 ? usd.toFixed(3).replace(/0$/, '') : usd.toFixed(2)}`
 
@@ -107,6 +115,7 @@ function badges(m) {
   const out = []
   // First, so it's the one thing you can't miss
   if (m.uncensored) out.push({ t: '🔞 uncensored', title: UNCENSORED_TITLE, cls: 'uncensored' })
+  if (PRIVACY[m.privacy]) out.push(PRIVACY[m.privacy])
   if (m.hidden) out.push({ t: 'hidden', title: m.hidden })
   if (props.kind === 'text') {
     if (m.input_modalities?.includes('image')) out.push({ t: 'vision', title: 'Accepts images' })
@@ -212,6 +221,8 @@ onBeforeUnmount(close)
           <template v-if="loading">Loading…</template>
           <template v-else>{{ current?.name || modelValue || 'None' }}</template>
           <span v-if="!loading && current?.uncensored" class="item-badge uncensored picked" :title="UNCENSORED_TITLE">🔞 uncensored</span>
+          <span v-if="!loading && PRIVACY[current?.privacy]" class="item-badge picked" :class="PRIVACY[current.privacy].cls"
+                :title="PRIVACY[current.privacy].title">{{ PRIVACY[current.privacy].t }}</span>
         </span>
       </span>
       <span class="chev">▾</span>
@@ -546,6 +557,15 @@ onBeforeUnmount(close)
   background: rgba(225, 112, 85, 0.18);
   color: #ff8a6e;
   font-weight: 600;
+}
+
+.item-badge.private {
+  background: rgba(0, 184, 148, 0.16);
+  color: #4fd1a5;
+}
+
+.item-badge.anonymized {
+  color: var(--text2);
 }
 
 .item-badge.picked {
