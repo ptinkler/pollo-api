@@ -384,6 +384,21 @@ class TestText:
         assert ev[-1]["message"]["content"] == "From Venice"
 
 
+    def test_no_images_for_a_model_without_vision_before_the_model_list_loads(self, client, conv, chat, venice):
+        """After a restart (or a failed model list) the app still knows from
+        Venice's own catalogue that the model can't see images."""
+        v, fake = venice
+        fake.routes["/chat/completions"] = self._sse({"choices": [{"delta": {"content": "ok"}}]})
+        assert chat._models_cache["data"] is None
+        up = client.post(f"/api/chat/conversations/{conv['id']}/attachments",
+                         files={"file": ("a.png", _png_bytes(), "image/png")}).json()["file"]
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
+            "content": "like this", **SETTINGS, "mode": "auto", "text_model": "venice/venice-uncensored",
+            "attachments": [up]}))
+        assert ev[-1]["message"]["status"] != "error"
+        sent = json.dumps(_calls(fake, "/chat/completions")[0][2]["messages"])
+        assert "image_url" not in sent and "[user attached an image]" in sent
+
 def test_balance_falls_back_to_the_response_header(client, venice):
     v, fake = venice
     fake.routes["/billing/balance"] = httpx.Response(401, json={"error": "Admin API key required"})

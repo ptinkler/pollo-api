@@ -434,6 +434,11 @@ def _entry(kind: str, model_id: str) -> dict:
     return entry
 
 
+def model_info(kind: str, model_id: str) -> dict[str, Any]:
+    """One model's public catalogue entry (raises VeniceError if unknown)."""
+    return _public([_entry(kind, model_id)])[0]
+
+
 def get_balance() -> float | None:
     """The account's USD balance: the billing endpoint if this key may read
     it, else the balance Venice reported on the latest call."""

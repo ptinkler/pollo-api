@@ -341,11 +341,20 @@ def get_models(refresh: bool = False) -> dict[str, Any]:
 
 
 def _model_info(kind: str, model_id: str | None) -> dict | None:
-    """Look up cached catalogue info without triggering a fetch."""
-    data = _models_cache["data"]
-    if not data or not model_id:
+    """Look up cached catalogue info without fetching every provider's list.
+    That cache is empty after a restart or when any list failed to load;
+    Venice models then come from Venice's own catalogue, so a model without
+    vision isn't sent images (Venice rejects those requests)."""
+    if not model_id:
         return None
-    return next((m for m in data.get(kind, []) if m["id"] == model_id), None)
+    data = _models_cache["data"]
+    info = next((m for m in data.get(kind, []) if m["id"] == model_id), None) if data else None
+    if info is None and venice_chat.is_venice(model_id) and venice_chat.is_configured():
+        try:
+            return venice_chat.model_info(kind, model_id)
+        except Exception:  # noqa: BLE001 — unknown model or Venice unreachable: treat as unknown
+            return None
+    return info
 
 
 def _fit_video_params(model_id: str, duration: int | None, aspect_ratio: str | None,
