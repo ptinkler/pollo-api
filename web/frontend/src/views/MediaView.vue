@@ -25,7 +25,7 @@ const loading = ref(true)
 const uploading = ref(0)
 const { filters, filtered } = useMediaFilters(items)
 // The chat sidebar's 🖼 Media button opens this filtered to chats
-const ORIGINS = ['library', 'project', 'chat']
+const ORIGINS = ['library', 'project', 'chat', 'orphan']
 const route = useRoute()
 if (ORIGINS.includes(route?.query.origin)) filters.origin = route.query.origin
 
@@ -162,7 +162,7 @@ async function addToCharacter(list) {
 
 function sourceLink(item) {
   if (item.origin === 'project') return { name: 'project-gallery', params: { project: item.project } }
-  if (item.origin === 'chat') return { name: 'chat-conversation', params: { id: item.conversation_id } }
+  if (item.conversation_id) return { name: 'chat-conversation', params: { id: item.conversation_id } }
   return null
 }
 

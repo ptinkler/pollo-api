@@ -7,6 +7,9 @@ It's an index over files that already live elsewhere, not a store of its own:
   • project  — a Generate project's uploads (src-/ref-/image.* files) and
                creations (generated videos/images), in its assets folder
   • chat     — a chat's uploads and generated images/videos (<data>/chat/<id>/)
+  • orphan   — files in a chat's folder that nothing records any more: an
+               attachment that was never sent, a file a message dropped, or
+               the folder of a chat that's gone
 
 Item ids say where a file is: "lib:<file>", "proj:<slug>:<file>",
 "chat:<conversation id>:<file>".
@@ -23,6 +26,7 @@ import asyncio
 import hashlib
 import io
 import shutil
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -48,6 +52,10 @@ VIDEO_EXTS = {".mp4"}
 THUMB_SIZE = 320  # px, the thumbnail's shorter side (grid tiles are square, cropped to fill)
 THUMB_WORKERS = 2  # thumbnails made at once — a grid asks for many together, and a NAS CPU is slow
 PROJECT_SKIP = {"thumb.jpg"}  # generated project thumbnail, not media
+# A new chat file isn't orphaned until it's this old (s): attachments wait in
+# the composer, and generations are written before their message records them
+ORPHAN_GRACE = 3600
+_PARAM_FILES = ("first_frame", "last_frame", "source_video")  # chat media params naming one file
 
 
 def _web_api():
@@ -246,6 +254,10 @@ def _project_items(db) -> list[dict[str, Any]]:
 
 def _chat_items(db) -> list[dict[str, Any]]:
     titles = {c.id: c.title for c in db.list_conversations(limit=100000)}
+    return _chat_records(db, titles) + _chat_orphans(db, titles)
+
+
+def _chat_records(db, titles: dict[str, str]) -> list[dict[str, Any]]:
     # Keyed by file name alone: a branched chat links its media in under the
     # same names (web/chat.py api_fork_conversation), so each shows once —
     # in the oldest chat that still has it
@@ -279,6 +291,51 @@ def _chat_items(db) -> list[dict[str, Any]]:
     for lib in db.list_chat_library():  # media detached from its message by older edits/retries
         add(lib.conversation_id, lib.item, lib.created_at)
     return list(items.values())
+
+
+def _referenced_files(item: dict) -> list[str]:
+    """Files a chat media item uses: its own, and the references it was made
+    from (kept so it can be retried)."""
+    params = item.get("params") or {}
+    refs = [*(params.get("refs") or []), *(params.get(k) for k in _PARAM_FILES)]
+    return [f for f in [item.get("file"), *refs] if isinstance(f, str) and f]
+
+
+def _chat_orphans(db, titles: dict[str, str]) -> list[dict[str, Any]]:
+    """Files in chat folders that no message or library entry records."""
+    root = config.ROOT_DIR / "chat"
+    if not root.is_dir():
+        return []
+    used: set[tuple[str, str]] = set()
+    for msg in db.get_chat_messages_with_media():
+        used.update((msg.conversation_id, f) for i in msg.media for f in _referenced_files(i))
+    for lib in db.list_chat_library():
+        used.update((lib.conversation_id, f) for f in _referenced_files(lib.item))
+    cutoff = time.time() - ORPHAN_GRACE
+    items = []
+    for d in root.iterdir():
+        if not d.is_dir():
+            continue
+        for p in d.iterdir():
+            kind = _kind(p) if p.is_file() and (d.name, p.name) not in used else None
+            if not kind or p.stat().st_mtime > cutoff:
+                continue
+            media_id = f"chat:{d.name}:{p.name}"
+            items.append(
+                {
+                    "id": media_id,
+                    "kind": kind,
+                    "source": "upload" if p.name.startswith("up_") else "generated",
+                    "origin": "orphan",
+                    "name": p.name,
+                    "url": f"/api/chat/media/{d.name}/{p.name}",
+                    "thumb_url": _thumb_url(media_id),
+                    "created_at": _mtime_iso(p),
+                    "conversation_id": d.name if d.name in titles else None,
+                    "conversation_title": titles.get(d.name),
+                }
+            )
+    return items
 
 
 @router.get("")

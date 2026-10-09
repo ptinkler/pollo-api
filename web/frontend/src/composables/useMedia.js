@@ -21,6 +21,7 @@ export const importMedia = (mediaId, target) => apiPost('/api/media/import', { m
 export function mediaOrigin(item) {
   if (item.origin === 'project') return item.project_name || item.project
   if (item.origin === 'chat') return item.conversation_title || 'Chat'
+  if (item.origin === 'orphan') return item.conversation_title ? `${item.conversation_title} (orphaned)` : 'Orphaned'
   return 'Library'
 }
 
@@ -28,8 +29,8 @@ export function mediaOrigin(item) {
  * Filters over a list of media items (a ref): kind, source, origin and a
  * text search over prompt / name / where it's from.
  */
-export function useMediaFilters(items, { kind = 'all' } = {}) {
-  const filters = reactive({ kind, source: 'all', origin: 'all', q: '' })
+export function useMediaFilters(items, { kind = 'all', origin = 'all' } = {}) {
+  const filters = reactive({ kind, source: 'all', origin, q: '' })
   const filtered = computed(() => {
     const q = filters.q.trim().toLowerCase()
     return items.value.filter(

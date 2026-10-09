@@ -104,6 +104,52 @@ class TestListing:
         assert client.delete(f"/api/media/{media_id}").status_code in (400, 404)
 
 
+class TestOrphans:
+    @pytest.fixture()
+    def orphans(self, db, conv):
+        """conv plus an attachment nothing sent, a reference a reply was made
+        from, and the folder of a deleted chat — all old enough."""
+        import os
+
+        import img2vid.common.config as config
+
+        root = config.ROOT_DIR / "chat"
+        (root / conv.id / "up_lost.png").write_bytes(_png())
+        (root / conv.id / "up_ref.png").write_bytes(_png())
+        db.add_chat_message(
+            conv.id,
+            "assistant",
+            "",
+            media=[
+                {
+                    "id": "r",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "pending",
+                    "params": {"refs": ["up_ref.png"]},
+                }
+            ],
+        )
+        (root / "gone").mkdir()
+        (root / "gone" / "img_old.png").write_bytes(_png())
+        for p in root.rglob("*.png"):
+            os.utime(p, (0, 0))
+        (root / conv.id / "up_new.png").write_bytes(_png())  # too new — may still be in the composer
+        return root
+
+    def test_lists_unrecorded_chat_files(self, client, conv, orphans):
+        items = _items(client)
+        orphaned = {k for k, i in items.items() if i["origin"] == "orphan"}
+        assert orphaned == {f"chat:{conv.id}:up_lost.png", "chat:gone:img_old.png"}
+        assert items[f"chat:{conv.id}:up_lost.png"]["conversation_title"] == "Fox chat"
+        assert items["chat:gone:img_old.png"]["conversation_id"] is None
+        assert items[f"chat:{conv.id}:img_1.png"]["origin"] == "chat"
+
+    def test_delete(self, client, orphans):
+        assert client.delete("/api/media/chat:gone:img_old.png").status_code == 200
+        assert not (orphans / "gone" / "img_old.png").exists()
+
+
 class TestImport:
     def test_into_a_project(self, client, project, conv):
         import web.api as api_mod

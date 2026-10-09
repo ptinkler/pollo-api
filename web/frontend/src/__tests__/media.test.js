@@ -53,6 +53,8 @@ describe('useMediaFilters', () => {
 
   it('names where an item is from', () => {
     expect(ITEMS.map(mediaOrigin)).toEqual(['Library', 'Trailer', 'Fox chat'])
+    expect(mediaOrigin({ origin: 'orphan', conversation_title: 'Old chat' })).toBe('Old chat (orphaned)')
+    expect(mediaOrigin({ origin: 'orphan' })).toBe('Orphaned')
   })
 })
 
@@ -103,6 +105,18 @@ describe('MediaPicker', () => {
     input.dispatchEvent(new Event('change'))
     await flushPromises()
     expect(document.body.querySelectorAll('.tile.selected')).toHaveLength(1)
+    expect(document.body.querySelectorAll('.tile')).toHaveLength(3)
+    w.unmount()
+  })
+
+  it('opens on the origin it was given, widening it for an upload', async () => {
+    const w = await open({ origin: 'chat' })
+    expect(document.body.querySelector('select[aria-label="Where from"]').value).toBe('chat')
+    expect(document.body.querySelectorAll('.tile')).toHaveLength(1)
+    const input = document.body.querySelector('input[type=file]')
+    Object.defineProperty(input, 'files', { value: [new File(['x'], 'n.png', { type: 'image/png' })] })
+    input.dispatchEvent(new Event('change'))
+    await flushPromises()
     expect(document.body.querySelectorAll('.tile')).toHaveLength(3)
     w.unmount()
   })

@@ -20,6 +20,7 @@ const ORIGINS = [
   ['library', 'Library'],
   ['project', 'Projects'],
   ['chat', 'Chats'],
+  ['orphan', 'Orphaned'],
 ]
 </script>
 

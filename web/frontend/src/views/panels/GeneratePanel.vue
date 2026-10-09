@@ -553,6 +553,7 @@ function addRefs(data) {
     <MediaPicker
       :open="!!libraryTarget"
       :multiple="false"
+      origin="project"
       :title="libraryTarget?.kind === 'source' ? 'Choose a source image' : 'Choose a reference image'"
       @pick="onLibraryPick"
       @close="libraryTarget = null"

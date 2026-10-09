@@ -13,6 +13,7 @@ const props = defineProps({
   title: { type: String, default: 'Choose images' },
   multiple: { type: Boolean, default: true },
   max: { type: Number, default: null }, // most that can be picked (null = no limit)
+  origin: { type: String, default: 'all' }, // where-from filter it opens on
 })
 const emit = defineEmits(['pick', 'close'])
 const showToast = inject('showToast', () => {})
@@ -22,7 +23,7 @@ const loading = ref(false)
 const uploading = ref(0)
 const selected = ref(new Set())
 const images = computed(() => items.value.filter(i => i.kind === 'image'))
-const { filters, filtered } = useMediaFilters(images, { kind: 'image' })
+const { filters, filtered } = useMediaFilters(images, { kind: 'image', origin: props.origin })
 const limit = computed(() => (props.multiple ? props.max : 1))
 
 watch(
@@ -30,6 +31,7 @@ watch(
   async open => {
     if (!open) return
     selected.value = new Set()
+    filters.origin = props.origin
     loading.value = true
     try {
       items.value = await fetchMedia()
@@ -55,6 +57,7 @@ async function upload(files) {
     try {
       const item = await uploadMedia(file)
       items.value = [item, ...items.value]
+      if (![item.origin, 'all'].includes(filters.origin)) filters.origin = 'all' // so the upload shows
       toggle(item)
     } catch (e) {
       showToast(`Upload failed: ${e.message}`, 'error')

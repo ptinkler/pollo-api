@@ -21,6 +21,13 @@ case "$(uname -s)" in
     ;;
 esac
 
+# Git GUIs run hooks without the login shell's setup, so an nvm-installed Node
+# isn't on PATH and an older system one (/usr/bin/node) would run ESLint,
+# which needs Node 20.19+. Put nvm's newest Node first (nvm itself doesn't
+# load under sh/dash).
+nvm_node=$(ls -d "${NVM_DIR:-$HOME/.nvm}"/versions/node/v*/bin 2>/dev/null | sort -V | tail -n 1)
+[ -n "$nvm_node" ] && PATH="$nvm_node:$PATH" && export PATH
+
 if [ -x .venv/bin/pre-commit ]; then
   exec .venv/bin/pre-commit run --hook-stage pre-commit
 elif command -v pre-commit >/dev/null 2>&1; then
