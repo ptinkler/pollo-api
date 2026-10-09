@@ -26,8 +26,6 @@ export const pinChatMedia = (messageId, mediaId, pinned) =>
 export const deleteChatExchange = (messageId) => apiDelete(`/api/chat/messages/${messageId}`)
 // What that would also remove: { other_versions, other_messages }
 export const fetchDeleteInfo = (messageId) => apiGet(`/api/chat/messages/${messageId}/delete-info`)
-export const fetchChatLibrary = () => apiGet('/api/chat/library')
-export const deleteLibraryItem = (mediaId) => apiDelete(`/api/chat/library/${enc(mediaId)}`)
 
 // Custom instructions (saved, attachable per chat)
 export const fetchInstructions = () => apiGet('/api/chat/instructions')

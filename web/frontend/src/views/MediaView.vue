@@ -1,11 +1,14 @@
 <script setup>
 import { ref, computed, onMounted, inject } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import MediaGrid from '../components/media/MediaGrid.vue'
 import MediaFilters from '../components/media/MediaFilters.vue'
 import CharacterEditor from '../components/characters/CharacterEditor.vue'
-import { fetchMedia, uploadMedia, deleteMedia, importMedia, mediaOrigin, useMediaFilters } from '../composables/useMedia'
+import {
+  fetchMedia, uploadMedia, deleteMedia, importMedia, mediaOrigin, useMediaFilters, fetchBlockedCounts, clearBlocked,
+} from '../composables/useMedia'
 import { fetchCharacters } from '../composables/useCharacters'
+import { fmtCost } from '../utils/format'
 
 const showToast = inject('showToast', () => {})
 
@@ -13,6 +16,40 @@ const items = ref([])
 const loading = ref(true)
 const uploading = ref(0)
 const { filters, filtered } = useMediaFilters(items)
+// The chat sidebar's 🖼 Media button opens this filtered to chats
+const ORIGINS = ['library', 'project', 'chat']
+const route = useRoute()
+if (ORIGINS.includes(route?.query.origin)) filters.origin = route.query.origin
+
+// Generations a content filter blocked: failed cards in chats, and black
+// images saved before the app caught those
+const blocked = ref({ moderated: 0, black: 0 })
+const blockedTotal = computed(() => blocked.value.moderated + blocked.value.black)
+const clearing = ref(false)
+
+async function loadBlocked() {
+  try {
+    blocked.value = await fetchBlockedCounts()
+  } catch { /* the button just stays hidden */ }
+}
+
+async function clearAllBlocked() {
+  const { moderated, black } = blocked.value
+  const parts = []
+  if (moderated) parts.push(`${moderated} failed generation${moderated !== 1 ? 's' : ''} (removed from their chats)`)
+  if (black) parts.push(`${black} black image${black !== 1 ? 's' : ''} (deleted)`)
+  if (!confirm(`Clear everything a content filter blocked?\n\n${parts.join('\n')}`)) return
+  clearing.value = true
+  try {
+    const { cleared } = await clearBlocked()
+    showToast(`Cleared ${cleared} blocked generation${cleared !== 1 ? 's' : ''}`, 'success')
+    await Promise.all([load(), loadBlocked()])
+  } catch (e) {
+    showToast(`Couldn't clear: ${e.message}`, 'error')
+  } finally {
+    clearing.value = false
+  }
+}
 
 const selectMode = ref(false)
 const selected = ref(new Set())
@@ -119,6 +156,7 @@ const fmtDate = (s) => (s ? new Date(s).toLocaleString() : '')
 onMounted(() => {
   load()
   loadCharacters()
+  loadBlocked()
 })
 </script>
 
@@ -141,6 +179,9 @@ onMounted(() => {
 
     <div class="bar">
       <MediaFilters :filters="filters" />
+      <button v-if="blockedTotal" class="btn btn-secondary small clear-blocked" :disabled="clearing"
+              title="Remove failed generations a content filter blocked, and black images it sent back"
+              @click="clearAllBlocked">🧹 Clear blocked ({{ blockedTotal }})</button>
       <button class="btn btn-secondary small" @click="toggleSelectMode">{{ selectMode ? 'Cancel' : 'Select' }}</button>
     </div>
     <p v-if="uploading" class="muted">Uploading {{ uploading }}…</p>
@@ -179,7 +220,7 @@ onMounted(() => {
               · {{ fmtDate(preview.created_at) }}
             </p>
             <p v-if="preview.prompt" class="prompt">{{ preview.prompt }}</p>
-            <p v-if="preview.model" class="muted">{{ preview.model }}</p>
+            <p v-if="preview.model" class="muted">{{ preview.model }}<template v-if="preview.cost"> · {{ fmtCost(preview.cost) }}</template></p>
             <div class="actions">
               <template v-if="preview.kind === 'image'">
                 <button class="btn btn-secondary small" @click="newCharacter([preview])">👤 New character</button>

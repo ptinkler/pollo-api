@@ -10,6 +10,10 @@ export const fetchMedia = () => apiGet('/api/media').then(r => r.items)
 export const uploadMedia = (file) => apiUpload('/api/media/upload', file)
 export const deleteMedia = (id) => apiDelete(`/api/media/${enc(id)}`)
 
+/** Chat generations a content filter blocked: { moderated, black } counts, and clearing them all. */
+export const fetchBlockedCounts = () => apiGet('/api/media/blocked')
+export const clearBlocked = () => apiPost('/api/media/blocked/clear', {})
+
 /** Copy an image to a project ({ image_url: "local:…" }), a chat ({ file }) or a character (the character). */
 export const importMedia = (mediaId, target) => apiPost('/api/media/import', { media_id: mediaId, ...target })
 

@@ -42,10 +42,9 @@ const routes = [
     meta: { title: 'Chat — Pollo', fullBleed: true }
   },
   {
+    // The old chat Library is now part of Media
     path: '/chat/library',
-    name: 'chat-library',
-    component: ChatView,
-    meta: { title: 'Library — Chat', fullBleed: true }
+    redirect: { name: 'media', query: { origin: 'chat' } }
   },
   {
     path: '/chat/:id',

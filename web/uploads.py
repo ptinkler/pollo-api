@@ -27,6 +27,18 @@ def image_media_type(path: Path | str) -> str | None:
     return media_type if media_type and media_type.startswith("image/") else None
 
 
+def is_blank_image(data: bytes) -> bool:
+    """A solid black picture: what many providers' safety filters send instead
+    of the image they blocked. Even a night scene has some brighter pixels."""
+    try:
+        with Image.open(io.BytesIO(data)) as im:
+            im = im.convert("L")
+            im.thumbnail((64, 64))
+            return im.getextrema()[1] <= 4
+    except Exception:
+        return False   # not an image Pillow reads; leave it to the caller
+
+
 async def read_image_upload(file: UploadFile) -> tuple[bytes, str]:
     """Validate an uploaded image (type, size, real image content); returns
     (bytes, file extension to save it with)."""

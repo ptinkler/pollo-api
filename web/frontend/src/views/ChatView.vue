@@ -5,7 +5,6 @@ import { useAuth } from '../composables/useAuth'
 import { useSessionCredits } from '../composables/useSessionCredits'
 import ModelPicker from '../components/chat/ModelPicker.vue'
 import ChatMessage from '../components/chat/ChatMessage.vue'
-import ChatLibrary from '../components/chat/ChatLibrary.vue'
 import InstructionsDialog from '../components/chat/InstructionsDialog.vue'
 import CharacterPicker from '../components/characters/CharacterPicker.vue'
 import CharacterEditor from '../components/characters/CharacterEditor.vue'
@@ -92,7 +91,6 @@ const messages = ref([])
 const loadingConv = ref(false)
 
 const convId = computed(() => route.params.id || null)
-const isLibrary = computed(() => route.name === 'chat-library')
 
 // ── Composer state ───────────────────────────────────────────────────
 const draft = ref('')
@@ -688,7 +686,7 @@ function deleteQuestion({ other_versions: versions, other_messages: after }) {
   if (versions && after) extra = ` This also removes ${plural(versions, 'other version')} and ${plural(after, 'message')} that followed them.`
   else if (versions) extra = ` This also removes ${plural(versions, 'other version')}.`
   else if (after) extra = ` This also removes ${plural(after, 'message')} on other branches.`
-  return `Delete this prompt and its reply?${extra} Images and videos stay in the Library.`
+  return `Delete this prompt and its reply?${extra} Images and videos stay in Media.`
 }
 
 // Remove a prompt and its reply; the models stop seeing them, media stays in the Library
@@ -716,9 +714,10 @@ async function switchBranch(messageId) {
   }
 }
 
+// Chat creations live in Media, with everything else (filtered to chats)
 function openLibrary() {
   sidebarOpen.value = false
-  router.push({ name: 'chat-library' })
+  router.push({ name: 'media', query: { origin: 'chat' } })
 }
 
 // Retry a failed image/video in place (same or another model). The server
@@ -1080,7 +1079,7 @@ onBeforeUnmount(() => {
         </p>
       </div>
 
-      <button class="library-link" :class="{ active: isLibrary }" @click="openLibrary">🖼 Library</button>
+      <button class="library-link" title="Every image and video from your chats, in Media" @click="openLibrary">🗂 Media</button>
 
       <div class="side-heading chats-heading"><span>Chats</span></div>
       <div class="conv-list">
@@ -1133,9 +1132,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div ref="scroller" class="chat-scroll" @scroll.passive="onScroll">
-        <ChatLibrary v-if="isLibrary" @open-media="openMedia" />
-
-        <div v-else-if="loadingConv" class="center-note"><div class="spinner"></div></div>
+        <div v-if="loadingConv" class="center-note"><div class="spinner"></div></div>
 
         <div v-else-if="!messages.length" class="welcome">
           <h2><span>Hello.</span> What shall we make?</h2>
@@ -1173,7 +1170,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- ── Composer: one row ──────────────────────────── -->
-      <div v-if="!isLibrary" class="composer-wrap">
+      <div class="composer-wrap">
         <div class="composer" :class="{ dragging }">
           <div v-if="attachments.length" class="att-row">
             <div v-for="a in attachments" :key="a.key" class="att">
@@ -1413,12 +1410,6 @@ onBeforeUnmount(() => {
 
 .library-link:hover {
   background: var(--surface2);
-  color: var(--text);
-}
-
-.library-link.active {
-  background: rgba(108, 92, 231, 0.18);
-  border-color: rgba(108, 92, 231, 0.4);
   color: var(--text);
 }
 

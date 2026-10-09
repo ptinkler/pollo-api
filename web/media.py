@@ -39,7 +39,7 @@ from img2vid.common.metadata import get_db, iso
 
 from . import characters
 from .auth import verify_api_key
-from .uploads import image_media_type, read_image_upload, safe_filename
+from .uploads import image_media_type, is_blank_image, read_image_upload, safe_filename
 
 router = APIRouter(prefix="/api/media", dependencies=[Depends(verify_api_key)])
 
@@ -233,7 +233,7 @@ def _chat_items(db) -> list[dict[str, Any]]:
             "source": "upload" if item.get("source") == "upload" else "generated", "origin": "chat",
             "name": file, "url": f"/api/chat/media/{conv_id}/{file}", "thumb_url": _thumb_url(f"chat:{conv_id}:{file}"),
             "created_at": iso(created_at), "conversation_id": conv_id, "conversation_title": titles.get(conv_id),
-            "prompt": item.get("prompt"), "model": item.get("model"),
+            "prompt": item.get("prompt"), "model": item.get("model"), "cost": item.get("cost"),
         })
 
     for msg in db.get_chat_messages_with_media():
@@ -305,6 +305,80 @@ def api_delete_media(media_id: str):
                 db.delete_chat_library_item(lib.media_id)
         path.unlink()
     return {"deleted": media_id}
+
+
+# ── Clearing blocked generations ────────────────────────────────────
+
+_blank_cache: dict[tuple[str, float], bool] = {}
+
+
+def _is_blank_file(path: Path) -> bool:
+    """is_blank_image for a saved file, remembered per file version (the
+    Media page asks on every load, and a NAS reads slowly)."""
+    try:
+        key = (str(path), path.stat().st_mtime)
+    except OSError:
+        return False
+    if key not in _blank_cache:
+        _blank_cache[key] = is_blank_image(path.read_bytes())
+    return _blank_cache[key]
+
+
+def _blocked_reason(conv_id: str, item: dict) -> str | None:
+    """Why a chat media item counts as a blocked generation: "moderated" (a
+    content filter refused it) or "black" (a black image saved before the
+    app caught those); None otherwise."""
+    if item.get("source") == "upload":
+        return None
+    if item.get("status") == "error":
+        return "moderated" if item.get("moderated") else None
+    if item.get("kind") == "image" and item.get("status", "done") == "done" and item.get("file"):
+        path = _chat_dir(conv_id) / item["file"]
+        if path.is_file() and _is_blank_file(path):
+            return "black"
+    return None
+
+
+def _blocked(db) -> list[tuple[Any, dict, str]]:
+    """(chat message or library entry, media item, reason) for each blocked generation."""
+    out = []
+    for msg in db.get_chat_messages_with_media():
+        out += [(msg, i, r) for i in msg.media if (r := _blocked_reason(msg.conversation_id, i))]
+    for lib in db.list_chat_library():
+        if r := _blocked_reason(lib.conversation_id, lib.item):
+            out.append((lib, lib.item, r))
+    return out
+
+
+@router.get("/blocked")
+def api_blocked_count():
+    """How many chat generations a content filter blocked: failed ones
+    (moderated) and black images saved before those were caught."""
+    found = _blocked(get_db())
+    return {"moderated": sum(r == "moderated" for *_, r in found), "black": sum(r == "black" for *_, r in found)}
+
+
+@router.post("/blocked/clear")
+def api_clear_blocked():
+    """Remove every blocked chat generation: the failed cards from their chats
+    (and detached ones from the library) and the black images' files."""
+    db = get_db()
+    found = _blocked(db)
+    by_message: dict[int, list[str]] = {}
+    for owner, item, _ in found:
+        if hasattr(owner, "media_id"):          # a detached library entry
+            db.delete_chat_library_item(owner.media_id)
+        else:
+            by_message.setdefault(owner.id, []).append(item.get("id"))
+        if item.get("file") and item.get("status", "done") == "done":
+            path = _chat_dir(owner.conversation_id) / safe_filename(item["file"])
+            _thumb_path(path).unlink(missing_ok=True)
+            path.unlink(missing_ok=True)
+    for msg_id, ids in by_message.items():
+        msg = db.get_chat_message(msg_id)
+        if msg:
+            db.update_chat_message(msg_id, media=[i for i in msg.media if i.get("id") not in ids])
+    return {"cleared": len(found)}
 
 
 # ── Using an item elsewhere ─────────────────────────────────────────

@@ -140,6 +140,38 @@ class TestDelete:
         assert client.get(f"/api/characters/{c['id']}/images/{c['images'][0]}").status_code == 200
 
 
+class TestBlocked:
+    @pytest.fixture()
+    def blocked(self, db, conv):
+        """conv plus: a moderated failure and a black image in a reply, an
+        ordinary failure (kept), and a moderated failure detached to the library."""
+        import img2vid.common.config as config
+        d = config.ROOT_DIR / "chat" / conv.id
+        (d / "img_black.png").write_bytes(_png("black"))
+        db.add_chat_message(conv.id, "user", "again")
+        db.add_chat_message(conv.id, "assistant", "", media=[
+            {"id": "m", "kind": "image", "source": "generated", "status": "error", "moderated": True, "error": "flagged"},
+            {"id": "b", "kind": "image", "source": "generated", "status": "done", "file": "img_black.png"},
+            {"id": "t", "kind": "image", "source": "generated", "status": "error", "moderated": False, "error": "timeout"}])
+        old = db.add_chat_message(conv.id, "user", "older")
+        db.add_chat_message(conv.id, "assistant", "", parent_id=old.id, media=[
+            {"id": "lm", "kind": "video", "source": "generated", "status": "error", "moderated": True, "error": "nsfw",
+             "job_id": "venice:m:q"}])
+        db.delete_chat_exchange(conv.id, old.id)
+        return d
+
+    def test_counts(self, client, blocked):
+        assert client.get("/api/media/blocked").json() == {"moderated": 2, "black": 1}
+
+    def test_clear_removes_them_and_keeps_the_rest(self, client, db, conv, blocked):
+        assert client.post("/api/media/blocked/clear").json() == {"cleared": 3}
+        media = {i["id"] for m in db.get_chat_messages(conv.id) for i in m.media}
+        assert {"m", "b", "lm"}.isdisjoint(media) and {"t", "g", "u", "p"} <= media
+        assert not (blocked / "img_black.png").exists() and (blocked / "img_1.png").exists()
+        assert db.list_chat_library() == []
+        assert client.get("/api/media/blocked").json() == {"moderated": 0, "black": 0}
+
+
 class TestThumbnails:
     def _big_png(self, size=(1600, 900)) -> bytes:
         buf = io.BytesIO()

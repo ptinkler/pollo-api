@@ -143,3 +143,49 @@ describe('MediaGrid thumbnails', () => {
     w.unmount()
   })
 })
+
+describe('MediaView', () => {
+  async function mountView(query = {}, blocked = { moderated: 2, black: 1 }) {
+    const calls = []
+    globalThis.fetch = vi.fn(async (url, opts = {}) => {
+      calls.push([opts.method || 'GET', String(url)])
+      const u = String(url)
+      const body = u.includes('/api/media/blocked/clear') ? { cleared: 3 }
+        : u.includes('/api/media/blocked') ? blocked
+        : u.includes('/api/characters') ? []
+        : { items: ITEMS }
+      return { ok: true, status: 200, json: async () => body }
+    })
+    const { createRouter, createMemoryHistory } = await import('vue-router')
+    const MediaView = (await import('../views/MediaView.vue')).default
+    const r = createRouter({ history: createMemoryHistory(), routes: [{ path: '/media', name: 'media', component: MediaView }] })
+    r.push({ name: 'media', query })
+    await r.isReady()
+    const w = mount({ template: '<router-view />' }, { global: { plugins: [r], provide: { showToast: () => {} } } })
+    await flushPromises()
+    return { w, calls }
+  }
+
+  it('opens filtered to chats from the chat sidebar link', async () => {
+    const { w } = await mountView({ origin: 'chat' })
+    expect(w.find('select[aria-label="Where from"]').element.value).toBe('chat')
+    w.unmount()
+  })
+
+  it('clears blocked generations after confirming', async () => {
+    const { w, calls } = await mountView()
+    const btn = w.find('.clear-blocked')
+    expect(btn.text()).toContain('Clear blocked (3)')
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await btn.trigger('click')
+    await flushPromises()
+    expect(calls).toContainEqual(['POST', '/api/media/blocked/clear'])
+    w.unmount()
+  })
+
+  it('hides the button when nothing was blocked', async () => {
+    const { w } = await mountView({}, { moderated: 0, black: 0 })
+    expect(w.find('.clear-blocked').exists()).toBe(false)
+    w.unmount()
+  })
+})

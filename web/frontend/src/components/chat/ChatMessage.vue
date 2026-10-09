@@ -217,7 +217,7 @@ const { copiedKey, copy } = useCopy()
         <template v-if="canEdit">
           <button class="meta-btn" title="Edit and resend" @click="startEdit">✎ Edit</button>
           <button class="meta-btn" title="Resend this prompt for a different response" @click="emit('resend')">↻ Retry</button>
-          <button class="meta-btn" title="Delete this prompt and its reply from the chat (images and videos stay in the Library)"
+          <button class="meta-btn" title="Delete this prompt and its reply from the chat (images and videos stay in Media)"
             @click="emit('delete')">🗑 Delete</button>
         </template>
       </div>
