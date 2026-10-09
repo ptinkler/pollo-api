@@ -34,4 +34,3 @@ pytest.ini
 # Docker
 Dockerfile
 docker-compose.yml
-

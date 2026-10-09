@@ -3,7 +3,7 @@ IMAGE_APP := $(REGISTRY)/pollo-api
 IMAGE_NGX := $(REGISTRY)/pollo-nginx
 TAG       := latest
 
-.PHONY: build push tag dev dev-api dev-frontend lint format test vpn-restart vpn-status vpn-logs db-migrate db-upgrade db-downgrade db-history
+.PHONY: build push tag dev dev-api dev-frontend lint format test hooks vpn-restart vpn-status vpn-logs db-migrate db-upgrade db-downgrade db-history
 
 build:
 	docker build -t $(IMAGE_APP):$(TAG) .
@@ -39,6 +39,11 @@ format:
 	.venv/bin/ruff format .
 	cd web/frontend && npm run lint:fix && npm run format
 
+# Run the lint checks on every commit (.githooks/pre-commit runs .pre-commit-config.yaml;
+# from git for Windows it runs them inside WSL)
+hooks:
+	git config core.hooksPath .githooks
+
 test:
 	.venv/bin/python -m pytest -q
 	cd web/frontend && npm test
@@ -66,4 +71,3 @@ db-downgrade:  ## Revert the last migration
 
 db-history:  ## Show migration history
 	alembic history --verbose
-

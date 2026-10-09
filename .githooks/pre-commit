@@ -1,0 +1,30 @@
+#!/bin/sh
+# Runs the checks in .pre-commit-config.yaml on the staged files.
+# Enabled by `make hooks` (git config core.hooksPath .githooks).
+#
+# The tools live in the Linux checkout (.venv, web/frontend/node_modules), so
+# when git for Windows commits to the repo through \\wsl.localhost\<distro>\…
+# (VS Code, GitHub Desktop, PowerShell), the checks run inside WSL instead.
+
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*)
+    # //wsl.localhost/Ubuntu/home/... (or //wsl$/Ubuntu/...) → distro + Linux path
+    top=$(git rev-parse --show-toplevel)
+    rest=${top#//wsl.localhost/}
+    [ "$rest" = "$top" ] && rest=${top#//wsl\$/}
+    if [ "$rest" = "$top" ]; then
+      echo "pre-commit hook: $top isn't a WSL path; run the commit from WSL" >&2
+      exit 1
+    fi
+    distro=${rest%%/*}
+    exec wsl.exe -d "$distro" --cd "/${rest#*/}" -- sh .githooks/pre-commit "$@"
+    ;;
+esac
+
+if [ -x .venv/bin/pre-commit ]; then
+  exec .venv/bin/pre-commit run --hook-stage pre-commit
+elif command -v pre-commit >/dev/null 2>&1; then
+  exec pre-commit run --hook-stage pre-commit
+fi
+echo "pre-commit hook: pre-commit isn't installed — pip install -r requirements-dev.txt" >&2
+exit 1

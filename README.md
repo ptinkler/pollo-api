@@ -75,6 +75,7 @@ make dev        # API on :5000, Vite dev server on :5173
 make test       # pytest + vitest
 make lint       # what CI checks
 make format     # fix what can be fixed automatically
+make hooks      # check (and fix) staged files on every commit
 ```
 
 Code standards, enforced in CI:

@@ -1,0 +1,37 @@
+# Runs on every commit once enabled with `make hooks` (via .githooks/pre-commit,
+# which also works when committing from Windows to the repo in WSL).
+# The same checks as CI's lint job, on the staged files; fixable problems are
+# fixed (re-stage and commit again). Run everything: `pre-commit run --all-files`.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+
+  # Keep in step with ruff in requirements-dev.txt and CI
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.10
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # The frontend's own ESLint and Prettier (run `npm install` in web/frontend first)
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint
+        entry: web/frontend/node_modules/.bin/eslint --fix
+        language: system
+        files: ^web/frontend/.*\.(js|vue)$
+      - id: prettier
+        name: prettier
+        entry: web/frontend/node_modules/.bin/prettier --write --ignore-unknown --ignore-path web/frontend/.prettierignore
+        language: system
+        files: ^web/frontend/
