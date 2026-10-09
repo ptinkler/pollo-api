@@ -33,9 +33,11 @@ describe('ChatComposer', () => {
     expect(w.find('.send.stop').exists()).toBe(true)
     expect(w.find('.ctx-chip').text()).toContain('👤 Linh')
     expect(w.find('.ctx-chip.pins').text()).toContain('📌 2')
-    expect(mountComposer({ mode: { id: 'text', label: 'Chat', icon: '💬' }, pinnedCount: 2 }).find('.pins').exists()).toBe(
-      false,
-    )
+    expect(
+      mountComposer({ mode: { id: 'text', label: 'Chat', icon: '💬' }, pinnedCount: 2 })
+        .find('.pins')
+        .exists(),
+    ).toBe(false)
   })
 
   it('keeps characters and pins in the one row: change characters, or unpin all', async () => {

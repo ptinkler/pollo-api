@@ -284,7 +284,9 @@ const { copiedKey, copy } = useCopy()
         </button>
         <template v-if="canEdit">
           <button class="meta-btn" title="Edit and resend" @click="startEdit">✎</button>
-          <button class="meta-btn" title="Resend this prompt for a different response" @click="emit('resend')">↻</button>
+          <button class="meta-btn" title="Resend this prompt for a different response" @click="emit('resend')">
+            ↻
+          </button>
           <button
             class="meta-btn"
             title="Start a new chat from here: everything up to this prompt and its reply, nothing after"
@@ -475,7 +477,14 @@ const { copiedKey, copy } = useCopy()
             >
               ✎🎬
             </button>
-            <button v-if="canRetry" class="meta-btn" title="Retry: another version of this reply" @click="emit('retry')">↻</button>
+            <button
+              v-if="canRetry"
+              class="meta-btn"
+              title="Retry: another version of this reply"
+              @click="emit('retry')"
+            >
+              ↻
+            </button>
             <button
               v-if="canBranch"
               class="meta-btn"
@@ -487,7 +496,9 @@ const { copiedKey, copy } = useCopy()
           </template>
           <ForkList v-if="message.forks?.length" :forks="message.forks" @open="id => emit('open-chat', id)" />
           <span class="meta-spacer"></span>
-          <span v-if="modelShort && showTextModel" class="meta-info model" :title="message.model">💬 {{ modelShort }}</span>
+          <span v-if="modelShort && showTextModel" class="meta-info model" :title="message.model"
+            >💬 {{ modelShort }}</span
+          >
           <span v-if="message.cost" class="meta-info" title="Total OpenRouter cost for this reply (text + media)"
             >total {{ fmtCost(message.cost) }}</span
           >
