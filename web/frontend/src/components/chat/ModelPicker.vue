@@ -10,7 +10,7 @@ const props = defineProps({
   models: { type: Array, default: () => [] },
   label: { type: String, required: true },
   icon: { type: String, default: '' },
-  kind: { type: String, default: 'text' },  // text | image | video
+  kind: { type: String, default: 'text' }, // text | image | video
   loading: { type: Boolean, default: false },
   // Render the trigger as a small text button (e.g. "Try another model…")
   // instead of the labelled picker box, for one-off picks
@@ -35,8 +35,13 @@ const hiddenCount = computed(() => props.models.filter(m => m.hidden).length)
 // "Uncensored only" narrows the list the same way (the current pick always stays)
 const { uncensoredOnly } = useUncensoredOnly()
 const uncensoredCount = computed(() => props.models.filter(m => m.uncensored && (showHidden.value || !m.hidden)).length)
-const visibleModels = computed(() => props.models.filter(m => m.id === props.modelValue || (
-  (showHidden.value || !m.hidden) && (!uncensoredOnly.value || !uncensoredCount.value || m.uncensored))))
+const visibleModels = computed(() =>
+  props.models.filter(
+    m =>
+      m.id === props.modelValue ||
+      ((showHidden.value || !m.hidden) && (!uncensoredOnly.value || !uncensoredCount.value || m.uncensored)),
+  ),
+)
 
 // ── Provider tabs: Pollo ("pollo/…", billed in Pollo credits), Venice
 // ("venice/…", billed to the Venice account) and OpenRouter. Only shown when
@@ -46,12 +51,15 @@ const ALL_PROVIDERS = {
   venice: { label: 'Venice', title: 'Runs on your Venice account (billed in Venice credit)' },
   openrouter: { label: 'OpenRouter', title: 'Runs on OpenRouter (billed in OpenRouter credits)' },
 }
-const providerOf = (id) => {
+const providerOf = id => {
   const prefix = (id || '').split('/')[0]
   return prefix === 'pollo' || prefix === 'venice' ? prefix : 'openrouter'
 }
-const PROVIDERS = computed(() => Object.fromEntries(
-  Object.entries(ALL_PROVIDERS).filter(([id]) => visibleModels.value.some(m => providerOf(m.id) === id))))
+const PROVIDERS = computed(() =>
+  Object.fromEntries(
+    Object.entries(ALL_PROVIDERS).filter(([id]) => visibleModels.value.some(m => providerOf(m.id) === id)),
+  ),
+)
 const showTabs = computed(() => Object.keys(PROVIDERS.value).length > 1)
 const tab = ref(Object.keys(ALL_PROVIDERS)[0])
 
@@ -62,15 +70,17 @@ const searched = computed(() => {
     : visibleModels.value
 })
 const matches = computed(() =>
-  showTabs.value ? searched.value.filter(m => providerOf(m.id) === tab.value) : searched.value)
+  showTabs.value ? searched.value.filter(m => providerOf(m.id) === tab.value) : searched.value,
+)
 const tabCounts = computed(() => {
   const counts = Object.fromEntries(Object.keys(ALL_PROVIDERS).map(id => [id, 0]))
   for (const m of searched.value) counts[providerOf(m.id)]++
   return counts
 })
 // Where a search that found nothing here does find something
-const otherTab = computed(() =>
-  Object.keys(PROVIDERS.value).find(id => id !== tab.value && tabCounts.value[id]) || null)
+const otherTab = computed(
+  () => Object.keys(PROVIDERS.value).find(id => id !== tab.value && tabCounts.value[id]) || null,
+)
 
 // Favourites keep the order they were starred in; models that have left
 // the catalogue are skipped rather than shown broken
@@ -78,8 +88,7 @@ const favouriteModels = computed(() => {
   const byId = new Map(matches.value.map(m => [m.id, m]))
   return (favourites[props.kind] || []).map(id => byId.get(id)).filter(Boolean)
 })
-const otherModels = computed(() =>
-  matches.value.filter(m => !isFavourite(props.kind, m.id)).slice(0, 200))
+const otherModels = computed(() => matches.value.filter(m => !isFavourite(props.kind, m.id)).slice(0, 200))
 const filtered = computed(() => [...favouriteModels.value, ...otherModels.value])
 
 const sections = computed(() => {
@@ -102,47 +111,82 @@ const UNCENSORED_TITLE = 'Uncensored: the provider marks this model as having no
 
 // Venice's privacy levels
 const PRIVACY = {
-  private: { t: '🔒 private', cls: 'private',
-    title: 'Private: runs on Venice\'s own servers and nothing is stored' },
-  anonymized: { t: 'anonymized', cls: 'anonymized',
-    title: 'Anonymized: Venice passes it to a third-party provider without your identity; that provider may keep the prompts and outputs' },
+  private: { t: '🔒 private', cls: 'private', title: "Private: runs on Venice's own servers and nothing is stored" },
+  anonymized: {
+    t: 'anonymized',
+    cls: 'anonymized',
+    title:
+      'Anonymized: Venice passes it to a third-party provider without your identity; that provider may keep the prompts and outputs',
+  },
 }
 
 // Venice prices: per image, or a quote for a ~5s video at the lowest resolution
-const fmtPrice = (usd) => `$${usd < 0.1 ? usd.toFixed(3).replace(/0$/, '') : usd.toFixed(2)}`
+const fmtPrice = usd => `$${usd < 0.1 ? usd.toFixed(3).replace(/0$/, '') : usd.toFixed(2)}`
 
+const VIDEO_FAMILY = {
+  reference: 'refs→vid',
+  frames: 'first+last',
+  angles: 'multi-angle',
+  video: 'vid→vid',
+  motion: 'motion',
+  upscale: 'upscale',
+}
+
+// The little labels beside a model: warnings first, then what it can do and costs
 function badges(m) {
-  const out = []
-  // First, so it's the one thing you can't miss
-  if (m.uncensored) out.push({ t: '🔞 uncensored', title: UNCENSORED_TITLE, cls: 'uncensored' })
-  if (PRIVACY[m.privacy]) out.push(PRIVACY[m.privacy])
-  if (m.hidden) out.push({ t: 'hidden', title: m.hidden })
-  if (props.kind === 'text') {
-    if (m.input_modalities?.includes('image')) out.push({ t: 'vision', title: 'Accepts images' })
-    if (m.supports_tools) out.push({ t: 'tools', title: 'Can create images/videos in Auto mode' })
-    const p = perMillion(m.prompt_price)
-    const c = perMillion(m.completion_price)
-    if (p) out.push({ t: p === 'free' ? 'free' : `${p}/${c}`, title: 'Input/output price per million tokens' })
-  } else if (m.price) {
-    out.push({ t: fmtPrice(m.price.usd), title: props.kind === 'video'
-      ? `Quoted price for ${m.price.basis || 'a default video'} (longer or sharper costs more)`
-      : `Price per image${m.price.basis ? ` (${m.price.basis})` : ''}` })
-  }
-  if (props.kind === 'image') {
-    if (m.conversational) out.push({ t: 'context', title: 'Sees the conversation (text and earlier images), like the Gemini app' })
-    else if (m.input_modalities?.includes('image')) out.push({ t: 'edits', title: 'Takes reference images (tends to edit them)' })
-    if (chatImageModelTakesCharacters(m)) out.push({ t: '👤', title: 'Can use characters (sends their reference images)' })
-  } else if (props.kind === 'video') {
-    const FAMILY = {
-      reference: 'refs→vid', frames: 'first+last', angles: 'multi-angle',
-      video: 'vid→vid', motion: 'motion', upscale: 'upscale',
-    }
-    if (FAMILY[m.family]) out.push({ t: FAMILY[m.family], title: m.family_hint })
-    else if (m.frame_images?.includes('first_frame')) out.push({ t: 'img→vid', title: 'Can animate an image' })
-    if (m.durations?.length) out.push({ t: `${Math.min(...m.durations)}–${Math.max(...m.durations)}s`, title: 'Durations' })
-    if (m.generate_audio) out.push({ t: 'audio', title: 'Can generate audio' })
-  }
-  return out
+  const kindBadges = { text: textBadges, image: imageBadges, video: videoBadges }[props.kind] || (() => [])
+  const price = props.kind === 'text' ? [] : priceBadge(m)
+  return [...flagBadges(m), ...price, ...kindBadges(m)].filter(Boolean)
+}
+
+function flagBadges(m) {
+  return [
+    // First, so it's the one thing you can't miss
+    m.uncensored && { t: '🔞 uncensored', title: UNCENSORED_TITLE, cls: 'uncensored' },
+    PRIVACY[m.privacy],
+    m.hidden && { t: 'hidden', title: m.hidden },
+  ]
+}
+
+function textBadges(m) {
+  const p = perMillion(m.prompt_price)
+  const c = perMillion(m.completion_price)
+  return [
+    m.input_modalities?.includes('image') && { t: 'vision', title: 'Accepts images' },
+    m.supports_tools && { t: 'tools', title: 'Can create images/videos in Auto mode' },
+    p && { t: p === 'free' ? 'free' : `${p}/${c}`, title: 'Input/output price per million tokens' },
+  ]
+}
+
+function priceBadge(m) {
+  if (!m.price) return []
+  const basis = m.price.basis
+  const title =
+    props.kind === 'video'
+      ? `Quoted price for ${basis || 'a default video'} (longer or sharper costs more)`
+      : `Price per image${basis ? ` (${basis})` : ''}`
+  return [{ t: fmtPrice(m.price.usd), title }]
+}
+
+function imageBadges(m) {
+  const input = m.conversational
+    ? { t: 'context', title: 'Sees the conversation (text and earlier images), like the Gemini app' }
+    : m.input_modalities?.includes('image') && { t: 'edits', title: 'Takes reference images (tends to edit them)' }
+  return [
+    input,
+    chatImageModelTakesCharacters(m) && { t: '👤', title: 'Can use characters (sends their reference images)' },
+  ]
+}
+
+function videoBadges(m) {
+  const family = VIDEO_FAMILY[m.family]
+    ? { t: VIDEO_FAMILY[m.family], title: m.family_hint }
+    : m.frame_images?.includes('first_frame') && { t: 'img→vid', title: 'Can animate an image' }
+  return [
+    family,
+    m.durations?.length && { t: `${Math.min(...m.durations)}–${Math.max(...m.durations)}s`, title: 'Durations' },
+    m.generate_audio && { t: 'audio', title: 'Can generate audio' },
+  ]
 }
 
 function onDocClick(e) {
@@ -181,7 +225,7 @@ async function toggle() {
   place()
   document.addEventListener('mousedown', onDocClick)
   window.addEventListener('resize', place)
-  window.addEventListener('scroll', place, true)   // any scrolling ancestor moves the button
+  window.addEventListener('scroll', place, true) // any scrolling ancestor moves the button
   await nextTick()
   searchInput.value?.focus()
 }
@@ -193,9 +237,15 @@ function close() {
   window.removeEventListener('scroll', place, true)
 }
 
+// A model, or null for none
 function pick(m) {
-  emit('update:modelValue', m.id)
+  emit('update:modelValue', m?.id ?? '')
   close()
+}
+
+function showTab(id) {
+  tab.value = id
+  searchInput.value?.focus()
 }
 
 function onKeydown(e) {
@@ -211,18 +261,40 @@ onBeforeUnmount(close)
     <button v-if="triggerText" type="button" class="picker-trigger" :class="{ active: open }" @click="toggle">
       {{ triggerText }}
     </button>
-    <button v-else type="button" class="picker-btn" :class="{ active: open }" @click="toggle" :title="modelValue || 'None selected'">
+    <button
+      v-else
+      type="button"
+      class="picker-btn"
+      :class="{ active: open }"
+      :title="modelValue || 'None selected'"
+      @click="toggle"
+    >
       <span class="picker-icon">{{ icon }}</span>
       <span class="picker-text">
-        <span class="picker-label">{{ label }}<span
-          v-if="showTabs && modelValue" class="provider-tag" :class="providerOf(modelValue)"
-          :title="ALL_PROVIDERS[providerOf(modelValue)].title"> · {{ ALL_PROVIDERS[providerOf(modelValue)].label }}</span></span>
+        <span class="picker-label"
+          >{{ label
+          }}<span
+            v-if="showTabs && modelValue"
+            class="provider-tag"
+            :class="providerOf(modelValue)"
+            :title="ALL_PROVIDERS[providerOf(modelValue)].title"
+          >
+            · {{ ALL_PROVIDERS[providerOf(modelValue)].label }}</span
+          ></span
+        >
         <span class="picker-value">
           <template v-if="loading">Loading…</template>
           <template v-else>{{ current?.name || modelValue || 'None' }}</template>
-          <span v-if="!loading && current?.uncensored" class="item-badge uncensored picked" :title="UNCENSORED_TITLE">🔞 uncensored</span>
-          <span v-if="!loading && PRIVACY[current?.privacy]" class="item-badge picked" :class="PRIVACY[current.privacy].cls"
-                :title="PRIVACY[current.privacy].title">{{ PRIVACY[current.privacy].t }}</span>
+          <span v-if="!loading && current?.uncensored" class="item-badge uncensored picked" :title="UNCENSORED_TITLE"
+            >🔞 uncensored</span
+          >
+          <span
+            v-if="!loading && PRIVACY[current?.privacy]"
+            class="item-badge picked"
+            :class="PRIVACY[current.privacy].cls"
+            :title="PRIVACY[current.privacy].title"
+            >{{ PRIVACY[current.privacy].t }}</span
+          >
         </span>
       </span>
       <span class="chev">▾</span>
@@ -246,14 +318,20 @@ onBeforeUnmount(close)
           :class="[id, { active: tab === id }]"
           :aria-selected="tab === id"
           :title="p.title"
-          @click="tab = id; searchInput?.focus()"
-        >{{ p.label }} <span class="tab-count">{{ tabCounts[id] }}</span></button>
+          @click="showTab(id)"
+        >
+          {{ p.label }} <span class="tab-count">{{ tabCounts[id] }}</span>
+        </button>
       </div>
       <label v-if="uncensoredCount" class="show-hidden uncensored-only" title="Only list models marked uncensored">
         <input v-model="uncensoredOnly" type="checkbox" @change="searchInput?.focus()" />
         🔞 Uncensored only ({{ uncensoredCount }})
       </label>
-      <label v-if="hiddenCount" class="show-hidden" title="Models left out of the list: not enabled for this API key, or retired">
+      <label
+        v-if="hiddenCount"
+        class="show-hidden"
+        title="Models left out of the list: not enabled for this API key, or retired"
+      >
         <input v-model="showHidden" type="checkbox" @change="searchInput?.focus()" />
         Show hidden ({{ hiddenCount }})
       </label>
@@ -265,7 +343,7 @@ onBeforeUnmount(close)
             type="button"
             class="picker-item"
             :class="{ selected: !modelValue }"
-            @click="emit('update:modelValue', ''); close()"
+            @click="pick(null)"
           >
             <span class="item-name">None</span>
             <span class="item-id">Disable {{ kind }} generation</span>
@@ -283,7 +361,9 @@ onBeforeUnmount(close)
             <span class="item-row">
               <span class="item-name">{{ m.name }}</span>
               <span class="item-badges">
-                <span v-for="b in badges(m)" :key="b.t" class="item-badge" :class="b.cls" :title="b.title">{{ b.t }}</span>
+                <span v-for="b in badges(m)" :key="b.t" class="item-badge" :class="b.cls" :title="b.title">{{
+                  b.t
+                }}</span>
               </span>
               <button
                 type="button"
@@ -292,8 +372,10 @@ onBeforeUnmount(close)
                 :title="isFavourite(kind, m.id) ? 'Remove from favourites' : 'Add to favourites'"
                 :aria-pressed="isFavourite(kind, m.id)"
                 @click.stop="toggleFavourite(kind, m.id)"
-                @keydown.enter.stop"
-              >{{ isFavourite(kind, m.id) ? '★' : '☆' }}</button>
+                @keydown.enter.stop
+              >
+                {{ isFavourite(kind, m.id) ? '★' : '☆' }}
+              </button>
             </span>
             <span class="item-id">{{ m.id }}</span>
           </div>
@@ -301,7 +383,8 @@ onBeforeUnmount(close)
         <div v-if="!filtered.length" class="picker-empty">
           No {{ showTabs ? ALL_PROVIDERS[tab].label + ' ' : '' }}models match “{{ query }}”
           <button v-if="showTabs && otherTab" type="button" class="tab-hint" @click="tab = otherTab">
-            {{ tabCounts[otherTab] }} match{{ tabCounts[otherTab] === 1 ? '' : 'es' }} in {{ ALL_PROVIDERS[otherTab].label }} →
+            {{ tabCounts[otherTab] }} match{{ tabCounts[otherTab] === 1 ? '' : 'es' }} in
+            {{ ALL_PROVIDERS[otherTab].label }} →
           </button>
         </div>
       </div>
@@ -598,7 +681,9 @@ onBeforeUnmount(close)
   border-radius: 6px;
   cursor: pointer;
   opacity: 0.45;
-  transition: opacity 0.15s, color 0.15s;
+  transition:
+    opacity 0.15s,
+    color 0.15s;
 }
 
 .picker-item:hover .star,

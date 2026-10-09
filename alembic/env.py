@@ -4,11 +4,11 @@ Uses the same DB_PATH and models as the application so that
 `alembic revision --autogenerate` and `alembic upgrade head`
 always target the correct database.
 """
+
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config, pool
-
 from alembic import context
+from sqlalchemy import engine_from_config, pool
 
 from img2vid.common.metadata import Base
 
@@ -17,9 +17,9 @@ config = context.config
 
 # Use sqlalchemy.url if already set (e.g. by tests or CLI override),
 # otherwise derive from the app's DB_PATH config.
-if not config.get_main_option("sqlalchemy.url") or \
-   config.get_main_option("sqlalchemy.url") == "sqlite:///placeholder":
+if not config.get_main_option("sqlalchemy.url") or config.get_main_option("sqlalchemy.url") == "sqlite:///placeholder":
     from img2vid.common.config import DB_PATH
+
     config.set_main_option("sqlalchemy.url", f"sqlite:///{DB_PATH}")
 
 # Set up Python logging from the .ini file

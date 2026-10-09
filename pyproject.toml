@@ -1,0 +1,41 @@
+# Tool configuration only — the app is run from source (see README / Makefile).
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+extend-exclude = ["data", "web/frontend", "web/static"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle (PEP 8)
+    "F",        # pyflakes: unused names, undefined names
+    "I",        # import sorting
+    "B",        # bugbear: likely bugs
+    "UP",       # pyupgrade: modern syntax for the target version
+    "C4",       # comprehensions
+    "SIM",      # simplifications
+    "C90",      # function complexity (mccabe)
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI declares parameters with calls in their defaults
+extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Query", "fastapi.Cookie", "fastapi.Form"]
+
+[tool.ruff.lint.per-file-ignores]
+# Bootstraps sys.path and the environment before importing the app
+"web/api.py" = ["E402"]
+# Fixtures imported from another test module are redefined as test parameters
+"tests/test_characters.py" = ["F811"]
+"tests/test_media.py" = ["F811"]
+"tests/test_venice.py" = ["F811"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["img2vid", "web", "tests"]
+known-third-party = ["alembic"]   # not the migrations folder of the same name
+
+[tool.ruff.format]
+quote-style = "double"
+line-ending = "lf"

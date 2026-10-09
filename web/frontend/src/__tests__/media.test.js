@@ -5,11 +5,36 @@ import MediaPicker from '../components/media/MediaPicker.vue'
 import { useMediaFilters, mediaOrigin } from '../composables/useMedia'
 
 const ITEMS = [
-  { id: 'lib:a.png', kind: 'image', source: 'upload', origin: 'library', name: 'a.png', url: '/a', created_at: '2026-10-07' },
-  { id: 'proj:p:v.mp4', kind: 'video', source: 'generated', origin: 'project', name: 'v.mp4', url: '/v',
-    project: 'p', project_name: 'Trailer', prompt: 'a fox runs' },
-  { id: 'chat:c:g.png', kind: 'image', source: 'generated', origin: 'chat', name: 'g.png', url: '/g',
-    conversation_title: 'Fox chat', prompt: 'fox in snow' },
+  {
+    id: 'lib:a.png',
+    kind: 'image',
+    source: 'upload',
+    origin: 'library',
+    name: 'a.png',
+    url: '/a',
+    created_at: '2026-10-07',
+  },
+  {
+    id: 'proj:p:v.mp4',
+    kind: 'video',
+    source: 'generated',
+    origin: 'project',
+    name: 'v.mp4',
+    url: '/v',
+    project: 'p',
+    project_name: 'Trailer',
+    prompt: 'a fox runs',
+  },
+  {
+    id: 'chat:c:g.png',
+    kind: 'image',
+    source: 'generated',
+    origin: 'chat',
+    name: 'g.png',
+    url: '/g',
+    conversation_title: 'Fox chat',
+    prompt: 'fox in snow',
+  },
 ]
 
 describe('useMediaFilters', () => {
@@ -22,7 +47,7 @@ describe('useMediaFilters', () => {
     expect(filtered.value.map(i => i.id)).toEqual(['chat:c:g.png'])
     filters.kind = 'all'
     filters.source = 'all'
-    filters.q = 'trailer'   // matches where it's from
+    filters.q = 'trailer' // matches where it's from
     expect(filtered.value.map(i => i.id)).toEqual(['proj:p:v.mp4'])
   })
 
@@ -33,7 +58,7 @@ describe('useMediaFilters', () => {
 
 describe('MediaPicker', () => {
   beforeEach(() => {
-    globalThis.fetch = vi.fn(async (url) => {
+    globalThis.fetch = vi.fn(async url => {
       const body = String(url).endsWith('/api/media/upload')
         ? { id: 'lib:new.png', kind: 'image', source: 'upload', origin: 'library', name: 'new.png', url: '/n' }
         : { items: ITEMS }
@@ -51,7 +76,7 @@ describe('MediaPicker', () => {
   it('offers only images and emits the picked ones', async () => {
     const w = await open()
     const tiles = document.body.querySelectorAll('.tile')
-    expect(tiles).toHaveLength(2)                     // the video isn't offered
+    expect(tiles).toHaveLength(2) // the video isn't offered
     tiles[0].click()
     tiles[1].click()
     await flushPromises()
@@ -89,14 +114,23 @@ describe('MediaGrid lazy rendering', () => {
     let trigger
     const observed = []
     globalThis.IntersectionObserver = class {
-      constructor(cb) { trigger = cb }
-      observe(el) { observed.push(el) }
+      constructor(cb) {
+        trigger = cb
+      }
+      observe(el) {
+        observed.push(el)
+      }
       unobserve() {}
       disconnect() {}
     }
     const items = Array.from({ length: 130 }, (_, n) => ({
-      id: `lib:${n}.png`, kind: 'image', source: 'upload', origin: 'library', name: `${n}.png`,
-      url: `/full/${n}`, thumb_url: `/thumb/${n}`,
+      id: `lib:${n}.png`,
+      kind: 'image',
+      source: 'upload',
+      origin: 'library',
+      name: `${n}.png`,
+      url: `/full/${n}`,
+      thumb_url: `/thumb/${n}`,
     }))
     const w = mount(MediaGrid, { props: { items, pageSize: 50 } })
     await flushPromises()
@@ -120,14 +154,22 @@ describe('MediaGrid lazy rendering', () => {
   })
 })
 
-
 describe('MediaGrid thumbnails', () => {
   it('defaults to batches of 20, retries a failed thumbnail once, then shows a placeholder', async () => {
     vi.useFakeTimers()
     const { default: MediaGrid } = await import('../components/media/MediaGrid.vue')
-    globalThis.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} }
+    globalThis.IntersectionObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
     const items = Array.from({ length: 30 }, (_, n) => ({
-      id: `lib:${n}.png`, kind: 'image', source: 'upload', origin: 'library', name: `${n}.png`, thumb_url: `/thumb/${n}`,
+      id: `lib:${n}.png`,
+      kind: 'image',
+      source: 'upload',
+      origin: 'library',
+      name: `${n}.png`,
+      thumb_url: `/thumb/${n}`,
     }))
     const w = mount(MediaGrid, { props: { items } })
     await flushPromises()
@@ -150,15 +192,21 @@ describe('MediaView', () => {
     globalThis.fetch = vi.fn(async (url, opts = {}) => {
       calls.push([opts.method || 'GET', String(url)])
       const u = String(url)
-      const body = u.includes('/api/media/blocked/clear') ? { cleared: 3 }
-        : u.includes('/api/media/blocked') ? blocked
-        : u.includes('/api/characters') ? []
-        : { items: ITEMS }
+      const body = u.includes('/api/media/blocked/clear')
+        ? { cleared: 3 }
+        : u.includes('/api/media/blocked')
+          ? blocked
+          : u.includes('/api/characters')
+            ? []
+            : { items: ITEMS }
       return { ok: true, status: 200, json: async () => body }
     })
     const { createRouter, createMemoryHistory } = await import('vue-router')
     const MediaView = (await import('../views/MediaView.vue')).default
-    const r = createRouter({ history: createMemoryHistory(), routes: [{ path: '/media', name: 'media', component: MediaView }] })
+    const r = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/media', name: 'media', component: MediaView }],
+    })
     r.push({ name: 'media', query })
     await r.isReady()
     const w = mount({ template: '<router-view />' }, { global: { plugins: [r], provide: { showToast: () => {} } } })

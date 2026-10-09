@@ -1,11 +1,13 @@
-import requests
 import os
-from typing import Any, ClassVar
 from pathlib import Path
+from typing import Any, ClassVar
+
+import requests
 from PIL import Image
-from ..common.get_inputs import get_prompt, get_image_url, get_image_path, get_subject_url, get_audio_url
+
 from ..common.cloudflare import is_cloudflare_block
-from ..common.config import POLLO_API_BASE, POLLO_API_V1_BASE, POLLO_API_TIMEOUT
+from ..common.config import POLLO_API_BASE, POLLO_API_TIMEOUT, POLLO_API_V1_BASE
+from ..common.get_inputs import get_audio_url, get_image_path, get_image_url, get_prompt, get_subject_url
 
 # Sentinel for distinguishing "not passed" from None
 _UNSET = object()
@@ -79,7 +81,7 @@ class BaseVideoGenerator:
         """Parse and validate video length against VALID_LENGTHS."""
         try:
             length = int(length_str)
-            if hasattr(cls, 'VALID_LENGTHS') and cls.VALID_LENGTHS:
+            if hasattr(cls, "VALID_LENGTHS") and cls.VALID_LENGTHS:
                 if length in cls.VALID_LENGTHS:
                     return length
             else:
@@ -89,13 +91,13 @@ class BaseVideoGenerator:
         return default
 
     def __init__(self, **kwargs) -> None:
-        self.api_key = kwargs.get('api_key') or os.getenv("POLLO_API_KEY")
-        self.project = kwargs.get('project') or os.getenv("PROJECT", "default")
-        self.prompt = kwargs.get('prompt') or get_prompt(self.project)
-        self.image_url = kwargs.get('image_url', _UNSET)
+        self.api_key = kwargs.get("api_key") or os.getenv("POLLO_API_KEY")
+        self.project = kwargs.get("project") or os.getenv("PROJECT", "default")
+        self.prompt = kwargs.get("prompt") or get_prompt(self.project)
+        self.image_url = kwargs.get("image_url", _UNSET)
         if self.image_url is _UNSET:
             self.image_url = get_image_url(self.project)
-        self.image_path = get_image_path(self.project) if not kwargs.get('image_url') else None
+        self.image_path = get_image_path(self.project) if not kwargs.get("image_url") else None
         self.payload_attrs = {}
         self.model_url = None
         self.model_name = self.__class__.__name__
@@ -109,20 +111,13 @@ class BaseVideoGenerator:
         if not self.model_url:
             raise ValueError("model_url must be set in the subclass.")
         payload = self.get_payload()
-        headers = {
-            "x-api-key": self.api_key,
-            "Content-Type": "application/json"
-        }
+        headers = {"x-api-key": self.api_key, "Content-Type": "application/json"}
         try:
             resp = requests.request("POST", self.model_url, json=payload, headers=headers, timeout=POLLO_API_TIMEOUT)
         except requests.exceptions.ConnectionError as e:
-            raise ConnectionError(
-                f"Cannot reach API ({self.model_url}) — VPN/network may be down: {e}"
-            ) from e
+            raise ConnectionError(f"Cannot reach API ({self.model_url}) — VPN/network may be down: {e}") from e
         except requests.exceptions.Timeout as e:
-            raise ConnectionError(
-                f"API request timed out ({self.model_url}) — VPN/network may be slow: {e}"
-            ) from e
+            raise ConnectionError(f"API request timed out ({self.model_url}) — VPN/network may be slow: {e}") from e
 
         if is_cloudflare_block(resp):
             raise ConnectionError(
@@ -173,6 +168,7 @@ class BaseV1VideoGenerator(BaseVideoGenerator):
     overriding get_payload(), unless their schema has a genuinely bespoke
     field (as wan27's negativePrompt/audio-driven-generation does).
     """
+
     V1_PROVIDER: ClassVar[str] = ""
     V1_MODEL: ClassVar[str] = ""
 
@@ -226,36 +222,42 @@ class BaseV1VideoGenerator(BaseVideoGenerator):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_V1_BASE}/{self.V1_PROVIDER}/{self.V1_MODEL}/video"
-        self.refs = kwargs.get('refs') if self.HAS_REFS else None
-        self.resolution = kwargs.get('resolution') or os.getenv("RESOLUTION", self.DEFAULT_RESOLUTION)
-        length_str = str(kwargs.get('length') or os.getenv("LENGTH", str(self.DEFAULT_LENGTH)))
+        self.refs = kwargs.get("refs") if self.HAS_REFS else None
+        self.resolution = kwargs.get("resolution") or os.getenv("RESOLUTION", self.DEFAULT_RESOLUTION)
+        length_str = str(kwargs.get("length") or os.getenv("LENGTH", str(self.DEFAULT_LENGTH)))
         if self.refs and self.REF_VALID_LENGTHS:
             # Snap to the nearest length the ref branch allows
             length = int(length_str) if length_str.isdigit() else self.DEFAULT_LENGTH
             self.length = min(self.REF_VALID_LENGTHS, key=lambda v: abs(v - length))
         else:
             self.length = self._get_valid_length(length_str, default=self.DEFAULT_LENGTH)
-        self.aspect_ratio = kwargs.get('aspect_ratio') or self.get_aspect_ratio(
+        self.aspect_ratio = kwargs.get("aspect_ratio") or self.get_aspect_ratio(
             os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "portrait")
         )
-        self.image_tail = (kwargs.get('image_tail') or os.getenv("IMAGE_TAIL")) if self.HAS_IMAGE_TAIL else None
+        self.image_tail = (kwargs.get("image_tail") or os.getenv("IMAGE_TAIL")) if self.HAS_IMAGE_TAIL else None
         self.seed = (
-            kwargs.get('seed') or (int(os.getenv("SEED")) if os.getenv("SEED") else None)
-        ) if self.HAS_SEED else None
+            (kwargs.get("seed") or (int(os.getenv("SEED")) if os.getenv("SEED") else None)) if self.HAS_SEED else None
+        )
         self.generate_audio = (
-            kwargs.get('generate_audio') if kwargs.get('generate_audio') is not None
-            else _parse_bool_env("GENERATE_AUDIO", True)
-        ) if self.HAS_GENERATE_AUDIO else None
+            (
+                kwargs.get("generate_audio")
+                if kwargs.get("generate_audio") is not None
+                else _parse_bool_env("GENERATE_AUDIO", True)
+            )
+            if self.HAS_GENERATE_AUDIO
+            else None
+        )
         self.web_search = (
-            kwargs.get('web_search') if kwargs.get('web_search') is not None
-            else _parse_bool_env("WEBSEARCH", False)
-        ) if self.HAS_WEB_SEARCH else None
-        self.mode = (kwargs.get('mode') or os.getenv("MODE")) if self.HAS_MODE else None
+            (kwargs.get("web_search") if kwargs.get("web_search") is not None else _parse_bool_env("WEBSEARCH", False))
+            if self.HAS_WEB_SEARCH
+            else None
+        )
+        self.mode = (kwargs.get("mode") or os.getenv("MODE")) if self.HAS_MODE else None
         self.negative_prompt = None
         self.audio_url = None
         if self.HAS_NEGATIVE_PROMPT_AUDIO:
-            self.negative_prompt = kwargs.get('negative_prompt') or os.getenv("NEGATIVE_PROMPT")
-            audio_url = kwargs.get('audio_url', _UNSET)
+            self.negative_prompt = kwargs.get("negative_prompt") or os.getenv("NEGATIVE_PROMPT")
+            audio_url = kwargs.get("audio_url", _UNSET)
             if audio_url is _UNSET:
                 audio_url = get_audio_url(self.project)
             self.audio_url = audio_url
@@ -280,12 +282,10 @@ class BaseV1VideoGenerator(BaseVideoGenerator):
     def get_payload(self) -> dict[str, Any]:
         refs = self._normalize_refs(self.refs)
         attrs: dict[str, Any] = {"prompt": self.prompt}
-
         if refs:
             attrs["refs"] = refs
         elif not self.is_text_only:
             attrs["image"] = self.image_url
-
         attrs["duration"] = self.length
         attrs["resolution"] = self.resolution
 
@@ -295,24 +295,24 @@ class BaseV1VideoGenerator(BaseVideoGenerator):
         # it on the image branch too; see HAS_ASPECT_RATIO_ON_IMAGE.
         if refs or self.is_text_only or self.HAS_ASPECT_RATIO_ON_IMAGE:
             attrs["aspectRatio"] = self.aspect_ratio
-
-        if self.HAS_IMAGE_TAIL and self.image_tail and not refs and not self.is_text_only:
-            attrs["imageTail"] = self.image_tail
-        if self.generate_audio is not None:
-            attrs["generateAudio"] = self.generate_audio
-        if self.web_search is not None and not refs:
-            attrs["webSearch"] = self.web_search
-        if self.seed is not None and (self.REF_HAS_SEED or not refs):
-            attrs["seed"] = self.seed
-        if self.mode:
-            attrs["mode"] = self.mode
-        if self.negative_prompt:
-            attrs["negativePrompt"] = self.negative_prompt
-        if self.audio_url and not refs:
-            attrs["audio"] = self.audio_url
-
+        attrs.update(self._optional_attrs(has_refs=bool(refs)))
         self.payload_attrs = attrs
         return {"input": attrs}
+
+    def _optional_attrs(self, has_refs: bool) -> dict[str, Any]:
+        """The options that are set and that the chosen branch takes (the ref
+        branch has no end frame, web search or audio; seed only on some)."""
+        image_branch = not has_refs and not self.is_text_only
+        candidates = {
+            "imageTail": ((self.image_tail or None) if self.HAS_IMAGE_TAIL else None, image_branch),
+            "generateAudio": (self.generate_audio, True),
+            "webSearch": (self.web_search, not has_refs),
+            "seed": (self.seed, self.REF_HAS_SEED or not has_refs),
+            "mode": (self.mode or None, True),
+            "negativePrompt": (self.negative_prompt or None, True),
+            "audio": (self.audio_url or None, not has_refs),
+        }
+        return {key: value for key, (value, allowed) in candidates.items() if value is not None and allowed}
 
 
 class Pollo20VideoGenerator(BaseVideoGenerator):
@@ -327,11 +327,19 @@ class Pollo20VideoGenerator(BaseVideoGenerator):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_BASE}/pollo/pollo-v2-0"
-        self.aspect_ratio = kwargs.get('aspect_ratio') or self.get_aspect_ratio(os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "portrait"))
-        self.resolution = kwargs.get('resolution') or os.getenv("RESOLUTION", "480p")
-        self.length = self._get_valid_length(str(kwargs.get('length') or os.getenv("LENGTH", "10")))
-        self.generate_audio = kwargs.get('generate_audio') if kwargs.get('generate_audio') is not None else _parse_bool_env("GENERATE_AUDIO", True)
-        self.web_search = kwargs.get('web_search') if kwargs.get('web_search') is not None else _parse_bool_env("WEBSEARCH", False)
+        self.aspect_ratio = kwargs.get("aspect_ratio") or self.get_aspect_ratio(
+            os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "portrait")
+        )
+        self.resolution = kwargs.get("resolution") or os.getenv("RESOLUTION", "480p")
+        self.length = self._get_valid_length(str(kwargs.get("length") or os.getenv("LENGTH", "10")))
+        self.generate_audio = (
+            kwargs.get("generate_audio")
+            if kwargs.get("generate_audio") is not None
+            else _parse_bool_env("GENERATE_AUDIO", True)
+        )
+        self.web_search = (
+            kwargs.get("web_search") if kwargs.get("web_search") is not None else _parse_bool_env("WEBSEARCH", False)
+        )
 
     def get_payload(self) -> dict[str, Any]:
         self.payload_attrs = {
@@ -359,13 +367,14 @@ class Pollo25VideoGenerator(Pollo20VideoGenerator):
     regardless of value, so it's dropped from the payload rather than
     exposed as a user-facing setting.
     """
+
     VALID_LENGTHS: ClassVar[tuple] = (4, 5, 6, 7, 8, 9, 10, 11, 12, 15)
     VALID_RESOLUTIONS: ClassVar[tuple] = ("720p", "1080p")
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_BASE}/pollo/pollo-v2-5"
-        self.resolution = kwargs.get('resolution') or os.getenv("RESOLUTION", "1080p")
+        self.resolution = kwargs.get("resolution") or os.getenv("RESOLUTION", "1080p")
 
     def get_payload(self) -> dict[str, Any]:
         payload = super().get_payload()
@@ -384,8 +393,8 @@ class PolloDance20VideoGenerator(Pollo20VideoGenerator):
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_BASE}/pollo/pollo-dance-2-0"
         self.aspect_ratio = self.get_aspect_ratio_from_image() or self.aspect_ratio
-        self.seed = kwargs.get('seed') or (int(os.getenv("SEED")) if os.getenv("SEED") else None)
-        self.image_tail = kwargs.get('image_tail') or os.getenv("IMAGE_TAIL")
+        self.seed = kwargs.get("seed") or (int(os.getenv("SEED")) if os.getenv("SEED") else None)
+        self.image_tail = kwargs.get("image_tail") or os.getenv("IMAGE_TAIL")
 
     def get_payload(self) -> dict[str, Any]:
         payload = super().get_payload()
@@ -430,6 +439,7 @@ class Seedance25VideoGenerator(PolloDance20VideoGenerator):
     enums for resolution, aspectRatio, and length were read directly from
     the API's validation error responses.
     """
+
     VALID_LENGTHS: ClassVar[tuple] = tuple(range(4, 31))
     VALID_RATIOS: ClassVar[tuple] = ("4:3", "3:4", "1:1", "16:9", "9:16", "21:9", "adaptive")
     VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "720p")
@@ -459,6 +469,7 @@ class MinimaxH3VideoGenerator(BaseVideoGenerator):
     length is 4-15, and promptOptimizer is confirmed against a live
     successful task response.
     """
+
     VALID_LENGTHS: ClassVar[tuple] = tuple(range(4, 16))
     VALID_RESOLUTIONS: ClassVar[tuple] = ("480P", "768P", "2K")
 
@@ -470,12 +481,12 @@ class MinimaxH3VideoGenerator(BaseVideoGenerator):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_BASE}/minimax/minimax-h3"
-        self.resolution = kwargs.get('resolution') or os.getenv("RESOLUTION", "2K")
-        self.length = self._get_valid_length(str(kwargs.get('length') or os.getenv("LENGTH", "10")))
-        self.image_tail = kwargs.get('image_tail') or os.getenv("IMAGE_TAIL")
+        self.resolution = kwargs.get("resolution") or os.getenv("RESOLUTION", "2K")
+        self.length = self._get_valid_length(str(kwargs.get("length") or os.getenv("LENGTH", "10")))
+        self.image_tail = kwargs.get("image_tail") or os.getenv("IMAGE_TAIL")
         self.prompt_optimizer = (
-            kwargs.get('prompt_optimizer')
-            if kwargs.get('prompt_optimizer') is not None
+            kwargs.get("prompt_optimizer")
+            if kwargs.get("prompt_optimizer") is not None
             else _parse_bool_env("PROMPT_OPTIMIZER", True)
         )
 
@@ -513,6 +524,7 @@ class MinimaxH3MaxVideoGenerator(BaseV1VideoGenerator):
     spec's schema, so they're included here after all. No generateAudio,
     webSearch, seed, or mode fields exist for this model.
     """
+
     V1_PROVIDER: ClassVar[str] = "minimax"
     V1_MODEL: ClassVar[str] = "minimax-h3-max"
 
@@ -535,6 +547,7 @@ class Wan27VideoGenerator(BaseVideoGenerator):
     generation via audioUrl. Resolution enum values are uppercase
     ("720P", "1080P") per the API docs, unlike other models' lowercase.
     """
+
     VALID_LENGTHS: ClassVar[tuple] = tuple(range(2, 16))
     VALID_RESOLUTIONS: ClassVar[tuple] = ("720P", "1080P")
 
@@ -548,12 +561,12 @@ class Wan27VideoGenerator(BaseVideoGenerator):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_BASE}/wanx/wan-v2-7"
-        self.resolution = kwargs.get('resolution') or os.getenv("RESOLUTION", "1080P")
-        self.length = self._get_valid_length(str(kwargs.get('length') or os.getenv("LENGTH", "5")), default=5)
-        self.image_tail = kwargs.get('image_tail') or os.getenv("IMAGE_TAIL")
-        self.negative_prompt = kwargs.get('negative_prompt') or os.getenv("NEGATIVE_PROMPT")
-        self.seed = kwargs.get('seed') or (int(os.getenv("SEED")) if os.getenv("SEED") else None)
-        audio_url = kwargs.get('audio_url', _UNSET)
+        self.resolution = kwargs.get("resolution") or os.getenv("RESOLUTION", "1080P")
+        self.length = self._get_valid_length(str(kwargs.get("length") or os.getenv("LENGTH", "5")), default=5)
+        self.image_tail = kwargs.get("image_tail") or os.getenv("IMAGE_TAIL")
+        self.negative_prompt = kwargs.get("negative_prompt") or os.getenv("NEGATIVE_PROMPT")
+        self.seed = kwargs.get("seed") or (int(os.getenv("SEED")) if os.getenv("SEED") else None)
+        audio_url = kwargs.get("audio_url", _UNSET)
         if audio_url is _UNSET:
             audio_url = get_audio_url(self.project)
         self.audio_url = audio_url
@@ -593,6 +606,7 @@ class Wan30VideoGenerator(BaseVideoGenerator):
     the text-only branch, but it's intentionally omitted here per product
     spec.
     """
+
     VALID_LENGTHS: ClassVar[tuple] = tuple(range(2, 31))
     VALID_RESOLUTIONS: ClassVar[tuple] = ("480P", "720P", "1080P")
     VALID_NUM_OUTPUTS: ClassVar[tuple] = (1, 2, 3, 4)
@@ -605,14 +619,14 @@ class Wan30VideoGenerator(BaseVideoGenerator):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_BASE}/wanx/wan-v3-0"
-        self.resolution = kwargs.get('resolution') or os.getenv("RESOLUTION", "1080P")
-        self.length = self._get_valid_length(str(kwargs.get('length') or os.getenv("LENGTH", "5")), default=5)
+        self.resolution = kwargs.get("resolution") or os.getenv("RESOLUTION", "1080P")
+        self.length = self._get_valid_length(str(kwargs.get("length") or os.getenv("LENGTH", "5")), default=5)
         self.generate_audio = (
-            kwargs.get('generate_audio')
-            if kwargs.get('generate_audio') is not None
+            kwargs.get("generate_audio")
+            if kwargs.get("generate_audio") is not None
             else _parse_bool_env("GENERATE_AUDIO", True)
         )
-        num_outputs = kwargs.get('num_outputs')
+        num_outputs = kwargs.get("num_outputs")
         if num_outputs is None:
             env_val = os.getenv("NUM_OUTPUTS")
             num_outputs = int(env_val) if env_val else 1
@@ -665,6 +679,7 @@ class Pollo20VideoGeneratorV1(BaseV1VideoGenerator):
     capabilities the legacy endpoint didn't have. No imageTail, mode, or
     negativePrompt/audio fields.
     """
+
     V1_PROVIDER: ClassVar[str] = "pollo-ai"
     V1_MODEL: ClassVar[str] = "pollo-v2"
 
@@ -694,6 +709,7 @@ class Pollo25VideoGeneratorV1(BaseV1VideoGenerator):
     imageTail, or refs (no Reference-To-Video branch exists for this
     model in the spec).
     """
+
     V1_PROVIDER: ClassVar[str] = "pollo-ai"
     V1_MODEL: ClassVar[str] = "pollo-v2-5"
 
@@ -709,7 +725,7 @@ class Pollo25VideoGeneratorV1(BaseV1VideoGenerator):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.mode = kwargs.get('mode') or os.getenv("MODE", "basic")
+        self.mode = kwargs.get("mode") or os.getenv("MODE", "basic")
 
 
 class PolloDance20VideoGeneratorV1(BaseV1VideoGenerator):
@@ -728,6 +744,7 @@ class PolloDance20VideoGeneratorV1(BaseV1VideoGenerator):
     server-side default "16:9" if omitted) — confirmed from the spec, hence
     HAS_ASPECT_RATIO_ON_IMAGE.
     """
+
     V1_PROVIDER: ClassVar[str] = "pollo-ai"
     V1_MODEL: ClassVar[str] = "pollo-dance-2-0"
 
@@ -748,6 +765,7 @@ class PolloDance20VideoGeneratorV1(BaseV1VideoGenerator):
 
 class PolloDance20FastVideoGeneratorV1(PolloDance20VideoGeneratorV1):
     """Fast variant — v1 API (pollo-ai/pollo-dance-2-0-fast/video). Same schema, minus 1080p resolution."""
+
     V1_MODEL: ClassVar[str] = "pollo-dance-2-0-fast"
     VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "720p")
 
@@ -767,6 +785,7 @@ class Pollo30VideoGeneratorV1(PolloDance20VideoGeneratorV1):
     Not enabled for API access on our key yet (403 "This model is not
     enabled for API access", 2026-10-07), so MODEL_INFO marks it hidden.
     """
+
     V1_MODEL: ClassVar[str] = "pollo-v3-0"
     VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "720p", "1080p", "4K")
     REF_HAS_SEED: ClassVar[bool] = True
@@ -788,6 +807,7 @@ class Pollo30FastVideoGeneratorV1(PolloDance20VideoGeneratorV1):
     400 "The model used to create this video is currently unavailable"
     (2026-10-07), so MODEL_INFO marks it hidden.
     """
+
     V1_MODEL: ClassVar[str] = "pollo-v3-0-fast"
     VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "720p")
     VALID_RATIOS: ClassVar[tuple] = ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9")
@@ -811,6 +831,7 @@ class Seedance20VideoGeneratorV1(BaseV1VideoGenerator):
     HAS_ASPECT_RATIO_ON_IMAGE. Also inherited by the Fast/Mini subclasses
     below, whose image branches carry the same field.
     """
+
     V1_PROVIDER: ClassVar[str] = "bytedance"
     V1_MODEL: ClassVar[str] = "seedance-2-0"
 
@@ -830,12 +851,14 @@ class Seedance20VideoGeneratorV1(BaseV1VideoGenerator):
 
 class Seedance20FastVideoGeneratorV1(Seedance20VideoGeneratorV1):
     """Fast variant — v1 API (bytedance/seedance-2-0-fast/video). Same schema, minus 1080p/4K resolution."""
+
     V1_MODEL: ClassVar[str] = "seedance-2-0-fast"
     VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "720p")
 
 
 class Seedance20MiniVideoGeneratorV1(Seedance20VideoGeneratorV1):
     """Mini variant — v1 API (bytedance/seedance-2-0-mini/video). Same schema, minus 1080p/4K resolution."""
+
     V1_MODEL: ClassVar[str] = "seedance-2-0-mini"
     VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "720p")
 
@@ -852,6 +875,7 @@ class Seedance25VideoGeneratorV1(BaseV1VideoGenerator):
     webSearch, generateAudio carry over; refs now supported directly
     instead of via the separate seedanceref legacy endpoints.
     """
+
     V1_PROVIDER: ClassVar[str] = "bytedance"
     V1_MODEL: ClassVar[str] = "seedance-2-5"
 
@@ -869,7 +893,7 @@ class Seedance25VideoGeneratorV1(BaseV1VideoGenerator):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        if not kwargs.get('aspect_ratio') and not os.getenv("ASPECT_RATIO") and not os.getenv("RATIO"):
+        if not kwargs.get("aspect_ratio") and not os.getenv("ASPECT_RATIO") and not os.getenv("RATIO"):
             self.aspect_ratio = "adaptive"
 
 
@@ -887,6 +911,7 @@ class MinimaxH3VideoGeneratorV1(BaseV1VideoGenerator):
     for MinimaxH3). imageTail and refs carry over from legacy; aspectRatio
     is new (legacy didn't expose it for this model).
     """
+
     V1_PROVIDER: ClassVar[str] = "minimax"
     V1_MODEL: ClassVar[str] = "minimax-h3"
 
@@ -914,6 +939,7 @@ class Wan27VideoGeneratorV1(BaseV1VideoGenerator):
     the legacy endpoint didn't expose. No generateAudio, seed IS present
     (legacy also had it).
     """
+
     V1_PROVIDER: ClassVar[str] = "alibaba"
     V1_MODEL: ClassVar[str] = "wan-v2-7"
 
@@ -944,6 +970,7 @@ class Wan30VideoGeneratorV1(BaseV1VideoGenerator):
     aspectRatio and refs are new capabilities the legacy endpoint didn't
     expose (aside from refs going through a wholly separate ref2video URL).
     """
+
     V1_PROVIDER: ClassVar[str] = "alibaba"
     V1_MODEL: ClassVar[str] = "wan-v3-0"
 
@@ -962,7 +989,7 @@ class Wan30VideoGeneratorV1(BaseV1VideoGenerator):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        if not kwargs.get('aspect_ratio') and not os.getenv("ASPECT_RATIO") and not os.getenv("RATIO"):
+        if not kwargs.get("aspect_ratio") and not os.getenv("ASPECT_RATIO") and not os.getenv("RATIO"):
             self.aspect_ratio = "adaptive"
 
 
@@ -974,6 +1001,7 @@ class Wan30PrimeVideoGeneratorV1(Wan30VideoGeneratorV1):
     have an identical schema to wan-v3-0 v1, so it only overrides the
     model slug.
     """
+
     V1_MODEL: ClassVar[str] = "wan-v3-0-prime"
 
 
@@ -993,6 +1021,7 @@ class PolloDanceRefVideoGenerator(BaseVideoGenerator):
     - imageMeta: Optional cropping/positioning metadata for refs
     - generateAudio: Generate audio track
     """
+
     VALID_LENGTHS: ClassVar[tuple] = tuple(range(4, 16))
     VALID_RATIOS: ClassVar[tuple] = ("4:3", "3:4", "1:1", "16:9", "9:16", "21:9")
     VALID_REF_TYPES: ClassVar[tuple] = ("image", "subject", "video", "audio")
@@ -1008,25 +1037,25 @@ class PolloDanceRefVideoGenerator(BaseVideoGenerator):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_BASE}/pollo/pollo-dance-2-0/ref2video"
-        self.aspect_ratio = kwargs.get('aspect_ratio') or self.get_aspect_ratio(
+        self.aspect_ratio = kwargs.get("aspect_ratio") or self.get_aspect_ratio(
             os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "portrait")
         )
-        self.resolution = kwargs.get('resolution') or os.getenv("RESOLUTION", "720p")
+        self.resolution = kwargs.get("resolution") or os.getenv("RESOLUTION", "720p")
         self.duration = self._get_valid_length(
-            str(kwargs.get('length') or kwargs.get('duration') or os.getenv("LENGTH", "10"))
+            str(kwargs.get("length") or kwargs.get("duration") or os.getenv("LENGTH", "10"))
         )
         self.generate_audio = (
-            kwargs.get('generate_audio')
-            if kwargs.get('generate_audio') is not None
+            kwargs.get("generate_audio")
+            if kwargs.get("generate_audio") is not None
             else _parse_bool_env("GENERATE_AUDIO", True)
         )
-        self.video_num = kwargs.get('video_num') or int(os.getenv("VIDEO_NUM", "1"))
+        self.video_num = kwargs.get("video_num") or int(os.getenv("VIDEO_NUM", "1"))
         if self.video_num < 1 or self.video_num > 4:
             self.video_num = 1
 
         # Build refs from kwargs or project files
-        self.refs = kwargs.get('refs') or self._build_refs_from_inputs(kwargs)
-        self.image_meta = kwargs.get('image_meta')
+        self.refs = kwargs.get("refs") or self._build_refs_from_inputs(kwargs)
+        self.image_meta = kwargs.get("image_meta")
 
     def _build_refs_from_inputs(self, kwargs) -> list[dict[str, Any]]:
         """
@@ -1043,25 +1072,29 @@ class PolloDanceRefVideoGenerator(BaseVideoGenerator):
 
         # Primary image as first ref
         if self.image_url:
-            refs.append({
-                "type": "image",
-                "name": "reference",
-                "image": self.image_url,
-                "order": order,
-            })
+            refs.append(
+                {
+                    "type": "image",
+                    "name": "reference",
+                    "image": self.image_url,
+                    "order": order,
+                }
+            )
             order += 1
 
         # Subject URL as additional ref
-        subject_url = kwargs.get('subject_url', _UNSET)
+        subject_url = kwargs.get("subject_url", _UNSET)
         if subject_url is _UNSET:
             subject_url = get_subject_url(self.project)
         if subject_url:
-            refs.append({
-                "type": "image",
-                "name": "subject",
-                "image": subject_url,
-                "order": order,
-            })
+            refs.append(
+                {
+                    "type": "image",
+                    "name": "subject",
+                    "image": subject_url,
+                    "order": order,
+                }
+            )
             order += 1
 
         return refs
@@ -1129,12 +1162,14 @@ class PolloDanceRefVideoGenerator(BaseVideoGenerator):
             else:
                 name = f"ref{order}"
                 url = line
-            refs.append({
-                "type": "image",
-                "name": name,
-                "image": url,
-                "order": order,
-            })
+            refs.append(
+                {
+                    "type": "image",
+                    "name": name,
+                    "image": url,
+                    "order": order,
+                }
+            )
             order += 1
             if order > 13:
                 break
@@ -1186,6 +1221,7 @@ class PolloDanceRefVideoGenerator(BaseVideoGenerator):
 
 class PolloDanceRefFastVideoGenerator(PolloDanceRefVideoGenerator):
     """Fast variant of the Ref2Video generator."""
+
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_BASE}/pollo/pollo-dance-2-0-fast/ref2video"
@@ -1225,6 +1261,7 @@ class BaseV1ImageGenerator(BaseVideoGenerator):
     them — those fields are simply dropped for v1 subclasses rather than
     guessed at.
     """
+
     V1_PROVIDER: ClassVar[str] = ""
     V1_MODEL: ClassVar[str] = ""
 
@@ -1248,15 +1285,15 @@ class BaseV1ImageGenerator(BaseVideoGenerator):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_V1_BASE}/{self.V1_PROVIDER}/{self.V1_MODEL}/image"
-        self.aspect_ratio = kwargs.get('aspect_ratio') or self.get_aspect_ratio(
+        self.aspect_ratio = kwargs.get("aspect_ratio") or self.get_aspect_ratio(
             os.getenv("ASPECT_RATIO") or os.getenv("RATIO", self.DEFAULT_RATIO_KEYWORD)
         )
-        resolution = kwargs.get('resolution') or os.getenv("RESOLUTION")
+        resolution = kwargs.get("resolution") or os.getenv("RESOLUTION")
         self.resolution = resolution if resolution in self.VALID_RESOLUTIONS else None
         self.seed = (
-            kwargs.get('seed') or (int(os.getenv("SEED")) if os.getenv("SEED") else None)
-        ) if self.HAS_SEED else None
-        self.images = kwargs.get('images') or None
+            (kwargs.get("seed") or (int(os.getenv("SEED")) if os.getenv("SEED") else None)) if self.HAS_SEED else None
+        )
+        self.images = kwargs.get("images") or None
 
     @property
     def is_text_only(self) -> bool:
@@ -1267,7 +1304,7 @@ class BaseV1ImageGenerator(BaseVideoGenerator):
         if not self.ACCEPTS_IMAGES:
             images = []
         elif self.MAX_IMAGES:
-            images = images[:self.MAX_IMAGES]
+            images = images[: self.MAX_IMAGES]
 
         input_payload: dict[str, Any] = {"prompt": self.prompt}
         if not images or self.ASPECT_RATIO_WITH_IMAGES:
@@ -1298,6 +1335,7 @@ class PolloJourneyImageGenerator(BaseVideoGenerator):
     Two modes: Text-to-Image (prompt only) and Image-to-Image (images[],
     prompt optional).
     """
+
     VALID_RATIOS: ClassVar[tuple] = ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16")
     VALID_RESOLUTIONS: ClassVar[tuple] = ("1K", "2K")
 
@@ -1309,13 +1347,13 @@ class PolloJourneyImageGenerator(BaseVideoGenerator):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_BASE}/pollojourney/pollojourney-v8-2-image/image"
-        self.aspect_ratio = kwargs.get('aspect_ratio') or self.get_aspect_ratio(
+        self.aspect_ratio = kwargs.get("aspect_ratio") or self.get_aspect_ratio(
             os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "square")
         )
-        resolution = kwargs.get('resolution') or os.getenv("RESOLUTION")
+        resolution = kwargs.get("resolution") or os.getenv("RESOLUTION")
         self.resolution = resolution if resolution in self.VALID_RESOLUTIONS else None
-        self.seed = kwargs.get('seed') or (int(os.getenv("SEED")) if os.getenv("SEED") else None)
-        self.images = kwargs.get('images') or None
+        self.seed = kwargs.get("seed") or (int(os.getenv("SEED")) if os.getenv("SEED") else None)
+        self.images = kwargs.get("images") or None
 
     @property
     def is_text_only(self) -> bool:
@@ -1347,6 +1385,7 @@ class PolloJourneyImageGeneratorV1(BaseV1ImageGenerator):
     default "1:1") and resolution ("1K"/"2K", default "1K") enums as the
     legacy endpoint. seed carries over unchanged.
     """
+
     V1_PROVIDER: ClassVar[str] = "pollo-ai"
     V1_MODEL: ClassVar[str] = "pollojourney-v8-2-image"
 
@@ -1360,6 +1399,7 @@ class NanoBanana2ImageGenerator(BaseVideoGenerator):
 
     Supports text-to-image, image-to-image, and multi-image-to-image.
     """
+
     VALID_RATIOS: ClassVar[tuple] = ("1:1", "9:16", "16:9", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9")
     VALID_RESOLUTIONS: ClassVar[tuple] = ("1K", "2K", "4K")
     VALID_THINKING_LEVELS: ClassVar[tuple] = ("minimal", "high")
@@ -1373,19 +1413,19 @@ class NanoBanana2ImageGenerator(BaseVideoGenerator):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_BASE}/google/nano-banana-2/image"
-        self.aspect_ratio = kwargs.get('aspect_ratio') or self.get_aspect_ratio(
+        self.aspect_ratio = kwargs.get("aspect_ratio") or self.get_aspect_ratio(
             os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "square")
         )
-        resolution = kwargs.get('resolution') or os.getenv("RESOLUTION")
+        resolution = kwargs.get("resolution") or os.getenv("RESOLUTION")
         self.resolution = resolution if resolution in self.VALID_RESOLUTIONS else None
-        thinking_level = kwargs.get('thinking_level') or os.getenv("THINKING_LEVEL")
+        thinking_level = kwargs.get("thinking_level") or os.getenv("THINKING_LEVEL")
         self.thinking_level = thinking_level if thinking_level in self.VALID_THINKING_LEVELS else None
-        max_images = kwargs.get('max_images')
+        max_images = kwargs.get("max_images")
         if max_images is None:
             env_val = os.getenv("MAX_IMAGES")
             max_images = int(env_val) if env_val else None
         self.max_images = max(1, min(4, int(max_images))) if max_images is not None else None
-        self.images = kwargs.get('images') or None
+        self.images = kwargs.get("images") or None
 
     @property
     def is_text_only(self) -> bool:
@@ -1427,12 +1467,25 @@ class NanoBanana2ImageGeneratorV1(BaseV1ImageGenerator):
     is passed, and is REQUIRED for image-to-image per the spec (no
     seed field either).
     """
+
     V1_PROVIDER: ClassVar[str] = "google"
     V1_MODEL: ClassVar[str] = "nano-banana-2"
 
     VALID_RATIOS: ClassVar[tuple] = (
-        "1:1", "9:16", "16:9", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9",
-        "1:4", "4:1", "8:1", "1:8",
+        "1:1",
+        "9:16",
+        "16:9",
+        "4:3",
+        "3:4",
+        "3:2",
+        "2:3",
+        "5:4",
+        "4:5",
+        "21:9",
+        "1:4",
+        "4:1",
+        "8:1",
+        "1:8",
     )
     VALID_RESOLUTIONS: ClassVar[tuple] = ("0.5K", "1K", "2K", "4K")
 
@@ -1443,6 +1496,7 @@ class SeedreamImageGenerator(BaseVideoGenerator):
     Supports text-to-image and image-to-image (single or multi-image reference).
     Returns 1–4 images per request. No seed or style fields.
     """
+
     VALID_RATIOS: ClassVar[tuple] = ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16", "21:9")
     VALID_RESOLUTIONS: ClassVar[tuple] = ("2K", "3K", "4K")
 
@@ -1454,17 +1508,17 @@ class SeedreamImageGenerator(BaseVideoGenerator):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_BASE}/seedream/seedream-5-0-lite/image"
-        self.aspect_ratio = kwargs.get('aspect_ratio') or self.get_aspect_ratio(
+        self.aspect_ratio = kwargs.get("aspect_ratio") or self.get_aspect_ratio(
             os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "square")
         )
-        resolution = kwargs.get('resolution') or os.getenv("RESOLUTION")
+        resolution = kwargs.get("resolution") or os.getenv("RESOLUTION")
         self.resolution = resolution if resolution in self.VALID_RESOLUTIONS else None
-        max_images = kwargs.get('max_images')
+        max_images = kwargs.get("max_images")
         if max_images is None:
             env_val = os.getenv("MAX_IMAGES")
             max_images = int(env_val) if env_val else None
         self.max_images = max(1, min(4, int(max_images))) if max_images is not None else None
-        self.images = kwargs.get('images') or None
+        self.images = kwargs.get("images") or None
 
     def get_payload(self) -> dict[str, Any]:
         input_payload: dict[str, Any] = {
@@ -1498,6 +1552,7 @@ class SeedreamImageGeneratorV1(BaseV1ImageGenerator):
     v1 schema — dropped, matching BaseV1ImageGenerator's shared behavior
     of not guessing at fields the spec doesn't list. No seed field either.
     """
+
     V1_PROVIDER: ClassVar[str] = "bytedance"
     V1_MODEL: ClassVar[str] = "seedream-5-0-lite"
 
@@ -1518,6 +1573,7 @@ class SeedreamFlashImageGeneratorV1(BaseV1ImageGenerator):
     ratios incl. 21:9, resolution 1K/1.5K/2K, up to 10 reference images.
     seed/mode weren't rejected but aren't confirmed to do anything — left out.
     """
+
     V1_PROVIDER: ClassVar[str] = "bytedance"
     V1_MODEL: ClassVar[str] = "seedream-5-0-flash"
     VALID_RATIOS: ClassVar[tuple] = ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9")
@@ -1528,6 +1584,7 @@ class SeedreamFlashImageGeneratorV1(BaseV1ImageGenerator):
 class SeedreamProImageGeneratorV1(BaseV1ImageGenerator):
     """Seedream 5.0 Pro — v1 API (bytedance/seedream-5-0-pro/image). From the
     spec (2026-10-06): seven ratios, 1K/2K, up to 10 reference images."""
+
     V1_PROVIDER: ClassVar[str] = "bytedance"
     V1_MODEL: ClassVar[str] = "seedream-5-0-pro"
     VALID_RATIOS: ClassVar[tuple] = _SEEDREAM_RATIOS
@@ -1554,6 +1611,7 @@ class PolloImage2ImageGenerator(BaseVideoGenerator):
     response_format; they're left out (a single reference goes through
     images[], like Pollo Journey).
     """
+
     VALID_RATIOS: ClassVar[tuple] = ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16", "4:5", "5:4")
     VALID_RESOLUTIONS: ClassVar[tuple] = ("1K", "2K", "4K")
     VALID_MODES: ClassVar[tuple] = ("fast", "standard", "professional")
@@ -1566,15 +1624,15 @@ class PolloImage2ImageGenerator(BaseVideoGenerator):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_BASE}/pollo/pollo-image-v2/image"
-        self.aspect_ratio = kwargs.get('aspect_ratio') or self.get_aspect_ratio(
+        self.aspect_ratio = kwargs.get("aspect_ratio") or self.get_aspect_ratio(
             os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "square")
         )
-        resolution = kwargs.get('resolution') or os.getenv("RESOLUTION")
+        resolution = kwargs.get("resolution") or os.getenv("RESOLUTION")
         self.resolution = resolution if resolution in self.VALID_RESOLUTIONS else None
-        mode = kwargs.get('mode') or os.getenv("IMAGE_MODE")
+        mode = kwargs.get("mode") or os.getenv("IMAGE_MODE")
         mode = mode if mode in self.VALID_MODES else None
         self.mode = "professional" if self.resolution and self.resolution != "1K" else mode
-        self.images = kwargs.get('images') or None
+        self.images = kwargs.get("images") or None
 
     @property
     def is_text_only(self) -> bool:
@@ -1610,6 +1668,7 @@ _QWEN_IMAGE_RATIOS = ("1:1", "3:4", "4:3", "16:9", "9:16")
 
 class KlingV3ImageGeneratorV1(BaseV1ImageGenerator):
     """Kling V3 Image (kling-ai/kling-v3-image/image): a single reference image, 1K/2K."""
+
     V1_PROVIDER: ClassVar[str] = "kling-ai"
     V1_MODEL: ClassVar[str] = "kling-v3-image"
     VALID_RATIOS: ClassVar[tuple] = _KLING_IMAGE_RATIOS
@@ -1620,6 +1679,7 @@ class KlingV3ImageGeneratorV1(BaseV1ImageGenerator):
 class KlingV3OmniImageGeneratorV1(BaseV1ImageGenerator):
     """Kling V3 Omni image (kling-ai/kling-v3-omni/image): 1–10 reference
     images, 1K/2K/4K, plus an "auto" ratio (server default 16:9)."""
+
     V1_PROVIDER: ClassVar[str] = "kling-ai"
     V1_MODEL: ClassVar[str] = "kling-v3-omni"
     VALID_RATIOS: ClassVar[tuple] = ("16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "21:9", "auto")
@@ -1637,6 +1697,7 @@ class QwenImageImageGenerator(BaseVideoGenerator):
     Image-To-Image takes the reference as imageUrl (required) and has no
     aspectRatio. negativePrompt/style are left out.
     """
+
     VALID_RATIOS: ClassVar[tuple] = _QWEN_IMAGE_RATIOS
     VALID_RESOLUTIONS: ClassVar[tuple] = ()
 
@@ -1646,10 +1707,11 @@ class QwenImageImageGenerator(BaseVideoGenerator):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_url = f"{POLLO_API_BASE}/qwen/qwen-image/image"
-        ratio = kwargs.get('aspect_ratio') or self.get_aspect_ratio(
-            os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "square"))
+        ratio = kwargs.get("aspect_ratio") or self.get_aspect_ratio(
+            os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "square")
+        )
         self.aspect_ratio = ratio if ratio in self.VALID_RATIOS else "1:1"
-        self.images = kwargs.get('images') or None
+        self.images = kwargs.get("images") or None
 
     @property
     def is_text_only(self) -> bool:
@@ -1659,7 +1721,7 @@ class QwenImageImageGenerator(BaseVideoGenerator):
         refs = ([self.image_url] if self.image_url else []) + (self.images or [])
         input_payload: dict[str, Any] = {"prompt": self.prompt}
         if refs:
-            input_payload["imageUrl"] = refs[0]     # one reference; the image sets the shape
+            input_payload["imageUrl"] = refs[0]  # one reference; the image sets the shape
         else:
             input_payload["aspectRatio"] = self.aspect_ratio
         self.payload_attrs = input_payload
@@ -1670,6 +1732,7 @@ class QwenImage3ImageGeneratorV1(BaseV1ImageGenerator):
     """Qwen Image 3 (qwen/qwen-image-3/image): 1–3 reference images, 1K/2K.
     NB: answered 404 "Not found" for this account's API key on 2026-10-06,
     like a made-up model name; added at the user's request."""
+
     V1_PROVIDER: ClassVar[str] = "qwen"
     V1_MODEL: ClassVar[str] = "qwen-image-3"
     VALID_RATIOS: ClassVar[tuple] = _QWEN_IMAGE_RATIOS
@@ -1679,11 +1742,13 @@ class QwenImage3ImageGeneratorV1(BaseV1ImageGenerator):
 
 class QwenImage3ProImageGeneratorV1(QwenImage3ImageGeneratorV1):
     """Qwen Image 3 Pro (qwen/qwen-image-3-pro/image): same schema as Qwen Image 3 (same 404 caveat)."""
+
     V1_MODEL: ClassVar[str] = "qwen-image-3-pro"
 
 
 class QwenImageFlashImageGeneratorV1(BaseV1ImageGenerator):
     """Qwen Image Flash (alibaba/pre-qwen-image-flash/image): text-to-image only."""
+
     V1_PROVIDER: ClassVar[str] = "alibaba"
     V1_MODEL: ClassVar[str] = "pre-qwen-image-flash"
     VALID_RATIOS: ClassVar[tuple] = _QWEN_IMAGE_RATIOS
@@ -1691,6 +1756,7 @@ class QwenImageFlashImageGeneratorV1(BaseV1ImageGenerator):
 
 
 # ── Kling video (v1) ────────────────────────────────────────────────
+
 
 class BaseKlingVideoGeneratorV1(BaseV1VideoGenerator):
     """
@@ -1707,13 +1773,14 @@ class BaseKlingVideoGeneratorV1(BaseV1VideoGenerator):
     Left out: negativePrompt, V2.1's "strength", and the Reference-To-Video
     branches of Video O1/V3 Omni (their own resolution/duration rules).
     """
+
     V1_PROVIDER: ClassVar[str] = "kling-ai"
     VALID_LENGTHS: ClassVar[tuple] = (5, 10)
     VALID_RATIOS: ClassVar[tuple] = ("16:9", "9:16", "1:1")
-    DEFAULT_RESOLUTION: ClassVar[str] = ""        # leave the tier to Pollo's default
+    DEFAULT_RESOLUTION: ClassVar[str] = ""  # leave the tier to Pollo's default
     RESOLUTION_IS_MODE: ClassVar[bool] = False
-    MODE_ON_TEXT: ClassVar[bool] = True          # V2.5 Turbo's text branch has no mode
-    TEXT_TO_VIDEO: ClassVar[bool] = True         # V2.1 is image-to-video only
+    MODE_ON_TEXT: ClassVar[bool] = True  # V2.5 Turbo's text branch has no mode
+    TEXT_TO_VIDEO: ClassVar[bool] = True  # V2.1 is image-to-video only
     IMAGE_TAIL_NEEDS_PRO: ClassVar[bool] = False  # V2.5 Turbo: end frame only in pro mode
     NO_AUDIO_WITH_IMAGE_TAIL: ClassVar[bool] = False  # V2.6: end frame excludes audio
 
@@ -1738,6 +1805,7 @@ class BaseKlingVideoGeneratorV1(BaseV1VideoGenerator):
 
 class KlingV21VideoGeneratorV1(BaseKlingVideoGeneratorV1):
     """Kling V2.1 (kling-v2-1): image-to-video only, std/pro, 5/10s."""
+
     V1_MODEL: ClassVar[str] = "kling-v2-1"
     VALID_RESOLUTIONS: ClassVar[tuple] = ("std", "pro")
     RESOLUTION_IS_MODE: ClassVar[bool] = True
@@ -1746,12 +1814,14 @@ class KlingV21VideoGeneratorV1(BaseKlingVideoGeneratorV1):
 
 class KlingV21MasterVideoGeneratorV1(BaseKlingVideoGeneratorV1):
     """Kling V2.1 Master (kling-v2-1-master): 5/10s, no mode or end frame."""
+
     V1_MODEL: ClassVar[str] = "kling-v2-1-master"
 
 
 class KlingV25TurboVideoGeneratorV1(BaseKlingVideoGeneratorV1):
     """Kling V2.5 Turbo (kling-v2-5-turbo): std/pro on image-to-video only;
     an end frame requires pro."""
+
     V1_MODEL: ClassVar[str] = "kling-v2-5-turbo"
     VALID_RESOLUTIONS: ClassVar[tuple] = ("std", "pro")
     RESOLUTION_IS_MODE: ClassVar[bool] = True
@@ -1762,12 +1832,14 @@ class KlingV25TurboVideoGeneratorV1(BaseKlingVideoGeneratorV1):
 
 class KlingVideoO1VideoGeneratorV1(BaseKlingVideoGeneratorV1):
     """Kling Video O1 (kling-video-o1): 5/10s, end frame; no mode."""
+
     V1_MODEL: ClassVar[str] = "kling-video-o1"
     HAS_IMAGE_TAIL: ClassVar[bool] = True
 
 
 class KlingV26VideoGeneratorV1(BaseKlingVideoGeneratorV1):
     """Kling V2.6 (kling-v2-6): 5/10s, audio, end frame — not both at once."""
+
     V1_MODEL: ClassVar[str] = "kling-v2-6"
     HAS_IMAGE_TAIL: ClassVar[bool] = True
     HAS_GENERATE_AUDIO: ClassVar[bool] = True
@@ -1776,6 +1848,7 @@ class KlingV26VideoGeneratorV1(BaseKlingVideoGeneratorV1):
 
 class KlingV3VideoGeneratorV1(BaseKlingVideoGeneratorV1):
     """Kling V3 (kling-v3): 3–15s, std/pro/4K, audio, end frame."""
+
     V1_MODEL: ClassVar[str] = "kling-v3"
     VALID_LENGTHS: ClassVar[tuple] = tuple(range(3, 16))
     VALID_RESOLUTIONS: ClassVar[tuple] = ("std", "pro", "4K")
@@ -1786,6 +1859,7 @@ class KlingV3VideoGeneratorV1(BaseKlingVideoGeneratorV1):
 
 class KlingV3TurboVideoGeneratorV1(BaseKlingVideoGeneratorV1):
     """Kling V3 Turbo (kling-v3-turbo): 3–15s, real 720p/1080p resolutions; no mode/audio/end frame."""
+
     V1_MODEL: ClassVar[str] = "kling-v3-turbo"
     VALID_LENGTHS: ClassVar[tuple] = tuple(range(3, 16))
     VALID_RESOLUTIONS: ClassVar[tuple] = ("720p", "1080p")
@@ -1793,4 +1867,5 @@ class KlingV3TurboVideoGeneratorV1(BaseKlingVideoGeneratorV1):
 
 class KlingV3OmniVideoGeneratorV1(KlingV3VideoGeneratorV1):
     """Kling V3 Omni (kling-v3-omni): as V3 (Pollo's default tier is pro, not std)."""
+
     V1_MODEL: ClassVar[str] = "kling-v3-omni"

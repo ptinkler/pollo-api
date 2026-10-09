@@ -1,18 +1,16 @@
 """Tests for web.chat — OpenRouter chat mode. OpenRouter is always mocked."""
+
 import io
 import json
-import sys
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from PIL import Image
 
-ROOT_DIR = Path(__file__).parent.parent.resolve()
-sys.path.insert(0, str(ROOT_DIR))
-
-from fastapi.testclient import TestClient
-
 from img2vid.common.metadata import MetadataDB
+
+ROOT_DIR = Path(__file__).parent.parent.resolve()
 
 
 def _png_bytes(size=(8, 8), color="red") -> bytes:
@@ -31,10 +29,12 @@ def _tool_chunks(name, args, call_id="call_1", text=""):
     raw = json.dumps(args)
     if text:
         yield {"choices": [{"delta": {"content": text}}]}
-    yield {"choices": [{"delta": {"tool_calls": [
-        {"index": 0, "id": call_id, "function": {"name": name, "arguments": raw[:5]}}]}}]}
-    yield {"choices": [{"delta": {"tool_calls": [
-        {"index": 0, "function": {"arguments": raw[5:]}}]}}]}
+    yield {
+        "choices": [
+            {"delta": {"tool_calls": [{"index": 0, "id": call_id, "function": {"name": name, "arguments": raw[:5]}}]}}
+        ]
+    }
+    yield {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": raw[5:]}}]}}]}
     yield {"choices": [{"delta": {}, "finish_reason": "tool_calls"}], "usage": {"cost": 0.003}}
 
 
@@ -50,16 +50,19 @@ def db(tmp_path):
 @pytest.fixture()
 def chat(monkeypatch, db):
     import web.chat as chat_mod
+
     monkeypatch.setattr(chat_mod, "get_db", lambda: db)
     import web.characters as characters_mod
+
     monkeypatch.setattr(characters_mod, "get_db", lambda: db)
     import web.media as media_mod
+
     monkeypatch.setattr(media_mod, "get_db", lambda: db)
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
-    monkeypatch.delenv("VENICE_API_KEY", raising=False)   # tests never reach the real Venice
+    monkeypatch.delenv("VENICE_API_KEY", raising=False)  # tests never reach the real Venice
     monkeypatch.setattr(chat_mod, "VIDEO_POLL_INTERVAL", 0)
     monkeypatch.setattr(chat_mod, "start_video_poller", lambda *a: None)
-    monkeypatch.setattr(chat_mod, "_generate_title", lambda model, prompt: (None, 0.0))   # tests opt in
+    monkeypatch.setattr(chat_mod, "_generate_title", lambda model, prompt: (None, 0.0))  # tests opt in
     chat_mod._models_cache.update(at=0.0, data=None)
     return chat_mod
 
@@ -69,8 +72,10 @@ def client(chat, monkeypatch):
     monkeypatch.delenv("API_KEY", raising=False)
     monkeypatch.delenv("API_KEYS", raising=False)
     import web.auth as auth_mod
+
     auth_mod.get_api_keys.cache_clear()
     import web.api as api_mod
+
     return TestClient(api_mod.app, raise_server_exceptions=False)
 
 
@@ -96,18 +101,27 @@ class TestConversations:
         assert client.get("/api/chat/status").json() == {"configured": True, "openrouter": True, "venice": False}
         monkeypatch.delenv("OPENROUTER_API_KEY")
         assert client.get("/api/chat/status").json()["configured"] is False
-        monkeypatch.setenv("VENICE_API_KEY", "v-test")   # Venice alone can run the chat
+        monkeypatch.setenv("VENICE_API_KEY", "v-test")  # Venice alone can run the chat
         assert client.get("/api/chat/status").json() == {"configured": True, "openrouter": False, "venice": True}
 
     def test_openrouter_balance(self, client, chat, monkeypatch):
-        monkeypatch.setattr(chat.openrouter, "_get", lambda path, params=None: (
-            {"data": {"total_credits": 60, "total_usage": 52.78926312}} if path == "/credits" else pytest.fail(path)))
+        monkeypatch.setattr(
+            chat.openrouter,
+            "_get",
+            lambda path, params=None: (
+                {"data": {"total_credits": 60, "total_usage": 52.78926312}} if path == "/credits" else pytest.fail(path)
+            ),
+        )
         assert client.get("/api/chat/credits").json() == {
-            "total_credits": 60.0, "total_usage": 52.78926312, "remaining": 7.2107}
+            "total_credits": 60.0,
+            "total_usage": 52.78926312,
+            "remaining": 7.2107,
+        }
 
     def test_openrouter_balance_error_is_502(self, client, chat, monkeypatch):
         def boom(path, params=None):
             raise chat.openrouter.OpenRouterError("nope", 500)
+
         monkeypatch.setattr(chat.openrouter, "_get", boom)
         assert client.get("/api/chat/credits").status_code == 502
 
@@ -119,37 +133,47 @@ class TestConversations:
 
 class TestMedia:
     def test_upload_and_serve(self, client, conv):
-        r = client.post(f"/api/chat/conversations/{conv['id']}/attachments",
-                        files={"file": ("a.png", _png_bytes(), "image/png")})
+        r = client.post(
+            f"/api/chat/conversations/{conv['id']}/attachments", files={"file": ("a.png", _png_bytes(), "image/png")}
+        )
         name = r.json()["file"]
         assert name.startswith("up_") and name.endswith(".png")
         assert client.get(f"/api/chat/media/{conv['id']}/{name}").content == _png_bytes()
 
     def test_rejects_non_image(self, client, conv):
-        r = client.post(f"/api/chat/conversations/{conv['id']}/attachments",
-                        files={"file": ("a.png", b"not an image", "image/png")})
+        r = client.post(
+            f"/api/chat/conversations/{conv['id']}/attachments", files={"file": ("a.png", b"not an image", "image/png")}
+        )
         assert r.status_code == 400
 
     @pytest.mark.parametrize("conv_id,name", [("abc", "../x.png"), ("..", "metadata.db"), ("abc", ".hidden")])
     def test_path_traversal_blocked(self, chat, conv_id, name):
         from fastapi import HTTPException
+
         with pytest.raises(HTTPException) as e:
             chat.api_chat_media(conv_id, name)
         assert e.value.status_code == 400
 
     def test_an_image_already_in_the_chat_can_be_attached(self, client, conv, chat, db, monkeypatch):
-        """"Make a video from this image" attaches a generated image by name — it becomes the first frame."""
+        """ "Make a video from this image" attaches a generated image by name — it becomes the first frame."""
         (chat._conv_dir(conv["id"]) / "img_old.png").write_bytes(_png_bytes())
         submitted = {}
-        monkeypatch.setattr(chat.openrouter, "submit_video",
-                            lambda model, prompt, **kw: (submitted.update(kw), {"id": "vid-1"})[1])
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
-            "content": "slow zoom", "attachments": ["img_old.png"], "mode": "video", **SETTINGS}))
+        monkeypatch.setattr(
+            chat.openrouter, "submit_video", lambda model, prompt, **kw: (submitted.update(kw), {"id": "vid-1"})[1]
+        )
+        _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "slow zoom", "attachments": ["img_old.png"], "mode": "video", **SETTINGS},
+            )
+        )
         assert submitted["first_frame"].startswith("data:image/")
 
     def test_unknown_attachment_rejected(self, client, conv):
-        r = client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                        json={"content": "x", "attachments": ["nope.png"], **SETTINGS})
+        r = client.post(
+            f"/api/chat/conversations/{conv['id']}/messages",
+            json={"content": "x", "attachments": ["nope.png"], **SETTINGS},
+        )
         assert r.status_code == 400
 
 
@@ -160,10 +184,12 @@ class TestTurns:
         def fake_stream(model, messages, tools=None, session_id=None, **kw):
             seen.update(model=model, messages=messages, tools=tools)
             return _text_chunks("Hel", "lo!")
+
         monkeypatch.setattr(chat.openrouter, "stream_chat", fake_stream)
 
-        r = client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                        json={"content": "Say hello", "mode": "text", **SETTINGS})
+        r = client.post(
+            f"/api/chat/conversations/{conv['id']}/messages", json={"content": "Say hello", "mode": "text", **SETTINGS}
+        )
         ev = _events(r)
         assert ev[0]["type"] == "start" and ev[0]["user_message"]["content"] == "Say hello"
         assert "".join(e["text"] for e in ev if e["type"] == "delta") == "Hello!"
@@ -177,23 +203,34 @@ class TestTurns:
         assert client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["text_model"] == "t/model"
 
     def test_text_plus_image_is_one_llm_call(self, client, conv, chat, monkeypatch):
-        rounds = iter([_tool_chunks("generate_image", {"prompt": "a cat", "aspect_ratio": "16:9"},
-                                    text="Once upon a time, a cat.")])
+        rounds = iter(
+            [
+                _tool_chunks(
+                    "generate_image", {"prompt": "a cat", "aspect_ratio": "16:9"}, text="Once upon a time, a cat."
+                )
+            ]
+        )
         calls = []
 
         def fake_stream(model, messages, tools=None, session_id=None, **kw):
             calls.append((messages, tools))
             return next(rounds)
+
         monkeypatch.setattr(chat.openrouter, "stream_chat", fake_stream)
         img_args = {}
 
         def fake_image(model, prompt, **kw):
             img_args.update(model=model, prompt=prompt, **kw)
             return [(_png_bytes(), "image/png")], 0.04
+
         monkeypatch.setattr(chat.openrouter, "generate_image", fake_image)
 
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                 json={"content": "a story about a cat, with a picture", "mode": "auto", **SETTINGS}))
+        ev = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "a story about a cat, with a picture", "mode": "auto", **SETTINGS},
+            )
+        )
         assert [t["function"]["name"] for t in calls[0][1]] == ["generate_image", "create_character", "generate_video"]
         assert len(calls) == 1  # reply written + image made → complete
         assert img_args["model"] == "i/model" and img_args["prompt"] == "a cat"
@@ -208,18 +245,27 @@ class TestTurns:
         assert path.read_bytes() == _png_bytes()
 
     def test_failed_tool_gets_follow_up_round(self, client, conv, chat, monkeypatch):
-        rounds = iter([_tool_chunks("generate_image", {"prompt": "a cat"}, text="Drawing it."),
-                       _text_chunks("Sorry, the image model is down.")])
+        rounds = iter(
+            [
+                _tool_chunks("generate_image", {"prompt": "a cat"}, text="Drawing it."),
+                _text_chunks("Sorry, the image model is down."),
+            ]
+        )
         calls = []
-        monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None, **kw: (calls.append(msgs), next(rounds))[1])
+        monkeypatch.setattr(
+            chat.openrouter,
+            "stream_chat",
+            lambda m, msgs, tools=None, session_id=None, **kw: (calls.append(msgs), next(rounds))[1],
+        )
 
         def boom(*a, **k):
             raise chat.openrouter.OpenRouterError("[Seed] overloaded")
+
         monkeypatch.setattr(chat.openrouter, "generate_image", boom)
 
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                 json={"content": "draw a cat", **SETTINGS}))
+        ev = _events(
+            client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "draw a cat", **SETTINGS})
+        )
         assert len(calls) == 2
         assert calls[1][-1]["role"] == "tool" and not json.loads(calls[1][-1]["content"])["ok"]
         done = ev[-1]["message"]
@@ -232,47 +278,83 @@ class TestTurns:
         args_vid = json.dumps({"prompt": "the fox runs", "source_image": "latest"})
         chunks = [
             {"choices": [{"delta": {"content": "A fox, then it runs."}}]},
-            {"choices": [{"delta": {"tool_calls": [
-                {"index": 0, "id": "c1", "function": {"name": "generate_image", "arguments": args_img}},
-                {"index": 1, "id": "c2", "function": {"name": "generate_video", "arguments": args_vid}}]}}]},
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {"index": 0, "id": "c1", "function": {"name": "generate_image", "arguments": args_img}},
+                                {"index": 1, "id": "c2", "function": {"name": "generate_video", "arguments": args_vid}},
+                            ]
+                        }
+                    }
+                ]
+            },
         ]
         calls = []
         replies = iter([iter(chunks), _text_chunks("Done.")])
-        monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda *a, **k: (calls.append(1), next(replies))[1])
-        monkeypatch.setattr(chat.openrouter, "generate_image",
-                            lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None))
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: (calls.append(1), next(replies))[1])
+        monkeypatch.setattr(
+            chat.openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
+        )
         submitted = {}
-        monkeypatch.setattr(chat.openrouter, "submit_video",
-                            lambda model, prompt, **kw: (submitted.update(kw), {"id": "gen-vid-1"})[1])
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                 json={"content": "draw a fox and animate it", **SETTINGS}))
+        monkeypatch.setattr(
+            chat.openrouter, "submit_video", lambda model, prompt, **kw: (submitted.update(kw), {"id": "gen-vid-1"})[1]
+        )
+        ev = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "draw a fox and animate it", **SETTINGS},
+            )
+        )
         assert len(calls) == 1
         assert submitted["first_frame"].startswith("data:image/png;base64,")
         assert [m["kind"] for m in ev[-1]["message"]["media"]] == ["image", "video"]
 
     def test_source_latest_uses_previous_image(self, client, conv, chat, monkeypatch):
-        up = client.post(f"/api/chat/conversations/{conv['id']}/attachments",
-                         files={"file": ("a.png", _png_bytes(), "image/png")}).json()["file"]
-        rounds = iter([_tool_chunks("generate_image", {"prompt": "make it blue", "source_image": "latest"}),
-                       _text_chunks("Done.")])
+        up = client.post(
+            f"/api/chat/conversations/{conv['id']}/attachments", files={"file": ("a.png", _png_bytes(), "image/png")}
+        ).json()["file"]
+        rounds = iter(
+            [
+                _tool_chunks("generate_image", {"prompt": "make it blue", "source_image": "latest"}),
+                _text_chunks("Done."),
+            ]
+        )
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(rounds))
         got = {}
-        monkeypatch.setattr(chat.openrouter, "generate_image",
-                            lambda model, prompt, **kw: (got.update(kw), ([(_png_bytes(), "image/png")], None))[1])
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                            json={"content": "make it blue", "attachments": [up], **SETTINGS}))
+        monkeypatch.setattr(
+            chat.openrouter,
+            "generate_image",
+            lambda model, prompt, **kw: (got.update(kw), ([(_png_bytes(), "image/png")], None))[1],
+        )
+        _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "make it blue", "attachments": [up], **SETTINGS},
+            )
+        )
         assert got["input_images"][0].startswith("data:image/png;base64,")
 
     def test_image_mode_skips_text_model(self, client, conv, chat, monkeypatch):
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
         got = {}
-        monkeypatch.setattr(chat.openrouter, "generate_image",
-                            lambda model, prompt, **kw: (got.update(prompt=prompt, **kw),
-                                                         ([(_png_bytes(), "image/png")] * 2, 0.02))[1])
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                 json={"content": "a dog", "mode": "image",
-                                       "image_options": {"aspect_ratio": "1:1", "resolution": "2K"}, **SETTINGS}))
+        monkeypatch.setattr(
+            chat.openrouter,
+            "generate_image",
+            lambda model, prompt, **kw: (got.update(prompt=prompt, **kw), ([(_png_bytes(), "image/png")] * 2, 0.02))[1],
+        )
+        ev = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={
+                    "content": "a dog",
+                    "mode": "image",
+                    "image_options": {"aspect_ratio": "1:1", "resolution": "2K"},
+                    **SETTINGS,
+                },
+            )
+        )
         assert got["prompt"] == "a dog" and got["aspect_ratio"] == "1:1" and got["resolution"] == "2K"
         assert len(ev[-1]["message"]["media"]) == 2
         assert ev[-1]["message"]["model"] == "i/model"
@@ -280,21 +362,35 @@ class TestTurns:
     def test_video_mode_submits_and_polls(self, client, conv, chat, monkeypatch, db):
         started = []
         monkeypatch.setattr(chat, "start_video_poller", lambda *a: started.append(a))
-        monkeypatch.setattr(chat.openrouter, "submit_video",
-                            lambda model, prompt, **kw: {"id": "gen-vid-1", "status": "pending"})
-        chat._models_cache.update(at=9e18, data={"text": [], "image": [], "video": [
-            {"id": "v/model", "durations": [5, 10], "aspect_ratios": ["16:9"], "resolutions": ["720p"]}]})
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                 json={"content": "waves", "mode": "video",
-                                       "video_options": {"duration": 7, "aspect_ratio": "1:1"}, **SETTINGS}))
+        monkeypatch.setattr(
+            chat.openrouter, "submit_video", lambda model, prompt, **kw: {"id": "gen-vid-1", "status": "pending"}
+        )
+        chat._models_cache.update(
+            at=9e18,
+            data={
+                "text": [],
+                "image": [],
+                "video": [{"id": "v/model", "durations": [5, 10], "aspect_ratios": ["16:9"], "resolutions": ["720p"]}],
+            },
+        )
+        ev = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={
+                    "content": "waves",
+                    "mode": "video",
+                    "video_options": {"duration": 7, "aspect_ratio": "1:1"},
+                    **SETTINGS,
+                },
+            )
+        )
         item = ev[-1]["message"]["media"][0]
         assert item["status"] == "pending" and item["job_id"] == "gen-vid-1"
         assert item["params"]["duration"] == 5 and item["params"]["aspect_ratio"] is None  # snapped to model
         conv_id, msg_id, media_id, job_id = started[0]
 
         # Now run the poller for real against mocked status/download
-        statuses = iter([{"status": "in_progress"},
-                         {"status": "completed", "usage": {"cost": 0.5}}])
+        statuses = iter([{"status": "in_progress"}, {"status": "completed", "usage": {"cost": 0.5}}])
         monkeypatch.setattr(chat.openrouter, "get_video", lambda j: next(statuses))
         monkeypatch.setattr(chat.openrouter, "download_video", lambda j, dest, index=0: dest.write_bytes(b"mp4"))
         chat._poll_video(conv_id, msg_id, media_id, job_id)
@@ -306,36 +402,57 @@ class TestTurns:
         msg = db.add_chat_message(conv["id"], "assistant", media=[{"id": "m1", "kind": "video", "status": "pending"}])
         monkeypatch.setattr(chat.openrouter, "get_video", lambda j: {"status": "failed", "error": "nsfw"})
         chat._poll_video(conv["id"], msg.id, "m1", "gen-vid-x")
-        assert db.get_chat_message(msg.id).media[0] == {"id": "m1", "kind": "video", "status": "error", "error": "nsfw",
-                                                        "moderated": True}
+        assert db.get_chat_message(msg.id).media[0] == {
+            "id": "m1",
+            "kind": "video",
+            "status": "error",
+            "error": "nsfw",
+            "moderated": True,
+        }
 
     def test_openrouter_error_marks_message(self, client, conv, chat, monkeypatch):
         def boom(*a, **k):
             raise chat.openrouter.OpenRouterError("Insufficient credits", 402)
+
         monkeypatch.setattr(chat.openrouter, "stream_chat", boom)
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                 json={"content": "hi", **SETTINGS}))
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", **SETTINGS}))
         assert {"type": "error", "message": "Insufficient credits"} in ev
         assert ev[-1]["message"]["status"] == "error"
 
     def test_tools_withheld_for_models_without_tool_support(self, client, conv, chat, monkeypatch):
-        chat._models_cache.update(at=9e18, data={"image": [], "video": [], "text": [
-            {"id": "t/model", "supports_tools": False, "input_modalities": ["text"]}]})
+        chat._models_cache.update(
+            at=9e18,
+            data={
+                "image": [],
+                "video": [],
+                "text": [{"id": "t/model", "supports_tools": False, "input_modalities": ["text"]}],
+            },
+        )
         seen = {}
-        monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(tools=tools, msgs=msgs),
-                                                                          _text_chunks("ok"))[1])
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                            json={"content": "hi", "mode": "auto", **SETTINGS}))
+        monkeypatch.setattr(
+            chat.openrouter,
+            "stream_chat",
+            lambda m, msgs, tools=None, session_id=None, **kw: (
+                seen.update(tools=tools, msgs=msgs),
+                _text_chunks("ok"),
+            )[1],
+        )
+        _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", "mode": "auto", **SETTINGS}
+            )
+        )
         assert seen["tools"] is None
 
     def test_retry_replaces_assistant_message(self, client, conv, chat, monkeypatch):
         replies = iter([_text_chunks("first"), _text_chunks("second")])
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
-        first = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                    json={"content": "hi", **SETTINGS}))[-1]["message"]
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/retry",
-                                 json={"message_id": first["id"], **SETTINGS}))
+        first = _events(
+            client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", **SETTINGS})
+        )[-1]["message"]
+        ev = _events(
+            client.post(f"/api/chat/conversations/{conv['id']}/retry", json={"message_id": first["id"], **SETTINGS})
+        )
         assert ev[0]["user_message"] is None
         msgs = client.get(f"/api/chat/conversations/{conv['id']}").json()["messages"]
         assert [(m["role"], m["content"]) for m in msgs] == [("user", "hi"), ("assistant", "second")]
@@ -344,50 +461,121 @@ class TestTurns:
         """A reply sent in Chat mode, retried with Auto selected, reruns in Auto
         (tools offered) and the prompt's mode tag follows it."""
         offered = []
+
         def stream(model, msgs, tools=None, **kw):
             offered.append(bool(tools))
             return _text_chunks("ok")
+
         monkeypatch.setattr(chat.openrouter, "stream_chat", stream)
-        first = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                    json={"content": "hi", **SETTINGS, "mode": "text"}))[-1]["message"]
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/retry",
-                            json={"message_id": first["id"], **SETTINGS, "mode": "auto"}))
+        first = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", **SETTINGS, "mode": "text"}
+            )
+        )[-1]["message"]
+        _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/retry",
+                json={"message_id": first["id"], **SETTINGS, "mode": "auto"},
+            )
+        )
         assert offered == [False, True]
         msgs = client.get(f"/api/chat/conversations/{conv['id']}").json()["messages"]
         assert [(m["role"], m["mode"]) for m in msgs] == [("user", "auto"), ("assistant", "auto")]
 
     def test_history_records_past_media_as_tool_calls(self, client, conv, chat, db, monkeypatch):
         db.add_chat_message(conv["id"], "user", "draw a fox")
-        db.add_chat_message(conv["id"], "assistant", "Here!", media=[
-            {"id": "a", "kind": "image", "source": "generated", "status": "done", "file": "x.png", "prompt": "a fox",
-             "params": {"aspect_ratio": "16:9"}},
-            {"id": "b", "kind": "image", "source": "generated", "status": "error", "error": "flagged",
-             "prompt": "another fox"}])
+        db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "Here!",
+            media=[
+                {
+                    "id": "a",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "done",
+                    "file": "x.png",
+                    "prompt": "a fox",
+                    "params": {"aspect_ratio": "16:9"},
+                },
+                {
+                    "id": "b",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "error",
+                    "error": "flagged",
+                    "prompt": "another fox",
+                },
+            ],
+        )
         seen = {}
-        monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1])
+        monkeypatch.setattr(
+            chat.openrouter,
+            "stream_chat",
+            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1],
+        )
         _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "nice", **SETTINGS}))
         m = seen["msgs"]
-        assert m[2] == {"role": "assistant", "content": "Here!", "tool_calls": [
-            {"id": "call_a", "type": "function",
-             "function": {"name": "generate_image", "arguments": json.dumps({"prompt": "a fox", "aspect_ratio": "16:9"})}},
-            {"id": "call_b", "type": "function",
-             "function": {"name": "generate_image", "arguments": json.dumps({"prompt": "another fox"})}}]}
-        assert m[3] == {"role": "tool", "tool_call_id": "call_a",
-                        "content": json.dumps({"ok": True, "result": chat.IMAGE_TOOL_RESULT})}
-        assert m[4] == {"role": "tool", "tool_call_id": "call_b", "content": json.dumps({"ok": False, "error": "flagged"})}
+        assert m[2] == {
+            "role": "assistant",
+            "content": "Here!",
+            "tool_calls": [
+                {
+                    "id": "call_a",
+                    "type": "function",
+                    "function": {
+                        "name": "generate_image",
+                        "arguments": json.dumps({"prompt": "a fox", "aspect_ratio": "16:9"}),
+                    },
+                },
+                {
+                    "id": "call_b",
+                    "type": "function",
+                    "function": {"name": "generate_image", "arguments": json.dumps({"prompt": "another fox"})},
+                },
+            ],
+        }
+        assert m[3] == {
+            "role": "tool",
+            "tool_call_id": "call_a",
+            "content": json.dumps({"ok": True, "result": chat.IMAGE_TOOL_RESULT}),
+        }
+        assert m[4] == {
+            "role": "tool",
+            "tool_call_id": "call_b",
+            "content": json.dumps({"ok": False, "error": "flagged"}),
+        }
         assert m[5]["role"] == "user"
         assert not any("[generated image" in json.dumps(x) for x in m[1:])
 
     def test_history_uses_notes_when_no_tools_are_offered(self, client, conv, chat, db, monkeypatch):
         db.add_chat_message(conv["id"], "user", "draw a fox")
-        db.add_chat_message(conv["id"], "assistant", "Here!", media=[
-            {"id": "a", "kind": "image", "source": "generated", "status": "done", "file": "x.png", "prompt": "a fox"}])
+        db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "Here!",
+            media=[
+                {
+                    "id": "a",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "done",
+                    "file": "x.png",
+                    "prompt": "a fox",
+                }
+            ],
+        )
         seen = {}
-        monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1])
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                            json={"content": "nice", "mode": "text", **SETTINGS}))
+        monkeypatch.setattr(
+            chat.openrouter,
+            "stream_chat",
+            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1],
+        )
+        _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages", json={"content": "nice", "mode": "text", **SETTINGS}
+            )
+        )
         assert seen["msgs"][2] == {"role": "assistant", "content": "Here!\n\n[generated image: a fox]"}
         assert not any("tool_calls" in x for x in seen["msgs"])
 
@@ -396,9 +584,14 @@ class TestStartupResume:
     def test_resumes_pending_videos_and_fails_orphans(self, chat, db, conv, monkeypatch):
         started = []
         monkeypatch.setattr(chat, "start_video_poller", lambda *a: started.append(a))
-        m1 = db.add_chat_message(conv["id"], "assistant", media=[
-            {"id": "v", "kind": "video", "status": "pending", "job_id": "gen-vid-9"},
-            {"id": "i", "kind": "image", "status": "pending"}])
+        m1 = db.add_chat_message(
+            conv["id"],
+            "assistant",
+            media=[
+                {"id": "v", "kind": "video", "status": "pending", "job_id": "gen-vid-9"},
+                {"id": "i", "kind": "image", "status": "pending"},
+            ],
+        )
         m2 = db.add_chat_message(conv["id"], "assistant", status="streaming")
         chat.startup_resume_chat()
         assert started == [(conv["id"], m1.id, "v", "gen-vid-9")]
@@ -409,9 +602,9 @@ class TestStartupResume:
 def test_alembic_migration_creates_chat_tables(tmp_path):
     """0003 adds the chat tables to a pre-chat DB, and is a no-op when
     create_all() already made them (the app creates tables on startup)."""
+    import sqlalchemy as sa
     from alembic import command
     from alembic.config import Config
-    import sqlalchemy as sa
 
     def cfg_for(path):
         cfg = Config(str(ROOT_DIR / "alembic.ini"))
@@ -441,12 +634,19 @@ def test_alembic_migration_creates_chat_tables(tmp_path):
 class TestOpenRouterErrors:
     def _resp(self, status, body):
         import httpx
+
         return httpx.Response(status, json=body)
 
     def test_names_upstream_provider(self):
         from web import openrouter
-        body = {"error": {"code": 400, "message": "API key not valid. Please pass a valid API key.",
-                          "metadata": {"provider_name": "Google AI Studio"}}}
+
+        body = {
+            "error": {
+                "code": 400,
+                "message": "API key not valid. Please pass a valid API key.",
+                "metadata": {"provider_name": "Google AI Studio"},
+            }
+        }
         with pytest.raises(openrouter.OpenRouterError) as e:
             openrouter._raise_for_response(self._resp(400, body))
         assert str(e.value) == "[Google AI Studio] API key not valid. Please pass a valid API key."
@@ -454,15 +654,22 @@ class TestOpenRouterErrors:
 
     def test_appends_raw_upstream_message(self):
         from web import openrouter
-        body = {"error": {"message": "Provider returned error",
-                          "metadata": {"provider_name": "Fal", "raw": "content policy"}}}
+
+        body = {
+            "error": {
+                "message": "Provider returned error",
+                "metadata": {"provider_name": "Fal", "raw": "content policy"},
+            }
+        }
         with pytest.raises(openrouter.OpenRouterError) as e:
             openrouter._raise_for_response(self._resp(502, body))
         assert str(e.value) == "[Fal] Provider returned error: content policy"
 
     def test_non_json_body(self):
         import httpx
+
         from web import openrouter
+
         with pytest.raises(openrouter.OpenRouterError) as e:
             openrouter._raise_for_response(httpx.Response(503, text="upstream down"))
         assert str(e.value) == "upstream down"
@@ -470,8 +677,11 @@ class TestOpenRouterErrors:
 
 class TestEditAndLibrary:
     def _send(self, client, conv, content, **extra):
-        return _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                   json={"content": content, **SETTINGS, **extra}))
+        return _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages", json={"content": content, **SETTINGS, **extra}
+            )
+        )
 
     def _messages(self, client, conv):
         return client.get(f"/api/chat/conversations/{conv['id']}").json()["messages"]
@@ -482,18 +692,27 @@ class TestEditAndLibrary:
     def test_edit_starts_a_branch_and_keeps_the_old_one(self, client, conv, chat, monkeypatch):
         replies = iter([_text_chunks("one"), _text_chunks("two"), _text_chunks("edited reply")])
         seen = []
-        monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.append(msgs), next(replies))[1])
+        monkeypatch.setattr(
+            chat.openrouter,
+            "stream_chat",
+            lambda m, msgs, tools=None, session_id=None, **kw: (seen.append(msgs), next(replies))[1],
+        )
         first = self._send(client, conv, "first")[0]["user_message"]
         self._send(client, conv, "second")
 
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/edit",
-                                 json={"message_id": first["id"], "content": "first, but better", **SETTINGS}))
+        ev = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/edit",
+                json={"message_id": first["id"], "content": "first, but better", **SETTINGS},
+            )
+        )
         edited = ev[0]["user_message"]
         assert edited["id"] != first["id"] and edited["content"] == "first, but better"
         assert edited["siblings"] == [first["id"], edited["id"]]
         assert [(m["role"], m["content"]) for m in self._messages(client, conv)] == [
-            ("user", "first, but better"), ("assistant", "edited reply")]
+            ("user", "first, but better"),
+            ("assistant", "edited reply"),
+        ]
         # the model only saw the edited prompt, not the other branch
         assert [m["role"] for m in seen[-1]] == ["system", "user"]
 
@@ -504,24 +723,36 @@ class TestEditAndLibrary:
 
     def test_messages_remember_their_mode(self, client, conv, chat, monkeypatch):
         """The UI reruns an edit/retry in the message's own mode, so it must be recorded."""
-        monkeypatch.setattr(chat.openrouter, "generate_image",
-                            lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None))
+        monkeypatch.setattr(
+            chat.openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
+        )
         ev = self._send(client, conv, "a dog", mode="image")
         assert ev[0]["user_message"]["mode"] == "image" and ev[-1]["message"]["mode"] == "image"
-        edited = _events(client.post(f"/api/chat/conversations/{conv['id']}/edit", json={
-            "message_id": ev[0]["user_message"]["id"], "content": "a puppy", "mode": "image", **SETTINGS}))
+        edited = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/edit",
+                json={"message_id": ev[0]["user_message"]["id"], "content": "a puppy", "mode": "image", **SETTINGS},
+            )
+        )
         assert edited[0]["user_message"]["mode"] == "image"
         assert [m["mode"] for m in self._messages(client, conv)] == ["image", "image"]
 
     def test_switching_goes_to_the_newest_end_of_a_branch(self, client, conv, chat, monkeypatch):
         replies = iter([_text_chunks("a1"), _text_chunks("a2"), _text_chunks("b1"), _text_chunks("a3")])
         seen = []
-        monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.append(msgs), next(replies))[1])
+        monkeypatch.setattr(
+            chat.openrouter,
+            "stream_chat",
+            lambda m, msgs, tools=None, session_id=None, **kw: (seen.append(msgs), next(replies))[1],
+        )
         first = self._send(client, conv, "q1")[0]["user_message"]
         self._send(client, conv, "q2")
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/edit",
-                            json={"message_id": first["id"], "content": "other q1", **SETTINGS}))
+        _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/edit",
+                json={"message_id": first["id"], "content": "other q1", **SETTINGS},
+            )
+        )
         self._switch(client, conv, first["id"])
         # A new message continues the branch being shown
         self._send(client, conv, "q3")
@@ -541,25 +772,40 @@ class TestEditAndLibrary:
 
     def test_edit_keeps_attachments(self, client, conv, chat, monkeypatch):
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
-        up = client.post(f"/api/chat/conversations/{conv['id']}/attachments",
-                         files={"file": ("a.png", _png_bytes(), "image/png")}).json()["file"]
+        up = client.post(
+            f"/api/chat/conversations/{conv['id']}/attachments", files={"file": ("a.png", _png_bytes(), "image/png")}
+        ).json()["file"]
         first = self._send(client, conv, "what is this", attachments=[up])[0]["user_message"]
-        edited = _events(client.post(f"/api/chat/conversations/{conv['id']}/edit",
-                                     json={"message_id": first["id"], "content": "describe it", **SETTINGS}))[0]
+        edited = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/edit",
+                json={"message_id": first["id"], "content": "describe it", **SETTINGS},
+            )
+        )[0]
         assert [i["file"] for i in edited["user_message"]["media"]] == [up]
 
     def test_edit_keeps_generated_media_on_the_old_branch(self, client, conv, chat, monkeypatch):
-        rounds = iter([_tool_chunks("generate_image", {"prompt": "a cat"}), _text_chunks("Here."),
-                       _text_chunks("No image this time.")])
+        rounds = iter(
+            [
+                _tool_chunks("generate_image", {"prompt": "a cat"}),
+                _text_chunks("Here."),
+                _text_chunks("No image this time."),
+            ]
+        )
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(rounds))
-        monkeypatch.setattr(chat.openrouter, "generate_image",
-                            lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], 0.04))
+        monkeypatch.setattr(
+            chat.openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], 0.04)
+        )
         ev = self._send(client, conv, "draw a cat")
         user_id = ev[0]["user_message"]["id"]
         img = ev[-1]["message"]["media"][0]
 
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/edit",
-                            json={"message_id": user_id, "content": "just say hi", **SETTINGS}))
+        _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/edit",
+                json={"message_id": user_id, "content": "just say hi", **SETTINGS},
+            )
+        )
         assert all(not m["media"] for m in self._messages(client, conv))
         lib = client.get("/api/chat/library").json()["items"]
         assert [(i["id"], i["attached"]) for i in lib] == [(img["id"], True)]
@@ -568,45 +814,62 @@ class TestEditAndLibrary:
 
     def test_retry_adds_a_sibling_reply(self, client, conv, chat, monkeypatch):
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
-        monkeypatch.setattr(chat.openrouter, "generate_image",
-                            lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None))
+        monkeypatch.setattr(
+            chat.openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
+        )
         first = self._send(client, conv, "a dog", mode="image")[-1]["message"]
-        second = _events(client.post(f"/api/chat/conversations/{conv['id']}/retry",
-                                      json={"message_id": first["id"], "mode": "image", **SETTINGS}))[-1]["message"]
+        second = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/retry",
+                json={"message_id": first["id"], "mode": "image", **SETTINGS},
+            )
+        )[-1]["message"]
         assert second["siblings"] == [first["id"], second["id"]]
         lib = client.get("/api/chat/library").json()["items"]
         assert {(i["id"], i["attached"]) for i in lib} == {
-            (first["media"][0]["id"], True), (second["media"][0]["id"], True)}
+            (first["media"][0]["id"], True),
+            (second["media"][0]["id"], True),
+        }
         shown = self._switch(client, conv, first["id"]).json()["messages"]
         assert [m["id"] for m in shown][-1] == first["id"]
 
     def test_uploads_are_not_kept_in_library(self, client, conv, chat, db, monkeypatch):
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
-        up = client.post(f"/api/chat/conversations/{conv['id']}/attachments",
-                         files={"file": ("a.png", _png_bytes(), "image/png")}).json()["file"]
+        up = client.post(
+            f"/api/chat/conversations/{conv['id']}/attachments", files={"file": ("a.png", _png_bytes(), "image/png")}
+        ).json()["file"]
         first = self._send(client, conv, "hi")[0]["user_message"]
         self._send(client, conv, "look", attachments=[up])
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/edit",
-                            json={"message_id": first["id"], "content": "hello", **SETTINGS}))
+        _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/edit",
+                json={"message_id": first["id"], "content": "hello", **SETTINGS},
+            )
+        )
         assert client.get("/api/chat/library").json()["items"] == []
 
     def test_edit_rejected_while_streaming(self, client, conv, db):
         user = db.add_chat_message(conv["id"], "user", "hi")
         db.add_chat_message(conv["id"], "assistant", status="streaming")
-        r = client.post(f"/api/chat/conversations/{conv['id']}/edit",
-                        json={"message_id": user.id, "content": "x", **SETTINGS})
+        r = client.post(
+            f"/api/chat/conversations/{conv['id']}/edit", json={"message_id": user.id, "content": "x", **SETTINGS}
+        )
         assert r.status_code == 409
 
     def test_edit_rejects_assistant_message(self, client, conv, db):
         a = db.add_chat_message(conv["id"], "assistant", "hi")
-        r = client.post(f"/api/chat/conversations/{conv['id']}/edit",
-                        json={"message_id": a.id, "content": "x", **SETTINGS})
+        r = client.post(
+            f"/api/chat/conversations/{conv['id']}/edit", json={"message_id": a.id, "content": "x", **SETTINGS}
+        )
         assert r.status_code == 400
 
     def test_pending_video_finishes_into_library(self, chat, db, conv, monkeypatch):
         db.add_chat_message(conv["id"], "user", "waves")
-        msg = db.add_chat_message(conv["id"], "assistant", media=[
-            {"id": "v1", "kind": "video", "source": "generated", "status": "pending", "job_id": "gen-vid-1"}])
+        msg = db.add_chat_message(
+            conv["id"],
+            "assistant",
+            media=[{"id": "v1", "kind": "video", "source": "generated", "status": "pending", "job_id": "gen-vid-1"}],
+        )
         db.truncate_chat(conv["id"], after_id=msg.id - 1)
         assert db.get_chat_message(msg.id) is None
         monkeypatch.setattr(chat.openrouter, "get_video", lambda j: {"status": "completed", "usage": {"cost": 0.3}})
@@ -618,8 +881,11 @@ class TestEditAndLibrary:
     def test_startup_resumes_library_videos(self, chat, db, conv, monkeypatch):
         started = []
         monkeypatch.setattr(chat, "start_video_poller", lambda *a: started.append(a))
-        msg = db.add_chat_message(conv["id"], "assistant", media=[
-            {"id": "v2", "kind": "video", "source": "generated", "status": "pending", "job_id": "gen-vid-2"}])
+        msg = db.add_chat_message(
+            conv["id"],
+            "assistant",
+            media=[{"id": "v2", "kind": "video", "source": "generated", "status": "pending", "job_id": "gen-vid-2"}],
+        )
         db.truncate_chat(conv["id"], after_id=msg.id - 1)
         chat.startup_resume_chat()
         assert started == [(conv["id"], 0, "v2", "gen-vid-2")]
@@ -627,8 +893,11 @@ class TestEditAndLibrary:
     def test_delete_library_item(self, client, conv, chat, db):
         f = chat._conv_dir(conv["id"]) / "img_x.png"
         f.write_bytes(b"png")
-        msg = db.add_chat_message(conv["id"], "assistant", media=[
-            {"id": "i1", "kind": "image", "source": "generated", "status": "done", "file": "img_x.png"}])
+        msg = db.add_chat_message(
+            conv["id"],
+            "assistant",
+            media=[{"id": "i1", "kind": "image", "source": "generated", "status": "done", "file": "img_x.png"}],
+        )
         assert client.delete("/api/chat/library/i1").status_code == 404  # still attached
         db.truncate_chat(conv["id"], after_id=msg.id - 1)
         assert client.delete("/api/chat/library/i1").status_code == 200
@@ -636,8 +905,11 @@ class TestEditAndLibrary:
         assert client.get("/api/chat/library").json()["items"] == []
 
     def test_deleting_conversation_removes_its_library_items(self, client, conv, db):
-        msg = db.add_chat_message(conv["id"], "assistant", media=[
-            {"id": "i2", "kind": "image", "source": "generated", "status": "done", "file": "x.png"}])
+        msg = db.add_chat_message(
+            conv["id"],
+            "assistant",
+            media=[{"id": "i2", "kind": "image", "source": "generated", "status": "done", "file": "x.png"}],
+        )
         db.truncate_chat(conv["id"], after_id=msg.id - 1)
         client.delete(f"/api/chat/conversations/{conv['id']}")
         assert db.get_chat_library_item("i2") is None
@@ -647,30 +919,35 @@ def test_resend_same_prompt_gets_fresh_reply(client, conv, chat, monkeypatch):
     """Retry on a prompt = edit with unchanged text: a new branch with a fresh reply."""
     replies = iter([_text_chunks("a"), _text_chunks("b"), _text_chunks("c")])
     monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
-    first = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                json={"content": "tell me a joke", **SETTINGS}))[0]["user_message"]
+    first = _events(
+        client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "tell me a joke", **SETTINGS})
+    )[0]["user_message"]
     _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "another", **SETTINGS}))
-    _events(client.post(f"/api/chat/conversations/{conv['id']}/edit",
-                        json={"message_id": first["id"], "content": "tell me a joke", **SETTINGS}))
+    _events(
+        client.post(
+            f"/api/chat/conversations/{conv['id']}/edit",
+            json={"message_id": first["id"], "content": "tell me a joke", **SETTINGS},
+        )
+    )
     msgs = client.get(f"/api/chat/conversations/{conv['id']}").json()["messages"]
     assert [(m["role"], m["content"]) for m in msgs] == [("user", "tell me a joke"), ("assistant", "c")]
-
 
 
 class TestModerationAndRegenerate:
     def _blocked(self, chat, status=403, msg="Your input was flagged by moderation"):
         def boom(*a, **k):
             raise chat.openrouter.OpenRouterError(msg, status)
+
         return boom
 
     def test_moderation_block_ends_turn_without_retry(self, client, conv, chat, monkeypatch):
         rounds = iter([_tool_chunks("generate_image", {"prompt": "risky", "aspect_ratio": "9:16"}, text="Here goes.")])
         calls = []
-        monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda *a, **k: (calls.append(1), next(rounds))[1])
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: (calls.append(1), next(rounds))[1])
         monkeypatch.setattr(chat.openrouter, "generate_image", self._blocked(chat))
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                 json={"content": "draw it", **SETTINGS}))
+        ev = _events(
+            client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "draw it", **SETTINGS})
+        )
         assert len(calls) == 1  # no follow-up round, so no silent re-attempt
         done = ev[-1]["message"]
         assert done["content"] == "Here goes." and done["status"] == "done"
@@ -678,38 +955,64 @@ class TestModerationAndRegenerate:
         assert item["status"] == "error" and item["moderated"] is True
         assert item["params"] == {"aspect_ratio": "9:16", "resolution": None, "refs": []}
 
-    @pytest.mark.parametrize("status,msg,expected", [
-        (403, "Forbidden", True),
-        (400, "[Seed] Request rejected: content policy violation", True),
-        (400, "Provider returned error: prompt contains sensitive content", True),
-        (502, "Upstream timed out", False),
-        (400, "Invalid aspect_ratio", False),
-    ])
+    @pytest.mark.parametrize(
+        "status,msg,expected",
+        [
+            (403, "Forbidden", True),
+            (400, "[Seed] Request rejected: content policy violation", True),
+            (400, "Provider returned error: prompt contains sensitive content", True),
+            (502, "Upstream timed out", False),
+            (400, "Invalid aspect_ratio", False),
+        ],
+    )
     def test_moderation_detection(self, chat, status, msg, expected):
         assert chat._is_moderation_error(chat.openrouter.OpenRouterError(msg, status)) is expected
 
     def _failed_image(self, db, conv, **extra):
         db.add_chat_message(conv["id"], "user", "draw")
-        return db.add_chat_message(conv["id"], "assistant", "Here goes.", model="t/model", media=[{
-            "id": "m1", "kind": "image", "source": "generated", "status": "error", "error": "flagged",
-            "moderated": True, "prompt": "a lighthouse", "model": "i/model",
-            "params": {"aspect_ratio": "16:9", "resolution": None, "refs": []}, **extra}])
+        return db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "Here goes.",
+            model="t/model",
+            media=[
+                {
+                    "id": "m1",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "error",
+                    "error": "flagged",
+                    "moderated": True,
+                    "prompt": "a lighthouse",
+                    "model": "i/model",
+                    "params": {"aspect_ratio": "16:9", "resolution": None, "refs": []},
+                    **extra,
+                }
+            ],
+        )
 
     def _run_worker_inline(self, chat, monkeypatch):
         class Inline:
             def __init__(self, target, args, **kw):
                 self.target, self.args = target, args
+
             def start(self):
                 self.target(*self.args)
+
         monkeypatch.setattr(chat.threading, "Thread", Inline)
 
     def test_retry_same_model(self, client, conv, chat, db, monkeypatch):
         msg = self._failed_image(db, conv)
         self._run_worker_inline(chat, monkeypatch)
         got = {}
-        monkeypatch.setattr(chat.openrouter, "generate_image",
-                            lambda model, prompt, **kw: (got.update(model=model, prompt=prompt, **kw),
-                                                         ([(_png_bytes(), "image/png")], 0.02))[1])
+        monkeypatch.setattr(
+            chat.openrouter,
+            "generate_image",
+            lambda model, prompt, **kw: (
+                got.update(model=model, prompt=prompt, **kw),
+                ([(_png_bytes(), "image/png")], 0.02),
+            )[1],
+        )
         r = client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={})
         assert r.status_code == 200
         assert got["model"] == "i/model" and got["prompt"] == "a lighthouse" and got["aspect_ratio"] == "16:9"
@@ -721,8 +1024,11 @@ class TestModerationAndRegenerate:
         msg = self._failed_image(db, conv)
         self._run_worker_inline(chat, monkeypatch)
         got = {}
-        monkeypatch.setattr(chat.openrouter, "generate_image",
-                            lambda model, prompt, **kw: (got.update(model=model), ([(_png_bytes(), "image/png")], None))[1])
+        monkeypatch.setattr(
+            chat.openrouter,
+            "generate_image",
+            lambda model, prompt, **kw: (got.update(model=model), ([(_png_bytes(), "image/png")], None))[1],
+        )
         client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={"model": "other/model"})
         assert got["model"] == "other/model"
         assert db.get_chat_message(msg.id).media[0]["model"] == "other/model"
@@ -737,18 +1043,39 @@ class TestModerationAndRegenerate:
 
     def test_retry_video_refits_params_for_new_model(self, client, conv, chat, db, monkeypatch):
         db.add_chat_message(conv["id"], "user", "waves")
-        msg = db.add_chat_message(conv["id"], "assistant", media=[{
-            "id": "v1", "kind": "video", "source": "generated", "status": "error", "error": "flagged",
-            "prompt": "waves", "model": "v/old",
-            "params": {"duration": 7, "aspect_ratio": "16:9", "resolution": None, "first_frame": None}}])
-        chat._models_cache.update(at=9e18, data={"text": [], "image": [], "video": [
-            {"id": "v/new", "durations": [5, 10], "aspect_ratios": ["16:9"], "resolutions": []}]})
+        msg = db.add_chat_message(
+            conv["id"],
+            "assistant",
+            media=[
+                {
+                    "id": "v1",
+                    "kind": "video",
+                    "source": "generated",
+                    "status": "error",
+                    "error": "flagged",
+                    "prompt": "waves",
+                    "model": "v/old",
+                    "params": {"duration": 7, "aspect_ratio": "16:9", "resolution": None, "first_frame": None},
+                }
+            ],
+        )
+        chat._models_cache.update(
+            at=9e18,
+            data={
+                "text": [],
+                "image": [],
+                "video": [{"id": "v/new", "durations": [5, 10], "aspect_ratios": ["16:9"], "resolutions": []}],
+            },
+        )
         self._run_worker_inline(chat, monkeypatch)
         started = []
         monkeypatch.setattr(chat, "start_video_poller", lambda *a: started.append(a))
         got = {}
-        monkeypatch.setattr(chat.openrouter, "submit_video",
-                            lambda model, prompt, **kw: (got.update(model=model, **kw), {"id": "gen-vid-9"})[1])
+        monkeypatch.setattr(
+            chat.openrouter,
+            "submit_video",
+            lambda model, prompt, **kw: (got.update(model=model, **kw), {"id": "gen-vid-9"})[1],
+        )
         client.post(f"/api/chat/messages/{msg.id}/media/v1/regenerate", json={"model": "v/new"})
         assert got["model"] == "v/new" and got["duration"] == 5
         item = db.get_chat_message(msg.id).media[0]
@@ -761,12 +1088,14 @@ class TestModerationAndRegenerate:
         assert client.post(f"/api/chat/messages/{msg.id}/media/nope/regenerate", json={}).status_code == 404
 
 
-
 class TestContext:
     def _capture(self, chat, monkeypatch):
         seen = {}
-        monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1])
+        monkeypatch.setattr(
+            chat.openrouter,
+            "stream_chat",
+            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1],
+        )
         return seen
 
     def _img(self, chat, conv, name):
@@ -777,8 +1106,11 @@ class TestContext:
         db.add_chat_message(conv["id"], "user", "draw Linh")
         db.add_chat_message(conv["id"], "assistant", "Here she is.", media=[self._img(chat, conv, "g1.png")])
         seen = self._capture(chat, monkeypatch)
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                            json={"content": "what is she wearing?", **SETTINGS}))
+        _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages", json={"content": "what is she wearing?", **SETTINGS}
+            )
+        )
         last = seen["msgs"][-1]
         assert last["role"] == "user"
         kinds = [p["type"] for p in last["content"]]
@@ -795,10 +1127,14 @@ class TestContext:
             db.add_chat_message(conv["id"], "user", f"draw {i}")
             db.add_chat_message(conv["id"], "assistant", "ok", media=[self._img(chat, conv, f"g{i}.png")])
         seen = self._capture(chat, monkeypatch)
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                            json={"content": "next", **SETTINGS, **settings}))
-        return sum(1 for m in seen["msgs"] if isinstance(m["content"], list)
-                   for p in m["content"] if p["type"] == "image_url")
+        _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages", json={"content": "next", **SETTINGS, **settings}
+            )
+        )
+        return sum(
+            1 for m in seen["msgs"] if isinstance(m["content"], list) for p in m["content"] if p["type"] == "image_url"
+        )
 
     def test_only_most_recent_images_as_pixels(self, client, conv, chat, db, monkeypatch):
         assert self._pixels_sent(client, conv, chat, db, monkeypatch) == chat.DEFAULT_IMAGE_LIMIT == 6
@@ -808,8 +1144,14 @@ class TestContext:
         assert self._pixels_sent(client, conv, chat, db, monkeypatch, image_limit=limit) == expected
 
     def test_no_pixels_for_text_only_models(self, client, conv, chat, db, monkeypatch):
-        chat._models_cache.update(at=9e18, data={"image": [], "video": [], "text": [
-            {"id": "t/model", "supports_tools": True, "input_modalities": ["text"]}]})
+        chat._models_cache.update(
+            at=9e18,
+            data={
+                "image": [],
+                "video": [],
+                "text": [{"id": "t/model", "supports_tools": True, "input_modalities": ["text"]}],
+            },
+        )
         db.add_chat_message(conv["id"], "user", "draw")
         db.add_chat_message(conv["id"], "assistant", "ok", media=[self._img(chat, conv, "g.png")])
         seen = self._capture(chat, monkeypatch)
@@ -822,8 +1164,12 @@ class TestContext:
             db.add_chat_message(conv["id"], "assistant", f"a{i}")
         seen = self._capture(chat, monkeypatch)
         # limit 4 of 11 history messages → [a3?, q4, a4, now] trimmed to start on a user message
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                            json={"content": "now", "history_limit": 4, **SETTINGS}))
+        _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "now", "history_limit": 4, **SETTINGS},
+            )
+        )
         body = seen["msgs"][1:]
         assert [m["role"] for m in body] == ["user", "assistant", "user"]
         assert body[0]["content"][0]["text"] == "q4"
@@ -838,11 +1184,10 @@ class TestContext:
         assert "omitted" not in seen["msgs"][0]["content"]
 
     def test_invalid_limit_rejected(self, client, conv):
-        r = client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                        json={"content": "x", "history_limit": 0, **SETTINGS})
+        r = client.post(
+            f"/api/chat/conversations/{conv['id']}/messages", json={"content": "x", "history_limit": 0, **SETTINGS}
+        )
         assert r.status_code == 422
-
-
 
 
 class TestStallProtection:
@@ -852,15 +1197,19 @@ class TestStallProtection:
         def __init__(self, lines):
             self.lines = lines
             self.status_code = 200
+
         def __enter__(self):
             return self
+
         def __exit__(self, *a):
             return False
+
         def iter_lines(self):
             yield from self.lines
 
     def _keepalives(self):
         import time as _t
+
         while True:
             _t.sleep(0.02)
             yield ": OPENROUTER PROCESSING"
@@ -872,7 +1221,9 @@ class TestStallProtection:
         assert e.value.status == 504
 
     def test_stop_is_noticed_during_keepalives(self, chat, monkeypatch):
-        import threading, time as _t
+        import threading
+        import time as _t
+
         monkeypatch.setattr(chat.openrouter._client, "stream", lambda *a, **k: self._FakeStream(self._keepalives()))
         stop = threading.Event()
         threading.Timer(0.1, stop.set).start()
@@ -887,17 +1238,36 @@ class TestConsistencyReferences:
         for i in range(n):
             f = f"g{i}.png"
             (chat._conv_dir(conv["id"]) / f).write_bytes(_png_bytes(color=(i * 40, 0, 0)))
-            db.add_chat_message(conv["id"], "assistant", f"scene {i}", media=[
-                {"id": f"g{i}", "kind": "image", "source": "generated", "status": "done", "file": f, "prompt": f"p{i}"}])
+            db.add_chat_message(
+                conv["id"],
+                "assistant",
+                f"scene {i}",
+                media=[
+                    {
+                        "id": f"g{i}",
+                        "kind": "image",
+                        "source": "generated",
+                        "status": "done",
+                        "file": f,
+                        "prompt": f"p{i}",
+                    }
+                ],
+            )
 
     def _run(self, client, conv, chat, monkeypatch, tool_args):
         replies = iter([_tool_chunks("generate_image", tool_args, text="Next scene."), _text_chunks("Done.")])
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
         got = {}
-        monkeypatch.setattr(chat.openrouter, "generate_image",
-                            lambda model, prompt, **kw: (got.update(kw), ([(_png_bytes(), "image/png")], None))[1])
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                 json={"content": "continue the story", **SETTINGS}))
+        monkeypatch.setattr(
+            chat.openrouter,
+            "generate_image",
+            lambda model, prompt, **kw: (got.update(kw), ([(_png_bytes(), "image/png")], None))[1],
+        )
+        ev = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages", json={"content": "continue the story", **SETTINGS}
+            )
+        )
         return got, ev[-1]["message"]["media"][0]
 
     def test_no_references_unless_the_model_asks(self, client, conv, chat, db, monkeypatch):
@@ -907,13 +1277,21 @@ class TestConsistencyReferences:
 
     def test_model_opts_in_and_prompt_is_passed_verbatim(self, client, conv, chat, db, monkeypatch):
         self._prior_images(chat, db, conv, 1)
-        replies = iter([_tool_chunks("generate_image", {"prompt": "exactly what the model wrote",
-                                                        "keep_consistent": True}, text="Next."),
-                        _text_chunks("Done.")])
+        replies = iter(
+            [
+                _tool_chunks(
+                    "generate_image", {"prompt": "exactly what the model wrote", "keep_consistent": True}, text="Next."
+                ),
+                _text_chunks("Done."),
+            ]
+        )
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
         got = {}
-        monkeypatch.setattr(chat.openrouter, "generate_image",
-                            lambda model, prompt, **kw: (got.update(prompt=prompt, **kw), ([(_png_bytes(), "image/png")], None))[1])
+        monkeypatch.setattr(
+            chat.openrouter,
+            "generate_image",
+            lambda model, prompt, **kw: (got.update(prompt=prompt, **kw), ([(_png_bytes(), "image/png")], None))[1],
+        )
         _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "continue", **SETTINGS}))
         assert got["prompt"] == "exactly what the model wrote"
         assert len(got["input_images"]) == 1
@@ -928,23 +1306,28 @@ class TestConsistencyReferences:
         assert got.get("input_images") is None
 
     def test_skipped_for_image_models_without_reference_support(self, client, conv, chat, db, monkeypatch):
-        chat._models_cache.update(at=9e18, data={"text": [], "video": [], "image": [
-            {"id": "i/model", "input_modalities": ["text"]}]})
+        chat._models_cache.update(
+            at=9e18, data={"text": [], "video": [], "image": [{"id": "i/model", "input_modalities": ["text"]}]}
+        )
         self._prior_images(chat, db, conv, 1)
         got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "next", "keep_consistent": True})
         assert got.get("input_images") is None
 
     def test_edit_source_comes_first(self, client, conv, chat, db, monkeypatch):
         self._prior_images(chat, db, conv, 2)
-        got, item = self._run(client, conv, chat, monkeypatch,
-                              {"prompt": "make it night", "source_image": "latest", "keep_consistent": True})
+        got, item = self._run(
+            client,
+            conv,
+            chat,
+            monkeypatch,
+            {"prompt": "make it night", "source_image": "latest", "keep_consistent": True},
+        )
         assert item["params"]["refs"] == ["g1.png", "g0.png"]
 
     def test_edit_alone_sends_just_the_source(self, client, conv, chat, db, monkeypatch):
         self._prior_images(chat, db, conv, 2)
         got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "make it night", "source_image": "latest"})
         assert item["params"]["refs"] == ["g1.png"]
-
 
     def _pin(self, client, db, conv, media_id, pinned=True):
         msg = next(m for m in db.get_chat_messages(conv["id"]) if any(i["id"] == media_id for i in m.media))
@@ -963,8 +1346,13 @@ class TestConsistencyReferences:
         """Also the priority when a model takes fewer images (Venice edit models keep the first N)."""
         self._prior_images(chat, db, conv, 3)
         self._pin(client, db, conv, "g0")
-        got, item = self._run(client, conv, chat, monkeypatch,
-                              {"prompt": "make it night", "source_image": "latest", "keep_consistent": True})
+        got, item = self._run(
+            client,
+            conv,
+            chat,
+            monkeypatch,
+            {"prompt": "make it night", "source_image": "latest", "keep_consistent": True},
+        )
         assert item["params"]["refs"] == ["g2.png", "g0.png", "g1.png"]
         assert item["params"]["ref_args"] == {"source_image": "latest", "keep_consistent": True}
 
@@ -977,20 +1365,32 @@ class TestConsistencyReferences:
 
     def test_pinned_upload_is_a_reference_in_image_mode(self, client, conv, chat, db, monkeypatch):
         (chat._conv_dir(conv["id"]) / "u.png").write_bytes(_png_bytes())
-        db.add_chat_message(conv["id"], "user", "this is Linh", media=[
-            {"id": "u1", "kind": "image", "source": "upload", "status": "done", "file": "u.png"}])
+        db.add_chat_message(
+            conv["id"],
+            "user",
+            "this is Linh",
+            media=[{"id": "u1", "kind": "image", "source": "upload", "status": "done", "file": "u.png"}],
+        )
         db.add_chat_message(conv["id"], "assistant", "Nice photo.")
         self._pin(client, db, conv, "u1")
         got = {}
-        monkeypatch.setattr(chat.openrouter, "generate_image",
-                            lambda model, prompt, **kw: (got.update(kw), ([(_png_bytes(), "image/png")], None))[1])
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                 json={"content": "Linh at the beach", **SETTINGS, "mode": "image"}))
+        monkeypatch.setattr(
+            chat.openrouter,
+            "generate_image",
+            lambda model, prompt, **kw: (got.update(kw), ([(_png_bytes(), "image/png")], None))[1],
+        )
+        ev = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "Linh at the beach", **SETTINGS, "mode": "image"},
+            )
+        )
         assert ev[-1]["message"]["media"][0]["params"]["refs"] == ["u.png"]
 
     def test_pins_ignored_for_image_models_without_reference_support(self, client, conv, chat, db, monkeypatch):
-        chat._models_cache.update(at=9e18, data={"text": [], "video": [], "image": [
-            {"id": "i/model", "input_modalities": ["text"]}]})
+        chat._models_cache.update(
+            at=9e18, data={"text": [], "video": [], "image": [{"id": "i/model", "input_modalities": ["text"]}]}
+        )
         self._prior_images(chat, db, conv, 1)
         self._pin(client, db, conv, "g0")
         got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "next"})
@@ -998,35 +1398,68 @@ class TestConsistencyReferences:
 
     def test_only_finished_images_can_be_pinned(self, client, conv, chat, db):
         db.add_chat_message(conv["id"], "user", "go")
-        msg = db.add_chat_message(conv["id"], "assistant", "", media=[
-            {"id": "v", "kind": "video", "source": "generated", "status": "done", "file": "v.mp4", "prompt": "p"},
-            {"id": "e", "kind": "image", "source": "generated", "status": "error", "prompt": "p"}])
+        msg = db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "",
+            media=[
+                {"id": "v", "kind": "video", "source": "generated", "status": "done", "file": "v.mp4", "prompt": "p"},
+                {"id": "e", "kind": "image", "source": "generated", "status": "error", "prompt": "p"},
+            ],
+        )
         for mid in ("v", "e", "nope"):
             assert client.post(f"/api/chat/messages/{msg.id}/media/{mid}/pin", json={"pinned": True}).status_code == 404
 
     def test_history_replays_reference_choices(self, client, conv, chat, db, monkeypatch):
         db.add_chat_message(conv["id"], "user", "draw Linh again")
-        db.add_chat_message(conv["id"], "assistant", "Here!", media=[
-            {"id": "a", "kind": "image", "source": "generated", "status": "done", "file": "x.png", "prompt": "Linh",
-             "params": {"refs": ["p.png", "q.png"], "ref_args": {"keep_consistent": True}}}])
+        db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "Here!",
+            media=[
+                {
+                    "id": "a",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "done",
+                    "file": "x.png",
+                    "prompt": "Linh",
+                    "params": {"refs": ["p.png", "q.png"], "ref_args": {"keep_consistent": True}},
+                }
+            ],
+        )
         seen = {}
-        monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1])
+        monkeypatch.setattr(
+            chat.openrouter,
+            "stream_chat",
+            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1],
+        )
         _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "nice", **SETTINGS}))
         call = seen["msgs"][2]["tool_calls"][0]
         assert json.loads(call["function"]["arguments"]) == {"prompt": "Linh", "keep_consistent": True}
-        assert json.loads(seen["msgs"][3]["content"]) == {"ok": True, "result": chat.IMAGE_TOOL_RESULT,
-                                                          "reference_images": 2}
+        assert json.loads(seen["msgs"][3]["content"]) == {
+            "ok": True,
+            "result": chat.IMAGE_TOOL_RESULT,
+            "reference_images": 2,
+        }
+
 
 class TestModelDecides:
     """The app never adds instructions or extra calls to steer the model."""
 
     def test_no_extra_call_when_model_skips_the_tool(self, client, conv, chat, monkeypatch):
         calls = []
-        monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda *a, **k: (calls.append(k), _text_chunks("A story, and here's the photo."))[1])
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                 json={"content": "write a story and create an image of the scene", **SETTINGS}))
+        monkeypatch.setattr(
+            chat.openrouter,
+            "stream_chat",
+            lambda *a, **k: (calls.append(k), _text_chunks("A story, and here's the photo."))[1],
+        )
+        ev = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "write a story and create an image of the scene", **SETTINGS},
+            )
+        )
         assert len(calls) == 1
         assert ev[-1]["message"]["content"] == "A story, and here's the photo." and ev[-1]["message"]["media"] == []
 
@@ -1034,22 +1467,38 @@ class TestModelDecides:
         for i in range(4):
             db.add_chat_message(conv["id"], "user", f"q{i}")
             db.add_chat_message(conv["id"], "assistant", f"a{i}")
-        chat._models_cache.update(at=9e18, data={"image": [], "video": [], "text": [
-            {"id": "t/model", "supports_tools": False, "input_modalities": ["text"]}]})
+        chat._models_cache.update(
+            at=9e18,
+            data={
+                "image": [],
+                "video": [],
+                "text": [{"id": "t/model", "supports_tools": False, "input_modalities": ["text"]}],
+            },
+        )
         seen = {}
-        monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1])
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                            json={"content": "hi", "history_limit": 3, **SETTINGS}))
+        monkeypatch.setattr(
+            chat.openrouter,
+            "stream_chat",
+            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1],
+        )
+        _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", "history_limit": 3, **SETTINGS}
+            )
+        )
         from datetime import datetime
+
         assert seen["msgs"][0]["content"] == chat.SYSTEM_PROMPT.format(today=datetime.now().strftime("%A %d %B %Y"))
 
 
 class TestConversationalImageModels:
     """Gemini-style image models get the conversation, not a lone prompt."""
 
-    CATALOGUE = {"text": [], "video": [], "image": [
-        {"id": "i/model", "input_modalities": ["text", "image"], "conversational": True}]}
+    CATALOGUE = {
+        "text": [],
+        "video": [],
+        "image": [{"id": "i/model", "input_modalities": ["text", "image"], "conversational": True}],
+    }
 
     def _setup(self, chat, db, conv, with_prior_image=True):
         chat._models_cache.update(at=9e18, data=self.CATALOGUE)
@@ -1057,34 +1506,56 @@ class TestConversationalImageModels:
         media = []
         if with_prior_image:
             (chat._conv_dir(conv["id"]) / "g0.png").write_bytes(_png_bytes())
-            media = [{"id": "g0", "kind": "image", "source": "generated", "status": "done", "file": "g0.png",
-                      "prompt": "Linh in the gym"}]
+            media = [
+                {
+                    "id": "g0",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "done",
+                    "file": "g0.png",
+                    "prompt": "Linh in the gym",
+                }
+            ]
         db.add_chat_message(conv["id"], "assistant", "Linh lifted.", media=media)
 
     def _fake_chat_image(self, chat, monkeypatch):
         got = {}
-        monkeypatch.setattr(chat.openrouter, "generate_image_chat",
-                            lambda model, messages, **kw: (got.update(model=model, messages=messages, **kw),
-                                                           ([(_png_bytes(), "image/png")], 0.04))[1])
+        monkeypatch.setattr(
+            chat.openrouter,
+            "generate_image_chat",
+            lambda model, messages, **kw: (
+                got.update(model=model, messages=messages, **kw),
+                ([(_png_bytes(), "image/png")], 0.04),
+            )[1],
+        )
         monkeypatch.setattr(chat.openrouter, "generate_image", lambda *a, **k: pytest.fail("Images API not used"))
         return got
 
     def test_auto_mode_sends_conversation_reply_and_prompt(self, client, conv, chat, db, monkeypatch):
         self._setup(chat, db, conv)
-        replies = iter([_tool_chunks("generate_image", {"prompt": "Linh turns around", "aspect_ratio": "3:4"},
-                                     text="She turned around."),
-                        _text_chunks("Done.")])
+        replies = iter(
+            [
+                _tool_chunks(
+                    "generate_image", {"prompt": "Linh turns around", "aspect_ratio": "3:4"}, text="She turned around."
+                ),
+                _text_chunks("Done."),
+            ]
+        )
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
         got = self._fake_chat_image(chat, monkeypatch)
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                 json={"content": "can I see your muscles? (continue, with an image)", **SETTINGS}))
+        ev = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "can I see your muscles? (continue, with an image)", **SETTINGS},
+            )
+        )
         msgs = got["messages"]
         assert got["model"] == "i/model" and got["aspect_ratio"] == "3:4"
         assert [m["role"] for m in msgs] == ["user", "assistant", "user", "assistant", "user"]
         assert msgs[0]["content"][0]["text"] == "write a story about Linh, with a photo"
         # the earlier generated image is in the context as pixels
         assert any(p["type"] == "image_url" for p in msgs[2]["content"])
-        assert msgs[3] == {"role": "assistant", "content": "She turned around."}      # this reply so far
+        assert msgs[3] == {"role": "assistant", "content": "She turned around."}  # this reply so far
         assert msgs[4] == {"role": "user", "content": [{"type": "text", "text": "Linh turns around"}]}  # verbatim
         assert all(m["role"] != "system" for m in msgs)
         item = ev[-1]["message"]["media"][0]
@@ -1093,8 +1564,12 @@ class TestConversationalImageModels:
     def test_image_mode_sends_conversation_ending_with_users_message(self, client, conv, chat, db, monkeypatch):
         self._setup(chat, db, conv)
         got = self._fake_chat_image(chat, monkeypatch)
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                            json={"content": "Linh and Marcus high-five", "mode": "image", **SETTINGS}))
+        _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "Linh and Marcus high-five", "mode": "image", **SETTINGS},
+            )
+        )
         last = got["messages"][-1]
         assert last["role"] == "user" and last["content"][-1] == {"type": "text", "text": "Linh and Marcus high-five"}
         assert len(got["messages"]) == 3
@@ -1105,31 +1580,62 @@ class TestConversationalImageModels:
             db.add_chat_message(conv["id"], "user", f"q{i}")
             db.add_chat_message(conv["id"], "assistant", f"a{i}")
         got = self._fake_chat_image(chat, monkeypatch)
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                            json={"content": "draw it", "mode": "image", "history_limit": 3, **SETTINGS}))
+        _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "draw it", "mode": "image", "history_limit": 3, **SETTINGS},
+            )
+        )
         assert [m["role"] for m in got["messages"]] == ["user", "assistant", "user"]
 
     def test_non_conversational_models_still_use_images_api(self, client, conv, chat, db, monkeypatch):
-        chat._models_cache.update(at=9e18, data={"text": [], "video": [], "image": [
-            {"id": "i/model", "input_modalities": ["text", "image"], "conversational": False}]})
+        chat._models_cache.update(
+            at=9e18,
+            data={
+                "text": [],
+                "video": [],
+                "image": [{"id": "i/model", "input_modalities": ["text", "image"], "conversational": False}],
+            },
+        )
         monkeypatch.setattr(chat.openrouter, "generate_image_chat", lambda *a, **k: pytest.fail("chat path not used"))
-        monkeypatch.setattr(chat.openrouter, "generate_image",
-                            lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None))
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                 json={"content": "a dog", "mode": "image", **SETTINGS}))
+        monkeypatch.setattr(
+            chat.openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
+        )
+        ev = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages", json={"content": "a dog", "mode": "image", **SETTINGS}
+            )
+        )
         assert "context" not in ev[-1]["message"]["media"][0]["params"]
 
     def test_retry_of_failed_image_rebuilds_context(self, client, conv, chat, db, monkeypatch):
         chat._models_cache.update(at=9e18, data=self.CATALOGUE)
         db.add_chat_message(conv["id"], "user", "story please, with a photo")
-        msg = db.add_chat_message(conv["id"], "assistant", "Linh lifted.", media=[{
-            "id": "m1", "kind": "image", "source": "generated", "status": "error", "error": "timeout",
-            "prompt": "Linh lifting", "model": "i/model",
-            "params": {"aspect_ratio": None, "resolution": None, "refs": [], "context": True, "direct": False}}])
+        msg = db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "Linh lifted.",
+            media=[
+                {
+                    "id": "m1",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "error",
+                    "error": "timeout",
+                    "prompt": "Linh lifting",
+                    "model": "i/model",
+                    "params": {"aspect_ratio": None, "resolution": None, "refs": [], "context": True, "direct": False},
+                }
+            ],
+        )
 
         class Inline:
-            def __init__(self, target, args, **kw): self.target, self.args = target, args
-            def start(self): self.target(*self.args)
+            def __init__(self, target, args, **kw):
+                self.target, self.args = target, args
+
+            def start(self):
+                self.target(*self.args)
+
         monkeypatch.setattr(chat.threading, "Thread", Inline)
         got = self._fake_chat_image(chat, monkeypatch)
         client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={})
@@ -1142,23 +1648,48 @@ class TestConversationalImageModels:
 class TestOpenRouterChatImages:
     def _resp(self, body):
         import httpx
+
         return httpx.Response(200, json=body)
 
     def test_parses_data_url_images_and_sends_modalities(self, chat, monkeypatch):
         import base64
+
         sent = {}
         b64 = base64.b64encode(_png_bytes()).decode()
-        monkeypatch.setattr(chat.openrouter._client, "post", lambda url, **kw: (sent.update(kw["json"]), self._resp({
-            "choices": [{"message": {"content": "Here", "images": [
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}]}}],
-            "usage": {"cost": 0.039}}))[1])
-        images, cost = chat.openrouter.generate_image_chat("g/img", [{"role": "user", "content": "hi"}], aspect_ratio="16:9")
+        monkeypatch.setattr(
+            chat.openrouter._client,
+            "post",
+            lambda url, **kw: (
+                sent.update(kw["json"]),
+                self._resp(
+                    {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": "Here",
+                                    "images": [
+                                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
+                                    ],
+                                }
+                            }
+                        ],
+                        "usage": {"cost": 0.039},
+                    }
+                ),
+            )[1],
+        )
+        images, cost = chat.openrouter.generate_image_chat(
+            "g/img", [{"role": "user", "content": "hi"}], aspect_ratio="16:9"
+        )
         assert sent["modalities"] == ["image", "text"] and sent["image_config"] == {"aspect_ratio": "16:9"}
         assert images == [(_png_bytes(), "image/png")] and cost == 0.039
 
     def test_no_image_reports_models_text(self, chat, monkeypatch):
-        monkeypatch.setattr(chat.openrouter._client, "post", lambda url, **kw: self._resp(
-            {"choices": [{"message": {"content": "I can't draw that."}}]}))
+        monkeypatch.setattr(
+            chat.openrouter._client,
+            "post",
+            lambda url, **kw: self._resp({"choices": [{"message": {"content": "I can't draw that."}}]}),
+        )
         with pytest.raises(chat.openrouter.OpenRouterError) as e:
             chat.openrouter.generate_image_chat("g/img", [])
         assert "I can't draw that." in str(e.value)
@@ -1167,12 +1698,18 @@ class TestOpenRouterChatImages:
         def fake_get(path, params=None):
             if path == "/images/models":
                 return {"data": [{"id": "google/gem-img", "name": "Gem"}, {"id": "seed/dream", "name": "Seed"}]}
-            return {"data": [
-                {"id": "google/gem-img", "architecture": {"output_modalities": ["image", "text"]}},
-                {"id": "openai/gpt-img", "name": "GPT Image", "architecture": {"output_modalities": ["image", "text"],
-                                                                               "input_modalities": ["text", "image"]}},
-                {"id": "seed/dream", "architecture": {"output_modalities": ["image"]}},
-            ]}
+            return {
+                "data": [
+                    {"id": "google/gem-img", "architecture": {"output_modalities": ["image", "text"]}},
+                    {
+                        "id": "openai/gpt-img",
+                        "name": "GPT Image",
+                        "architecture": {"output_modalities": ["image", "text"], "input_modalities": ["text", "image"]},
+                    },
+                    {"id": "seed/dream", "architecture": {"output_modalities": ["image"]}},
+                ]
+            }
+
         monkeypatch.setattr(chat.openrouter, "_get", fake_get)
         models = {m["id"]: m for m in chat.openrouter.list_image_models()}
         assert models["google/gem-img"]["conversational"] is True
@@ -1184,28 +1721,47 @@ class TestFollowUpRounds:
     def _run(self, client, conv, chat, monkeypatch, rounds):
         calls = []
         rounds = iter(rounds)
-        monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None, **kw: (calls.append(tools), next(rounds))[1])
-        monkeypatch.setattr(chat.openrouter, "generate_image",
-                            lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None))
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                 json={"content": "story and a picture", **SETTINGS}))
+        monkeypatch.setattr(
+            chat.openrouter,
+            "stream_chat",
+            lambda m, msgs, tools=None, session_id=None, **kw: (calls.append(tools), next(rounds))[1],
+        )
+        monkeypatch.setattr(
+            chat.openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
+        )
+        ev = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages", json={"content": "story and a picture", **SETTINGS}
+            )
+        )
         return calls, ev[-1]["message"]
 
     def test_tool_first_gets_one_text_only_follow_up(self, client, conv, chat, monkeypatch):
-        calls, done = self._run(client, conv, chat, monkeypatch, [
-            _tool_chunks("generate_image", {"prompt": "scene"}),        # no text yet
-            _text_chunks("Here is the story."),
-        ])
-        assert len(calls) == 2 and calls[0] and calls[1] is None       # tools withheld on the follow-up
+        calls, done = self._run(
+            client,
+            conv,
+            chat,
+            monkeypatch,
+            [
+                _tool_chunks("generate_image", {"prompt": "scene"}),  # no text yet
+                _text_chunks("Here is the story."),
+            ],
+        )
+        assert len(calls) == 2 and calls[0] and calls[1] is None  # tools withheld on the follow-up
         assert done["content"] == "Here is the story." and len(done["media"]) == 1
 
     def test_no_second_image_even_if_the_model_tries(self, client, conv, chat, monkeypatch):
         # With tools withheld, a model can't call generate_image again
-        calls, done = self._run(client, conv, chat, monkeypatch, [
-            _tool_chunks("generate_image", {"prompt": "scene"}),
-            _text_chunks("Story."),
-        ])
+        calls, done = self._run(
+            client,
+            conv,
+            chat,
+            monkeypatch,
+            [
+                _tool_chunks("generate_image", {"prompt": "scene"}),
+                _text_chunks("Story."),
+            ],
+        )
         assert len(done["media"]) == 1
 
     def test_non_moderation_failure_keeps_tools_for_a_retry(self, client, conv, chat, monkeypatch):
@@ -1216,15 +1772,26 @@ class TestFollowUpRounds:
             if len(attempts) == 1:
                 raise chat.openrouter.OpenRouterError("Upstream timed out", 502)
             return [(_png_bytes(), "image/png")], None
-        rounds = iter([_tool_chunks("generate_image", {"prompt": "first"}, text="Story."),
-                       _tool_chunks("generate_image", {"prompt": "second"}, text="Trying again.")])
+
+        rounds = iter(
+            [
+                _tool_chunks("generate_image", {"prompt": "first"}, text="Story."),
+                _tool_chunks("generate_image", {"prompt": "second"}, text="Trying again."),
+            ]
+        )
         calls = []
-        monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None, **kw: (calls.append(tools), next(rounds))[1])
+        monkeypatch.setattr(
+            chat.openrouter,
+            "stream_chat",
+            lambda m, msgs, tools=None, session_id=None, **kw: (calls.append(tools), next(rounds))[1],
+        )
         monkeypatch.setattr(chat.openrouter, "generate_image", image)
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                 json={"content": "story and a picture", **SETTINGS}))
-        assert len(calls) == 2 and calls[1]                              # tools still offered
+        ev = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages", json={"content": "story and a picture", **SETTINGS}
+            )
+        )
+        assert len(calls) == 2 and calls[1]  # tools still offered
         assert attempts == ["first", "second"]
         assert [m["status"] for m in ev[-1]["message"]["media"]] == ["error", "done"]
 
@@ -1242,10 +1809,14 @@ def test_attribution_is_generic_and_hidden(chat, monkeypatch):
 
 class TestCustomInstructions:
     def test_crud_and_single_default(self, client):
-        a = client.post("/api/chat/instructions", json={"name": "Terse", "content": "Be brief.", "is_default": True}).json()
-        b = client.post("/api/chat/instructions", json={"name": "Story", "content": "Write vividly.", "is_default": True}).json()
+        a = client.post(
+            "/api/chat/instructions", json={"name": "Terse", "content": "Be brief.", "is_default": True}
+        ).json()
+        b = client.post(
+            "/api/chat/instructions", json={"name": "Story", "content": "Write vividly.", "is_default": True}
+        ).json()
         items = {i["name"]: i for i in client.get("/api/chat/instructions").json()["instructions"]}
-        assert items["Story"]["is_default"] and not items["Terse"]["is_default"]   # only one default
+        assert items["Story"]["is_default"] and not items["Terse"]["is_default"]  # only one default
         r = client.put(f"/api/chat/instructions/{a['id']}", json={"name": "Terse", "content": "Very brief."})
         assert r.json()["content"] == "Very brief."
         assert client.delete(f"/api/chat/instructions/{b['id']}").status_code == 200
@@ -1260,8 +1831,18 @@ class TestCustomInstructions:
 
     def test_attach_and_detach_on_existing_chat(self, client, conv):
         i = client.post("/api/chat/instructions", json={"name": "I", "content": "x"}).json()
-        assert client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_id": i["id"]}).json()["instruction_id"] == i["id"]
-        assert client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_id": None}).json()["instruction_id"] is None
+        assert (
+            client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_id": i["id"]}).json()[
+                "instruction_id"
+            ]
+            == i["id"]
+        )
+        assert (
+            client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_id": None}).json()[
+                "instruction_id"
+            ]
+            is None
+        )
 
     def test_deleting_an_instruction_detaches_it(self, client, conv):
         i = client.post("/api/chat/instructions", json={"name": "I", "content": "x"}).json()
@@ -1273,46 +1854,77 @@ class TestCustomInstructions:
         i = client.post("/api/chat/instructions", json={"name": "I", "content": "Always answer in French."}).json()
         client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_id": i["id"]})
         seen = {}
-        monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("Bonjour"))[1])
+        monkeypatch.setattr(
+            chat.openrouter,
+            "stream_chat",
+            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("Bonjour"))[1],
+        )
         _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", **SETTINGS}))
         assert seen["msgs"][1] == {"role": "system", "content": "Always answer in French."}
         assert seen["msgs"][2]["role"] == "user"
 
     def test_not_sent_when_none_attached(self, client, conv, chat, monkeypatch):
         seen = {}
-        monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1])
+        monkeypatch.setattr(
+            chat.openrouter,
+            "stream_chat",
+            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1],
+        )
         _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", **SETTINGS}))
         assert [m["role"] for m in seen["msgs"]] == ["system", "user"]
 
     def test_conversational_image_models_get_them_too(self, client, conv, chat, monkeypatch):
-        chat._models_cache.update(at=9e18, data={"text": [], "video": [], "image": [
-            {"id": "i/model", "input_modalities": ["text", "image"], "conversational": True}]})
+        chat._models_cache.update(
+            at=9e18,
+            data={
+                "text": [],
+                "video": [],
+                "image": [{"id": "i/model", "input_modalities": ["text", "image"], "conversational": True}],
+            },
+        )
         i = client.post("/api/chat/instructions", json={"name": "I", "content": "Watercolour style only."}).json()
         client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_id": i["id"]})
         got = {}
-        monkeypatch.setattr(chat.openrouter, "generate_image_chat",
-                            lambda model, messages, **kw: (got.update(messages=messages), ([(_png_bytes(), "image/png")], None))[1])
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                            json={"content": "a fox", "mode": "image", **SETTINGS}))
+        monkeypatch.setattr(
+            chat.openrouter,
+            "generate_image_chat",
+            lambda model, messages, **kw: (got.update(messages=messages), ([(_png_bytes(), "image/png")], None))[1],
+        )
+        _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages", json={"content": "a fox", "mode": "image", **SETTINGS}
+            )
+        )
         assert got["messages"][0] == {"role": "system", "content": "Watercolour style only."}
 
     def test_branch_columns_are_backfilled_on_older_databases(self, tmp_path):
         import sqlalchemy as sa
+
         path = tmp_path / "old.db"
         eng = sa.create_engine(f"sqlite:///{path}")
-        with eng.begin() as c:   # chats from before branching: linear, no parent_id / current_leaf_id
-            c.execute(sa.text("CREATE TABLE chat_conversations (id VARCHAR(50) PRIMARY KEY, title VARCHAR(255), "
-                              "text_model VARCHAR(255), image_model VARCHAR(255), video_model VARCHAR(255), "
-                              "instruction_id INTEGER, created_at DATETIME, updated_at DATETIME)"))
-            c.execute(sa.text("CREATE TABLE chat_messages (id INTEGER PRIMARY KEY, conversation_id VARCHAR(50), "
-                              "role VARCHAR(20), content TEXT, media_json TEXT, model VARCHAR(255), "
-                              "status VARCHAR(20), error TEXT, cost FLOAT, created_at DATETIME)"))
+        with eng.begin() as c:  # chats from before branching: linear, no parent_id / current_leaf_id
+            c.execute(
+                sa.text(
+                    "CREATE TABLE chat_conversations (id VARCHAR(50) PRIMARY KEY, title VARCHAR(255), "
+                    "text_model VARCHAR(255), image_model VARCHAR(255), video_model VARCHAR(255), "
+                    "instruction_id INTEGER, created_at DATETIME, updated_at DATETIME)"
+                )
+            )
+            c.execute(
+                sa.text(
+                    "CREATE TABLE chat_messages (id INTEGER PRIMARY KEY, conversation_id VARCHAR(50), "
+                    "role VARCHAR(20), content TEXT, media_json TEXT, model VARCHAR(255), "
+                    "status VARCHAR(20), error TEXT, cost FLOAT, created_at DATETIME)"
+                )
+            )
             c.execute(sa.text("INSERT INTO chat_conversations (id, title) VALUES ('a', 'A'), ('b', 'B')"))
-            c.execute(sa.text("INSERT INTO chat_messages (id, conversation_id, role, content, status) VALUES "
-                              "(1, 'a', 'user', 'q', 'done'), (2, 'b', 'user', 'x', 'done'), "
-                              "(3, 'a', 'assistant', 'r', 'done')"))
+            c.execute(
+                sa.text(
+                    "INSERT INTO chat_messages (id, conversation_id, role, content, status) VALUES "
+                    "(1, 'a', 'user', 'q', 'done'), (2, 'b', 'user', 'x', 'done'), "
+                    "(3, 'a', 'assistant', 'r', 'done')"
+                )
+            )
         eng.dispose()
         db = MetadataDB(db_path=path)
         assert [(m.id, m.parent_id) for m in db.get_chat_messages("a")] == [(1, None), (3, 1)]
@@ -1321,12 +1933,17 @@ class TestCustomInstructions:
 
     def test_missing_column_is_added_to_older_databases(self, tmp_path):
         import sqlalchemy as sa
+
         path = tmp_path / "old.db"
         eng = sa.create_engine(f"sqlite:///{path}")
-        with eng.begin() as c:   # a chat_conversations table from before instructions existed
-            c.execute(sa.text("CREATE TABLE chat_conversations (id VARCHAR(50) PRIMARY KEY, title VARCHAR(255), "
-                              "text_model VARCHAR(255), image_model VARCHAR(255), video_model VARCHAR(255), "
-                              "created_at DATETIME, updated_at DATETIME)"))
+        with eng.begin() as c:  # a chat_conversations table from before instructions existed
+            c.execute(
+                sa.text(
+                    "CREATE TABLE chat_conversations (id VARCHAR(50) PRIMARY KEY, title VARCHAR(255), "
+                    "text_model VARCHAR(255), image_model VARCHAR(255), video_model VARCHAR(255), "
+                    "created_at DATETIME, updated_at DATETIME)"
+                )
+            )
         eng.dispose()
         db = MetadataDB(db_path=path)
         conv = db.create_conversation(instruction_id=None)
@@ -1341,7 +1958,6 @@ class TestPolloImageModels:
 
     @pytest.fixture()
     def pollo(self, chat, monkeypatch):
-        import web.api as api_mod
         monkeypatch.setenv("POLLO_API_KEY", "pollo-test")
         monkeypatch.setattr(chat.pollo_chat, "POLL_INTERVAL", 0)
         calls = {"generators": [], "uploads": [], "statuses": iter([])}
@@ -1378,19 +1994,33 @@ class TestPolloImageModels:
 
             def send_request(self):
                 k = calls["generators"][-1][1]
-                self.payload_attrs = {name: k.get(arg) for name, arg in (
-                    ("aspectRatio", "aspect_ratio"), ("resolution", "resolution"), ("duration", "length"),
-                    ("generateAudio", "generate_audio")) if k.get(arg) is not None}
+                self.payload_attrs = {
+                    name: k.get(arg)
+                    for name, arg in (
+                        ("aspectRatio", "aspect_ratio"),
+                        ("resolution", "resolution"),
+                        ("duration", "length"),
+                        ("generateAudio", "generate_audio"),
+                    )
+                    if k.get(arg) is not None
+                }
                 return FakeResponse({"code": "SUCCESS", "data": {"taskId": "task-1", "status": "waiting"}})
 
         monkeypatch.setattr(chat.pollo_chat, "get_image_generator", lambda key, **kw: FakeGenerator(key, **kw))
         monkeypatch.setattr(chat.pollo_chat, "get_video_generator", lambda key, **kw: FakeGenerator(key, **kw))
         monkeypatch.setattr(chat.pollo_chat, "get_task_status", lambda task_id, key: next(calls["statuses"]))
-        monkeypatch.setattr(chat.pollo_chat.requests, "get",
-                            lambda url, timeout=None, stream=False: FakeResponse(
-                                None, b"mp4-bytes" if url.endswith(".mp4") else _png_bytes(), "image/jpeg"))
-        monkeypatch.setattr(api_mod, "_upload_image",
-                            lambda path: (calls["uploads"].append(path.name), f"https://tmp.example/{path.name}")[1])
+        monkeypatch.setattr(
+            chat.pollo_chat.requests,
+            "get",
+            lambda url, timeout=None, stream=False: FakeResponse(
+                None, b"mp4-bytes" if url.endswith(".mp4") else _png_bytes(), "image/jpeg"
+            ),
+        )
+        monkeypatch.setattr(
+            chat.pollo_chat.image_hosts,
+            "upload_image",
+            lambda path: (calls["uploads"].append(path.name), f"https://tmp.example/{path.name}")[1],
+        )
         return calls
 
     def _draw(self, client, conv, chat, monkeypatch, args, statuses, pollo):
@@ -1398,8 +2028,11 @@ class TestPolloImageModels:
         rounds = iter([_tool_chunks("generate_image", args, text="Here you go."), _text_chunks("unused")])
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(rounds))
         monkeypatch.setattr(chat.openrouter, "generate_image", lambda *a, **k: pytest.fail("should run on Pollo"))
-        return _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                   json={"content": "draw", "mode": "auto", **self.POLLO}))[-1]["message"]
+        return _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages", json={"content": "draw", "mode": "auto", **self.POLLO}
+            )
+        )[-1]["message"]
 
     def test_listed_in_the_image_catalogue_when_key_is_set(self, chat, monkeypatch, pollo):
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
@@ -1415,41 +2048,73 @@ class TestPolloImageModels:
         assert not any(m["id"].startswith("pollo/") for m in chat.get_models(refresh=True)["image"])
 
     def test_tool_call_runs_on_pollo(self, client, conv, chat, monkeypatch, pollo):
-        msg = self._draw(client, conv, chat, monkeypatch, {"prompt": "a red fox", "aspect_ratio": "16:9"},
-                         [[("processing", None, None, None)], [("succeed", None, "https://cdn/x.jpg", 6)]], pollo)
+        msg = self._draw(
+            client,
+            conv,
+            chat,
+            monkeypatch,
+            {"prompt": "a red fox", "aspect_ratio": "16:9"},
+            [[("processing", None, None, None)], [("succeed", None, "https://cdn/x.jpg", 6)]],
+            pollo,
+        )
         item = msg["media"][0]
         assert item["status"] == "done" and item["file"].endswith(".jpg")
         assert item["credits"] == 6 and not item.get("cost")
-        assert msg["cost"] == pytest.approx(0.003)   # OpenRouter text only — credits aren't dollars
+        assert msg["cost"] == pytest.approx(0.003)  # OpenRouter text only — credits aren't dollars
         key, kwargs = pollo["generators"][0]
         assert key == "seedreamv1"
         assert (kwargs["prompt"], kwargs["aspect_ratio"], kwargs["images"]) == ("a red fox", "16:9", None)
 
     def test_unsupported_ratio_falls_back_to_model_default(self, client, conv, chat, monkeypatch, pollo):
-        self._draw(client, conv, chat, monkeypatch, {"prompt": "x", "aspect_ratio": "5:4"},
-                   [[("succeed", None, "https://cdn/x.png", 3)]], pollo)
+        self._draw(
+            client,
+            conv,
+            chat,
+            monkeypatch,
+            {"prompt": "x", "aspect_ratio": "5:4"},
+            [[("succeed", None, "https://cdn/x.png", 3)]],
+            pollo,
+        )
         assert pollo["generators"][0][1]["aspect_ratio"] is None
 
     def test_reference_images_are_uploaded_for_pollo(self, client, conv, chat, db, monkeypatch, pollo):
         (chat._conv_dir(conv["id"]) / "img_prev.png").write_bytes(_png_bytes())
         db.add_chat_message(conv["id"], "user", "a cat")
-        db.add_chat_message(conv["id"], "assistant", media=[
-            {"id": "p1", "kind": "image", "source": "generated", "status": "done", "file": "img_prev.png"}])
-        self._draw(client, conv, chat, monkeypatch, {"prompt": "same cat, in a hat", "source_image": "latest"},
-                   [[("succeed", None, "https://cdn/x.png", 3)]], pollo)
+        db.add_chat_message(
+            conv["id"],
+            "assistant",
+            media=[{"id": "p1", "kind": "image", "source": "generated", "status": "done", "file": "img_prev.png"}],
+        )
+        self._draw(
+            client,
+            conv,
+            chat,
+            monkeypatch,
+            {"prompt": "same cat, in a hat", "source_image": "latest"},
+            [[("succeed", None, "https://cdn/x.png", 3)]],
+            pollo,
+        )
         assert pollo["uploads"] == ["img_prev.png"]
         assert pollo["generators"][0][1]["images"] == ["https://tmp.example/img_prev.png"]
 
     def test_failure_marks_the_item_and_can_be_retried(self, client, conv, chat, db, monkeypatch, pollo):
-        msg = self._draw(client, conv, chat, monkeypatch, {"prompt": "x"},
-                         [[("failed", "Content flagged by moderation", None, None)]], pollo)
+        msg = self._draw(
+            client,
+            conv,
+            chat,
+            monkeypatch,
+            {"prompt": "x"},
+            [[("failed", "Content flagged by moderation", None, None)]],
+            pollo,
+        )
         item = msg["media"][0]
         assert item["status"] == "error" and item["moderated"] is True
         assert "Pollo" in item["error"]
 
         pollo["statuses"] = iter([[("succeed", None, "https://cdn/y.png", 3)]])
-        monkeypatch.setattr(chat.threading, "Thread", lambda target, args, **kw: type(
-            "T", (), {"start": lambda self: target(*args)})())
+        monkeypatch.setattr(
+            chat.threading, "Thread", lambda target, args, **kw: type("T", (), {"start": lambda self: target(*args)})()
+        )
         client.post(f"/api/chat/messages/{msg['id']}/media/{item['id']}/regenerate", json={})
         fixed = db.get_chat_message(msg["id"]).media[0]
         assert fixed["status"] == "done" and fixed["credits"] == 3
@@ -1457,14 +2122,22 @@ class TestPolloImageModels:
     def test_legacy_only_model_generates_on_its_legacy_key(self, client, conv, chat, monkeypatch, pollo):
         pollo["statuses"] = iter([[("succeed", None, "https://cdn/x.png", 4)]])
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
-            "content": "a fox", "mode": "image", **{**SETTINGS, "image_model": "pollo/polloimage2"}}))
+        _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "a fox", "mode": "image", **{**SETTINGS, "image_model": "pollo/polloimage2"}},
+            )
+        )
         assert pollo["generators"][0][0] == "polloimage2"
 
     def test_polling_survives_transient_errors(self, chat, monkeypatch, pollo):
-        pollo["statuses"] = iter([[("cloudflare_blocked", "blocked", None, None)],
-                                  [("error", "HTTP 502", None, None)],
-                                  [("succeed", None, "https://cdn/x.png", 2)]])
+        pollo["statuses"] = iter(
+            [
+                [("cloudflare_blocked", "blocked", None, None)],
+                [("error", "HTTP 502", None, None)],
+                [("succeed", None, "https://cdn/x.png", 2)],
+            ]
+        )
         images, credits, _sent = chat.pollo_chat.generate_image("pollo/nanobanana2v1", "x")
         assert len(images) == 1 and credits == 2
 
@@ -1479,34 +2152,56 @@ class TestPolloImageModels:
         assert fast["name"] == "Pollo: Seedance 2.0 Fast"
         assert fast["durations"] == list(range(4, 16)) and fast["resolutions"] == ["480p", "720p"]
         assert fast["frame_images"] == ["first_frame"] and fast["generate_audio"] is True
-        assert "pollo/wan27v1" not in models   # marked deprecated on the Generate page
+        assert "pollo/wan27v1" not in models  # marked deprecated on the Generate page
 
     def test_video_mode_submits_to_pollo_with_first_frame(self, client, conv, chat, monkeypatch, pollo):
         monkeypatch.setattr(chat.openrouter, "submit_video", lambda *a, **k: pytest.fail("should run on Pollo"))
-        chat._models_cache.update(at=0.0, data={"video": [{"id": "pollo/seedance20fastv1",
-                                                           "durations": list(range(4, 16))}]})
-        up = client.post(f"/api/chat/conversations/{conv['id']}/attachments",
-                         files={"file": ("a.png", _png_bytes(), "image/png")}).json()["file"]
-        msg = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
-            "content": "make it move", "attachments": [up], "mode": "video", **self.VIDEO,
-            "video_options": {"duration": 20, "aspect_ratio": "9:16", "generate_audio": False}}))[-1]["message"]
+        chat._models_cache.update(
+            at=0.0, data={"video": [{"id": "pollo/seedance20fastv1", "durations": list(range(4, 16))}]}
+        )
+        up = client.post(
+            f"/api/chat/conversations/{conv['id']}/attachments", files={"file": ("a.png", _png_bytes(), "image/png")}
+        ).json()["file"]
+        msg = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={
+                    "content": "make it move",
+                    "attachments": [up],
+                    "mode": "video",
+                    **self.VIDEO,
+                    "video_options": {"duration": 20, "aspect_ratio": "9:16", "generate_audio": False},
+                },
+            )
+        )[-1]["message"]
         item = msg["media"][0]
         assert item["status"] == "pending" and item["job_id"] == "pollo:task-1"
         key, kwargs = pollo["generators"][0]
         assert key == "seedance20fastv1"
         assert pollo["uploads"] == [up] and kwargs["image_url"] == f"https://tmp.example/{up}"
         assert (kwargs["prompt"], kwargs["length"], kwargs["generate_audio"]) == ("make it move", 15, False)
-        assert kwargs["aspect_ratio"] == "9:16"   # picked in the composer, so it wins over the image's shape
+        assert kwargs["aspect_ratio"] == "9:16"  # picked in the composer, so it wins over the image's shape
 
     def _video_from_image(self, client, conv, chat, size, model, **extra):
-        up = client.post(f"/api/chat/conversations/{conv['id']}/attachments",
-                         files={"file": ("a.png", _png_bytes(size), "image/png")}).json()["file"]
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
-            "content": "animate", "attachments": [up], "mode": "video",
-            **{**SETTINGS, "video_model": model}, **extra}))
+        up = client.post(
+            f"/api/chat/conversations/{conv['id']}/attachments",
+            files={"file": ("a.png", _png_bytes(size), "image/png")},
+        ).json()["file"]
+        _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={
+                    "content": "animate",
+                    "attachments": [up],
+                    "mode": "video",
+                    **{**SETTINGS, "video_model": model},
+                    **extra,
+                },
+            )
+        )
 
     def test_first_frame_sets_the_ratio_when_none_is_picked(self, client, conv, chat, monkeypatch, pollo):
-        self._video_from_image(client, conv, chat, (60, 80), "pollo/seedance20fastv1")   # 3:4 photo
+        self._video_from_image(client, conv, chat, (60, 80), "pollo/seedance20fastv1")  # 3:4 photo
         assert pollo["generators"][0][1]["aspect_ratio"] == "3:4"
 
     def test_follow_image_ratio_preferred_when_the_model_has_one(self, client, conv, chat, monkeypatch, pollo):
@@ -1516,31 +2211,60 @@ class TestPolloImageModels:
     def test_animating_ignores_the_chat_models_ratio_guess(self, client, conv, chat, db, monkeypatch, pollo):
         (chat._conv_dir(conv["id"]) / "img_prev.png").write_bytes(_png_bytes((60, 80)))
         db.add_chat_message(conv["id"], "user", "a cat")
-        db.add_chat_message(conv["id"], "assistant", media=[
-            {"id": "p1", "kind": "image", "source": "generated", "status": "done", "file": "img_prev.png"}])
-        rounds = iter([_tool_chunks("generate_video", {"prompt": "it walks", "aspect_ratio": "9:16",
-                                                       "source_image": "latest"}, text="Rolling."), _text_chunks("x")])
+        db.add_chat_message(
+            conv["id"],
+            "assistant",
+            media=[{"id": "p1", "kind": "image", "source": "generated", "status": "done", "file": "img_prev.png"}],
+        )
+        rounds = iter(
+            [
+                _tool_chunks(
+                    "generate_video",
+                    {"prompt": "it walks", "aspect_ratio": "9:16", "source_image": "latest"},
+                    text="Rolling.",
+                ),
+                _text_chunks("x"),
+            ]
+        )
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(rounds))
-        _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                            json={"content": "animate it", "mode": "auto", **self.VIDEO}))
+        _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "animate it", "mode": "auto", **self.VIDEO},
+            )
+        )
         assert pollo["generators"][0][1]["aspect_ratio"] == "3:4"
 
     def test_poller_finishes_a_pollo_video(self, chat, db, conv, monkeypatch, pollo):
         monkeypatch.setattr(chat.openrouter, "get_video", lambda *a: pytest.fail("should ask Pollo"))
-        msg = db.add_chat_message(conv["id"], "assistant", media=[
-            {"id": "pv1", "kind": "video", "source": "generated", "status": "pending", "job_id": "pollo:task-9"}])
-        pollo["statuses"] = iter([[("processing", None, None, None)],
-                                  [("cloudflare_blocked", "blocked", None, None)],
-                                  [("succeed", None, "https://cdn/v.mp4", 40)],
-                                  [("succeed", None, "https://cdn/v.mp4", 40)]])   # re-read for the download
+        msg = db.add_chat_message(
+            conv["id"],
+            "assistant",
+            media=[
+                {"id": "pv1", "kind": "video", "source": "generated", "status": "pending", "job_id": "pollo:task-9"}
+            ],
+        )
+        pollo["statuses"] = iter(
+            [
+                [("processing", None, None, None)],
+                [("cloudflare_blocked", "blocked", None, None)],
+                [("succeed", None, "https://cdn/v.mp4", 40)],
+                [("succeed", None, "https://cdn/v.mp4", 40)],
+            ]
+        )  # re-read for the download
         chat._poll_video(conv["id"], msg.id, "pv1", "pollo:task-9")
         item = db.get_chat_message(msg.id).media[0]
         assert item["status"] == "done" and item["credits"] == 40 and not item.get("cost")
         assert (chat._chat_root() / conv["id"] / item["file"]).read_bytes() == b"mp4-bytes"
 
     def test_failed_pollo_video_marks_the_item(self, chat, db, conv, monkeypatch, pollo):
-        msg = db.add_chat_message(conv["id"], "assistant", media=[
-            {"id": "pv2", "kind": "video", "source": "generated", "status": "pending", "job_id": "pollo:task-8"}])
+        msg = db.add_chat_message(
+            conv["id"],
+            "assistant",
+            media=[
+                {"id": "pv2", "kind": "video", "source": "generated", "status": "pending", "job_id": "pollo:task-8"}
+            ],
+        )
         pollo["statuses"] = iter([[("failed", "Your prompt violates our content policy", None, None)]])
         chat._poll_video(conv["id"], msg.id, "pv2", "pollo:task-8")
         item = db.get_chat_message(msg.id).media[0]
@@ -1556,29 +2280,49 @@ class TestPolloImageModels:
         assert images["pollo/qwenimage"]["input_modalities"] == ["text", "image"]
         assert images["pollo/qwenimage3prov1"]["input_modalities"] == ["text", "image"]
         assert "pollo/qwenimagev1" not in images
-        assert images["pollo/qwenimageflashv1"]["input_modalities"] == ["text"]   # no reference images
+        assert images["pollo/qwenimageflashv1"]["input_modalities"] == ["text"]  # no reference images
         assert videos["pollo/klingv3v1"]["resolutions"] == ["std", "pro", "4K"]
         assert videos["pollo/klingv3v1"]["durations"] == list(range(3, 16))
 
     def test_image_only_kling_without_an_image_fails_on_the_card(self, client, conv, chat, db, monkeypatch, pollo):
         import img2vid.pollo.pollo_img2vid as registry
-        monkeypatch.setattr(chat.pollo_chat, "get_video_generator", registry.get_video_generator)   # the real one
-        msg = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
-            "content": "a fox running", "mode": "video", **{**SETTINGS, "video_model": "pollo/klingv21v1"}}))[-1]["message"]
+
+        monkeypatch.setattr(chat.pollo_chat, "get_video_generator", registry.get_video_generator)  # the real one
+        msg = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "a fox running", "mode": "video", **{**SETTINGS, "video_model": "pollo/klingv21v1"}},
+            )
+        )[-1]["message"]
         item = msg["media"][0]
         assert item["status"] == "error" and "needs a source image" in item["error"]
 
     def test_auto_mode_uses_composer_video_settings_and_records_what_was_sent(
-            self, client, conv, chat, monkeypatch, pollo):
-        chat._models_cache.update(at=0.0, data={"video": [{"id": "pollo/seedance20fastv1",
-                                                           "durations": list(range(4, 16)),
-                                                           "resolutions": ["480p", "720p"]}]})
-        rounds = iter([_tool_chunks("generate_video", {"prompt": "waves", "duration": 6}, text="Rolling."),
-                       _text_chunks("x")])
+        self, client, conv, chat, monkeypatch, pollo
+    ):
+        chat._models_cache.update(
+            at=0.0,
+            data={
+                "video": [
+                    {"id": "pollo/seedance20fastv1", "durations": list(range(4, 16)), "resolutions": ["480p", "720p"]}
+                ]
+            },
+        )
+        rounds = iter(
+            [_tool_chunks("generate_video", {"prompt": "waves", "duration": 6}, text="Rolling."), _text_chunks("x")]
+        )
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(rounds))
-        msg = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
-            "content": "make a video of waves", "mode": "auto", **self.VIDEO,
-            "video_options": {"resolution": "720p", "aspect_ratio": "16:9"}}))[-1]["message"]
+        msg = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={
+                    "content": "make a video of waves",
+                    "mode": "auto",
+                    **self.VIDEO,
+                    "video_options": {"resolution": "720p", "aspect_ratio": "16:9"},
+                },
+            )
+        )[-1]["message"]
         kwargs = pollo["generators"][0][1]
         # composer picks apply in Auto; the chat model's duration fills the gap
         assert (kwargs["resolution"], kwargs["aspect_ratio"], kwargs["length"]) == ("720p", "16:9", 6)
@@ -1588,53 +2332,77 @@ class TestPolloImageModels:
     def test_model_pollo_doesnt_serve_explains_itself(self, client, conv, chat, monkeypatch, pollo):
         class NotServed:
             status_code, text = 404, ""
+
             def json(self):
                 return {"message": "Not found", "code": "NOT_FOUND", "errorCode": "REJECTED"}
+
         class Gen:
             api_key, payload_attrs = "k", {}
+
             def send_request(self):
                 return NotServed()
+
         monkeypatch.setattr(chat.pollo_chat, "get_image_generator", lambda key, **kw: Gen())
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
-        msg = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
-            "content": "a fox", "mode": "image", **{**SETTINGS, "image_model": "pollo/qwenimage3prov1"}}))[-1]["message"]
+        msg = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "a fox", "mode": "image", **{**SETTINGS, "image_model": "pollo/qwenimage3prov1"}},
+            )
+        )[-1]["message"]
         assert "isn't available to your API key" in msg["media"][0]["error"]
 
     def test_pollo_not_enabled_is_not_called_moderation(self, client, conv, chat, monkeypatch, pollo):
         """Pollo answers 403 for "not enabled for API access" — that's not a content block."""
+
         class Refused:
             status_code, text = 403, ""
+
             def json(self):
                 return {"message": "This model is not enabled for API access.", "code": "FORBIDDEN"}
+
         class Gen:
             api_key, payload_attrs = "k", {}
+
             def send_request(self):
                 return Refused()
+
         monkeypatch.setattr(chat.pollo_chat, "get_image_generator", lambda key, **kw: Gen())
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
-        msg = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
-            "content": "a gym", "mode": "image", **{**SETTINGS, "image_model": "pollo/seedreamprov1"}}))[-1]["message"]
+        msg = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "a gym", "mode": "image", **{**SETTINGS, "image_model": "pollo/seedreamprov1"}},
+            )
+        )[-1]["message"]
         item = msg["media"][0]
         assert item["error"] == "Pollo: This model is not enabled for API access." and item["moderated"] is False
 
     def test_pollo_content_rejection_is_still_moderation(self, chat):
         assert chat._is_moderation_error(chat.pollo_chat.PolloError("Pollo: prompt flagged as sensitive content", 400))
-        assert chat._is_moderation_error(chat.openrouter.OpenRouterError("Forbidden", 403))   # OpenRouter's 403 still is
+        assert chat._is_moderation_error(chat.openrouter.OpenRouterError("Forbidden", 403))  # OpenRouter's 403 still is
 
     def test_models_not_enabled_for_the_key_are_flagged_hidden(self, chat, monkeypatch, pollo):
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
             monkeypatch.setattr(chat.openrouter, fn, lambda: [])
         images = {m["id"]: m for m in chat.get_models(refresh=True)["image"]}
         hidden = {k for k, m in images.items() if m["hidden"]}
-        assert hidden == {"pollo/seedreamprov1", "pollo/seedreamflashv1", "pollo/qwenimage",
-                          "pollo/qwenimageflashv1", "pollo/qwenimage3v1", "pollo/qwenimage3prov1"}
+        assert hidden == {
+            "pollo/seedreamprov1",
+            "pollo/seedreamflashv1",
+            "pollo/qwenimage",
+            "pollo/qwenimageflashv1",
+            "pollo/qwenimage3v1",
+            "pollo/qwenimage3prov1",
+        }
         assert "403" in images["pollo/seedreamprov1"]["hidden"]
-        assert images["pollo/klingv3imagev1"]["hidden"] is None   # confirmed working
+        assert images["pollo/klingv3imagev1"]["hidden"] is None  # confirmed working
 
 
 class TestOpenRouterConnection:
     def test_connections_use_tcp_keepalive(self, chat):
         import socket
+
         opts = chat.openrouter._keepalive_socket_options()
         assert (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1) in opts
         if hasattr(socket, "TCP_KEEPIDLE"):
@@ -1643,12 +2411,17 @@ class TestOpenRouterConnection:
     def test_dropped_connection_fails_the_card_with_an_explanation(self, client, conv, chat, monkeypatch):
         """httpx.RemoteProtocolError used to escape as a raw error and leave the image pending."""
         import httpx
+
         def drop(*a, **k):
             raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+
         monkeypatch.setattr(chat.openrouter._client, "stream", drop)
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
-        msg = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                  json={"content": "a fox", "mode": "image", **SETTINGS}))[-1]["message"]
+        msg = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages", json={"content": "a fox", "mode": "image", **SETTINGS}
+            )
+        )[-1]["message"]
         item = msg["media"][0]
         assert item["status"] == "error" and item["moderated"] is False
         assert "connection to OpenRouter dropped after" in item["error"] and "RemoteProtocolError" in item["error"]
@@ -1661,33 +2434,48 @@ class TestOpenRouterImageStream:
         def __init__(self, lines, content_type="text/event-stream", status=200, body=None):
             self.lines, self.status_code, self._body = lines, status, body
             self.headers = {"content-type": content_type}
+
         def __enter__(self):
             return self
+
         def __exit__(self, *a):
             return False
+
         def iter_lines(self):
             yield from self.lines
+
         def read(self):
             return b""
+
         def json(self):
             return self._body
 
     def _b64(self, color="red"):
         import base64
+
         return base64.b64encode(_png_bytes(color=color)).decode()
 
     def test_keeps_only_completed_images_and_cost(self, chat, monkeypatch):
         sent = {}
-        lines = [": OPENROUTER PROCESSING", "",
-                 "event: image_generation.partial_image",
-                 "data: " + json.dumps({"type": "image_generation.partial_image", "b64_json": self._b64("blue")}), "",
-                 ": OPENROUTER PROCESSING", "",
-                 "event: image_generation.completed",
-                 "data: " + json.dumps({"type": "image_generation.completed", "b64_json": self._b64(),
-                                        "usage": {"cost": 0.03}}), "",
-                 "data: [DONE]"]
-        monkeypatch.setattr(chat.openrouter._client, "stream",
-                            lambda method, url, **kw: (sent.update(kw["json"]), self._Stream(lines))[1])
+        lines = [
+            ": OPENROUTER PROCESSING",
+            "",
+            "event: image_generation.partial_image",
+            "data: " + json.dumps({"type": "image_generation.partial_image", "b64_json": self._b64("blue")}),
+            "",
+            ": OPENROUTER PROCESSING",
+            "",
+            "event: image_generation.completed",
+            "data: "
+            + json.dumps({"type": "image_generation.completed", "b64_json": self._b64(), "usage": {"cost": 0.03}}),
+            "",
+            "data: [DONE]",
+        ]
+        monkeypatch.setattr(
+            chat.openrouter._client,
+            "stream",
+            lambda method, url, **kw: (sent.update(kw["json"]), self._Stream(lines))[1],
+        )
         images, cost = chat.openrouter.generate_image("x/img", "a fox")
         assert sent["stream"] is True
         assert images == [(_png_bytes(), "image/png")] and cost == 0.03
@@ -1706,8 +2494,11 @@ class TestOpenRouterImageStream:
 
     def test_plain_json_answer_still_works(self, chat, monkeypatch):
         body = {"data": [{"b64_json": self._b64(), "media_type": "image/png"}], "usage": {"cost": 0.01}}
-        monkeypatch.setattr(chat.openrouter._client, "stream",
-                            lambda *a, **k: self._Stream([], content_type="application/json", body=body))
+        monkeypatch.setattr(
+            chat.openrouter._client,
+            "stream",
+            lambda *a, **k: self._Stream([], content_type="application/json", body=body),
+        )
         images, cost = chat.openrouter.generate_image("x/img", "a fox")
         assert len(images) == 1 and cost == 0.01
 
@@ -1720,11 +2511,38 @@ class TestOpenRouterImageStream:
 class TestDeleteExchange:
     def _chat(self, db, conv):
         u1 = db.add_chat_message(conv["id"], "user", "draw a fox")
-        a1 = db.add_chat_message(conv["id"], "assistant", "Here!", media=[
-            {"id": "f1", "kind": "image", "source": "generated", "status": "done", "file": "fox.png", "prompt": "fox"}])
+        a1 = db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "Here!",
+            media=[
+                {
+                    "id": "f1",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "done",
+                    "file": "fox.png",
+                    "prompt": "fox",
+                }
+            ],
+        )
         u2 = db.add_chat_message(conv["id"], "user", "now a cat", parent_id=a1.id)
-        a2 = db.add_chat_message(conv["id"], "assistant", "Meow", parent_id=u2.id, media=[
-            {"id": "c1", "kind": "image", "source": "generated", "status": "done", "file": "cat.png", "prompt": "cat"}])
+        a2 = db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "Meow",
+            parent_id=u2.id,
+            media=[
+                {
+                    "id": "c1",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "done",
+                    "file": "cat.png",
+                    "prompt": "cat",
+                }
+            ],
+        )
         u3 = db.add_chat_message(conv["id"], "user", "thanks", parent_id=a2.id)
         a3 = db.add_chat_message(conv["id"], "assistant", "Welcome", parent_id=u3.id)
         return u1, a1, u2, a2, u3, a3
@@ -1736,8 +2554,11 @@ class TestDeleteExchange:
         assert [m["content"] for m in r.json()["messages"]] == ["draw a fox", "Here!", "thanks", "Welcome"]
         # The models no longer see it
         seen = {}
-        monkeypatch.setattr(chat.openrouter, "stream_chat",
-                            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1])
+        monkeypatch.setattr(
+            chat.openrouter,
+            "stream_chat",
+            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1],
+        )
         _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "more", **SETTINGS}))
         assert "now a cat" not in json.dumps(seen["msgs"]) and "Meow" not in json.dumps(seen["msgs"])
         # Its image is kept, in the library
@@ -1748,13 +2569,20 @@ class TestDeleteExchange:
     def test_whole_turn_goes_and_only_the_shown_continuation_stays(self, client, conv, chat, db):
         u1, a1, u2, a2, u3, a3 = self._chat(db, conv)
         # Another reply version, an edited prompt version, each with follow-ups
-        retry = db.add_chat_message(conv["id"], "assistant", "Purr", parent_id=u2.id, media=[
-            {"id": "r1", "kind": "image", "source": "generated", "status": "done", "file": "r.png", "prompt": "r"}])
-        retry_next = db.add_chat_message(conv["id"], "user", "on the retry branch", parent_id=retry.id)
+        retry = db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "Purr",
+            parent_id=u2.id,
+            media=[
+                {"id": "r1", "kind": "image", "source": "generated", "status": "done", "file": "r.png", "prompt": "r"}
+            ],
+        )
+        db.add_chat_message(conv["id"], "user", "on the retry branch", parent_id=retry.id)
         edit = db.add_chat_message(conv["id"], "user", "now a dog", parent_id=a1.id)
         edit_reply = db.add_chat_message(conv["id"], "assistant", "Woof", parent_id=edit.id)
-        edit_next = db.add_chat_message(conv["id"], "user", "on the edit branch", parent_id=edit_reply.id)
-        db.set_chat_leaf(conv["id"], a3.id)   # looking at the original version
+        db.add_chat_message(conv["id"], "user", "on the edit branch", parent_id=edit_reply.id)
+        db.set_chat_leaf(conv["id"], a3.id)  # looking at the original version
 
         info = client.get(f"/api/chat/messages/{u2.id}/delete-info").json()
         assert info == {"other_versions": 1, "other_messages": 2}
@@ -1764,7 +2592,7 @@ class TestDeleteExchange:
         ids = {m.id for m in db.get_chat_messages(conv["id"])}
         assert ids == {u1.id, a1.id, u3.id, a3.id}
         assert db.get_chat_message(u3.id).parent_id == a1.id
-        assert client.get(f"/api/chat/messages/{u3.id}").json()["siblings"] == [u3.id]   # no stray versions
+        assert client.get(f"/api/chat/messages/{u3.id}").json()["siblings"] == [u3.id]  # no stray versions
         lib = {i["id"] for i in client.get("/api/chat/library").json()["items"] if not i["attached"]}
         assert {"c1", "r1"} <= lib
 
@@ -1773,13 +2601,16 @@ class TestDeleteExchange:
         edit = db.add_chat_message(conv["id"], "user", "now a dog", parent_id=a1.id)
         edit_reply = db.add_chat_message(conv["id"], "assistant", "Woof", parent_id=edit.id)
         edit_next = db.add_chat_message(conv["id"], "user", "walkies", parent_id=edit_reply.id)
-        db.set_chat_leaf(conv["id"], edit_next.id)   # looking at the edited version
+        db.set_chat_leaf(conv["id"], edit_next.id)  # looking at the edited version
         msgs = client.delete(f"/api/chat/messages/{edit.id}").json()["messages"]
         assert [m["content"] for m in msgs] == ["draw a fox", "Here!", "walkies"]
 
     def test_info_is_quiet_without_other_versions(self, client, conv, db):
         u1, a1, u2, *_ = self._chat(db, conv)
-        assert client.get(f"/api/chat/messages/{u2.id}/delete-info").json() == {"other_versions": 0, "other_messages": 0}
+        assert client.get(f"/api/chat/messages/{u2.id}/delete-info").json() == {
+            "other_versions": 0,
+            "other_messages": 0,
+        }
 
     def test_deleting_the_last_exchange_shows_the_one_before(self, client, conv, db):
         u1, a1, u2, a2, u3, a3 = self._chat(db, conv)
@@ -1800,12 +2631,31 @@ class TestFork:
         (d / "fox.png").write_bytes(_png_bytes())
         (d / "cat.png").write_bytes(_png_bytes(color="blue"))
         u1 = db.add_chat_message(conv["id"], "user", "draw a fox", mode="auto")
-        a1 = db.add_chat_message(conv["id"], "assistant", "Here!", model="t/model", media=[
-            {"id": "f1", "kind": "image", "source": "generated", "status": "done", "file": "fox.png", "pinned": True}])
+        a1 = db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "Here!",
+            model="t/model",
+            media=[
+                {
+                    "id": "f1",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "done",
+                    "file": "fox.png",
+                    "pinned": True,
+                }
+            ],
+        )
         db.update_chat_message(a1.id, cost=0.02)
         u2 = db.add_chat_message(conv["id"], "user", "now a cat", parent_id=a1.id)
-        a2 = db.add_chat_message(conv["id"], "assistant", "Meow", parent_id=u2.id, media=[
-            {"id": "c1", "kind": "image", "source": "generated", "status": "done", "file": "cat.png"}])
+        a2 = db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "Meow",
+            parent_id=u2.id,
+            media=[{"id": "c1", "kind": "image", "source": "generated", "status": "done", "file": "cat.png"}],
+        )
         return u1, a1, u2, a2
 
     def _fork(self, client, conv, message_id):
@@ -1844,7 +2694,7 @@ class TestFork:
         new = self._fork(client, conv, u2.id).json()
         msgs = client.get(f"/api/chat/conversations/{new['id']}").json()["messages"]
         assert [m["content"] for m in msgs] == ["draw a fox", "Here!", "now a cat", "Meow"]
-        assert all(m["siblings"] == [m["id"]] for m in msgs)   # no other versions come along
+        assert all(m["siblings"] == [m["id"]] for m in msgs)  # no other versions come along
         db.set_chat_leaf(conv["id"], retry.id)
         new = self._fork(client, conv, u2.id).json()
         assert client.get(f"/api/chat/conversations/{new['id']}").json()["messages"][-1]["content"] == "Purr"
@@ -1858,8 +2708,14 @@ class TestFork:
 
     def test_pending_video_is_not_copied_as_pending(self, client, conv, chat, db):
         u = db.add_chat_message(conv["id"], "user", "a clip")
-        db.add_chat_message(conv["id"], "assistant", "", media=[
-            {"id": "v1", "kind": "video", "source": "generated", "status": "pending", "file": None, "job_id": "j"}])
+        db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "",
+            media=[
+                {"id": "v1", "kind": "video", "source": "generated", "status": "pending", "file": None, "job_id": "j"}
+            ],
+        )
         new = self._fork(client, conv, u.id).json()
         item = client.get(f"/api/chat/conversations/{new['id']}").json()["messages"][1]["media"][0]
         assert item["status"] == "error"
@@ -1873,6 +2729,7 @@ class TestFork:
 
     def test_chat_made_characters_are_copied_and_saved_ones_shared(self, client, conv, chat, db):
         import web.characters as characters_mod
+
         saved = db.create_character("Rex", "a dog")
         own = db.create_character("Bob", "a fox", conversation_id=conv["id"])
         d = characters_mod.char_dir(own.id)
@@ -1884,9 +2741,21 @@ class TestFork:
         (chat._conv_dir(conv["id"]) / "bob.png").write_bytes(_png_bytes())
         (chat._conv_dir(conv["id"]) / "up_src.png").write_bytes(_png_bytes())
         u = db.add_chat_message(conv["id"], "user", "draw Bob")
-        db.add_chat_message(conv["id"], "assistant", "", media=[
-            {"id": "b1", "kind": "image", "source": "generated", "status": "done", "file": "bob.png",
-             "params": {"characters": [own.id], "refs": ["up_src.png", f"char:{own.id}/img_bob.png"]}}])
+        db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "",
+            media=[
+                {
+                    "id": "b1",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "done",
+                    "file": "bob.png",
+                    "params": {"characters": [own.id], "refs": ["up_src.png", f"char:{own.id}/img_bob.png"]},
+                }
+            ],
+        )
 
         new = self._fork(client, conv, u.id).json()
         copy_id = next(i for i in new["character_ids"] if i != saved.id)
@@ -1903,7 +2772,10 @@ class TestFork:
         # Deleting the original takes its own characters, not the branch's
         client.delete(f"/api/chat/conversations/{conv['id']}")
         assert db.get_character(own.id) is None and db.get_character(unused.id) is None
-        assert client.get(f"/api/chat/conversations/{new['id']}").json()["conversation"]["character_ids"] == [saved.id, copy_id]
+        assert client.get(f"/api/chat/conversations/{new['id']}").json()["conversation"]["character_ids"] == [
+            saved.id,
+            copy_id,
+        ]
         assert (characters_mod.char_dir(copy_id) / "img_bob.png").is_file()
 
     def test_branching_from_a_reply_ends_with_that_reply(self, client, conv, chat, db):
@@ -1939,11 +2811,14 @@ class TestFork:
 class TestConversationList:
     def test_pinned_first_and_pinning_keeps_the_order_of_the_rest(self, client, db):
         a = client.post("/api/chat/conversations", json={"title": "A"}).json()
-        b = client.post("/api/chat/conversations", json={"title": "B"}).json()
-        c = client.post("/api/chat/conversations", json={"title": "C"}).json()
+        client.post("/api/chat/conversations", json={"title": "B"})
+        client.post("/api/chat/conversations", json={"title": "C"})
         r = client.patch(f"/api/chat/conversations/{a['id']}", json={"pinned": True})
         assert r.json()["pinned"] is True
-        titles = lambda: [x["title"] for x in client.get("/api/chat/conversations").json()["conversations"]]
+
+        def titles():
+            return [x["title"] for x in client.get("/api/chat/conversations").json()["conversations"]]
+
         assert titles() == ["A", "C", "B"]
         client.patch(f"/api/chat/conversations/{a['id']}", json={"pinned": False})
         assert titles() == ["C", "B", "A"]
@@ -1956,11 +2831,13 @@ class TestConversationList:
         assert len(data["conversations"]) == 2 and data["more"] is True
 
     def test_search_finds_titles_and_messages_on_any_branch(self, client, db):
-        fox = client.post("/api/chat/conversations", json={"title": "Fox story"}).json()
+        client.post("/api/chat/conversations", json={"title": "Fox story"})
         other = client.post("/api/chat/conversations", json={"title": "Misc"}).json()
         client.post("/api/chat/conversations", json={"title": "Nothing here"})
-        u = db.add_chat_message(other["id"], "user", "a long intro " * 20 + "then a FOX appears in the snow " + "and more " * 20)
-        db.add_chat_message(other["id"], "user", "edited away", parent_id=None)   # another branch shown
+        db.add_chat_message(
+            other["id"], "user", "a long intro " * 20 + "then a FOX appears in the snow " + "and more " * 20
+        )
+        db.add_chat_message(other["id"], "user", "edited away", parent_id=None)  # another branch shown
         res = client.get("/api/chat/conversations", params={"q": "fox"}).json()["conversations"]
         assert {c["title"] for c in res} == {"Fox story", "Misc"}
         by = {c["title"]: c for c in res}
@@ -1978,27 +2855,44 @@ class TestConversationList:
 class TestRememberedSettings:
     def test_turn_settings_are_kept_on_the_chat_and_copied_to_branches(self, client, conv, chat, db, monkeypatch):
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
-        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
-            "content": "hi", **SETTINGS, "mode": "text", "history_limit": 10, "image_limit": 2,
-            "image_options": {"aspect_ratio": "16:9"}}))
+        ev = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={
+                    "content": "hi",
+                    **SETTINGS,
+                    "mode": "text",
+                    "history_limit": 10,
+                    "image_limit": 2,
+                    "image_options": {"aspect_ratio": "16:9"},
+                },
+            )
+        )
         got = client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["settings"]
         assert got["mode"] == "text" and got["history_limit"] == 10 and got["image_limit"] == 2
         assert got["image_options"]["aspect_ratio"] == "16:9"
-        new = client.post(f"/api/chat/conversations/{conv['id']}/fork",
-                          json={"message_id": ev[0]["user_message"]["id"]}).json()
+        new = client.post(
+            f"/api/chat/conversations/{conv['id']}/fork", json={"message_id": ev[0]["user_message"]["id"]}
+        ).json()
         assert new["settings"] == got
 
 
 class TestTitles:
     def _send(self, client, conv, content="tell me about foxes in winter"):
-        return _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
-                                   json={"content": content, **SETTINGS, "mode": "text"}))
+        return _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages", json={"content": content, **SETTINGS, "mode": "text"}
+            )
+        )
 
     def test_model_title_and_its_cost(self, client, conv, chat, monkeypatch):
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok", cost=0.001))
         seen = {}
-        monkeypatch.setattr(chat, "_generate_title",
-                            lambda model, prompt: (seen.update(model=model, prompt=prompt), ("Winter Foxes", 0.0005))[1])
+        monkeypatch.setattr(
+            chat,
+            "_generate_title",
+            lambda model, prompt: (seen.update(model=model, prompt=prompt), ("Winter Foxes", 0.0005))[1],
+        )
         ev = self._send(client, conv)
         assert {"type": "title", "title": "Winter Foxes"} in ev
         assert seen == {"model": "t/model", "prompt": "tell me about foxes in winter"}
@@ -2010,8 +2904,10 @@ class TestTitles:
 
     def test_falls_back_to_the_prompt(self, client, conv, chat, monkeypatch):
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
+
         def boom(model, prompt):
             raise chat.openrouter.OpenRouterError("nope")
+
         monkeypatch.setattr(chat, "_generate_title", boom)
         ev = self._send(client, conv)
         assert {"type": "title", "title": "tell me about foxes in winter"} in ev
@@ -2025,9 +2921,13 @@ class TestTitles:
         assert seen["model"] == "cheap/model"
 
     def test_generate_title_cleans_the_reply(self, monkeypatch):
-        import web.chat as chat_mod   # not the `chat` fixture: that stubs _generate_title out
-        monkeypatch.setattr(chat_mod.openrouter, "stream_chat",
-                            lambda model, msgs, **kw: _text_chunks('<think>hmm</think>**Title:** "Winter Foxes."\nextra', cost=0.0002))
+        import web.chat as chat_mod  # not the `chat` fixture: that stubs _generate_title out
+
+        monkeypatch.setattr(
+            chat_mod.openrouter,
+            "stream_chat",
+            lambda model, msgs, **kw: _text_chunks('<think>hmm</think>**Title:** "Winter Foxes."\nextra', cost=0.0002),
+        )
         assert chat_mod._generate_title("t/model", "foxes") == ("Winter Foxes", 0.0002)
 
     def test_clean_title_rejects_rambling(self, chat):

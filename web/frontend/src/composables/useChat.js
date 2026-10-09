@@ -11,12 +11,12 @@ export const fetchVeniceBalance = () => apiGet('/api/chat/venice-balance')
 // Pinned + most recent ({ conversations, more }); with `q`, chats whose title or messages match (each with a `snippet`)
 export const fetchConversations = (q = '') => apiGet(`/api/chat/conversations${q ? `?q=${enc(q)}` : ''}`)
 // What a chat has cost: { usd, credits, inherited_usd, inherited_credits }
-export const fetchConversationSpend = (id) => apiGet(`/api/chat/conversations/${enc(id)}/spend`)
-export const fetchConversation = (id) => apiGet(`/api/chat/conversations/${enc(id)}`)
+export const fetchConversationSpend = id => apiGet(`/api/chat/conversations/${enc(id)}/spend`)
+export const fetchConversation = id => apiGet(`/api/chat/conversations/${enc(id)}`)
 export const createConversation = (data = {}) => apiPost('/api/chat/conversations', data)
-export const deleteConversation = (id) => apiDelete(`/api/chat/conversations/${enc(id)}`)
-export const fetchChatMessage = (id) => apiGet(`/api/chat/messages/${id}`)
-export const cancelChatMessage = (id) => apiPost(`/api/chat/messages/${id}/cancel`)
+export const deleteConversation = id => apiDelete(`/api/chat/conversations/${enc(id)}`)
+export const fetchChatMessage = id => apiGet(`/api/chat/messages/${id}`)
+export const cancelChatMessage = id => apiPost(`/api/chat/messages/${id}/cancel`)
 // Show the branch through this message (edits/retries are kept as sibling branches)
 export const switchChatBranch = (convId, messageId) =>
   apiPost(`/api/chat/conversations/${enc(convId)}/branch`, { message_id: messageId })
@@ -29,15 +29,15 @@ export const regenerateChatMedia = (messageId, mediaId, model = null) =>
 export const pinChatMedia = (messageId, mediaId, pinned) =>
   apiPost(`/api/chat/messages/${messageId}/media/${enc(mediaId)}/pin`, { pinned })
 // Delete a prompt's turn (all versions of it and its replies); generated media moves to the library
-export const deleteChatExchange = (messageId) => apiDelete(`/api/chat/messages/${messageId}`)
+export const deleteChatExchange = messageId => apiDelete(`/api/chat/messages/${messageId}`)
 // What that would also remove: { other_versions, other_messages }
-export const fetchDeleteInfo = (messageId) => apiGet(`/api/chat/messages/${messageId}/delete-info`)
+export const fetchDeleteInfo = messageId => apiGet(`/api/chat/messages/${messageId}/delete-info`)
 
 // Custom instructions (saved, attachable per chat)
 export const fetchInstructions = () => apiGet('/api/chat/instructions')
-export const createInstruction = (data) => apiPost('/api/chat/instructions', data)
+export const createInstruction = data => apiPost('/api/chat/instructions', data)
 export const updateInstruction = (id, data) => apiPut(`/api/chat/instructions/${id}`, data)
-export const deleteInstruction = (id) => apiDelete(`/api/chat/instructions/${id}`)
+export const deleteInstruction = id => apiDelete(`/api/chat/instructions/${id}`)
 
 export const patchConversation = (id, data) => apiPatch(`/api/chat/conversations/${enc(id)}`, data)
 export const uploadChatAttachment = (convId, file) =>
@@ -83,7 +83,8 @@ export async function readSSE(stream, onEvent) {
     while ((sep = buffer.indexOf('\n\n')) !== -1) {
       const block = buffer.slice(0, sep)
       buffer = buffer.slice(sep + 2)
-      const data = block.split('\n')
+      const data = block
+        .split('\n')
         .filter(l => l.startsWith('data: '))
         .map(l => l.slice(6))
         .join('\n')

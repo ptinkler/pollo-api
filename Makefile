@@ -3,7 +3,7 @@ IMAGE_APP := $(REGISTRY)/pollo-api
 IMAGE_NGX := $(REGISTRY)/pollo-nginx
 TAG       := latest
 
-.PHONY: build push tag dev dev-api dev-frontend vpn-restart vpn-status vpn-logs db-migrate db-upgrade db-downgrade db-history
+.PHONY: build push tag dev dev-api dev-frontend lint format test vpn-restart vpn-status vpn-logs db-migrate db-upgrade db-downgrade db-history
 
 build:
 	docker build -t $(IMAGE_APP):$(TAG) .
@@ -27,6 +27,21 @@ dev-frontend:
 
 dev:
 	$(MAKE) -j2 dev-api dev-frontend
+
+# Code standards: ruff (Python) and ESLint + Prettier (frontend). CI runs `lint`.
+lint:
+	.venv/bin/ruff check .
+	.venv/bin/ruff format --check .
+	cd web/frontend && npm run lint && npm run format:check
+
+format:
+	.venv/bin/ruff check --fix .
+	.venv/bin/ruff format .
+	cd web/frontend && npm run lint:fix && npm run format
+
+test:
+	.venv/bin/python -m pytest -q
+	cd web/frontend && npm test
 
 vpn-restart:
 	docker restart pollo-vpn

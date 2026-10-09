@@ -5,8 +5,8 @@ import { characterAvatar } from '../../composables/useCharacters'
 // Attached characters as chips, plus a menu to attach more. Editing and
 // creating happen in CharacterEditor; this only emits 'edit' / 'create'.
 const props = defineProps({
-  modelValue: { type: Array, default: () => [] },   // attached character ids
-  characters: { type: Array, default: () => [] },   // what can be attached
+  modelValue: { type: Array, default: () => [] }, // attached character ids
+  characters: { type: Array, default: () => [] }, // what can be attached
   allowCreate: { type: Boolean, default: true },
   createLabel: { type: String, default: '＋ New character' },
 })
@@ -25,7 +25,10 @@ function attach(c) {
 }
 
 function detach(c) {
-  emit('update:modelValue', props.modelValue.filter(id => id !== c.id))
+  emit(
+    'update:modelValue',
+    props.modelValue.filter(id => id !== c.id),
+  )
 }
 
 function onDocClick(e) {
@@ -54,8 +57,13 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
 <template>
   <div ref="root" class="char-picker">
     <div class="chips">
-      <span v-for="c in attached" :key="c.id" class="chip" :class="{ adhoc: c.adhoc }"
-            :title="(c.adhoc ? 'This chat only — ' : '') + (c.description || c.name)">
+      <span
+        v-for="c in attached"
+        :key="c.id"
+        class="chip"
+        :class="{ adhoc: c.adhoc }"
+        :title="(c.adhoc ? 'This chat only — ' : '') + (c.description || c.name)"
+      >
         <button class="chip-main" @click="emit('edit', c)">
           <img v-if="characterAvatar(c)" :src="characterAvatar(c)" alt="" />
           <span v-else class="avatar-blank">👤</span>

@@ -4,8 +4,10 @@ Shared configuration — single source of truth for data paths and API settings.
 All modules that need ROOT_DIR, ASSETS_DIR, DB_PATH, or API constants should
 import from here instead of computing them independently.
 """
+
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -27,4 +29,3 @@ POLLO_API_BASE = "https://pollo.ai/api/platform/generation"
 # under POLLO_API_BASE, which Pollo now calls the "legacy" API.
 POLLO_API_V1_BASE = "https://pollo.ai/api/platform/v1/generation"
 POLLO_API_TIMEOUT = 30  # per-request timeout in seconds for individual HTTP calls
-

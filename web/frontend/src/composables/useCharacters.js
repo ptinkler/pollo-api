@@ -12,10 +12,10 @@ export const fetchCharacters = ({ conversationId = null, includeAdhoc = false } 
   const qs = params.toString()
   return apiGet(`/api/characters${qs ? `?${qs}` : ''}`).then(r => r.characters)
 }
-export const createCharacter = (data) => apiPost('/api/characters', data)
+export const createCharacter = data => apiPost('/api/characters', data)
 export const updateCharacter = (id, data) => apiPatch(`/api/characters/${id}`, data)
-export const deleteCharacter = (id) => apiDelete(`/api/characters/${id}`)
-export const promoteCharacter = (id) => apiPost(`/api/characters/${id}/promote`)
+export const deleteCharacter = id => apiDelete(`/api/characters/${id}`)
+export const promoteCharacter = id => apiPost(`/api/characters/${id}/promote`)
 export const uploadCharacterImage = (id, file) => apiUpload(`/api/characters/${id}/images`, file)
 export const copyChatImageToCharacter = (id, conversationId, file) =>
   apiPost(`/api/characters/${id}/images/from-chat`, { conversation_id: conversationId, file })
@@ -24,14 +24,14 @@ export const copyGenerationImageToCharacter = (id, project, filename) =>
 
 export const characterImageUrl = (id, file) => `/api/characters/${id}/images/${enc(file)}`
 /** The character's main (first) image, or null. */
-export const characterAvatar = (c) => (c?.images?.length ? characterImageUrl(c.id, c.images[0]) : null)
+export const characterAvatar = c => (c?.images?.length ? characterImageUrl(c.id, c.images[0]) : null)
 
 // Characters need a model that takes reference images (their whole point is
 // keeping a look consistent). Mirrors the server's checks: _characters_usable
 // in web/chat.py, and the "images" option / Ref mode on the Generate page.
 
 /** A chat image model (catalogue entry) that can use characters. */
-export const chatImageModelTakesCharacters = (info) =>
+export const chatImageModelTakesCharacters = info =>
   !!info && (!!info.conversational || !!info.input_modalities?.includes('image'))
 
 /** A Generate-page model (MODEL_INFO entry) that can use characters, given whether Ref mode is on. */

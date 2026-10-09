@@ -8,7 +8,7 @@ const showToast = inject('showToast', () => {})
 
 const characters = ref([])
 const loading = ref(true)
-const editing = ref(null)        // character being edited
+const editing = ref(null) // character being edited
 const editorOpen = ref(false)
 
 const saved = computed(() => characters.value.filter(c => !c.adhoc))
@@ -69,8 +69,8 @@ onMounted(load)
       <div>
         <h1>Characters</h1>
         <p class="sub">
-          Reusable characters for chats and generations. Their description goes into the prompt and their
-          images are sent as references, so they look the same every time.
+          Reusable characters for chats and generations. Their description goes into the prompt and their images are
+          sent as references, so they look the same every time.
         </p>
       </div>
       <button class="btn btn-primary" @click="edit(null)">＋ New character</button>

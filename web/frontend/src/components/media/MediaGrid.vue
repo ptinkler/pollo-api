@@ -18,30 +18,38 @@ const emit = defineEmits(['toggle', 'open'])
 const shown = ref(props.pageSize)
 const visible = computed(() => props.items.slice(0, shown.value))
 // New filters or search: start from the top again
-watch(() => props.items, () => { shown.value = props.pageSize })
+watch(
+  () => props.items,
+  () => {
+    shown.value = props.pageSize
+  },
+)
 
 // Add the next batch when the sentinel after the last tile comes within
 // ~a row of the screen. Without IntersectionObserver (old browsers, tests) show all.
 const sentinel = ref(null)
 let observer = null
-watch(sentinel, (el) => {
+watch(sentinel, el => {
   observer?.disconnect()
   if (!el) return
   if (typeof IntersectionObserver === 'undefined') {
     shown.value = Infinity
     return
   }
-  observer = new IntersectionObserver((entries) => {
-    if (!entries.some(e => e.isIntersecting)) return
-    shown.value += props.pageSize
-    // Still in range after the new page (a tall screen)? Observing afresh
-    // reports the current state again, so it keeps filling.
-    nextTick(() => {
-      if (!sentinel.value) return
-      observer.unobserve(sentinel.value)
-      observer.observe(sentinel.value)
-    })
-  }, { rootMargin: '300px 0px' })
+  observer = new IntersectionObserver(
+    entries => {
+      if (!entries.some(e => e.isIntersecting)) return
+      shown.value += props.pageSize
+      // Still in range after the new page (a tall screen)? Observing afresh
+      // reports the current state again, so it keeps filling.
+      nextTick(() => {
+        if (!sentinel.value) return
+        observer.unobserve(sentinel.value)
+        observer.observe(sentinel.value)
+      })
+    },
+    { rootMargin: '300px 0px' },
+  )
   observer.observe(el)
 })
 onBeforeUnmount(() => observer?.disconnect())
@@ -54,7 +62,9 @@ function onThumbError(item, e) {
   if (!retried.value.has(item.id)) {
     retried.value = new Set(retried.value).add(item.id)
     const img = e.target
-    setTimeout(() => { img.src = `${item.thumb_url}?retry=1` }, 2000)
+    setTimeout(() => {
+      img.src = `${item.thumb_url}?retry=1`
+    }, 2000)
   } else {
     failed.value = new Set(failed.value).add(item.id)
   }

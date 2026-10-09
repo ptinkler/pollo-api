@@ -142,4 +142,3 @@ describe('useProjectSettings', () => {
     expect(settings.value.model).toBe('seedance20fastv1')
   })
 })
-

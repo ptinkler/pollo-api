@@ -42,7 +42,9 @@ Turns run in a worker thread that owns all persistence; the SSE response
 just relays its events. Closing the tab therefore doesn't lose the reply,
 and videos keep polling in their own threads until they land on disk.
 """
+
 import base64
+import contextlib
 import io
 import json
 import mimetypes
@@ -53,9 +55,10 @@ import shutil
 import threading
 import time
 import uuid
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
@@ -72,20 +75,21 @@ from .uploads import is_blank_image, read_image_upload, safe_filename
 router = APIRouter(prefix="/api/chat", dependencies=[Depends(verify_api_key)])
 
 MAX_TOOL_ROUNDS = 4
-CONSISTENCY_REFS = 2              # recent images passed to the image model to keep characters consistent
-DEFAULT_IMAGE_LIMIT = 6           # chat images per request unless the composer's slider says otherwise: the most
-                                  # recent images sent to the chat model as pixels, and the cap on chat images sent
-                                  # as references (edit source + recent + pins + attachments). Character images
-                                  # come on top, uncapped (each model trims to its own maximum).
-MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024   # larger images are downscaled before sending
+CONSISTENCY_REFS = 2  # recent images passed to the image model to keep characters consistent
+# Chat images per request unless the composer's slider says otherwise: the most
+# recent images sent to the chat model as pixels, and the cap on chat images sent
+# as references (edit source + recent + pins + attachments). Character images
+# come on top, uncapped (each model trims to its own maximum).
+DEFAULT_IMAGE_LIMIT = 6
+MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024  # larger images are downscaled before sending
 MODELS_CACHE_TTL = 30 * 60
-CHAT_ROUND_SECONDS = 300          # cap on one LLM call (long stories stream for a while)
+CHAT_ROUND_SECONDS = 300  # cap on one LLM call (long stories stream for a while)
 VIDEO_POLL_INTERVAL = 10
 VIDEO_POLL_TIMEOUT = 45 * 60
 VIDEO_MAX_POLL_ERRORS = 10
 DEFAULT_TITLE = "New chat"
-TITLE_SECONDS = 20                # cap on the title request, which runs alongside the first reply
-TITLE_WAIT_SECONDS = 8            # how long a finished first reply waits for it before using the prompt
+TITLE_SECONDS = 20  # cap on the title request, which runs alongside the first reply
+TITLE_WAIT_SECONDS = 8  # how long a finished first reply waits for it before using the prompt
 TITLE_PROMPT = """Write a short title, 2 to 6 words, for a chat that starts with the message below. \
 Reply with the title alone: no quotes, no "Title:", no full stop.
 
@@ -110,19 +114,30 @@ TOOLS_IMAGE = {
     "type": "function",
     "function": {
         "name": "generate_image",
-        "description": "Generate an image from a text prompt. Earlier images in the conversation can be passed to the image model as references, to keep characters consistent or to edit an image.",
+        "description": (
+            "Generate an image from a text prompt. Earlier images in the conversation can be passed to the "
+            "image model as references, to keep characters consistent or to edit an image."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "prompt": {"type": "string", "description": "Detailed description of the image to create."},
-                "aspect_ratio": {"type": "string", "enum": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
-                                 "description": "Aspect ratio. Omit to use the image model's default."},
-                "source_image": {"type": "string", "enum": ["none", "latest"],
-                                 "description": "'latest' to edit/transform the most recent image in the conversation."},
-                "keep_consistent": {"type": "boolean",
-                                    "description": "true = also send the 2 most recent images in the conversation to the "
-                                                   "image model as reference images. Default false. Images the user "
-                                                   "has pinned are always sent as references."},
+                "aspect_ratio": {
+                    "type": "string",
+                    "enum": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+                    "description": "Aspect ratio. Omit to use the image model's default.",
+                },
+                "source_image": {
+                    "type": "string",
+                    "enum": ["none", "latest"],
+                    "description": "'latest' to edit/transform the most recent image in the conversation.",
+                },
+                "keep_consistent": {
+                    "type": "boolean",
+                    "description": "true = also send the 2 most recent images in the conversation to the "
+                    "image model as reference images. Default false. Images the user "
+                    "has pinned are always sent as references.",
+                },
             },
             "required": ["prompt"],
         },
@@ -134,19 +149,25 @@ TOOLS_CREATE_CHARACTER = {
     "function": {
         "name": "create_character",
         "description": "Save a character (person, creature, mascot…) from the most recent image(s) in the "
-                       "conversation, so later images keep their look: from then on their description and "
-                       "reference images are sent to the image model whenever they appear. Use it when the user "
-                       "asks to make, save or keep using a character from an image. It's kept in this chat; "
-                       "the user can save it for use in other chats.",
+        "conversation, so later images keep their look: from then on their description and "
+        "reference images are sent to the image model whenever they appear. Use it when the user "
+        "asks to make, save or keep using a character from an image. It's kept in this chat; "
+        "the user can save it for use in other chats.",
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "The character's name, as the user calls them."},
-                "description": {"type": "string",
-                                "description": "Their appearance in detail, from the image: face, hair, build, "
-                                               "age, clothing, distinctive features, art style."},
-                "images": {"type": "integer", "minimum": 1, "maximum": 4,
-                           "description": "How many of the most recent images show them (default 1: the latest)."},
+                "description": {
+                    "type": "string",
+                    "description": "Their appearance in detail, from the image: face, hair, build, "
+                    "age, clothing, distinctive features, art style.",
+                },
+                "images": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4,
+                    "description": "How many of the most recent images show them (default 1: the latest).",
+                },
             },
             "required": ["name", "description"],
         },
@@ -157,15 +178,24 @@ TOOLS_VIDEO = {
     "type": "function",
     "function": {
         "name": "generate_video",
-        "description": "Generate a short video from a text prompt, optionally animating the latest image in the conversation (used as the first frame). Runs in the background for a few minutes.",
+        "description": (
+            "Generate a short video from a text prompt, optionally animating the latest image in the "
+            "conversation (used as the first frame). Runs in the background for a few minutes."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
-                "prompt": {"type": "string", "description": "Detailed description of the scene, action and camera motion."},
+                "prompt": {
+                    "type": "string",
+                    "description": "Detailed description of the scene, action and camera motion.",
+                },
                 "duration": {"type": "integer", "description": "Length in seconds. Omit to use the model default."},
                 "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"]},
-                "source_image": {"type": "string", "enum": ["none", "latest"],
-                                 "description": "'latest' to animate the most recent image in the conversation."},
+                "source_image": {
+                    "type": "string",
+                    "enum": ["none", "latest"],
+                    "description": "'latest' to animate the most recent image in the conversation.",
+                },
             },
             "required": ["prompt"],
         },
@@ -175,12 +205,13 @@ TOOLS_VIDEO = {
 
 # ── Request models ──────────────────────────────────────────────────
 
+
 class ConversationCreate(BaseModel):
     title: str | None = None
     text_model: str | None = None
     image_model: str | None = None
     video_model: str | None = None
-    instruction_id: int | None = None   # omitted = the default instruction, if one is set
+    instruction_id: int | None = None  # omitted = the default instruction, if one is set
     character_ids: list[int] = []
 
 
@@ -189,7 +220,7 @@ class ConversationUpdate(BaseModel):
     text_model: str | None = None
     image_model: str | None = None
     video_model: str | None = None
-    instruction_id: int | None = None   # explicit null detaches
+    instruction_id: int | None = None  # explicit null detaches
     character_ids: list[int] | None = None
     pinned: bool | None = None
 
@@ -208,9 +239,9 @@ class TurnOptions(BaseModel):
 
 
 class TurnSettings(BaseModel):
-    mode: str = "auto"                 # auto | text | image | video
-    history_limit: int | None = Field(default=None, ge=1)   # past messages sent to the chat model; None = all
-    image_limit: int | None = Field(default=DEFAULT_IMAGE_LIMIT, ge=0)   # chat images per request; None = all
+    mode: str = "auto"  # auto | text | image | video
+    history_limit: int | None = Field(default=None, ge=1)  # past messages sent to the chat model; None = all
+    image_limit: int | None = Field(default=DEFAULT_IMAGE_LIMIT, ge=0)  # chat images per request; None = all
     text_model: str | None = None
     image_model: str | None = None
     video_model: str | None = None
@@ -222,27 +253,28 @@ class TurnSettings(BaseModel):
 
 class SendMessage(TurnSettings):
     content: str = ""
-    attachments: list[str] = []        # filenames returned by the attachments endpoint
+    attachments: list[str] = []  # filenames returned by the attachments endpoint
 
 
 class RetryMessage(TurnSettings):
-    message_id: int                    # the assistant message to regenerate
+    message_id: int  # the assistant message to regenerate
 
 
 class EditMessage(TurnSettings):
-    message_id: int                    # the user message to rewrite and resend
+    message_id: int  # the user message to rewrite and resend
     content: str
 
 
 class SwitchBranch(BaseModel):
-    message_id: int                    # show the branch this message is on (its newest version)
+    message_id: int  # show the branch this message is on (its newest version)
 
 
 class ForkConversation(BaseModel):
-    message_id: int                    # a prompt (the new chat ends with it and its reply) or a reply
+    message_id: int  # a prompt (the new chat ends with it and its reply) or a reply
 
 
 # ── Paths & media helpers ───────────────────────────────────────────
+
 
 def _chat_root() -> Path:
     # Read config at call time so tests can redirect ROOT_DIR
@@ -256,8 +288,7 @@ def _conv_dir(conv_id: str) -> Path:
 
 
 def _new_media(kind: str, source: str, **fields) -> dict[str, Any]:
-    return {"id": uuid.uuid4().hex[:8], "kind": kind, "source": source,
-            "status": "pending", "file": None, **fields}
+    return {"id": uuid.uuid4().hex[:8], "kind": kind, "source": source, "status": "pending", "file": None, **fields}
 
 
 def _saved_media(kind: str, source: str, file: str, **fields) -> dict[str, Any]:
@@ -309,8 +340,9 @@ def _shown_branch(conv_id: str) -> list[dict]:
     siblings: dict[int | None, list[int]] = {}
     for m in messages:
         siblings.setdefault(m.parent_id, []).append(m.id)
-    return [{**m.to_dict(), "siblings": siblings[m.parent_id]}
-            for m in _branch_to(messages, db.get_chat_leaf_id(conv_id))]
+    return [
+        {**m.to_dict(), "siblings": siblings[m.parent_id]} for m in _branch_to(messages, db.get_chat_leaf_id(conv_id))
+    ]
 
 
 def _require_openrouter():
@@ -330,9 +362,11 @@ def get_models(refresh: bool = False) -> dict[str, Any]:
         if not refresh and _models_cache["data"] and time.time() - _models_cache["at"] < MODELS_CACHE_TTL:
             return _models_cache["data"]
         data: dict[str, Any] = {"errors": {}}
-        for kind, fn in (("text", openrouter.list_text_models),
-                         ("image", openrouter.list_image_models),
-                         ("video", openrouter.list_video_models)):
+        for kind, fn in (
+            ("text", openrouter.list_text_models),
+            ("image", openrouter.list_image_models),
+            ("video", openrouter.list_video_models),
+        ):
             data[kind] = []
             if not openrouter.is_configured():
                 continue
@@ -370,8 +404,9 @@ def _model_info(kind: str, model_id: str | None) -> dict | None:
     return info
 
 
-def _fit_video_params(model_id: str, duration: int | None, aspect_ratio: str | None,
-                      resolution: str | None) -> tuple[int | None, str | None, str | None]:
+def _fit_video_params(
+    model_id: str, duration: int | None, aspect_ratio: str | None, resolution: str | None
+) -> tuple[int | None, str | None, str | None]:
     """Snap requested params onto what the video model supports (when known),
     so a model-chosen "7 seconds" doesn't fail on a 5/10-only model."""
     info = _model_info("video", model_id)
@@ -389,10 +424,14 @@ def _fit_video_params(model_id: str, duration: int | None, aspect_ratio: str | N
 
 # ── Routes: meta ────────────────────────────────────────────────────
 
+
 @router.get("/status")
 def api_chat_status():
-    return {"configured": openrouter.is_configured() or venice_chat.is_configured(),
-            "openrouter": openrouter.is_configured(), "venice": venice_chat.is_configured()}
+    return {
+        "configured": openrouter.is_configured() or venice_chat.is_configured(),
+        "openrouter": openrouter.is_configured(),
+        "venice": venice_chat.is_configured(),
+    }
 
 
 @router.get("/credits")
@@ -402,7 +441,7 @@ def api_chat_credits():
     try:
         return openrouter.get_credits()
     except openrouter.OpenRouterError as e:
-        raise HTTPException(502, f"Couldn't fetch the OpenRouter balance: {e}")
+        raise HTTPException(502, f"Couldn't fetch the OpenRouter balance: {e}") from e
 
 
 @router.get("/venice-balance")
@@ -433,11 +472,18 @@ def api_list_conversations(q: str = ""):
     db = get_db()
     q = q.strip()
     if q:
-        return {"conversations": [{**c.to_dict(), "snippet": _snippet(text, q) if text else None}
-                                  for c, text in db.search_conversations(q)], "more": False}
+        return {
+            "conversations": [
+                {**c.to_dict(), "snippet": _snippet(text, q) if text else None}
+                for c, text in db.search_conversations(q)
+            ],
+            "more": False,
+        }
     convs = db.list_conversations(limit=CONVERSATION_LIST_LIMIT + 1)
-    return {"conversations": [c.to_dict() for c in convs[:CONVERSATION_LIST_LIMIT]],
-            "more": len(convs) > CONVERSATION_LIST_LIMIT}
+    return {
+        "conversations": [c.to_dict() for c in convs[:CONVERSATION_LIST_LIMIT]],
+        "more": len(convs) > CONVERSATION_LIST_LIMIT,
+    }
 
 
 def _snippet(text: str, q: str) -> str:
@@ -447,7 +493,11 @@ def _snippet(text: str, q: str) -> str:
     if i == -1 or len(text) <= SNIPPET_CHARS:
         return text[:SNIPPET_CHARS]
     start = max(0, min(i - SNIPPET_CHARS // 3, len(text) - SNIPPET_CHARS))
-    return ("…" if start else "") + text[start:start + SNIPPET_CHARS].strip() + ("…" if start + SNIPPET_CHARS < len(text) else "")
+    return (
+        ("…" if start else "")
+        + text[start : start + SNIPPET_CHARS].strip()
+        + ("…" if start + SNIPPET_CHARS < len(text) else "")
+    )
 
 
 @router.post("/conversations")
@@ -461,8 +511,11 @@ def api_create_conversation(data: ConversationCreate):
     characters.require(data.character_ids, db)
     conv = db.create_conversation(
         title=(data.title or DEFAULT_TITLE).strip()[:255] or DEFAULT_TITLE,
-        text_model=data.text_model, image_model=data.image_model, video_model=data.video_model,
-        instruction_id=instruction_id, character_ids=data.character_ids,
+        text_model=data.text_model,
+        image_model=data.image_model,
+        video_model=data.video_model,
+        instruction_id=instruction_id,
+        character_ids=data.character_ids,
     )
     return conv.to_dict()
 
@@ -474,6 +527,7 @@ def _require_instruction(instruction_id: int | None) -> int | None:
 
 
 # ── Routes: custom instructions ─────────────────────────────────────
+
 
 @router.get("/instructions")
 def api_list_instructions():
@@ -487,8 +541,9 @@ def api_create_instruction(data: InstructionIn):
 
 @router.put("/instructions/{instruction_id}")
 def api_update_instruction(instruction_id: int, data: InstructionIn):
-    item = get_db().save_instruction(instruction_id, name=data.name.strip(), content=data.content,
-                                     is_default=data.is_default)
+    item = get_db().save_instruction(
+        instruction_id, name=data.name.strip(), content=data.content, is_default=data.is_default
+    )
     if not item:
         raise HTTPException(404, "Instruction not found")
     return item.to_dict()
@@ -508,13 +563,19 @@ def api_get_conversation(conv_id: str):
     origin = None
     if conv.forked_from_id:
         parent = db.get_conversation(conv.forked_from_id)
-        origin = {"id": conv.forked_from_id, "title": parent.title if parent else None,
-                  "message_id": conv.forked_from_message_id, "exists": parent is not None}
+        origin = {
+            "id": conv.forked_from_id,
+            "title": parent.title if parent else None,
+            "message_id": conv.forked_from_message_id,
+            "exists": parent is not None,
+        }
     forks: dict[int, list[dict]] = {}
     for f in db.list_conversation_forks(conv_id):
         forks.setdefault(f.forked_from_message_id, []).append({"id": f.id, "title": f.title})
-    return {"conversation": {**conv.to_dict(), "forked_from": origin, "spend": _spend(conv)},
-            "messages": [{**m, "forks": forks.get(m["id"], [])} for m in _shown_branch(conv_id)]}
+    return {
+        "conversation": {**conv.to_dict(), "forked_from": origin, "spend": _spend(conv)},
+        "messages": [{**m, "forks": forks.get(m["id"], [])} for m in _shown_branch(conv_id)],
+    }
 
 
 @router.get("/conversations/{conv_id}/spend")
@@ -526,8 +587,12 @@ def _spend(conv) -> dict:
     """What the chat cost: `usd` and `credits` in total, of which `inherited_*`
     came with the messages copied in when it was branched off another chat."""
     usd, credits = get_db().get_chat_spend(conv.id)
-    return {"usd": usd, "credits": credits,
-            "inherited_usd": conv.inherited_cost or 0, "inherited_credits": conv.inherited_credits or 0}
+    return {
+        "usd": usd,
+        "credits": credits,
+        "inherited_usd": conv.inherited_cost or 0,
+        "inherited_credits": conv.inherited_credits or 0,
+    }
 
 
 @router.post("/conversations/{conv_id}/branch")
@@ -571,9 +636,14 @@ def api_fork_conversation(conv_id: str, data: ForkConversation):
         path.append(next((m for m in replies if m.id in shown), replies[-1]))
 
     new = db.create_conversation(
-        title=f"{conv.title} (branch)"[:255], text_model=conv.text_model, image_model=conv.image_model,
-        video_model=conv.video_model, instruction_id=conv.instruction_id, settings=conv.settings,
-        forked_from_id=conv_id, forked_from_message_id=at.id,
+        title=f"{conv.title} (branch)"[:255],
+        text_model=conv.text_model,
+        image_model=conv.image_model,
+        video_model=conv.video_model,
+        instruction_id=conv.instruction_id,
+        settings=conv.settings,
+        forked_from_id=conv_id,
+        forked_from_message_id=at.id,
         inherited_cost=round(sum(m.cost or 0 for m in path), 6) or None,
         inherited_credits=sum(i.get("credits") or 0 for m in path for i in m.media) or None,
     )
@@ -583,23 +653,34 @@ def api_fork_conversation(conv_id: str, data: ForkConversation):
     for msg in path:
         for item in msg.media:
             used.update(_media_character_ids(item.get("params") or {}))
-    char_map = {c.id: characters.copy_to_conversation(c, new.id, db).id
-                for c in characters.load(sorted(used), db) if c.conversation_id == conv_id}
+    char_map = {
+        c.id: characters.copy_to_conversation(c, new.id, db).id
+        for c in characters.load(sorted(used), db)
+        if c.conversation_id == conv_id
+    }
     db.update_conversation(new.id, character_ids=[char_map.get(i, i) for i in conv.character_ids])
 
     fork = _Fork(_chat_root() / conv_id, _conv_dir(new.id), char_map)
     parent_id = None
     for msg in path:
         media = [fork.media_item(item) for item in msg.media]
-        copy = db.add_chat_message(new.id, msg.role, msg.content, media=media, model=msg.model,
-                                   status=msg.status, parent_id=parent_id, mode=msg.mode)
+        copy = db.add_chat_message(
+            new.id,
+            msg.role,
+            msg.content,
+            media=media,
+            model=msg.model,
+            status=msg.status,
+            parent_id=parent_id,
+            mode=msg.mode,
+        )
         if msg.error or msg.cost:
             copy = db.update_chat_message(copy.id, error=msg.error, cost=msg.cost)
         parent_id = copy.id
     return db.get_conversation(new.id).to_dict()
 
 
-_PARAM_FILES = ("first_frame", "last_frame", "source_video")   # media params naming one reference file
+_PARAM_FILES = ("first_frame", "last_frame", "source_video")  # media params naming one reference file
 
 
 def _media_character_ids(params: dict) -> set[int]:
@@ -607,7 +688,7 @@ def _media_character_ids(params: dict) -> set[int]:
     ids = {i for i in params.get("characters") or [] if isinstance(i, int)}
     for ref in [*(params.get("refs") or []), *(params.get(k) for k in _PARAM_FILES)]:
         if isinstance(ref, str) and ref.startswith(characters.REF_PREFIX):
-            cid = ref[len(characters.REF_PREFIX):].partition("/")[0]
+            cid = ref[len(characters.REF_PREFIX) :].partition("/")[0]
             if cid.isdigit():
                 ids.add(int(cid))
     return ids
@@ -625,7 +706,11 @@ class _Fork:
         item = {**item, "id": uuid.uuid4().hex[:8]}
         if item.get("status") == "pending":
             # Its poller keeps updating the original chat only
-            return {**item, "status": "error", "error": "Still rendering in the original chat when this one was branched"}
+            return {
+                **item,
+                "status": "error",
+                "error": "Still rendering in the original chat when this one was branched",
+            }
         if item.get("file"):
             self._link(item["file"])
         if item.get("params"):
@@ -642,7 +727,7 @@ class _Fork:
     def _ref(self, ref: str) -> str:
         """A reference for the new chat: a copied character's image, or a chat file (linked over)."""
         if ref.startswith(characters.REF_PREFIX):
-            cid, _, file = ref[len(characters.REF_PREFIX):].partition("/")
+            cid, _, file = ref[len(characters.REF_PREFIX) :].partition("/")
             if cid.isdigit() and int(cid) in self.char_map:
                 return characters.image_ref(self.char_map[int(cid)], file)
             return ref
@@ -650,8 +735,12 @@ class _Fork:
         return ref
 
     def _link(self, name: str) -> None:
-        if Path(name).name != name or name.startswith(".") or not (self.src / name).is_file() \
-                or (self.dst / name).exists():
+        if (
+            Path(name).name != name
+            or name.startswith(".")
+            or not (self.src / name).is_file()
+            or (self.dst / name).exists()
+        ):
             return
         try:
             (self.dst / name).hardlink_to(self.src / name)
@@ -688,6 +777,7 @@ def api_delete_conversation(conv_id: str):
 
 # ── Routes: media ───────────────────────────────────────────────────
 
+
 @router.post("/conversations/{conv_id}/attachments")
 async def api_upload_attachment(conv_id: str, file: UploadFile = File(...)):
     _require_conv(conv_id)
@@ -716,11 +806,25 @@ def api_chat_library():
     for msg in db.get_chat_messages_with_media():
         for item in msg.media:
             if item.get("source") != "upload":
-                items.append({**item, "conversation_id": msg.conversation_id, "message_id": msg.id,
-                              "attached": True, "created_at": iso(msg.created_at)})
+                items.append(
+                    {
+                        **item,
+                        "conversation_id": msg.conversation_id,
+                        "message_id": msg.id,
+                        "attached": True,
+                        "created_at": iso(msg.created_at),
+                    }
+                )
     for lib in db.list_chat_library():
-        items.append({**lib.item, "conversation_id": lib.conversation_id, "message_id": None,
-                      "attached": False, "created_at": iso(lib.created_at)})
+        items.append(
+            {
+                **lib.item,
+                "conversation_id": lib.conversation_id,
+                "message_id": None,
+                "attached": False,
+                "created_at": iso(lib.created_at),
+            }
+        )
     items.sort(key=lambda i: i["created_at"], reverse=True)
     for i in items:
         i["conversation_title"] = titles.get(i["conversation_id"])
@@ -774,8 +878,10 @@ def api_delete_exchange(message_id: int):
         raise HTTPException(400, "Delete the prompt; its reply goes with it")
     _require_idle(msg.conversation_id)
     db.delete_chat_exchange(msg.conversation_id, message_id)
-    return {"conversation": db.get_conversation(msg.conversation_id).to_dict(),
-            "messages": _shown_branch(msg.conversation_id)}
+    return {
+        "conversation": db.get_conversation(msg.conversation_id).to_dict(),
+        "messages": _shown_branch(msg.conversation_id),
+    }
 
 
 @router.post("/messages/{message_id}/cancel")
@@ -787,6 +893,7 @@ def api_cancel_message(message_id: int):
 
 
 # ── Routes: turns (SSE) ─────────────────────────────────────────────
+
 
 @router.post("/conversations/{conv_id}/messages")
 def api_send_message(conv_id: str, data: SendMessage):
@@ -842,8 +949,7 @@ def api_edit(conv_id: str, data: EditMessage):
     if not content and not msg.media:
         raise HTTPException(400, "Message is empty")
     media = [{**item, "id": uuid.uuid4().hex[:8]} for item in msg.media]
-    user_msg = db.add_chat_message(conv_id, "user", content, media=media, parent_id=msg.parent_id,
-                                   mode=data.mode)
+    user_msg = db.add_chat_message(conv_id, "user", content, media=media, parent_id=msg.parent_id, mode=data.mode)
     _remember_settings(conv, data)
     return _start_turn(conv_id, data, user_msg, parent_id=user_msg.id)
 
@@ -860,8 +966,11 @@ _REMEMBERED_SETTINGS = {"mode", "history_limit", "image_limit", "image_options",
 def _remember_settings(conv, settings: TurnSettings) -> None:
     """Persist the model picks and composer settings on the conversation so
     reopening it restores them."""
-    fields: dict[str, Any] = {k: getattr(settings, k) for k in ("text_model", "image_model", "video_model")
-                              if getattr(settings, k) and getattr(settings, k) != getattr(conv, k)}
+    fields: dict[str, Any] = {
+        k: getattr(settings, k)
+        for k in ("text_model", "image_model", "video_model")
+        if getattr(settings, k) and getattr(settings, k) != getattr(conv, k)
+    }
     composer = settings.model_dump(include=_REMEMBERED_SETTINGS)
     if composer != conv.settings:
         fields["settings"] = composer
@@ -878,10 +987,14 @@ def _sse(event: dict) -> str:
 
 def _start_turn(conv_id: str, settings: TurnSettings, user_msg, parent_id: int | None) -> StreamingResponse:
     model = {"image": settings.image_model, "video": settings.video_model}.get(settings.mode, settings.text_model)
-    assistant = get_db().add_chat_message(conv_id, "assistant", "", model=model, status="streaming",
-                                          parent_id=parent_id, mode=settings.mode)
-    start = {"type": "start", "user_message": _message_out(user_msg) if user_msg else None,
-             "assistant_message": _message_out(assistant)}
+    assistant = get_db().add_chat_message(
+        conv_id, "assistant", "", model=model, status="streaming", parent_id=parent_id, mode=settings.mode
+    )
+    start = {
+        "type": "start",
+        "user_message": _message_out(user_msg) if user_msg else None,
+        "assistant_message": _message_out(assistant),
+    }
     events: queue.Queue = queue.Queue()
     cancel = threading.Event()
     _cancel_events[assistant.id] = cancel
@@ -907,11 +1020,13 @@ def _start_turn(conv_id: str, settings: TurnSettings, user_msg, parent_id: int |
                 return
             yield _sse(ev)
 
-    return StreamingResponse(stream(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
 
 
 # ── Turn orchestration ──────────────────────────────────────────────
+
 
 class Turn:
     """Runs one assistant turn and persists it. `emit` receives UI events."""
@@ -927,8 +1042,8 @@ class Turn:
         self.history = _branch_to(self.db.get_chat_messages(conv_id), message_id)[:-1]
         self.instructions = _conversation_instructions(conv_id)
         conv = self.db.get_conversation(conv_id)
-        self.characters = []            # attached by the user; the only ones a turn uses
-        if self._characters_usable():   # attached ones stay attached, just unused, otherwise
+        self.characters = []  # attached by the user; the only ones a turn uses
+        if self._characters_usable():  # attached ones stay attached, just unused, otherwise
             self.characters = characters.load(conv.character_ids if conv else [], self.db)
         self.content = ""
         self.cost = 0.0
@@ -953,7 +1068,10 @@ class Turn:
             self.content = self.content.rstrip() + ("\n\n" if self.content else "") + "*(stopped)*"
         self._finish_title(title_job)
         msg = self.db.update_chat_message(
-            self.message_id, content=self.content, status=status, error=error,
+            self.message_id,
+            content=self.content,
+            status=status,
+            error=error,
             cost=round(self.cost, 6) if self.cost else None,
         )
         if error:
@@ -969,7 +1087,7 @@ class Turn:
         prompt = (user.content if user else "").strip()
         if not prompt:
             raise openrouter.OpenRouterError("Image mode needs a text prompt")
-        chars = self.characters   # every attached character
+        chars = self.characters  # every attached character
         refs = [m["file"] for m in (user.media if user else []) if m["kind"] == "image" and m.get("file")]
         if self._accepts_refs():
             refs = _with_character_refs(refs + self._pinned_images(), chars, self.s.image_limit, after=len(refs))
@@ -983,9 +1101,15 @@ class Turn:
             raise openrouter.OpenRouterError("Video mode needs a prompt or an image")
         # Attached images: the first frame, the last frame (first+last-frame
         # models) and, for reference models, all of them are references
-        self._generate_video(prompt, self.s.video_options.duration, self.s.video_options.aspect_ratio,
-                             frames[0] if frames else None, chars=self.characters,
-                             last_frame=frames[1] if len(frames) > 1 else None, attached=frames)
+        self._generate_video(
+            prompt,
+            self.s.video_options.duration,
+            self.s.video_options.aspect_ratio,
+            frames[0] if frames else None,
+            chars=self.characters,
+            last_frame=frames[1] if len(frames) > 1 else None,
+            attached=frames,
+        )
 
     # ― chat with tools ―
     def _chat(self, tools_enabled: bool) -> None:
@@ -1047,8 +1171,14 @@ class Turn:
         if self.content and not self.content.endswith("\n\n"):
             self._append("\n\n")
         stream_chat = venice_chat.stream_chat if venice_chat.is_venice(self.s.text_model) else openrouter.stream_chat
-        for chunk in stream_chat(self.s.text_model, messages, tools, session_id=self.conv_id,
-                                            max_seconds=CHAT_ROUND_SECONDS, should_stop=self.cancel.is_set):
+        for chunk in stream_chat(
+            self.s.text_model,
+            messages,
+            tools,
+            session_id=self.conv_id,
+            max_seconds=CHAT_ROUND_SECONDS,
+            should_stop=self.cancel.is_set,
+        ):
             if self.cancel.is_set():
                 break
             usage = chunk.get("usage")
@@ -1061,8 +1191,9 @@ class Turn:
                     text += delta["content"]
                     self._append(delta["content"])
                 for tc in delta.get("tool_calls") or []:
-                    slot = calls.setdefault(tc.get("index", 0), {
-                        "id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                    slot = calls.setdefault(
+                        tc.get("index", 0), {"id": "", "type": "function", "function": {"name": "", "arguments": ""}}
+                    )
                     if tc.get("id"):
                         slot["id"] = tc["id"]
                     fn = tc.get("function") or {}
@@ -1073,9 +1204,11 @@ class Turn:
             c["id"] = c["id"] or f"call_{i}"
         # Diagnostics: distinguishes "model never called the tool" from
         # "we failed to parse the call" when media goes missing
-        print(f"💬 chat msg {self.message_id} {self.s.text_model}: finish={finish} "
-              f"tools_offered={bool(tools)} tool_calls={[c['function']['name'] for c in tool_calls]} "
-              f"raw_call_slots={len(calls)} text_chars={len(text)}")
+        print(
+            f"💬 chat msg {self.message_id} {self.s.text_model}: finish={finish} "
+            f"tools_offered={bool(tools)} tool_calls={[c['function']['name'] for c in tool_calls]} "
+            f"raw_call_slots={len(calls)} text_chars={len(text)}"
+        )
         return text, tool_calls
 
     def _append(self, text: str) -> None:
@@ -1090,47 +1223,52 @@ class Turn:
             return {"ok": False, "error": "Arguments were not valid JSON"}
         if name == "create_character":
             return self._create_character(args)
+        if name not in ("generate_image", "generate_video"):
+            return {"ok": False, "error": f"Unknown tool {name}"}
         prompt = str(args.get("prompt") or "").strip()
         if not prompt:
             return {"ok": False, "error": "prompt is required"}
         source = self._latest_image() if args.get("source_image") == "latest" else None
         if args.get("source_image") == "latest" and not source:
             return {"ok": False, "error": "There is no earlier image in the conversation to use"}
-        # A setting picked in the composer beats the model's guess. When
-        # animating an image, the image's own shape beats the guess too.
         chars = self._pick_characters(args.get("characters"), prompt)
-        opts = self.s.video_options if name == "generate_video" else self.s.image_options
-        guess = None if name == "generate_video" and source else args.get("aspect_ratio")
-        ratio = opts.aspect_ratio or guess
         try:
             if name == "generate_image":
-                refs = self._image_refs(args, source, chars)
-                ref_args = {k: args[k] for k in ("source_image", "keep_consistent", "characters") if k in args}
-                self._generate_image(prompt, ratio, refs, ref_args, chars)
-                result = {"ok": True, "result": IMAGE_TOOL_RESULT}
-                if chars:
-                    result["characters"] = [c.name for c in chars]
-                if refs:
-                    result["reference_images"] = len(refs)
-                    pinned = len(set(refs) & set(self._pinned_images()))
-                    if pinned:
-                        result["pinned_by_user"] = pinned
-                elif (ref_args or self._pinned_images()) and not self._accepts_refs():
-                    result["note"] = "The selected image model can't take reference images, so none were sent."
-                return result
-            if name == "generate_video":
-                duration = opts.duration or args.get("duration")
-                last = None
-                if "last_frame" in ((_model_info("video", self.s.video_model) or {}).get("frame_images") or []):
-                    # First+last-frame models: the two most recent images, older one first
-                    recent = self._latest_images(2)
-                    if len(recent) == 2:
-                        source, last = recent[1], recent[0]
-                self._generate_video(prompt, duration, ratio, source, chars, last_frame=last)
-                return {"ok": True, "result": VIDEO_TOOL_RESULT}
+                return self._image_tool(prompt, args, source, chars)
+            return self._video_tool(prompt, args, source, chars)
         except openrouter.OpenRouterError as e:
             return {"ok": False, "error": str(e), "moderated": _is_moderation_error(e)}
-        return {"ok": False, "error": f"Unknown tool {name}"}
+
+    def _image_tool(self, prompt: str, args: dict, source: str | None, chars: list) -> dict:
+        # A setting picked in the composer beats the model's guess
+        ratio = self.s.image_options.aspect_ratio or args.get("aspect_ratio")
+        refs = self._image_refs(args, source, chars)
+        ref_args = {k: args[k] for k in ("source_image", "keep_consistent", "characters") if k in args}
+        self._generate_image(prompt, ratio, refs, ref_args, chars)
+        result: dict[str, Any] = {"ok": True, "result": IMAGE_TOOL_RESULT}
+        if chars:
+            result["characters"] = [c.name for c in chars]
+        pinned = self._pinned_images()
+        if refs:
+            result["reference_images"] = len(refs)
+            if set(refs) & set(pinned):
+                result["pinned_by_user"] = len(set(refs) & set(pinned))
+        elif (ref_args or pinned) and not self._accepts_refs():
+            result["note"] = "The selected image model can't take reference images, so none were sent."
+        return result
+
+    def _video_tool(self, prompt: str, args: dict, source: str | None, chars: list) -> dict:
+        # The composer's settings beat the model's guesses; an animated image's own shape does too
+        opts = self.s.video_options
+        ratio = opts.aspect_ratio or (None if source else args.get("aspect_ratio"))
+        last = None
+        if "last_frame" in ((_model_info("video", self.s.video_model) or {}).get("frame_images") or []):
+            # First+last-frame models: the two most recent images, older one first
+            recent = self._latest_images(2)
+            if len(recent) == 2:
+                source, last = recent[1], recent[0]
+        self._generate_video(prompt, opts.duration or args.get("duration"), ratio, source, chars, last_frame=last)
+        return {"ok": True, "result": VIDEO_TOOL_RESULT}
 
     def _latest_image(self) -> str | None:
         images = self._latest_images(1)
@@ -1150,15 +1288,21 @@ class Turn:
 
     def _pinned_images(self) -> list[str]:
         """Images the user pinned on this branch, oldest first."""
-        return [item["file"] for msg in self.history for item in msg.media
-                if item.get("pinned") and item["kind"] == "image" and item.get("status", "done") == "done"
-                and item.get("file")]
+        return [
+            item["file"]
+            for msg in self.history
+            for item in msg.media
+            if item.get("pinned")
+            and item["kind"] == "image"
+            and item.get("status", "done") == "done"
+            and item.get("file")
+        ]
 
     def _pick_characters(self, names, prompt: str) -> list:
         """The attached characters in a picture: those the model named in the
         tool call, plus any whose name is in its prompt (models sometimes
         forget the argument). Unattached characters are never used."""
-        named = characters.named(self.characters, names)   # "Chloe" can mean attached "Chloe Muscle"
+        named = characters.named(self.characters, names)  # "Chloe" can mean attached "Chloe Muscle"
         # "Chloe" in the prompt of a picture of "Chloe Muscle" is her, not an attached "Chloe"
         mentioned = characters.mentioned(self.characters, prompt, prefer=named)
         return list({c.id: c for c in named + mentioned}.values())
@@ -1170,18 +1314,27 @@ class Turn:
             return
         self.characters += new
         self.db.update_conversation(self.conv_id, character_ids=[c.id for c in self.characters])
-        self.emit({"type": "characters", "character_ids": [c.id for c in self.characters],
-                   "characters": [c.to_dict() for c in self.characters]})
+        self.emit(
+            {
+                "type": "characters",
+                "character_ids": [c.id for c in self.characters],
+                "characters": [c.to_dict() for c in self.characters],
+            }
+        )
 
     def _create_character(self, args: dict) -> dict:
         name = str(args.get("name") or "").strip()[:100]
         if not name:
             return {"ok": False, "error": "name is required"}
-        existing = next((c for c in characters.available(self.conv_id, self.db)
-                         if c.name.strip().lower() == name.lower()), None)
+        existing = next(
+            (c for c in characters.available(self.conv_id, self.db) if c.name.strip().lower() == name.lower()), None
+        )
         if existing:
-            how = ("use it by name" if existing.id in {c.id for c in self.characters}
-                   else "the user can attach it to this chat with the characters button")
+            how = (
+                "use it by name"
+                if existing.id in {c.id for c in self.characters}
+                else "the user can attach it to this chat with the characters button"
+            )
             return {"ok": False, "error": f"There's already a character called {name}; {how}"}
         try:
             n = max(1, min(4, int(args.get("images") or 1)))
@@ -1190,11 +1343,15 @@ class Turn:
         files = [p for p in (_conv_dir(self.conv_id) / f for f in self._latest_images(n)) if p.is_file()]
         if not files:
             return {"ok": False, "error": "There is no image in the conversation to make the character from"}
-        char = characters.create_from_files(name, str(args.get("description") or "").strip()[:4000], files,
-                                            self.conv_id, self.db)
+        char = characters.create_from_files(
+            name, str(args.get("description") or "").strip()[:4000], files, self.conv_id, self.db
+        )
         self._attach([char])
-        return {"ok": True, "result": f"Character {name} saved with {len(files)} reference image(s) and attached "
-                                      f"to this chat. Name them in generate_image's `characters` to use them."}
+        return {
+            "ok": True,
+            "result": f"Character {name} saved with {len(files)} reference image(s) and attached "
+            f"to this chat. Name them in generate_image's `characters` to use them.",
+        }
 
     def _characters_usable(self) -> bool:
         """Whether this turn can use characters — mirrors characterSupport in
@@ -1233,7 +1390,7 @@ class Turn:
         recent = []
         if args.get("keep_consistent") is True:
             recent = [f for f in self._latest_images(CONSISTENCY_REFS) if f not in pinned and f not in lead]
-        chat_refs = _dedupe(lead + pinned + recent[:max(CONSISTENCY_REFS - len(lead), 0)])
+        chat_refs = _dedupe(lead + pinned + recent[: max(CONSISTENCY_REFS - len(lead), 0)])
         return _with_character_refs(chat_refs, chars, self.s.image_limit, after=len(lead))
 
     # ― generation ―
@@ -1247,32 +1404,47 @@ class Turn:
         self.db.update_chat_media_item(self.message_id, item["id"], **fields)
         self.emit({"type": "media", "message_id": self.message_id, "item": dict(item)})
 
-    def _generate_image(self, prompt: str, aspect_ratio: str | None, ref_files: list[str],
-                        ref_args: dict | None = None, chars: list | None = None) -> None:
+    def _generate_image(
+        self,
+        prompt: str,
+        aspect_ratio: str | None,
+        ref_files: list[str],
+        ref_args: dict | None = None,
+        chars: list | None = None,
+    ) -> None:
         if not self.s.image_model:
             raise openrouter.OpenRouterError("No image model selected")
         # Params are stored on the item so a failed image can be retried as-is
-        params = {"aspect_ratio": aspect_ratio,
-                  "resolution": self.s.image_options.resolution,
-                  "refs": ref_files}
+        params = {"aspect_ratio": aspect_ratio, "resolution": self.s.image_options.resolution, "refs": ref_files}
         if ref_args:
-            params["ref_args"] = ref_args   # the model's own reference choices, replayed in history
+            params["ref_args"] = ref_args  # the model's own reference choices, replayed in history
         if chars:
-            params["characters"] = [c.id for c in chars]   # described in the prompt at generation time
-            params["character_names"] = [c.name for c in chars]   # for display
+            params["characters"] = [c.id for c in chars]  # described in the prompt at generation time
+            params["character_names"] = [c.name for c in chars]  # for display
         context = None
         if _is_conversational(self.s.image_model):
             # Like the Gemini app: the image model gets the conversation
             direct = self.s.mode == "image"
-            params.update(context=True, direct=direct, history_limit=self.s.history_limit,
-                          image_limit=self.s.image_limit)
-            context = _image_context(self.conv_id, self.history, self.s.history_limit, self.content,
-                                     None if direct else prompt, ref_files, self.instructions, chars,
-                                     self.s.image_limit)
+            params.update(
+                context=True, direct=direct, history_limit=self.s.history_limit, image_limit=self.s.image_limit
+            )
+            context = _image_context(
+                self.conv_id,
+                self.history,
+                self.s.history_limit,
+                self.content,
+                None if direct else prompt,
+                ref_files,
+                self.instructions,
+                chars,
+                self.s.image_limit,
+            )
         item = _new_media("image", "generated", prompt=prompt, model=self.s.image_model, params=params)
         self._add_media(item)
         try:
-            names, cost, credits, sent = _run_image_generation(self.conv_id, self.s.image_model, prompt, params, context)
+            names, cost, credits, sent = _run_image_generation(
+                self.conv_id, self.s.image_model, prompt, params, context
+            )
         except openrouter.OpenRouterError as e:
             self._update_media(item, **_failure_fields(e))
             raise
@@ -1280,20 +1452,34 @@ class Turn:
             self.cost += float(cost)
         for i, name in enumerate(names):
             if i == 0:
-                self._update_media(item, status="done", file=name, cost=cost, credits=credits,
-                                   params={**params, **sent})
+                self._update_media(
+                    item, status="done", file=name, cost=cost, credits=credits, params={**params, **sent}
+                )
             else:
                 self._add_media(_saved_media("image", "generated", name, prompt=prompt, model=self.s.image_model))
 
-    def _generate_video(self, prompt: str, duration: int | None, aspect_ratio: str | None,
-                        first_frame: str | None, chars: list | None = None, last_frame: str | None = None,
-                        attached: list[str] | None = None) -> None:
+    def _generate_video(
+        self,
+        prompt: str,
+        duration: int | None,
+        aspect_ratio: str | None,
+        first_frame: str | None,
+        chars: list | None = None,
+        last_frame: str | None = None,
+        attached: list[str] | None = None,
+    ) -> None:
         if not self.s.video_model:
             raise openrouter.OpenRouterError("No video model selected")
         duration, aspect_ratio, resolution = _fit_video_params(
-            self.s.video_model, duration, aspect_ratio, self.s.video_options.resolution)
-        params = {"duration": duration, "aspect_ratio": aspect_ratio, "resolution": resolution,
-                  "first_frame": first_frame, "generate_audio": self.s.video_options.generate_audio}
+            self.s.video_model, duration, aspect_ratio, self.s.video_options.resolution
+        )
+        params = {
+            "duration": duration,
+            "aspect_ratio": aspect_ratio,
+            "resolution": resolution,
+            "first_frame": first_frame,
+            "generate_audio": self.s.video_options.generate_audio,
+        }
         if chars:
             params["characters"] = [c.id for c in chars]
         params.update(self._video_inputs(first_frame, last_frame, attached or [], chars or []))
@@ -1308,8 +1494,7 @@ class Turn:
         self._update_media(item, job_id=job["id"], params={**params, **job.get("params", {})})
         start_video_poller(self.conv_id, self.message_id, item["id"], job["id"])
 
-    def _video_inputs(self, first_frame: str | None, last_frame: str | None, attached: list[str],
-                      chars: list) -> dict:
+    def _video_inputs(self, first_frame: str | None, last_frame: str | None, attached: list[str], chars: list) -> dict:
         """The extra inputs the video model's family takes (Venice): reference
         images (attached ones, the frame, characters' images and pins), a
         last frame, or the chat's latest video."""
@@ -1340,8 +1525,9 @@ class Turn:
         note = _characters_note(self.characters)
         if note:
             messages.append({"role": "system", "content": note})
-        return messages + _conversation(self.conv_id, self.history, self.s.history_limit, vision, as_tool_calls,
-                                        self.s.image_limit)
+        return messages + _conversation(
+            self.conv_id, self.history, self.s.history_limit, vision, as_tool_calls, self.s.image_limit
+        )
 
     # ― title ―
     def _start_title(self) -> dict | None:
@@ -1356,11 +1542,12 @@ class Turn:
         job: dict[str, Any] = {"prompt": first.content, "title": None, "cost": 0.0, "thread": None}
         model = os.environ.get("CHAT_TITLE_MODEL") or self.s.text_model
         if model and (venice_chat.is_configured() if venice_chat.is_venice(model) else openrouter.is_configured()):
+
             def work():
-                try:
+                # No title from the model: the prompt stands in
+                with contextlib.suppress(Exception):
                     job["title"], job["cost"] = _generate_title(model, first.content)
-                except Exception:  # noqa: BLE001 — no title from the model: the prompt stands in
-                    pass
+
             job["thread"] = threading.Thread(target=work, daemon=True, name=f"chat-title-{self.message_id}")
             job["thread"].start()
         return job
@@ -1381,7 +1568,7 @@ class Turn:
             if len(title) > 60:
                 title = title[:57].rsplit(" ", 1)[0] + "…"
         conv = self.db.get_conversation(self.conv_id)
-        if not conv or conv.title != DEFAULT_TITLE:   # renamed meanwhile
+        if not conv or conv.title != DEFAULT_TITLE:  # renamed meanwhile
             return
         self.db.update_conversation(self.conv_id, title=title)
         self.emit({"type": "title", "title": title})
@@ -1391,8 +1578,9 @@ def _generate_title(model: str, prompt: str) -> tuple[str | None, float]:
     """(a short title for a chat starting with `prompt`, its cost in USD)."""
     stream_chat = venice_chat.stream_chat if venice_chat.is_venice(model) else openrouter.stream_chat
     text, cost = "", 0.0
-    for chunk in stream_chat(model, [{"role": "user", "content": TITLE_PROMPT.format(prompt=prompt[:2000])}],
-                             max_seconds=TITLE_SECONDS):
+    for chunk in stream_chat(
+        model, [{"role": "user", "content": TITLE_PROMPT.format(prompt=prompt[:2000])}], max_seconds=TITLE_SECONDS
+    ):
         usage = chunk.get("usage")
         if usage and usage.get("cost"):
             cost += float(usage["cost"])
@@ -1404,8 +1592,8 @@ def _generate_title(model: str, prompt: str) -> tuple[str | None, float]:
 def _clean_title(text: str) -> str | None:
     """The model's reply as a title: its first line, without a "Title:" label,
     quotes, markdown or a full stop. None if nothing usable is left."""
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)   # reasoning models
-    line = next((l.strip() for l in text.splitlines() if l.strip()), "")
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)  # reasoning models
+    line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
     line = re.sub(r"^(?:\*\*)?title(?:\*\*)?\s*:\s*", "", line, flags=re.IGNORECASE)
     line = line.strip(" \t\"'`*#_“”‘’").rstrip(".").strip()
     if not line or len(line) > 80:
@@ -1419,13 +1607,25 @@ def _with_character_arg(tool: dict, names: list[str]) -> dict:
         return tool
     fn = tool["function"]
     params = fn["parameters"]
-    return {**tool, "function": {**fn, "parameters": {**params, "properties": {
-        **params["properties"],
-        "characters": {"type": "array", "items": {"type": "string", "enum": names},
-                       "description": "The user's characters who appear in it. Their descriptions and reference "
-                                      "images are sent to the model automatically, so the prompt needn't "
-                                      "describe their looks."},
-    }}}}
+    return {
+        **tool,
+        "function": {
+            **fn,
+            "parameters": {
+                **params,
+                "properties": {
+                    **params["properties"],
+                    "characters": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": names},
+                        "description": "The user's characters who appear in it. Their descriptions and reference "
+                        "images are sent to the model automatically, so the prompt needn't "
+                        "describe their looks.",
+                    },
+                },
+            },
+        },
+    }
 
 
 def _characters_note(attached: list) -> str:
@@ -1433,14 +1633,17 @@ def _characters_note(attached: list) -> str:
     if not attached:
         return ""
     parts = ["The user has attached these characters to the chat:\n\n" + characters.describe(attached)]
-    parts.append("Whenever one of these characters is in an image or video you make, name them in the tool's "
-                 "`characters` argument: their description and reference images are then sent to the model "
-                 "for you, so they look the same as before.")
+    parts.append(
+        "Whenever one of these characters is in an image or video you make, name them in the tool's "
+        "`characters` argument: their description and reference images are then sent to the model "
+        "for you, so they look the same as before."
+    )
     return "\n\n".join(parts)
 
 
-def _with_character_refs(chat_refs: list[str], chars: list, image_limit: int | None,
-                         after: int | None = None) -> list[str]:
+def _with_character_refs(
+    chat_refs: list[str], chars: list, image_limit: int | None, after: int | None = None
+) -> list[str]:
     """Chat images (up to `image_limit`, None = all) plus every image of the
     characters in the picture, which aren't capped. The character images go
     after the first `after` chat images (default: all of them)."""
@@ -1470,8 +1673,22 @@ def _history_window(history: list, limit: int | None) -> list:
     return window or history[-1:]
 
 
-def _conversation(conv_id: str, history: list, history_limit: int | None, vision: bool,
-                  as_tool_calls: bool = False, image_limit: int | None = DEFAULT_IMAGE_LIMIT) -> list[dict]:
+# Chat APIs don't accept images inside assistant messages, so images the
+# model generated ride along with the next user message, after this label
+CARRIED_LABEL = {
+    "type": "text",
+    "text": "[The images you generated in your previous reply, attached so you can see them]",
+}
+
+
+def _conversation(
+    conv_id: str,
+    history: list,
+    history_limit: int | None,
+    vision: bool,
+    as_tool_calls: bool = False,
+    image_limit: int | None = DEFAULT_IMAGE_LIMIT,
+) -> list[dict]:
     """The chat history as OpenRouter messages (no system prompt): the last
     `history_limit` messages, with the `image_limit` most recent images as
     pixels (None = all).
@@ -1480,74 +1697,86 @@ def _conversation(conv_id: str, history: list, history_limit: int | None, vision
     `as_tool_calls` (only when tools are offered — providers reject tool
     calls otherwise) records generated media as the tool calls and results
     that produced it; without it, media is summarised in bracketed notes."""
-    messages: list[dict] = []
-
     history = _history_window(history, history_limit)
-
-    # The most recent few images — uploaded or generated — go over as
-    # pixels so the model can see what's actually in them; older ones
-    # are described by a note instead.
-    image_budget = (float("inf") if image_limit is None else image_limit) if vision else 0
-    pixel_files: set[str] = set()
-    for msg in reversed(history):
-        for item in reversed(msg.media):
-            if (image_budget and item["kind"] == "image" and item.get("file")
-                    and item.get("status", "done") == "done"):
-                pixel_files.add(item["file"])
-                image_budget -= 1
-
-    conv_dir = _conv_dir(conv_id)
-
-    def pixels(item: dict) -> dict | None:
-        f = item.get("file")
-        if f in pixel_files and (conv_dir / f).is_file():
-            return {"type": "image_url", "image_url": {"url": _file_to_data_url(conv_dir / f)}}
-        return None
-
-    # Chat APIs don't accept images inside assistant messages, so images
-    # the model generated ride along with the next user message.
+    pixels = _pixels_for(_conv_dir(conv_id), _pixel_files(history, image_limit if vision else 0))
+    messages: list[dict] = []
     carried: list[dict] = []
-    carried_label = {"type": "text", "text": "[The images you generated in your previous reply, "
-                                             "attached so you can see them]"}
     for msg in history:
         if msg.role == "user":
-            parts: list[dict] = []
-            if carried:
-                parts += [carried_label, *carried]
-                carried = []
-            if msg.content:
-                parts.append({"type": "text", "text": msg.content})
-            for item in msg.media:
-                parts.append(pixels(item) or {"type": "text", "text": "[user attached an image]"})
+            parts = ([CARRIED_LABEL, *carried] if carried else []) + _user_parts(msg, pixels)
+            carried = []
             if parts:
                 messages.append({"role": "user", "content": parts})
         elif msg.role == "assistant":
             carried += [p for p in (pixels(i) for i in msg.media if i["kind"] == "image") if p]
-            generated = [i for i in msg.media if i.get("source") == "generated" and i.get("prompt")]
-            if as_tool_calls and generated:
-                # Record what actually happened: the model's tool calls and
-                # the results it got back — not text it could imitate
-                messages.append({"role": "assistant", "content": msg.content or None,
-                                 "tool_calls": [_history_tool_call(i) for i in generated]})
-                messages += [{"role": "tool", "tool_call_id": f"call_{i['id']}",
-                              "content": json.dumps(_history_tool_result(i))} for i in generated]
-                continue
-            text = msg.content or ""
-            notes = [_media_note(item) for item in msg.media]
-            if notes:
-                text = (text + "\n\n" if text else "") + "\n".join(notes)
-            if msg.status == "error" and not text:
-                continue
-            if text:
-                messages.append({"role": "assistant", "content": text})
+            messages += _assistant_messages(msg, as_tool_calls)
     if carried:  # history ended on an assistant message
-        messages.append({"role": "user", "content": [carried_label, *carried]})
+        messages.append({"role": "user", "content": [CARRIED_LABEL, *carried]})
     return messages
 
 
-def _image_context(conv_id: str, history: list, history_limit: int | None, reply_text: str,
-                   prompt: str | None, refs: list[str], instructions: str | None = None,
-                   chars: list | None = None, image_limit: int | None = DEFAULT_IMAGE_LIMIT) -> list[dict]:
+def _pixel_files(history: list, budget: int | None) -> set[str]:
+    """The most recent `budget` images (None = all) — uploaded or generated —
+    which go over as pixels so the model can see what's in them; older ones
+    are described by a note instead."""
+    images = [
+        item["file"]
+        for msg in reversed(history)
+        for item in reversed(msg.media)
+        if item["kind"] == "image" and item.get("file") and item.get("status", "done") == "done"
+    ]
+    return set(images if budget is None else images[:budget])
+
+
+def _pixels_for(conv_dir: Path, files: set[str]):
+    """A function giving an image item's pixels as a message part (None if it doesn't go as pixels)."""
+
+    def pixels(item: dict) -> dict | None:
+        f = item.get("file")
+        if f in files and (conv_dir / f).is_file():
+            return {"type": "image_url", "image_url": {"url": _file_to_data_url(conv_dir / f)}}
+        return None
+
+    return pixels
+
+
+def _user_parts(msg, pixels) -> list[dict]:
+    parts = [{"type": "text", "text": msg.content}] if msg.content else []
+    return parts + [pixels(item) or {"type": "text", "text": "[user attached an image]"} for item in msg.media]
+
+
+def _assistant_messages(msg, as_tool_calls: bool) -> list[dict]:
+    """A reply as messages: with its media as the tool calls that made it, or as notes in the text."""
+    generated = [i for i in msg.media if i.get("source") == "generated" and i.get("prompt")]
+    if as_tool_calls and generated:
+        # Record what actually happened: the model's tool calls and the
+        # results it got back — not text it could imitate
+        return [
+            {
+                "role": "assistant",
+                "content": msg.content or None,
+                "tool_calls": [_history_tool_call(i) for i in generated],
+            },
+            *(
+                {"role": "tool", "tool_call_id": f"call_{i['id']}", "content": json.dumps(_history_tool_result(i))}
+                for i in generated
+            ),
+        ]
+    text = "\n\n".join(filter(None, [msg.content or "", "\n".join(_media_note(item) for item in msg.media)]))
+    return [{"role": "assistant", "content": text}] if text else []
+
+
+def _image_context(
+    conv_id: str,
+    history: list,
+    history_limit: int | None,
+    reply_text: str,
+    prompt: str | None,
+    refs: list[str],
+    instructions: str | None = None,
+    chars: list | None = None,
+    image_limit: int | None = DEFAULT_IMAGE_LIMIT,
+) -> list[dict]:
     """What a conversational image model is sent: the conversation, then —
     when the chat model called the tool — its reply so far and its prompt,
     verbatim, with any reference images it asked for. In Image mode
@@ -1566,8 +1795,11 @@ def _image_context(conv_id: str, history: list, history_limit: int | None, reply
         # Image mode: the user's message is last; their characters' images go with it
         paths = [_ref_file(conv_id, f) for f in refs if f.startswith(characters.REF_PREFIX)]
         if paths and messages and messages[-1]["role"] == "user":
-            messages[-1] = {**messages[-1], "content": messages[-1]["content"] + [
-                {"type": "image_url", "image_url": {"url": _file_to_data_url(p)}} for p in paths if p.is_file()]}
+            messages[-1] = {
+                **messages[-1],
+                "content": messages[-1]["content"]
+                + [{"type": "image_url", "image_url": {"url": _file_to_data_url(p)}} for p in paths if p.is_file()],
+            }
     return messages
 
 
@@ -1599,9 +1831,14 @@ def _history_tool_call(item: dict) -> dict:
     # run of reference-free calls that the model then imitates
     if item["kind"] == "image":
         args.update(params.get("ref_args") or {})
-    return {"id": f"call_{item['id']}", "type": "function",
-            "function": {"name": "generate_image" if item["kind"] == "image" else "generate_video",
-                         "arguments": json.dumps(args)}}
+    return {
+        "id": f"call_{item['id']}",
+        "type": "function",
+        "function": {
+            "name": "generate_image" if item["kind"] == "image" else "generate_video",
+            "arguments": json.dumps(args),
+        },
+    }
 
 
 def _history_tool_result(item: dict) -> dict:
@@ -1645,14 +1882,16 @@ def _failure_fields(e: openrouter.OpenRouterError) -> dict[str, Any]:
     return {"status": "error", "error": str(e), "moderated": _is_moderation_error(e)}
 
 
-BLACK_IMAGE_ERROR = ("Blocked by the model's content filter: it sent back a black image. "
-                     "Try again, soften the prompt, or pick another model (🔒 private or 🔞 uncensored ones "
-                     "don't filter like this)")
+BLACK_IMAGE_ERROR = (
+    "Blocked by the model's content filter: it sent back a black image. "
+    "Try again, soften the prompt, or pick another model (🔒 private or 🔞 uncensored ones "
+    "don't filter like this)"
+)
 
 
-def _run_image_generation(conv_id: str, model: str, prompt: str, params: dict[str, Any],
-                          context: list[dict] | None = None
-                          ) -> tuple[list[str], float | None, int | None, dict[str, Any]]:
+def _run_image_generation(
+    conv_id: str, model: str, prompt: str, params: dict[str, Any], context: list[dict] | None = None
+) -> tuple[list[str], float | None, int | None, dict[str, Any]]:
     """Generate and save images; returns (filenames, dollar cost, Pollo credits,
     the params actually sent — Pollo and Venice, defaults included — for display).
     With `context` (conversational models) the model gets the conversation;
@@ -1663,19 +1902,26 @@ def _run_image_generation(conv_id: str, model: str, prompt: str, params: dict[st
         prompt = characters.with_characters(prompt, _param_characters(params))
     credits, sent = None, {}
     if venice_chat.is_venice(model):
-        images, cost, sent = venice_chat.generate_image(model, prompt, aspect_ratio=params.get("aspect_ratio"),
-                                                        resolution=params.get("resolution"), ref_paths=refs)
+        images, cost, sent = venice_chat.generate_image(
+            model, prompt, aspect_ratio=params.get("aspect_ratio"), resolution=params.get("resolution"), ref_paths=refs
+        )
     elif pollo_chat.is_pollo(model):
-        images, credits, sent = pollo_chat.generate_image(model, prompt, aspect_ratio=params.get("aspect_ratio"),
-                                                    resolution=params.get("resolution"), ref_paths=refs)
+        images, credits, sent = pollo_chat.generate_image(
+            model, prompt, aspect_ratio=params.get("aspect_ratio"), resolution=params.get("resolution"), ref_paths=refs
+        )
         cost = None
     elif context is not None:
-        images, cost = openrouter.generate_image_chat(model, context, aspect_ratio=params.get("aspect_ratio"),
-                                                      session_id=conv_id)
+        images, cost = openrouter.generate_image_chat(
+            model, context, aspect_ratio=params.get("aspect_ratio"), session_id=conv_id
+        )
     else:
         images, cost = openrouter.generate_image(
-            model, prompt, aspect_ratio=params.get("aspect_ratio"), resolution=params.get("resolution"),
-            input_images=[_file_to_data_url(f) for f in refs] or None, session_id=conv_id,
+            model,
+            prompt,
+            aspect_ratio=params.get("aspect_ratio"),
+            resolution=params.get("resolution"),
+            input_images=[_file_to_data_url(f) for f in refs] or None,
+            session_id=conv_id,
         )
     kept = [(data, media_type) for data, media_type in images if not is_blank_image(data)]
     if images and not kept:
@@ -1694,8 +1940,12 @@ def _submit_video_generation(conv_id: str, model: str, prompt: str, params: dict
     if venice_chat.is_venice(model):
         conv_dir = _conv_dir(conv_id)
         return venice_chat.submit_video(
-            model, prompt, duration=params.get("duration"), aspect_ratio=params.get("aspect_ratio"),
-            resolution=params.get("resolution"), generate_audio=params.get("generate_audio"),
+            model,
+            prompt,
+            duration=params.get("duration"),
+            aspect_ratio=params.get("aspect_ratio"),
+            resolution=params.get("resolution"),
+            generate_audio=params.get("generate_audio"),
             first_frame=frame,
             last_frame=_ref_file(conv_id, params["last_frame"]) if params.get("last_frame") else None,
             refs=[_ref_file(conv_id, r) for r in params.get("refs") or []],
@@ -1703,13 +1953,21 @@ def _submit_video_generation(conv_id: str, model: str, prompt: str, params: dict
         )
     if pollo_chat.is_pollo(model):
         return pollo_chat.submit_video(
-            model, prompt, duration=params.get("duration"), aspect_ratio=params.get("aspect_ratio"),
-            resolution=params.get("resolution"), generate_audio=params.get("generate_audio"),
+            model,
+            prompt,
+            duration=params.get("duration"),
+            aspect_ratio=params.get("aspect_ratio"),
+            resolution=params.get("resolution"),
+            generate_audio=params.get("generate_audio"),
             first_frame=frame,
         )
     return openrouter.submit_video(
-        model, prompt, duration=params.get("duration"), aspect_ratio=params.get("aspect_ratio"),
-        resolution=params.get("resolution"), generate_audio=params.get("generate_audio"),
+        model,
+        prompt,
+        duration=params.get("duration"),
+        aspect_ratio=params.get("aspect_ratio"),
+        resolution=params.get("resolution"),
+        generate_audio=params.get("generate_audio"),
         first_frame=_file_to_data_url(frame) if frame else None,
         session_id=conv_id,
     )
@@ -1745,7 +2003,7 @@ def api_pin_media(message_id: int, media_id: str, data: PinMedia):
 
 
 class RegenerateMedia(BaseModel):
-    model: str | None = None           # None = same model as the failed attempt
+    model: str | None = None  # None = same model as the failed attempt
 
 
 @router.post("/messages/{message_id}/media/{media_id}/regenerate")
@@ -1767,10 +2025,15 @@ def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia):
     if not item.get("prompt"):
         raise HTTPException(400, "This item has no stored prompt to retry")
     model = data.model or item.get("model")
-    msg = db.update_chat_media_item(message_id, media_id, status="pending", error=None,
-                                    moderated=False, model=model, job_id=None)
-    threading.Thread(target=_regenerate_worker, args=(msg.conversation_id, message_id, dict(item), model),
-                     daemon=True, name=f"chat-regen-{media_id}").start()
+    msg = db.update_chat_media_item(
+        message_id, media_id, status="pending", error=None, moderated=False, model=model, job_id=None
+    )
+    threading.Thread(
+        target=_regenerate_worker,
+        args=(msg.conversation_id, message_id, dict(item), model),
+        daemon=True,
+        name=f"chat-regen-{media_id}",
+    ).start()
     return _message_out(msg)
 
 
@@ -1785,44 +2048,69 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
                 msg = db.get_chat_message(message_id)
                 history = _branch_to(db.get_chat_messages(conv_id), message_id)[:-1]
                 direct = params.get("direct", False)
-                context = _image_context(conv_id, history, params.get("history_limit"), msg.content if msg else "",
-                                         None if direct else item["prompt"], params.get("refs") or [],
-                                         _conversation_instructions(conv_id), _param_characters(params),
-                                         params.get("image_limit", DEFAULT_IMAGE_LIMIT))
+                context = _image_context(
+                    conv_id,
+                    history,
+                    params.get("history_limit"),
+                    msg.content if msg else "",
+                    None if direct else item["prompt"],
+                    params.get("refs") or [],
+                    _conversation_instructions(conv_id),
+                    _param_characters(params),
+                    params.get("image_limit", DEFAULT_IMAGE_LIMIT),
+                )
             params["context"] = context is not None
             names, cost, credits, sent = _run_image_generation(conv_id, model, item["prompt"], params, context)
-            db.update_chat_media_item(message_id, media_id, status="done", file=names[0], cost=cost,
-                                      credits=credits, params={**params, **sent})
+            db.update_chat_media_item(
+                message_id,
+                media_id,
+                status="done",
+                file=names[0],
+                cost=cost,
+                credits=credits,
+                params={**params, **sent},
+            )
             for extra in names[1:]:
-                db.append_chat_media_item(message_id, _saved_media("image", "generated", extra,
-                                                                   prompt=item["prompt"], model=model))
+                db.append_chat_media_item(
+                    message_id, _saved_media("image", "generated", extra, prompt=item["prompt"], model=model)
+                )
             _add_message_cost(message_id, cost)
         else:
             # A different model may support different durations/ratios
             params["duration"], params["aspect_ratio"], params["resolution"] = _fit_video_params(
-                model, params.get("duration"), params.get("aspect_ratio"), params.get("resolution"))
+                model, params.get("duration"), params.get("aspect_ratio"), params.get("resolution")
+            )
             job = _submit_video_generation(conv_id, model, item["prompt"], params)
-            db.update_chat_media_item(message_id, media_id, job_id=job["id"],
-                                      params={**params, **job.get("params", {})})
+            db.update_chat_media_item(
+                message_id, media_id, job_id=job["id"], params={**params, **job.get("params", {})}
+            )
             start_video_poller(conv_id, message_id, media_id, job["id"])
     except openrouter.OpenRouterError as e:
         db.update_chat_media_item(message_id, media_id, **_failure_fields(e))
     except Exception as e:  # noqa: BLE001 — never leave the card stuck on "pending"
-        db.update_chat_media_item(message_id, media_id, status="error", error=f"{type(e).__name__}: {e}",
-                                  moderated=False)
+        db.update_chat_media_item(
+            message_id, media_id, status="error", error=f"{type(e).__name__}: {e}", moderated=False
+        )
 
 
 # ── Video polling ───────────────────────────────────────────────────
 
+
 def start_video_poller(conv_id: str, message_id: int, media_id: str, job_id: str) -> None:
-    threading.Thread(target=_poll_video, args=(conv_id, message_id, media_id, job_id),
-                     daemon=True, name=f"chat-video-{media_id}").start()
+    threading.Thread(
+        target=_poll_video, args=(conv_id, message_id, media_id, job_id), daemon=True, name=f"chat-video-{media_id}"
+    ).start()
 
 
 def _poll_video(conv_id: str, message_id: int, media_id: str, job_id: str) -> None:
     db = get_db()
-    source = (pollo_chat if pollo_chat.is_pollo_job(job_id)
-              else venice_chat if venice_chat.is_venice_job(job_id) else openrouter)
+    source = (
+        pollo_chat
+        if pollo_chat.is_pollo_job(job_id)
+        else venice_chat
+        if venice_chat.is_venice_job(job_id)
+        else openrouter
+    )
     deadline = time.time() + VIDEO_POLL_TIMEOUT
     errors = 0
     while time.time() < deadline:
@@ -1849,16 +2137,18 @@ def _poll_video(conv_id: str, message_id: int, media_id: str, job_id: str) -> No
                 db.update_chat_media_item(message_id, media_id, status="error", error=f"Download failed: {e}")
                 return
             cost = (job.get("usage") or {}).get("cost")
-            msg = db.update_chat_media_item(message_id, media_id, status="done", file=name, cost=cost,
-                                            credits=job.get("credits"))
+            msg = db.update_chat_media_item(
+                message_id, media_id, status="done", file=name, cost=cost, credits=job.get("credits")
+            )
             if msg:
                 _add_message_cost(message_id, cost)
             print(f"✅ chat video {job_id} saved as {name}")
             return
         if status in ("failed", "cancelled", "expired"):
             error = job.get("error") or f"Video {status}"
-            db.update_chat_media_item(message_id, media_id, status="error", error=error,
-                                      moderated=bool(_MODERATION.search(error)))
+            db.update_chat_media_item(
+                message_id, media_id, status="error", error=error, moderated=bool(_MODERATION.search(error))
+            )
             return
     db.update_chat_media_item(message_id, media_id, status="error", error="Timed out waiting for video")
 

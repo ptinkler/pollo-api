@@ -6,11 +6,19 @@ import GalleryPanel from './panels/GalleryPanel.vue'
 import HistoryPanel from './panels/HistoryPanel.vue'
 import ArchivePanel from './panels/ArchivePanel.vue'
 import VideoModal from '../components/VideoModal.vue'
-import { fetchProject, fetchModels, archiveJob, unarchiveJob, archiveProject, unarchiveProject, deleteProject } from '../composables/useApi'
+import {
+  fetchProject,
+  fetchModels,
+  archiveJob,
+  unarchiveJob,
+  archiveProject,
+  unarchiveProject,
+  deleteProject,
+} from '../composables/useApi'
 import { useJobsQueue } from '../composables/useJobsQueue'
 
 const props = defineProps({
-  project: { type: String, required: true }
+  project: { type: String, required: true },
 })
 
 const router = useRouter()
@@ -62,7 +70,7 @@ const tabs = [
   { id: 'gallery', label: 'Gallery', route: 'project-gallery' },
   { id: 'generate', label: 'Generate', route: 'project-generate' },
   { id: 'history', label: 'History', route: 'project-history' },
-  { id: 'archive', label: 'Archive', route: 'project-archive' }
+  { id: 'archive', label: 'Archive', route: 'project-archive' },
 ]
 
 async function loadProject() {
@@ -95,14 +103,13 @@ function setLegacyMode(value) {
   loadModels()
 }
 
-
 function openVideoModal(video) {
   selectedVideo.value = video
   modalVisible.value = true
   // Update URL to include video filename
   router.push({
     name: 'project-video',
-    params: { project: props.project, videoFilename: video.filename }
+    params: { project: props.project, videoFilename: video.filename },
   })
 }
 
@@ -130,11 +137,15 @@ function handleRegenerate(video) {
 function handleUseAsRef(video) {
   const job = video?.job || {}
   const refs = []
-  let order = 1
 
   const isImage = job.media_type === 'image' || job.job_type === 'image'
   if (job.video_url) {
-    refs.push({ type: isImage ? 'image' : 'video', name: isImage ? 'imgref1' : 'vidref1', url: job.video_url, order: order++ })
+    refs.push({
+      type: isImage ? 'image' : 'video',
+      name: isImage ? 'imgref1' : 'vidref1',
+      url: job.video_url,
+      order: 1,
+    })
   }
 
   useAsRefData.value = {
@@ -239,7 +250,7 @@ function handleJobComplete(job) {
     // Build video object matching gallery format
     const video = {
       filename: job.filename,
-      job: job
+      job: job,
     }
     galleryRef.value.addVideo(video)
   }
@@ -249,35 +260,43 @@ function viewVideoFromHistory(filename) {
   // Navigate to gallery with specific video
   router.push({
     name: 'project-video',
-    params: { project: props.project, videoFilename: filename }
+    params: { project: props.project, videoFilename: filename },
   })
 }
 
 // Watch for video filename in route to open modal
-watch(videoFilename, async (filename) => {
-  if (filename && activeTab.value === 'gallery') {
-    // Wait for gallery to load, then find and open video
-    await new Promise(resolve => setTimeout(resolve, 100))
-    if (galleryRef.value?.getVideoByFilename) {
-      const video = galleryRef.value.getVideoByFilename(filename)
-      if (video) {
-        selectedVideo.value = video
-        modalVisible.value = true
+watch(
+  videoFilename,
+  async filename => {
+    if (filename && activeTab.value === 'gallery') {
+      // Wait for gallery to load, then find and open video
+      await new Promise(resolve => setTimeout(resolve, 100))
+      if (galleryRef.value?.getVideoByFilename) {
+        const video = galleryRef.value.getVideoByFilename(filename)
+        if (video) {
+          selectedVideo.value = video
+          modalVisible.value = true
+        }
       }
     }
-  }
-}, { immediate: true })
+  },
+  { immediate: true },
+)
 
 // Load project when it changes
-watch(() => props.project, () => {
-  loadProject()
-}, { immediate: true })
+watch(
+  () => props.project,
+  () => {
+    loadProject()
+  },
+  { immediate: true },
+)
 
 // Subscribe to global job completions so gallery updates regardless of active tab
 let unsubJobComplete = null
 onMounted(() => {
   loadModels()
-  unsubJobComplete = onJobComplete((job) => {
+  unsubJobComplete = onJobComplete(job => {
     // Only add videos for the current project
     if (job.project === props.project && job.filename && job.video_exists) {
       handleJobComplete(job)
@@ -300,21 +319,25 @@ onUnmounted(() => {
       <div class="header-divider"></div>
       <h2>{{ projectData?.name || 'Loading...' }}</h2>
       <div class="header-actions">
-        <button class="header-action-btn" :title="isProjectArchived ? 'Unarchive project' : 'Archive project'" @click="handleArchiveProject">
+        <button
+          class="header-action-btn"
+          :title="isProjectArchived ? 'Unarchive project' : 'Archive project'"
+          @click="handleArchiveProject"
+        >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 8v13H3V8"/>
-            <path d="M1 3h22v5H1z"/>
-            <path d="M10 12h4"/>
+            <path d="M21 8v13H3V8" />
+            <path d="M1 3h22v5H1z" />
+            <path d="M10 12h4" />
           </svg>
           {{ isProjectArchived ? 'Unarchive' : 'Archive' }}
         </button>
         <button class="header-action-btn header-action-btn-danger" title="Delete project" @click="handleDeleteProject">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M3 6h18"/>
-            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
-            <line x1="10" y1="11" x2="10" y2="17"/>
-            <line x1="14" y1="11" x2="14" y2="17"/>
+            <path d="M3 6h18" />
+            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+            <line x1="10" y1="11" x2="10" y2="17" />
+            <line x1="14" y1="11" x2="14" y2="17" />
           </svg>
           Delete
         </button>

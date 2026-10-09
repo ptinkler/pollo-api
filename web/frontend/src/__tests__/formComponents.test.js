@@ -229,4 +229,3 @@ describe('form/index.js exports', () => {
     expect(exports.LengthSlider).toBeDefined()
   })
 })
-

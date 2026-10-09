@@ -1,7 +1,6 @@
 <script setup>
-
 defineProps({
-  toasts: { type: Array, required: true }
+  toasts: { type: Array, required: true },
 })
 
 defineEmits(['remove'])
@@ -14,12 +13,7 @@ function getIcon(type) {
 <template>
   <div class="toaster">
     <TransitionGroup name="toast">
-      <div
-        v-for="toast in toasts"
-        :key="toast.id"
-        :class="['toast', toast.type]"
-        @click="$emit('remove', toast.id)"
-      >
+      <div v-for="toast in toasts" :key="toast.id" :class="['toast', toast.type]" @click="$emit('remove', toast.id)">
         <span class="toast-icon">{{ getIcon(toast.type) }}</span>
         <span class="toast-message">{{ toast.message }}</span>
       </div>
@@ -99,4 +93,3 @@ function getIcon(type) {
   }
 }
 </style>
-

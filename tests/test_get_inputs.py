@@ -1,10 +1,15 @@
 """Tests for img2vid.common.get_inputs — file reading utilities."""
+
 import pytest
-from pathlib import Path
 
 from img2vid.common.get_inputs import (
-    get_prompt, get_image_url, get_image_path, get_video_url,
-    get_subject_url, get_audio_url, get_from_file,
+    get_audio_url,
+    get_from_file,
+    get_image_path,
+    get_image_url,
+    get_prompt,
+    get_subject_url,
+    get_video_url,
 )
 
 
@@ -96,7 +101,6 @@ class TestGetVideoUrl:
         assert get_video_url("nonexistent") is None
 
 
-
 class TestGetSubjectUrl:
     def test_reads_subject_url(self, tmp_path, monkeypatch):
         project_dir = tmp_path / "projects" / "myproj"
@@ -121,4 +125,3 @@ class TestGetAudioUrl:
     def test_returns_none_when_missing(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         assert get_audio_url("nonexistent") is None
-

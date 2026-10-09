@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 
-const status = ref('loading')   // loading | connected | error | unreachable
+const status = ref('loading') // loading | connected | error | unreachable
 const publicIp = ref('')
 const serverCountry = ref('')
 const selectedCountry = ref('')
@@ -12,10 +12,25 @@ const errorMessage = ref('')
 let timer = null
 
 const countries = [
-  'United States', 'United Kingdom', 'Canada', 'Australia',
-  'Germany', 'France', 'Netherlands', 'Japan', 'Singapore',
-  'Switzerland', 'Sweden', 'Brazil', 'India', 'South Korea',
-  'Italy', 'Spain', 'Norway', 'Denmark', 'Ireland',
+  'United States',
+  'United Kingdom',
+  'Canada',
+  'Australia',
+  'Germany',
+  'France',
+  'Netherlands',
+  'Japan',
+  'Singapore',
+  'Switzerland',
+  'Sweden',
+  'Brazil',
+  'India',
+  'South Korea',
+  'Italy',
+  'Spain',
+  'Norway',
+  'Denmark',
+  'Ireland',
 ]
 
 async function fetchStatus() {
@@ -26,9 +41,7 @@ async function fetchStatus() {
     const vpnStatus = data.vpn?.status ?? 'unknown'
     publicIp.value = data.public_ip?.public_ip || ''
     serverCountry.value = (data.server_countries || [])[0] || ''
-    status.value = vpnStatus === 'running' ? 'connected'
-                 : vpnStatus === 'unreachable' ? 'unreachable'
-                 : 'error'
+    status.value = vpnStatus === 'running' ? 'connected' : vpnStatus === 'unreachable' ? 'unreachable' : 'error'
   } catch (err) {
     console.error('[VPN] Failed to fetch status:', err)
     status.value = 'unreachable'
@@ -60,6 +73,11 @@ async function restart() {
   } finally {
     restarting.value = false
   }
+}
+
+function pickCountry() {
+  changeCountry(selectedCountry.value)
+  expanded.value = false
 }
 
 async function changeCountry(newCountry) {
@@ -109,41 +127,25 @@ const statusColor = {
       </span>
       <span v-else-if="status === 'loading'" class="info">…</span>
       <span v-else class="info err">offline</span>
-      <button
-        class="restart-btn"
-        :disabled="restarting"
-        @click.stop="restart"
-        title="Restart VPN"
-      >
+      <button class="restart-btn" :disabled="restarting" title="Restart VPN" @click.stop="restart">
         <span :class="{ spinning: restarting }">{{ restarting ? '⟳' : '↻' }}</span>
       </button>
     </div>
-    <div v-if="errorMessage" class="vpn-error" @click="errorMessage = ''">
-      ⚠ {{ errorMessage }}
-    </div>
+    <div v-if="errorMessage" class="vpn-error" @click="errorMessage = ''">⚠ {{ errorMessage }}</div>
     <div v-if="expanded && status === 'connected'" class="vpn-details">
-      <div class="detail-row" v-if="publicIp">
+      <div v-if="publicIp" class="detail-row">
         <span class="detail-label">IP</span>
         <span class="detail-value">{{ publicIp }}</span>
       </div>
-      <div class="detail-row" v-if="serverCountry">
+      <div v-if="serverCountry" class="detail-row">
         <span class="detail-label">Country</span>
         <span class="detail-value">{{ serverCountry }}</span>
       </div>
       <div class="detail-row country-row">
         <span class="detail-label">Switch</span>
-        <select
-          v-model="selectedCountry"
-          class="country-select"
-          :disabled="switching"
-          @change="changeCountry(selectedCountry); expanded = false"
-        >
+        <select v-model="selectedCountry" class="country-select" :disabled="switching" @change="pickCountry">
           <option value="" disabled>Country…</option>
-          <option
-            v-for="c in countries"
-            :key="c"
-            :value="c"
-          >{{ c }}{{ c === serverCountry ? ' ✓' : '' }}</option>
+          <option v-for="c in countries" :key="c" :value="c">{{ c }}{{ c === serverCountry ? ' ✓' : '' }}</option>
         </select>
       </div>
     </div>
@@ -261,8 +263,12 @@ const statusColor = {
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .vpn-error {

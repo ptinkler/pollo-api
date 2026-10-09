@@ -5,20 +5,37 @@ import { useVideoList } from '../../composables/useVideoList'
 
 const props = defineProps({
   project: { type: String, required: true },
-  active: { type: Boolean, default: false }
+  active: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['open-video', 'regenerate', 'use-as-ref', 'video-deleted'])
 
 const {
-  videos, loading, load,
-  handleDelete, openVideo, handleRegenerate, handleToggleFavourite, handleUnarchive,
-  getVideoByFilename, removeVideo,
-  selectMode, selectedFilenames, toggleSelectMode, toggleSelect,
-  showMoveModal, pendingMoveJobIds, handleCardMove, handleBulkMove, handleMove, handleBulkDelete,
+  videos,
+  loading,
+  load,
+  handleDelete,
+  openVideo,
+  handleRegenerate,
+  handleToggleFavourite,
+  handleUnarchive,
+  getVideoByFilename,
+  removeVideo,
+  selectMode,
+  selectedFilenames,
+  toggleSelectMode,
+  toggleSelect,
+  showMoveModal,
+  pendingMoveJobIds,
+  handleCardMove,
+  handleBulkMove,
+  handleMove,
+  handleBulkDelete,
 } = useVideoList(props, { archived: true, emit })
 
-function refresh() { load() }
+function refresh() {
+  load()
+}
 
 defineExpose({ refresh, getVideoByFilename, removeVideo })
 </script>
@@ -57,7 +74,7 @@ defineExpose({ refresh, getVideoByFilename, removeVideo })
           :selected="selectedFilenames.has(video.filename)"
           @click="openVideo"
           @regenerate="handleRegenerate"
-          @use-as-ref="(v) => emit('use-as-ref', v)"
+          @use-as-ref="v => emit('use-as-ref', v)"
           @unarchive="handleUnarchive"
           @move="handleCardMove"
           @delete="handleDelete"

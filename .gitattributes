@@ -1,0 +1,5 @@
+# Line endings: LF everywhere (the repo is edited from both Windows and WSL)
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.mp4 binary

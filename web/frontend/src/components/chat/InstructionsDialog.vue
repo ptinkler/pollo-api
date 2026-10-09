@@ -5,12 +5,12 @@ import { createInstruction, updateInstruction, deleteInstruction } from '../../c
 const props = defineProps({
   open: { type: Boolean, default: false },
   instructions: { type: Array, default: () => [] },
-  selectId: { type: Number, default: null },   // open on this one
+  selectId: { type: Number, default: null }, // open on this one
 })
 const emit = defineEmits(['close', 'changed'])
 const showToast = inject('showToast', () => {})
 
-const editingId = ref(null)   // null = new
+const editingId = ref(null) // null = new
 const name = ref('')
 const content = ref('')
 const isDefault = ref(false)
@@ -45,20 +45,22 @@ function startNew() {
   nextTick(() => nameInput.value?.focus())
 }
 
-watch(() => props.open, (open) => {
-  if (!open) return
-  load(props.instructions.find(i => i.id === props.selectId) || props.instructions[0] || null)
-  if (!props.instructions.length) nextTick(() => nameInput.value?.focus())
-})
+watch(
+  () => props.open,
+  open => {
+    if (!open) return
+    load(props.instructions.find(i => i.id === props.selectId) || props.instructions[0] || null)
+    if (!props.instructions.length) nextTick(() => nameInput.value?.focus())
+  },
+)
 
 async function save() {
   if (!name.value.trim()) return showToast('Give the instructions a name', 'error')
   saving.value = true
   try {
     const data = { name: name.value.trim(), content: content.value, is_default: isDefault.value }
-    const saved = editingId.value == null
-      ? await createInstruction(data)
-      : await updateInstruction(editingId.value, data)
+    const saved =
+      editingId.value == null ? await createInstruction(data) : await updateInstruction(editingId.value, data)
     emit('changed', { saved })
     load(saved)
   } catch (e) {
@@ -94,8 +96,8 @@ function close() {
           <button class="x" title="Close" @click="close">✕</button>
         </div>
         <p class="sub">
-          Saved here and attached per chat. Sent word for word to the chat model, and to image models
-          with the <em>context</em> badge. Prompt-only image models and video models don't receive them.
+          Saved here and attached per chat. Sent word for word to the chat model, and to image models with the
+          <em>context</em> badge. Prompt-only image models and video models don't receive them.
         </p>
 
         <div class="body">
@@ -116,7 +118,13 @@ function close() {
 
           <section class="editor">
             <label for="ins-name">Name</label>
-            <input id="ins-name" ref="nameInput" v-model="name" maxlength="255" placeholder="e.g. Picture-book storyteller" />
+            <input
+              id="ins-name"
+              ref="nameInput"
+              v-model="name"
+              maxlength="255"
+              placeholder="e.g. Picture-book storyteller"
+            />
             <label for="ins-content">Instructions</label>
             <textarea
               id="ins-content"
@@ -124,9 +132,7 @@ function close() {
               maxlength="20000"
               placeholder="How should the model behave in chats that use this? Tone, format, things to always or never do…"
             ></textarea>
-            <label class="check">
-              <input v-model="isDefault" type="checkbox" /> Attach to new chats by default
-            </label>
+            <label class="check"> <input v-model="isDefault" type="checkbox" /> Attach to new chats by default </label>
             <div class="actions">
               <button v-if="editingId != null" class="btn btn-danger" @click="remove">Delete</button>
               <span class="spacer"></span>

@@ -7,16 +7,16 @@ Create Date: 2026-10-06
 The composer mode a chat turn ran in, so editing or retrying it reruns it
 the same way (e.g. a Video-mode prompt stays a video).
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
+from alembic import op
 
-
-revision: str = '0007'
-down_revision: Union[str, Sequence[str], None] = '0006'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "0007"
+down_revision: str | Sequence[str] | None = "0006"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

@@ -15,42 +15,42 @@ const routes = [
     path: '/',
     name: 'home',
     component: HomeView,
-    meta: { title: 'Pollo Video Generator' }
+    meta: { title: 'Pollo Video Generator' },
   },
   {
     path: '/usage',
     name: 'usage',
     component: UsageView,
-    meta: { title: 'Credit Usage — Pollo' }
+    meta: { title: 'Credit Usage — Pollo' },
   },
   {
     path: '/media',
     name: 'media',
     component: MediaView,
-    meta: { title: 'Media — Pollo' }
+    meta: { title: 'Media — Pollo' },
   },
   {
     path: '/characters',
     name: 'characters',
     component: CharactersView,
-    meta: { title: 'Characters — Pollo' }
+    meta: { title: 'Characters — Pollo' },
   },
   {
     path: '/chat',
     name: 'chat',
     component: ChatView,
-    meta: { title: 'Chat — Pollo', fullBleed: true }
+    meta: { title: 'Chat — Pollo', fullBleed: true },
   },
   {
     // The old chat Library is now part of Media
     path: '/chat/library',
-    redirect: { name: 'media', query: { origin: 'chat' } }
+    redirect: { name: 'media', query: { origin: 'chat' } },
   },
   {
     path: '/chat/:id',
     name: 'chat-conversation',
     component: ChatView,
-    meta: { title: 'Chat — Pollo', fullBleed: true }
+    meta: { title: 'Chat — Pollo', fullBleed: true },
   },
   {
     path: '/project/:project',
@@ -60,50 +60,50 @@ const routes = [
     children: [
       {
         path: '',
-        redirect: to => ({ name: 'project-gallery', params: { project: to.params.project } })
+        redirect: to => ({ name: 'project-gallery', params: { project: to.params.project } }),
       },
       {
         path: 'generate',
         name: 'project-generate',
         component: EmptyRouteComponent,
-        meta: { tab: 'generate' }
+        meta: { tab: 'generate' },
       },
       {
         path: 'gallery',
         name: 'project-gallery',
         component: EmptyRouteComponent,
-        meta: { tab: 'gallery' }
+        meta: { tab: 'gallery' },
       },
       {
         path: 'gallery/:videoFilename',
         name: 'project-video',
         component: EmptyRouteComponent,
-        meta: { tab: 'gallery' }
+        meta: { tab: 'gallery' },
       },
       {
         path: 'history',
         name: 'project-history',
         component: EmptyRouteComponent,
-        meta: { tab: 'history' }
+        meta: { tab: 'history' },
       },
       {
         path: 'archive',
         name: 'project-archive',
         component: EmptyRouteComponent,
-        meta: { tab: 'archive' }
-      }
-    ]
+        meta: { tab: 'archive' },
+      },
+    ],
   },
   {
     // Catch-all redirect to home
     path: '/:pathMatch(.*)*',
-    redirect: '/'
-  }
+    redirect: '/',
+  },
 ]
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
-  routes
+  routes,
 })
 
 // Update page title on navigation (only for non-project pages)
@@ -116,4 +116,3 @@ router.beforeEach((to, from, next) => {
 })
 
 export default router
-

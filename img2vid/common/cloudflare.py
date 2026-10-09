@@ -1,4 +1,5 @@
 """Cloudflare challenge/block detection utilities."""
+
 import requests
 
 # Markers found in Cloudflare challenge pages
@@ -11,4 +12,3 @@ def is_cloudflare_block(response: requests.Response) -> bool:
         return False
     body = (response.text or "").lower()
     return any(marker in body for marker in _CF_MARKERS)
-

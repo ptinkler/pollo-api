@@ -1,11 +1,10 @@
 <script setup>
-import { computed } from 'vue'
 import { getImageUrl } from '../composables/useApi'
 
-const props = defineProps({
+defineProps({
   project: { type: Object, required: true },
   showArchive: { type: Boolean, default: true },
-  showUnarchive: { type: Boolean, default: false }
+  showUnarchive: { type: Boolean, default: false },
 })
 
 defineEmits(['click', 'archive', 'unarchive', 'delete'])
@@ -37,42 +36,28 @@ defineEmits(['click', 'archive', 'unarchive', 'delete'])
     </div>
 
     <div class="card-actions">
-      <button
-        v-if="showArchive"
-        class="action-btn"
-        title="Archive"
-        @click.stop="$emit('archive', project)"
-      >
+      <button v-if="showArchive" class="action-btn" title="Archive" @click.stop="$emit('archive', project)">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 8v13H3V8"/>
-          <path d="M1 3h22v5H1z"/>
-          <path d="M10 12h4"/>
+          <path d="M21 8v13H3V8" />
+          <path d="M1 3h22v5H1z" />
+          <path d="M10 12h4" />
         </svg>
       </button>
-      <button
-        v-if="showUnarchive"
-        class="action-btn"
-        title="Unarchive"
-        @click.stop="$emit('unarchive', project)"
-      >
+      <button v-if="showUnarchive" class="action-btn" title="Unarchive" @click.stop="$emit('unarchive', project)">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 8v13H3V8"/>
-          <path d="M1 3h22v5H1z"/>
-          <path d="M12 12v6"/>
-          <path d="M9 15l3-3 3 3"/>
+          <path d="M21 8v13H3V8" />
+          <path d="M1 3h22v5H1z" />
+          <path d="M12 12v6" />
+          <path d="M9 15l3-3 3 3" />
         </svg>
       </button>
-      <button
-        class="action-btn action-btn-danger"
-        title="Delete"
-        @click.stop="$emit('delete', project)"
-      >
+      <button class="action-btn action-btn-danger" title="Delete" @click.stop="$emit('delete', project)">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M3 6h18"/>
-          <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
-          <line x1="10" y1="11" x2="10" y2="17"/>
-          <line x1="14" y1="11" x2="14" y2="17"/>
+          <path d="M3 6h18" />
+          <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+          <line x1="10" y1="11" x2="10" y2="17" />
+          <line x1="14" y1="11" x2="14" y2="17" />
         </svg>
       </button>
     </div>
@@ -88,7 +73,9 @@ defineEmits(['click', 'archive', 'unarchive', 'delete'])
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
-  transition: border-color 0.2s, transform 0.15s;
+  transition:
+    border-color 0.2s,
+    transform 0.15s;
 }
 
 .project-card:hover {

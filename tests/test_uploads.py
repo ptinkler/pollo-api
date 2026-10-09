@@ -1,4 +1,5 @@
 """Tests for web/uploads.py — image upload helpers shared by chat and Generate."""
+
 import asyncio
 import io
 
@@ -46,10 +47,13 @@ def test_read_image_upload_ok():
     assert ext == ".png" and content.startswith(b"\x89PNG")
 
 
-@pytest.mark.parametrize("content,content_type,msg", [
-    (b"x", "text/plain", "Unsupported file type"),
-    (b"not an image", "image/png", "not a valid image"),
-])
+@pytest.mark.parametrize(
+    "content,content_type,msg",
+    [
+        (b"x", "text/plain", "Unsupported file type"),
+        (b"not an image", "image/png", "not a valid image"),
+    ],
+)
 def test_read_image_upload_rejects(content, content_type, msg):
     with pytest.raises(HTTPException) as e:
         asyncio.run(read_image_upload(FakeUpload(content, content_type)))

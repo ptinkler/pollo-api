@@ -1,8 +1,8 @@
 """Tests for img2vid.common.get_task — task status polling."""
-import pytest
-from unittest.mock import patch, MagicMock
 
-from img2vid.common.get_task import get_task_status, get_credit_balance
+from unittest.mock import MagicMock, patch
+
+from img2vid.common.get_task import get_credit_balance, get_task_status
 
 
 class TestGetTaskStatus:
@@ -10,11 +10,7 @@ class TestGetTaskStatus:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
-            "data": {
-                "generations": [
-                    {"status": "succeed", "failMsg": None, "url": "https://video.com/out.mp4"}
-                ]
-            }
+            "data": {"generations": [{"status": "succeed", "failMsg": None, "url": "https://video.com/out.mp4"}]}
         }
         with patch("img2vid.common.get_task.requests.request", return_value=mock_resp):
             results = get_task_status("task123", "api-key-123")
@@ -29,7 +25,7 @@ class TestGetTaskStatus:
                 "credit": 21,
                 "generations": [
                     {"status": "succeed", "failMsg": None, "url": "https://video.com/out.mp4", "credit": "21"}
-                ]
+                ],
             }
         }
         with patch("img2vid.common.get_task.requests.request", return_value=mock_resp):
@@ -43,9 +39,7 @@ class TestGetTaskStatus:
         mock_resp.json.return_value = {
             "data": {
                 "credit": 15,
-                "generations": [
-                    {"status": "succeed", "failMsg": None, "url": "https://video.com/out.mp4"}
-                ]
+                "generations": [{"status": "succeed", "failMsg": None, "url": "https://video.com/out.mp4"}],
             }
         }
         with patch("img2vid.common.get_task.requests.request", return_value=mock_resp):
@@ -61,7 +55,7 @@ class TestGetTaskStatus:
                 "credit": 21,
                 "result": [
                     {"status": "succeed", "failMsg": None, "videoUrl": "https://cdn.pollo.ai/video.mp4", "credit": "21"}
-                ]
+                ],
             }
         }
         with patch("img2vid.common.get_task.requests.request", return_value=mock_resp):
@@ -72,11 +66,7 @@ class TestGetTaskStatus:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
-            "data": {
-                "generations": [
-                    {"status": "error", "failMsg": "Something broke", "url": None}
-                ]
-            }
+            "data": {"generations": [{"status": "error", "failMsg": "Something broke", "url": None}]}
         }
         with patch("img2vid.common.get_task.requests.request", return_value=mock_resp):
             results = get_task_status("task123", "api-key-123")
@@ -87,11 +77,7 @@ class TestGetTaskStatus:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
-            "data": {
-                "generations": [
-                    {"status": "processing", "failMsg": None, "url": None}
-                ]
-            }
+            "data": {"generations": [{"status": "processing", "failMsg": None, "url": None}]}
         }
         with patch("img2vid.common.get_task.requests.request", return_value=mock_resp):
             results = get_task_status("task123", "api-key-123")
@@ -108,11 +94,7 @@ class TestGetTaskStatus:
     def test_api_error_status_code(self):
         mock_resp = MagicMock()
         mock_resp.status_code = 400
-        mock_resp.json.return_value = {
-            "data": {
-                "issues": [{"message": "Bad request"}]
-            }
-        }
+        mock_resp.json.return_value = {"data": {"issues": [{"message": "Bad request"}]}}
         with patch("img2vid.common.get_task.requests.request", return_value=mock_resp):
             results = get_task_status("task123", "api-key-123")
         assert results[0][0] == "error"
@@ -146,8 +128,10 @@ class TestGetTaskStatus:
         mock_resp = MagicMock()
         mock_resp.status_code = 403
         mock_resp.text = "<html><title>Just a moment...</title>cloudflare</html>"
-        with patch("img2vid.common.get_task.requests.request", return_value=mock_resp), \
-             patch("img2vid.common.get_task.is_cloudflare_block", return_value=True):
+        with (
+            patch("img2vid.common.get_task.requests.request", return_value=mock_resp),
+            patch("img2vid.common.get_task.is_cloudflare_block", return_value=True),
+        ):
             results = get_task_status("task123", "api-key-123")
         assert results[0][0] == "cloudflare_blocked"
         assert "Cloudflare" in results[0][1]
@@ -186,5 +170,3 @@ class TestGetCreditBalance:
         with patch("img2vid.common.get_task.requests.get", side_effect=Exception("timeout")):
             result = get_credit_balance("api-key-123")
         assert result is None
-
-

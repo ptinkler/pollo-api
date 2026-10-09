@@ -10,7 +10,9 @@ export async function copyText(text) {
     try {
       await navigator.clipboard.writeText(text)
       return true
-    } catch { /* permission denied — try the fallback */ }
+    } catch {
+      /* permission denied — try the fallback */
+    }
   }
   const ta = document.createElement('textarea')
   ta.value = text
@@ -22,7 +24,9 @@ export async function copyText(text) {
   let ok = false
   try {
     ok = document.execCommand('copy')
-  } catch { /* unsupported */ }
+  } catch {
+    /* unsupported */
+  }
   document.body.removeChild(ta)
   return ok
 }
@@ -38,7 +42,9 @@ export function useCopy() {
     if (ok) {
       copiedKey.value = key
       clearTimeout(timer)
-      timer = setTimeout(() => { copiedKey.value = null }, 1500)
+      timer = setTimeout(() => {
+        copiedKey.value = null
+      }, 1500)
     }
     return ok
   }

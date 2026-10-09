@@ -8,16 +8,16 @@ A chat branched off another remembers where it came from (and what the
 copied messages had cost); chats can be pinned to the top of the list; and
 each chat keeps the composer settings it was last used with.
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
+from alembic import op
 
-
-revision: str = '0010'
-down_revision: Union[str, Sequence[str], None] = '0009'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "0010"
+down_revision: str | Sequence[str] | None = "0009"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 COLUMNS = [
     sa.Column("forked_from_id", sa.String(50), nullable=True),

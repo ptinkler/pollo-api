@@ -3,7 +3,7 @@ from pathlib import Path
 
 def get_from_file(file_path: str) -> str:
     try:
-        with open(file_path, 'r') as f:
+        with open(file_path) as f:
             content = f.read().strip()
 
         if not content:
@@ -11,9 +11,9 @@ def get_from_file(file_path: str) -> str:
 
         return content
     except FileNotFoundError:
-        raise FileNotFoundError(f"{file_path} file not found")
+        raise FileNotFoundError(f"{file_path} file not found") from None
     except Exception as e:
-        raise RuntimeError(f"Error reading {file_path} file: {e}")
+        raise RuntimeError(f"Error reading {file_path} file: {e}") from e
 
 
 def _get_optional_file(project: str, filename: str) -> str | None:

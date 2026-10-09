@@ -3,16 +3,23 @@ import { ref, computed, watch, nextTick, inject } from 'vue'
 import MediaPicker from '../media/MediaPicker.vue'
 import { importMedia } from '../../composables/useMedia'
 import {
-  createCharacter, updateCharacter, deleteCharacter, promoteCharacter, uploadCharacterImage,
-  copyChatImageToCharacter, copyGenerationImageToCharacter, characterImageUrl,
+  createCharacter,
+  updateCharacter,
+  deleteCharacter,
+  promoteCharacter,
+  uploadCharacterImage,
+  copyChatImageToCharacter,
+  copyGenerationImageToCharacter,
+  characterImageUrl,
 } from '../../composables/useCharacters'
+import { takeFiles } from '../../utils/files'
 
-const MAX_IMAGES = 6   // mirrors MAX_IMAGES in web/characters.py
+const MAX_IMAGES = 6 // mirrors MAX_IMAGES in web/characters.py
 
 const props = defineProps({
   open: { type: Boolean, default: false },
-  character: { type: Object, default: null },        // edit this one; null = create
-  conversationId: { type: String, default: null },   // create as ad hoc in this chat
+  character: { type: Object, default: null }, // edit this one; null = create
+  conversationId: { type: String, default: null }, // create as ad hoc in this chat
   // Images to start a new character with: { kind: 'chat', conversationId, file, preview },
   // { kind: 'generation', project, filename, preview } or { kind: 'media', mediaId, preview }
   seed: { type: Array, default: () => [] },
@@ -22,8 +29,8 @@ const showToast = inject('showToast', () => {})
 
 const name = ref('')
 const description = ref('')
-const kept = ref([])      // existing image filenames, main first
-const pending = ref([])   // images to add on save
+const kept = ref([]) // existing image filenames, main first
+const pending = ref([]) // images to add on save
 const saving = ref(false)
 const pickerOpen = ref(false)
 const nameInput = ref(null)
@@ -32,14 +39,17 @@ let keySeq = 0
 const isNew = computed(() => !props.character)
 const total = computed(() => kept.value.length + pending.value.length)
 
-watch(() => props.open, (open) => {
-  if (!open) return
-  name.value = props.character?.name ?? ''
-  description.value = props.character?.description ?? ''
-  kept.value = [...(props.character?.images ?? [])]
-  pending.value = props.seed.map(s => ({ ...s, key: ++keySeq }))
-  nextTick(() => nameInput.value?.focus())
-})
+watch(
+  () => props.open,
+  open => {
+    if (!open) return
+    name.value = props.character?.name ?? ''
+    description.value = props.character?.description ?? ''
+    kept.value = [...(props.character?.images ?? [])]
+    pending.value = props.seed.map(s => ({ ...s, key: ++keySeq }))
+    nextTick(() => nameInput.value?.focus())
+  },
+)
 
 function addFiles(files) {
   for (const file of [...files].filter(f => f.type.startsWith('image/'))) {
@@ -115,12 +125,14 @@ async function remove() {
       <div class="dialog" role="dialog" aria-label="Character">
         <div class="head">
           <h3>{{ isNew ? 'New character' : character.name }}</h3>
-          <span v-if="character?.adhoc || (isNew && conversationId)" class="tag" title="Only in this chat until saved">this chat only</span>
+          <span v-if="character?.adhoc || (isNew && conversationId)" class="tag" title="Only in this chat until saved"
+            >this chat only</span
+          >
           <button class="x" title="Close" @click="emit('close')">✕</button>
         </div>
         <p class="sub">
-          The description is added to prompts and the images go to the model as references, so the
-          character looks the same every time. The first image is the main one.
+          The description is added to prompts and the images go to the model as references, so the character looks the
+          same every time. The first image is the main one.
         </p>
 
         <label for="char-name">Name</label>
@@ -133,7 +145,9 @@ async function remove() {
           placeholder="Appearance and anything that should stay the same: age, hair, build, clothing, style…"
         ></textarea>
 
-        <label>Images <span class="count">{{ total }}/{{ MAX_IMAGES }}</span></label>
+        <label
+          >Images <span class="count">{{ total }}/{{ MAX_IMAGES }}</span></label
+        >
         <div class="images" @dragover.prevent @drop.prevent="addFiles($event.dataTransfer?.files || [])">
           <div v-for="(f, i) in kept" :key="f" class="img" :class="{ main: i === 0 }">
             <img :src="characterImageUrl(character.id, f)" alt="" />
@@ -149,10 +163,20 @@ async function remove() {
             <label class="img add" title="Upload from this computer (or drop images here)">
               ＋
               <span class="add-label">Upload</span>
-              <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden
-                     @change="addFiles($event.target.files); $event.target.value = ''" />
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                multiple
+                hidden
+                @change="addFiles(takeFiles($event))"
+              />
             </label>
-            <button type="button" class="img add" title="Choose from your uploads and creations" @click="pickerOpen = true">
+            <button
+              type="button"
+              class="img add"
+              title="Choose from your uploads and creations"
+              @click="pickerOpen = true"
+            >
               🗂
               <span class="add-label">Library</span>
             </button>
@@ -169,7 +193,12 @@ async function remove() {
 
         <div class="actions">
           <button v-if="character" class="btn btn-danger" @click="remove">Delete</button>
-          <button v-if="character?.adhoc" class="btn btn-secondary" title="Keep it after this chat, and use it anywhere" @click="promote">
+          <button
+            v-if="character?.adhoc"
+            class="btn btn-secondary"
+            title="Keep it after this chat, and use it anywhere"
+            @click="promote"
+          >
             ⭐ Save to characters
           </button>
           <span class="spacer"></span>

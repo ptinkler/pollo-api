@@ -1,19 +1,40 @@
 <script setup>
-// Filter bar for the media library (state from useMediaFilters).
+// Filter bar for the media library: v-model:filters is useMediaFilters' state
+const filters = defineModel('filters', { type: Object, required: true })
 defineProps({
-  filters: { type: Object, required: true },
   showKind: { type: Boolean, default: true },
 })
 
-const KINDS = [['all', 'All'], ['image', 'Images'], ['video', 'Videos']]
-const SOURCES = [['all', 'Any source'], ['upload', 'Uploads'], ['generated', 'Creations']]
-const ORIGINS = [['all', 'Everywhere'], ['library', 'Library'], ['project', 'Projects'], ['chat', 'Chats']]
+const KINDS = [
+  ['all', 'All'],
+  ['image', 'Images'],
+  ['video', 'Videos'],
+]
+const SOURCES = [
+  ['all', 'Any source'],
+  ['upload', 'Uploads'],
+  ['generated', 'Creations'],
+]
+const ORIGINS = [
+  ['all', 'Everywhere'],
+  ['library', 'Library'],
+  ['project', 'Projects'],
+  ['chat', 'Chats'],
+]
 </script>
 
 <template>
   <div class="media-filters">
     <div v-if="showKind" class="seg">
-      <button v-for="[v, l] in KINDS" :key="v" type="button" :class="{ on: filters.kind === v }" @click="filters.kind = v">{{ l }}</button>
+      <button
+        v-for="[v, l] in KINDS"
+        :key="v"
+        type="button"
+        :class="{ on: filters.kind === v }"
+        @click="filters.kind = v"
+      >
+        {{ l }}
+      </button>
     </div>
     <select v-model="filters.source" aria-label="Source">
       <option v-for="[v, l] in SOURCES" :key="v" :value="v">{{ l }}</option>

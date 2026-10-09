@@ -1,24 +1,19 @@
 """Tests for web.api — FastAPI endpoints, TTLCache, helpers."""
+
 import os
-import sys
 import time
-import json
 import uuid
-import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
-# Ensure the project root is importable
-ROOT_DIR = Path(__file__).parent.parent.resolve()
-sys.path.insert(0, str(ROOT_DIR))
-
+import pytest
 from fastapi.testclient import TestClient
 
 from img2vid.common.metadata import MetadataDB
 
-
 # ── Fixtures ─────────────────────────────────────────────────────────
+
 
 @pytest.fixture(autouse=True)
 def _setup_env(tmp_path, monkeypatch):
@@ -40,10 +35,10 @@ def db(tmp_path):
 def client(tmp_path, db, monkeypatch):
     """Create a fresh FastAPI test client with mocked DB."""
     # We need to reload the api module so it picks up our temp dirs
-    import importlib
 
     # Patch module-level vars before importing
     import web.api as api_mod
+
     monkeypatch.setattr(api_mod, "ASSETS_DIR", tmp_path / "assets")
     monkeypatch.setattr(api_mod, "THUMB_CACHE_DIR", tmp_path / "cache" / "thumbnails")
     monkeypatch.setattr(api_mod, "POLLO_ROOT", tmp_path)
@@ -51,10 +46,13 @@ def client(tmp_path, db, monkeypatch):
     # The chat router (and its startup hook, run by the lifespan test) has its
     # own get_db import — patch it too so no test touches the real database
     import web.chat as chat_mod
+
     monkeypatch.setattr(chat_mod, "get_db", lambda: db)
     import web.characters as characters_mod
+
     monkeypatch.setattr(characters_mod, "get_db", lambda: db)
     import web.media as media_mod
+
     monkeypatch.setattr(media_mod, "get_db", lambda: db)
 
     # Clear caches
@@ -65,20 +63,24 @@ def client(tmp_path, db, monkeypatch):
 
 # ── TTLCache ─────────────────────────────────────────────────────────
 
+
 class TestTTLCache:
     def test_get_set(self):
         from web.api import TTLCache
+
         cache = TTLCache(default_ttl=10)
         cache.set("key", "value")
         assert cache.get("key") == "value"
 
     def test_get_miss(self):
         from web.api import TTLCache
+
         cache = TTLCache()
         assert cache.get("no_key") is None
 
     def test_ttl_expiry(self):
         from web.api import TTLCache
+
         cache = TTLCache(default_ttl=0.05)
         cache.set("key", "value")
         time.sleep(0.1)
@@ -86,6 +88,7 @@ class TestTTLCache:
 
     def test_custom_ttl(self):
         from web.api import TTLCache
+
         cache = TTLCache(default_ttl=10)
         cache.set("short", "val", ttl=0.05)
         cache.set("long", "val", ttl=10)
@@ -93,9 +96,9 @@ class TestTTLCache:
         assert cache.get("short") is None
         assert cache.get("long") == "val"
 
-
     def test_clear(self):
         from web.api import TTLCache
+
         cache = TTLCache()
         cache.set("a", 1)
         cache.set("b", 2)
@@ -104,8 +107,8 @@ class TestTTLCache:
         assert cache.get("b") is None
 
 
-
 # ── API: Models ──────────────────────────────────────────────────────
+
 
 class TestModelsEndpoint:
     def test_get_models_defaults_to_v1(self, client):
@@ -136,6 +139,7 @@ class TestModelsEndpoint:
 
 # ── API: Projects ────────────────────────────────────────────────────
 
+
 class TestProjectEndpoints:
     def test_create_project(self, client):
         resp = client.post("/api/projects", json={"name": "Test Project"})
@@ -150,12 +154,15 @@ class TestProjectEndpoints:
         assert resp.status_code == 400
 
     def test_create_project_with_urls(self, client):
-        resp = client.post("/api/projects", json={
-            "name": "URL Project",
-            "prompt": "test prompt",
-            "image_url": "https://img.com/i.jpg",
-            "video_url": "https://vid.com/v.mp4",
-        })
+        resp = client.post(
+            "/api/projects",
+            json={
+                "name": "URL Project",
+                "prompt": "test prompt",
+                "image_url": "https://img.com/i.jpg",
+                "video_url": "https://vid.com/v.mp4",
+            },
+        )
         assert resp.status_code == 200
 
     def test_list_projects(self, client):
@@ -168,8 +175,6 @@ class TestProjectEndpoints:
 
     def test_get_project(self, client, db):
         proj = db.create_project(name="Detail Test")
-        assets_path = Path(client.app.state._state.get("assets_dir", "")) if hasattr(client.app.state, "_state") else None
-        # Just use the API
         resp = client.get(f"/api/projects/{proj.slug}")
         assert resp.status_code == 200
         data = resp.json()
@@ -223,6 +228,7 @@ class TestProjectEndpoints:
 
     def test_delete_project(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="DeleteMe")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -260,6 +266,7 @@ class TestProjectEndpoints:
 
 
 # ── API: Jobs ────────────────────────────────────────────────────────
+
 
 class TestJobEndpoints:
     def _create_project_and_job(self, db, status="queued"):
@@ -324,6 +331,7 @@ class TestJobEndpoints:
         proj, job_id = self._create_project_and_job(db, status="done")
         # Create assets dir for the project
         import web.api as api_mod
+
         (api_mod.ASSETS_DIR / proj.assets_folder).mkdir(parents=True, exist_ok=True)
         resp = client.post(f"/api/jobs/{job_id}/archive")
         assert resp.status_code == 200
@@ -336,6 +344,7 @@ class TestJobEndpoints:
     def test_unarchive_job(self, client, db):
         proj, job_id = self._create_project_and_job(db, status="done")
         import web.api as api_mod
+
         (api_mod.ASSETS_DIR / proj.assets_folder).mkdir(parents=True, exist_ok=True)
         db.update_job(job_id, archived=True)
         resp = client.post(f"/api/jobs/{job_id}/unarchive")
@@ -372,38 +381,57 @@ class TestJobEndpoints:
 
 # ── API: Generate ────────────────────────────────────────────────────
 
+
 class TestGenerateEndpoint:
     def test_generate_unknown_model(self, client):
-        resp = client.post("/api/generate", json={
-            "model": "badmodel", "prompt": "test",
-        })
+        resp = client.post(
+            "/api/generate",
+            json={
+                "model": "badmodel",
+                "prompt": "test",
+            },
+        )
         assert resp.status_code == 400
 
     def test_generate_no_prompt(self, client, db):
         proj = db.create_project(name="GenTest")
-        resp = client.post("/api/generate", json={
-            "model": "pollodance20", "project": proj.slug, "prompt": "",
-        })
+        resp = client.post(
+            "/api/generate",
+            json={
+                "model": "pollodance20",
+                "project": proj.slug,
+                "prompt": "",
+            },
+        )
         assert resp.status_code == 400
 
     def test_generate_project_not_found(self, client):
-        resp = client.post("/api/generate", json={
-            "model": "pollodance20", "project": "nonexistent", "prompt": "test",
-        })
+        resp = client.post(
+            "/api/generate",
+            json={
+                "model": "pollodance20",
+                "project": "nonexistent",
+                "prompt": "test",
+            },
+        )
         assert resp.status_code == 404
 
     @patch("web.api.threading.Thread")
     def test_generate_success(self, mock_thread, client, db):
         proj = db.create_project(name="GenSuccess")
         import web.api as api_mod
+
         (api_mod.ASSETS_DIR / proj.assets_folder).mkdir(parents=True, exist_ok=True)
 
-        resp = client.post("/api/generate", json={
-            "model": "pollodance20",
-            "project": proj.slug,
-            "prompt": "A cat dancing",
-            "image_url": "https://img.com/cat.jpg",
-        })
+        resp = client.post(
+            "/api/generate",
+            json={
+                "model": "pollodance20",
+                "project": proj.slug,
+                "prompt": "A cat dancing",
+                "image_url": "https://img.com/cat.jpg",
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert "job_id" in data
@@ -412,16 +440,20 @@ class TestGenerateEndpoint:
 
     @patch("web.api.threading.Thread")
     def test_generate_auto_project(self, mock_thread, client):
-        resp = client.post("/api/generate", json={
-            "model": "pollodance20",
-            "prompt": "A dog running",
-        })
+        resp = client.post(
+            "/api/generate",
+            json={
+                "model": "pollodance20",
+                "prompt": "A dog running",
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert "project" in data
 
 
 # ── API: Video serving ───────────────────────────────────────────────
+
 
 class TestVideoServing:
     def test_serve_video_not_found(self, client, db):
@@ -441,6 +473,7 @@ class TestVideoServing:
     def test_serve_image_no_image(self, client, db):
         proj = db.create_project(name="NoImg")
         import web.api as api_mod
+
         (api_mod.ASSETS_DIR / proj.assets_folder).mkdir(parents=True, exist_ok=True)
         resp = client.get(f"/image/{proj.slug}")
         assert resp.status_code == 404
@@ -448,6 +481,7 @@ class TestVideoServing:
     def test_serve_image_with_source_image(self, client, db):
         proj = db.create_project(name="HasImg")
         import web.api as api_mod
+
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
         (assets / "image.jpg").write_bytes(b"\xff\xd8\xff\xe0fake_jpg")
@@ -465,6 +499,7 @@ class TestVideoServing:
 
 
 # ── API: Cache management ───────────────────────────────────────────
+
 
 class TestCacheEndpoint:
     def test_clear_cache(self, client):
@@ -487,7 +522,9 @@ class TestCacheEndpoint:
 
     def test_cleanup_thumbnails_keeps_valid(self, client, db, tmp_path):
         """Cached thumbnails that correspond to an existing video are kept."""
-        import hashlib, web.api as api_mod
+        import hashlib
+
+        import web.api as api_mod
 
         proj = db.create_project(name="KeepThumb")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
@@ -510,9 +547,11 @@ class TestCacheEndpoint:
 
 # ── Helpers: internal functions ──────────────────────────────────────
 
+
 class TestGetAssetsPath:
     def test_returns_path(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="AP")
         result = api_mod._get_assets_path(proj.slug)
         assert result is not None
@@ -520,12 +559,14 @@ class TestGetAssetsPath:
 
     def test_returns_none_for_unknown(self, client):
         import web.api as api_mod
+
         assert api_mod._get_assets_path("nonexistent") is None
 
 
 class TestGetProjectAssetsFolder:
     def test_cached_not_found(self, client):
         import web.api as api_mod
+
         # First call -> cache miss, sets __NOT_FOUND__
         assert api_mod._get_project_assets_folder("no_such") is None
         # Second call -> cache hit with __NOT_FOUND__
@@ -535,6 +576,7 @@ class TestGetProjectAssetsFolder:
 class TestFindVideoForJob:
     def test_video_path_exists(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="FVJ")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -548,6 +590,7 @@ class TestFindVideoForJob:
 
     def test_video_path_missing_looks_up_by_url(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="FVJ2")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -561,6 +604,7 @@ class TestFindVideoForJob:
 
     def test_video_path_missing_looks_up_by_task_id(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="FVJ3")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -574,6 +618,7 @@ class TestFindVideoForJob:
 
     def test_no_video_found(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="FVJ4")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -584,6 +629,7 @@ class TestFindVideoForJob:
 
     def test_no_assets_path(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="FVJ5")
         # Don't create assets dir
         db.create_job(job_id="fvj5", project=proj.slug, model="pollodance20", prompt="x")
@@ -593,6 +639,7 @@ class TestFindVideoForJob:
 
     def test_no_project(self, client, db):
         import web.api as api_mod
+
         # Create a job with a project slug that doesn't map to a project
         # Use a mock job
         job = MagicMock()
@@ -606,6 +653,7 @@ class TestFindVideoForJob:
     def test_url_suffix_match(self, client, db, tmp_path):
         """Match video by URL with suffix like filename(1).mp4"""
         import web.api as api_mod
+
         proj = db.create_project(name="FVJ6")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -618,10 +666,10 @@ class TestFindVideoForJob:
         assert exists is True
 
 
-
 class TestGetLatestVideoUncached:
     def test_returns_latest(self, client, tmp_path):
         import web.api as api_mod
+
         d = tmp_path / "uncached"
         d.mkdir()
         (d / "a.mp4").write_bytes(b"\x00")
@@ -630,6 +678,7 @@ class TestGetLatestVideoUncached:
 
     def test_excludes_filenames(self, client, tmp_path):
         import web.api as api_mod
+
         d = tmp_path / "uncached2"
         d.mkdir()
         (d / "a.mp4").write_bytes(b"\x00")
@@ -638,10 +687,12 @@ class TestGetLatestVideoUncached:
 
     def test_nonexistent_dir(self, client, tmp_path):
         import web.api as api_mod
+
         assert api_mod._get_latest_video_uncached(tmp_path / "nope") is None
 
     def test_empty_dir(self, client, tmp_path):
         import web.api as api_mod
+
         d = tmp_path / "emptydir"
         d.mkdir()
         assert api_mod._get_latest_video_uncached(d) is None
@@ -650,6 +701,7 @@ class TestGetLatestVideoUncached:
 class TestUpdateProjectThumbnail:
     def test_creates_thumb_from_video(self, client, db, tmp_path):
         import web.api as api_mod
+
         assets = tmp_path / "assets" / "thumbproj"
         assets.mkdir(parents=True, exist_ok=True)
         (assets / "vid.mp4").write_bytes(b"\x00" * 100)
@@ -661,6 +713,7 @@ class TestUpdateProjectThumbnail:
 
     def test_no_videos_removes_thumb(self, client, tmp_path):
         import web.api as api_mod
+
         assets = tmp_path / "assets" / "nothumb"
         assets.mkdir(parents=True, exist_ok=True)
         (assets / "thumb.jpg").write_bytes(b"\xff\xd8old")
@@ -670,6 +723,7 @@ class TestUpdateProjectThumbnail:
 
     def test_thumb_already_up_to_date(self, client, tmp_path):
         import web.api as api_mod
+
         assets = tmp_path / "assets" / "uptodate"
         assets.mkdir(parents=True, exist_ok=True)
         vid = assets / "vid.mp4"
@@ -677,13 +731,13 @@ class TestUpdateProjectThumbnail:
         thumb = assets / "thumb.jpg"
         thumb.write_bytes(b"\xff\xd8ok")
         # Make thumb newer than video
-        import os
         os.utime(str(thumb), (time.time() + 100, time.time() + 100))
         result = api_mod._update_project_thumbnail(assets, force=False)
         assert result is True
 
     def test_extract_fails(self, client, tmp_path):
         import web.api as api_mod
+
         assets = tmp_path / "assets" / "failextract"
         assets.mkdir(parents=True, exist_ok=True)
         (assets / "vid.mp4").write_bytes(b"\x00" * 100)
@@ -693,16 +747,20 @@ class TestUpdateProjectThumbnail:
 
     def test_write_fails(self, client, tmp_path):
         import web.api as api_mod
+
         assets = tmp_path / "assets" / "writefail"
         assets.mkdir(parents=True, exist_ok=True)
         (assets / "vid.mp4").write_bytes(b"\x00" * 100)
-        with patch.object(api_mod, "_extract_first_frame_uncached", return_value=b"\xff\xd8fake"), \
-             patch.object(Path, "write_bytes", side_effect=OSError("disk full")):
+        with (
+            patch.object(api_mod, "_extract_first_frame_uncached", return_value=b"\xff\xd8fake"),
+            patch.object(Path, "write_bytes", side_effect=OSError("disk full")),
+        ):
             result = api_mod._update_project_thumbnail(assets, force=True)
         assert result is False
 
     def test_no_videos_thumb_removal_fails(self, client, tmp_path):
         import web.api as api_mod
+
         assets = tmp_path / "assets" / "unlinkfail"
         assets.mkdir(parents=True, exist_ok=True)
         (assets / "thumb.jpg").write_bytes(b"\xff\xd8old")
@@ -714,6 +772,7 @@ class TestUpdateProjectThumbnail:
 class TestGetVideoList:
     def test_returns_videos(self, client, tmp_path):
         import web.api as api_mod
+
         assets = tmp_path / "assets" / "vids"
         assets.mkdir(parents=True, exist_ok=True)
         (assets / "a.mp4").write_bytes(b"\x00")
@@ -724,6 +783,7 @@ class TestGetVideoList:
 
     def test_nonexistent_dir(self, client, tmp_path):
         import web.api as api_mod
+
         result = api_mod._get_video_list(tmp_path / "nope")
         assert result == []
 
@@ -731,6 +791,7 @@ class TestGetVideoList:
 class TestExtractFirstFrame:
     def test_uncached_returns_none_for_invalid(self, client, tmp_path):
         import web.api as api_mod
+
         fp = tmp_path / "invalid.mp4"
         fp.write_bytes(b"\x00")
         result = api_mod._extract_first_frame_uncached(fp)
@@ -739,6 +800,7 @@ class TestExtractFirstFrame:
 
     def test_cached_returns_from_disk(self, client, tmp_path):
         import web.api as api_mod
+
         fp = tmp_path / "cached.mp4"
         fp.write_bytes(b"\x00")
         # Simulate a cached thumbnail on disk
@@ -750,6 +812,7 @@ class TestExtractFirstFrame:
 
     def test_cached_extracts_and_saves(self, client, tmp_path):
         import web.api as api_mod
+
         fp = tmp_path / "extract.mp4"
         fp.write_bytes(b"\x00")
         # No cache on disk, mock extraction
@@ -761,6 +824,7 @@ class TestExtractFirstFrame:
 
     def test_cached_extract_none(self, client, tmp_path):
         import web.api as api_mod
+
         fp = tmp_path / "noframe.mp4"
         fp.write_bytes(b"\x00")
         with patch.object(api_mod, "_extract_first_frame_uncached", return_value=None):
@@ -769,13 +833,16 @@ class TestExtractFirstFrame:
 
     def test_cache_read_fails(self, client, tmp_path):
         import web.api as api_mod
+
         fp = tmp_path / "badc.mp4"
         fp.write_bytes(b"\x00")
         cache_path = api_mod._get_thumb_cache_path(fp)
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_bytes(b"\xff\xd8data")
-        with patch.object(Path, "read_bytes", side_effect=OSError("read fail")), \
-             patch.object(api_mod, "_extract_first_frame_uncached", return_value=b"\xff\xd8new"):
+        with (
+            patch.object(Path, "read_bytes", side_effect=OSError("read fail")),
+            patch.object(api_mod, "_extract_first_frame_uncached", return_value=b"\xff\xd8new"),
+        ):
             result = api_mod._extract_first_frame(fp)
         assert result == b"\xff\xd8new"
 
@@ -783,6 +850,7 @@ class TestExtractFirstFrame:
 class TestGetThumbCachePath:
     def test_returns_path(self, client, tmp_path):
         import web.api as api_mod
+
         fp = tmp_path / "test.mp4"
         fp.write_bytes(b"\x00")
         result = api_mod._get_thumb_cache_path(fp)
@@ -790,6 +858,7 @@ class TestGetThumbCachePath:
 
     def test_nonexistent_file(self, client, tmp_path):
         import web.api as api_mod
+
         fp = tmp_path / "nofile.mp4"
         result = api_mod._get_thumb_cache_path(fp)
         assert str(result).endswith(".jpg")
@@ -798,6 +867,7 @@ class TestGetThumbCachePath:
 class TestGetArchivedFilenames:
     def test_returns_filenames(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="ArchFN")
         db.create_job(job_id="af1", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("af1", archived=True, video_path="/path/to/vid.mp4")
@@ -806,12 +876,14 @@ class TestGetArchivedFilenames:
 
     def test_empty_set(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="NoArch")
         result = api_mod._get_archived_filenames(proj.slug)
         assert result == set()
 
 
 # ── API: run_generation (background worker) ─────────────────────────
+
 
 class TestRunGeneration:
     @patch("web.api.download_video")
@@ -857,6 +929,7 @@ class TestRunGeneration:
     @patch("web.api.get_video_generator")
     def test_api_error(self, mock_gen_fn, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="RunGenErr")
         gen = MagicMock()
         gen.project = proj.assets_folder
@@ -876,6 +949,7 @@ class TestRunGeneration:
     @patch("web.api.get_video_generator")
     def test_no_task_id(self, mock_gen_fn, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="RunGenNoTask")
         gen = MagicMock()
         gen.project = proj.assets_folder
@@ -897,6 +971,7 @@ class TestRunGeneration:
     @patch("web.api.get_video_generator")
     def test_poll_error(self, mock_gen_fn, mock_task, mock_sleep, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="RunGenPollErr")
         gen = MagicMock()
         gen.project = proj.assets_folder
@@ -920,6 +995,7 @@ class TestRunGeneration:
     @patch("web.api.get_video_generator")
     def test_no_url(self, mock_gen_fn, mock_task, mock_sleep, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="RunGenNoUrl")
         gen = MagicMock()
         gen.project = proj.assets_folder
@@ -942,6 +1018,7 @@ class TestRunGeneration:
     @patch("web.api.get_video_generator", side_effect=Exception("boom"))
     def test_exception(self, mock_gen_fn, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="RunGenExc")
         job_id = "rgex1"
         db.create_job(job_id=job_id, project=proj.slug, model="pollodance20", prompt="test")
@@ -957,6 +1034,7 @@ class TestRunGeneration:
     def test_video_edit_mode(self, mock_gen_fn, mock_sleep, mock_task, mock_dl_img, mock_dl_vid, client, db, tmp_path):
         """Cover the is_video_edit branch in run_generation."""
         import web.api as api_mod
+
         proj = db.create_project(name="VidEdit")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -989,10 +1067,12 @@ class TestRunGeneration:
 
 # ── API: recover_stale_job ──────────────────────────────────────────
 
+
 class TestRecoverStaleJob:
     @patch("web.api._download_recovered_job")
     def test_recover_with_video_url(self, mock_dl, client, db):
         import web.api as api_mod
+
         proj = db.create_project(name="Recover1")
         db.create_job(job_id="rcv1", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("rcv1", status="downloading", video_url="https://v.mp4")
@@ -1003,6 +1083,7 @@ class TestRecoverStaleJob:
 
     def test_recover_no_task_id(self, client, db):
         import web.api as api_mod
+
         proj = db.create_project(name="Recover2")
         db.create_job(job_id="rcv2", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("rcv2", status="processing")
@@ -1013,6 +1094,7 @@ class TestRecoverStaleJob:
 
     def test_recover_no_api_key(self, client, db, monkeypatch):
         import web.api as api_mod
+
         proj = db.create_project(name="Recover3")
         db.create_job(job_id="rcv3", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("rcv3", status="processing", task_id="t1")
@@ -1026,6 +1108,7 @@ class TestRecoverStaleJob:
     @patch("web.api.get_task_status")
     def test_recover_success_with_url(self, mock_task, mock_dl, client, db):
         import web.api as api_mod
+
         proj = db.create_project(name="Recover4")
         db.create_job(job_id="rcv4", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("rcv4", status="processing", task_id="t1")
@@ -1038,6 +1121,7 @@ class TestRecoverStaleJob:
     @patch("web.api.get_task_status")
     def test_recover_success_no_url(self, mock_task, client, db):
         import web.api as api_mod
+
         proj = db.create_project(name="Recover5")
         db.create_job(job_id="rcv5", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("rcv5", status="processing", task_id="t1")
@@ -1050,6 +1134,7 @@ class TestRecoverStaleJob:
     @patch("web.api.get_task_status")
     def test_recover_api_error(self, mock_task, client, db):
         import web.api as api_mod
+
         proj = db.create_project(name="Recover6")
         db.create_job(job_id="rcv6", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("rcv6", status="processing", task_id="t1")
@@ -1062,6 +1147,7 @@ class TestRecoverStaleJob:
     @patch("web.api.get_task_status")
     def test_recover_still_processing(self, mock_task, client, db):
         import web.api as api_mod
+
         proj = db.create_project(name="Recover7")
         db.create_job(job_id="rcv7", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("rcv7", status="processing", task_id="t1")
@@ -1074,6 +1160,7 @@ class TestRecoverStaleJob:
     @patch("web.api.get_task_status", return_value=[])
     def test_recover_no_results(self, mock_task, client, db):
         import web.api as api_mod
+
         proj = db.create_project(name="Recover8")
         db.create_job(job_id="rcv8", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("rcv8", status="processing", task_id="t1")
@@ -1085,6 +1172,7 @@ class TestRecoverStaleJob:
     @patch("web.api.get_task_status", side_effect=Exception("network error"))
     def test_recover_exception(self, mock_task, client, db):
         import web.api as api_mod
+
         proj = db.create_project(name="Recover9")
         db.create_job(job_id="rcv9", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("rcv9", status="processing", task_id="t1")
@@ -1096,6 +1184,7 @@ class TestRecoverStaleJob:
 
 # ── API: Job endpoints (more coverage) ──────────────────────────────
 
+
 class TestJobEndpointsExtended:
     @patch("web.api._download_recovered_job")
     def test_get_job_stale_recovery(self, mock_dl, client, db):
@@ -1104,9 +1193,9 @@ class TestJobEndpointsExtended:
         db.create_job(job_id="stale1", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("stale1", status="downloading", video_url="https://v.mp4")
         # Make it stale by setting updated_at to the past
-        from datetime import timedelta
         with db._session() as session:
             from img2vid.common.metadata import Job as JobModel
+
             job = session.query(JobModel).filter(JobModel.job_id == "stale1").first()
             job.updated_at = datetime.now() - timedelta(seconds=300)
             session.commit()
@@ -1117,6 +1206,7 @@ class TestJobEndpointsExtended:
     def test_get_job_video_path_update(self, client, db, tmp_path):
         """Job video_path is updated if found at different location."""
         import web.api as api_mod
+
         proj = db.create_project(name="PathUpd")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1209,6 +1299,7 @@ class TestJobEndpointsExtended:
     def test_check_job_done_with_video(self, client, db, tmp_path):
         """Check job that's already done with video file."""
         import web.api as api_mod
+
         proj = db.create_project(name="ChkDone")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1233,10 +1324,12 @@ class TestJobEndpointsExtended:
 
 # ── API: Download job video ─────────────────────────────────────────
 
+
 class TestDownloadJobVideo:
     @patch("web.api.download_video")
     def test_download_success(self, mock_dl, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="DlJob")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1252,14 +1345,14 @@ class TestDownloadJobVideo:
 
     def test_download_already_exists(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="DlExists")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
         vid = assets / "existing.mp4"
         vid.write_bytes(b"\x00")
         db.create_job(job_id="de1", project=proj.slug, model="pollodance20", prompt="x")
-        db.update_job("de1", status="done", video_url="https://cdn.example.com/existing.mp4",
-                      video_path=str(vid))
+        db.update_job("de1", status="done", video_url="https://cdn.example.com/existing.mp4", video_path=str(vid))
         resp = client.post("/api/jobs/de1/download")
         assert resp.status_code == 200
         assert "already exists" in resp.json()["message"]
@@ -1267,6 +1360,7 @@ class TestDownloadJobVideo:
     @patch("web.api.download_video", side_effect=Exception("download failed"))
     def test_download_failure(self, mock_dl, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="DlFail")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1278,11 +1372,11 @@ class TestDownloadJobVideo:
     @patch("web.api.download_video")
     def test_download_with_params_json(self, mock_dl, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="DlParams")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
-        db.create_job(job_id="dp1", project=proj.slug, model="pollodance20", prompt="x",
-                      params={"web_search": True})
+        db.create_job(job_id="dp1", project=proj.slug, model="pollodance20", prompt="x", params={"web_search": True})
         db.update_job("dp1", status="done", video_url="https://v.mp4")
         mock_dl.return_value = str(assets / "v.mp4")
         (assets / "v.mp4").write_bytes(b"\x00" * 100)
@@ -1293,7 +1387,6 @@ class TestDownloadJobVideo:
     @patch("web.api.download_video")
     def test_download_project_not_found(self, mock_dl, client, db, tmp_path):
         """Cover line 863: project not found during download."""
-        import web.api as api_mod
         proj = db.create_project(name="DlNoProj")
         db.create_job(job_id="dnp1", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("dnp1", status="done", video_url="https://v.mp4")
@@ -1307,6 +1400,7 @@ class TestDownloadJobVideo:
     def test_download_with_invalid_params_json(self, mock_dl, client, db, tmp_path):
         """Cover lines 872-873: invalid params_json in download job."""
         import web.api as api_mod
+
         proj = db.create_project(name="DlBadJson")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1315,6 +1409,7 @@ class TestDownloadJobVideo:
         # Manually set bad params_json
         with db._session() as session:
             from img2vid.common.metadata import Job as JobModel
+
             job = session.query(JobModel).filter(JobModel.job_id == "dbj1").first()
             job.params_json = "not valid json"
             session.commit()
@@ -1327,9 +1422,11 @@ class TestDownloadJobVideo:
 
 # ── API: Delete job with video ──────────────────────────────────────
 
+
 class TestDeleteJobWithVideo:
     def test_delete_with_video_file(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="DelJV")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1343,7 +1440,6 @@ class TestDeleteJobWithVideo:
         assert not vid.exists()
 
     def test_delete_video_file_missing(self, client, db, tmp_path):
-        import web.api as api_mod
         proj = db.create_project(name="DelJVMiss")
         db.create_job(job_id="djvm1", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("djvm1", status="done", video_path="/nonexistent/vid.mp4")
@@ -1354,9 +1450,11 @@ class TestDeleteJobWithVideo:
 
 # ── API: Delete video endpoint ──────────────────────────────────────
 
+
 class TestDeleteVideoEndpoint:
     def test_delete_video_success(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="DelVid")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1371,9 +1469,11 @@ class TestDeleteVideoEndpoint:
 
 # ── API: Serve video ────────────────────────────────────────────────
 
+
 class TestServeVideoExtended:
     def test_serve_video_success(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="ServeVid")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1385,6 +1485,7 @@ class TestServeVideoExtended:
     def test_serve_video_fallback_assets_folder(self, client, db, tmp_path):
         """When slug lookup fails, falls back to using project as assets folder."""
         import web.api as api_mod
+
         # Create a directory directly named 'direct_folder'
         assets = api_mod.ASSETS_DIR / "direct_folder"
         assets.mkdir(parents=True, exist_ok=True)
@@ -1395,6 +1496,7 @@ class TestServeVideoExtended:
 
     def test_serve_video_thumb_success(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="ThumbSucc")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1406,6 +1508,7 @@ class TestServeVideoExtended:
 
     def test_serve_video_thumb_extract_fails(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="ThumbFail")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1417,6 +1520,7 @@ class TestServeVideoExtended:
 
     def test_serve_video_thumb_fallback(self, client, db, tmp_path):
         import web.api as api_mod
+
         assets = api_mod.ASSETS_DIR / "fallback_folder"
         assets.mkdir(parents=True, exist_ok=True)
         vid = assets / "test.mp4"
@@ -1428,9 +1532,11 @@ class TestServeVideoExtended:
 
 # ── API: Serve image ────────────────────────────────────────────────
 
+
 class TestServeImageExtended:
     def test_serve_thumb_jpg(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="ThumbImg")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1441,6 +1547,7 @@ class TestServeImageExtended:
 
     def test_serve_png_image(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="PngImg")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1451,61 +1558,86 @@ class TestServeImageExtended:
 
 # ── API: Generate (more options) ────────────────────────────────────
 
+
 class TestGenerateOptions:
     @patch("web.api.threading.Thread")
     def test_generate_with_model_options(self, mock_thread, client, db):
         proj = db.create_project(name="Seedance")
         import web.api as api_mod
+
         (api_mod.ASSETS_DIR / proj.assets_folder).mkdir(parents=True, exist_ok=True)
-        resp = client.post("/api/generate", json={
-            "model": "pollodance20",
-            "project": proj.slug,
-            "prompt": "A test",
-            "image_tail": "https://tail.jpg",
-        })
+        resp = client.post(
+            "/api/generate",
+            json={
+                "model": "pollodance20",
+                "project": proj.slug,
+                "prompt": "A test",
+                "image_tail": "https://tail.jpg",
+            },
+        )
         assert resp.status_code == 200
 
     @patch("web.api.threading.Thread")
     def test_generate_ref_mode(self, mock_thread, client, db):
         proj = db.create_project(name="RefMode")
         import web.api as api_mod
+
         (api_mod.ASSETS_DIR / proj.assets_folder).mkdir(parents=True, exist_ok=True)
-        resp = client.post("/api/generate", json={
-            "model": "pollodanceref",
-            "project": proj.slug,
-            "prompt": "Edit video",
-            "video_url": "https://v.mp4",
-            "subject_url": "https://s.jpg",
-            "audio_url": "https://a.mp3",
-        })
+        resp = client.post(
+            "/api/generate",
+            json={
+                "model": "pollodanceref",
+                "project": proj.slug,
+                "prompt": "Edit video",
+                "video_url": "https://v.mp4",
+                "subject_url": "https://s.jpg",
+                "audio_url": "https://a.mp3",
+            },
+        )
         assert resp.status_code == 200
 
     def _v1_ref_post(self, client, db, name, model, refs, **extra):
         proj = db.create_project(name=name)
         import web.api as api_mod
+
         (api_mod.ASSETS_DIR / proj.assets_folder).mkdir(parents=True, exist_ok=True)
-        return client.post("/api/generate", json={
-            "model": model, "project": proj.slug, "prompt": "p", "refs": refs, **extra,
-        })
+        return client.post(
+            "/api/generate",
+            json={
+                "model": model,
+                "project": proj.slug,
+                "prompt": "p",
+                "refs": refs,
+                **extra,
+            },
+        )
 
     @patch("web.api.threading.Thread")
     def test_generate_v1_ref_mode(self, mock_thread, client, db):
         refs = [{"type": "image", "url": "https://i.jpg"}, {"type": "video", "url": "https://v.mp4"}]
-        resp = self._v1_ref_post(client, db, "V1Ref", "seedance20v1", refs,
-                                 image_url="https://src.jpg", image_tail="https://tail.jpg")
+        resp = self._v1_ref_post(
+            client, db, "V1Ref", "seedance20v1", refs, image_url="https://src.jpg", image_tail="https://tail.jpg"
+        )
         assert resp.status_code == 200
         kwargs = mock_thread.call_args.kwargs["args"][2]
         assert kwargs["refs"] == refs
         assert kwargs["image_url"] is None
         assert "image_tail" not in kwargs
 
-    @pytest.mark.parametrize("model,refs,detail", [
-        ("pollo20v1", [{"type": "video", "url": "https://v.mp4"}], "doesn't accept video"),
-        ("pollo20v1", [{"type": "image", "url": f"https://{i}.jpg"} for i in range(8)], "max 7"),
-        ("seedance20v1", [{"type": "image", "url": f"https://{i}.jpg"} for i in range(10)], "image references (max 9)"),
-        ("seedance20v1", [{"type": "audio", "url": "https://a.mp3"}], "non-audio"),
-        ("wan30v1", [{"type": "file", "url": "https://d.pdf"}, {"type": "link", "url": "https://l"}], "combine"),
-    ])
+    @pytest.mark.parametrize(
+        "model,refs,detail",
+        [
+            ("pollo20v1", [{"type": "video", "url": "https://v.mp4"}], "doesn't accept video"),
+            ("pollo20v1", [{"type": "image", "url": f"https://{i}.jpg"} for i in range(8)], "max 7"),
+            (
+                "seedance20v1",
+                [{"type": "image", "url": f"https://{i}.jpg"} for i in range(10)],
+                "image references (max 9)",
+            ),
+            ("seedance20v1", [{"type": "audio", "url": "https://a.mp3"}], "non-audio"),
+            ("wan30v1", [{"type": "file", "url": "https://d.pdf"}, {"type": "link", "url": "https://l"}], "combine"),
+        ],
+    )
     @patch("web.api.threading.Thread")
     def test_generate_v1_ref_mode_rejects_invalid_refs(self, mock_thread, client, db, model, refs, detail):
         resp = self._v1_ref_post(client, db, "V1RefBad", model, refs)
@@ -1517,17 +1649,22 @@ class TestGenerateOptions:
     def test_generate_with_web_search(self, mock_thread, client, db):
         proj = db.create_project(name="WebSearch")
         import web.api as api_mod
+
         (api_mod.ASSETS_DIR / proj.assets_folder).mkdir(parents=True, exist_ok=True)
-        resp = client.post("/api/generate", json={
-            "model": "pollodance20",
-            "project": proj.slug,
-            "prompt": "test",
-            "web_search": True,
-        })
+        resp = client.post(
+            "/api/generate",
+            json={
+                "model": "pollodance20",
+                "project": proj.slug,
+                "prompt": "test",
+                "web_search": True,
+            },
+        )
         assert resp.status_code == 200
 
 
 # ── API: Jobs list (stale recovery in listing) ──────────────────────
+
 
 class TestJobsListStaleRecovery:
     @patch("web.api._download_recovered_job")
@@ -1535,9 +1672,9 @@ class TestJobsListStaleRecovery:
         proj = db.create_project(name="StaleList")
         db.create_job(job_id="sl1", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("sl1", status="downloading", video_url="https://v.mp4")
-        from datetime import timedelta
         with db._session() as session:
             from img2vid.common.metadata import Job as JobModel
+
             job = session.query(JobModel).filter(JobModel.job_id == "sl1").first()
             job.updated_at = datetime.now() - timedelta(seconds=300)
             session.commit()
@@ -1549,6 +1686,7 @@ class TestJobsListStaleRecovery:
 
     def test_jobs_list_with_video_exists(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="VideoExists")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1564,9 +1702,11 @@ class TestJobsListStaleRecovery:
 
 # ── API: Project get with video filtering ───────────────────────────
 
+
 class TestGetProjectVideoFiltering:
     def test_get_project_with_videos(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="VidFilter")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1582,6 +1722,7 @@ class TestGetProjectVideoFiltering:
 
     def test_get_project_filter_archived(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="ArchFilter")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1596,6 +1737,7 @@ class TestGetProjectVideoFiltering:
 
     def test_get_project_filter_not_archived(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="NotArchFilter")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1611,9 +1753,11 @@ class TestGetProjectVideoFiltering:
 
 # ── API: Project list with thumb_ts ─────────────────────────────────
 
+
 class TestProjectListThumb:
     def test_list_projects_with_thumb(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="ThumbList")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1628,49 +1772,62 @@ class TestProjectListThumb:
 
 # ── API: Update project fields ──────────────────────────────────────
 
+
 class TestUpdateProjectFields:
     def test_update_all_fields(self, client, db):
         proj = db.create_project(name="UpdAll")
-        resp = client.put(f"/api/projects/{proj.slug}", json={
-            "name": "New Name",
-            "prompt": "new prompt",
-            "image_url": "https://img.com/new.jpg",
-            "video_url": "https://vid.com/new.mp4",
-            "subject_url": "https://subj.com/new.jpg",
-            "audio_url": "https://audio.com/new.mp3",
-        })
+        resp = client.put(
+            f"/api/projects/{proj.slug}",
+            json={
+                "name": "New Name",
+                "prompt": "new prompt",
+                "image_url": "https://img.com/new.jpg",
+                "video_url": "https://vid.com/new.mp4",
+                "subject_url": "https://subj.com/new.jpg",
+                "audio_url": "https://audio.com/new.mp3",
+            },
+        )
         assert resp.status_code == 200
 
     def test_update_clear_fields(self, client, db):
         proj = db.create_project(name="ClearF")
         db.update_project(proj.slug, prompt="old", image_url="https://old.jpg")
-        resp = client.put(f"/api/projects/{proj.slug}", json={
-            "prompt": "",
-            "image_url": "",
-        })
+        resp = client.put(
+            f"/api/projects/{proj.slug}",
+            json={
+                "prompt": "",
+                "image_url": "",
+            },
+        )
         assert resp.status_code == 200
 
 
 # ── API: Create project with all urls ───────────────────────────────
 
+
 class TestCreateProjectAllUrls:
     def test_create_with_subject_and_audio_url(self, client):
-        resp = client.post("/api/projects", json={
-            "name": "Full URLs",
-            "prompt": "test",
-            "image_url": "https://i.jpg",
-            "video_url": "https://v.mp4",
-            "subject_url": "https://s.jpg",
-            "audio_url": "https://a.mp3",
-        })
+        resp = client.post(
+            "/api/projects",
+            json={
+                "name": "Full URLs",
+                "prompt": "test",
+                "image_url": "https://i.jpg",
+                "video_url": "https://v.mp4",
+                "subject_url": "https://s.jpg",
+                "audio_url": "https://a.mp3",
+            },
+        )
         assert resp.status_code == 200
 
 
 # ── API: Delete project with files ──────────────────────────────────
 
+
 class TestDeleteProjectFiles:
     def test_delete_project_removes_files(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="DelFiles")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1686,12 +1843,14 @@ class TestDeleteProjectFiles:
 
 # ── Startup / resume polling ────────────────────────────────────────
 
+
 class TestResumePollingJob:
     @patch("web.api.download_video")
     @patch("web.api.get_task_status")
     @patch("web.api.time.sleep")
     def test_resume_success(self, mock_sleep, mock_task, mock_dl, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="Resume1")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1710,6 +1869,7 @@ class TestResumePollingJob:
     @patch("web.api.time.sleep")
     def test_resume_error(self, mock_sleep, mock_task, client, db):
         import web.api as api_mod
+
         proj = db.create_project(name="Resume2")
         db.create_job(job_id="rs2", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("rs2", status="processing", task_id="t1")
@@ -1723,6 +1883,7 @@ class TestResumePollingJob:
     @patch("web.api.time.sleep")
     def test_resume_no_url(self, mock_sleep, mock_task, client, db):
         import web.api as api_mod
+
         proj = db.create_project(name="Resume3")
         db.create_job(job_id="rs3", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("rs3", status="processing", task_id="t1")
@@ -1734,6 +1895,7 @@ class TestResumePollingJob:
 
     def test_resume_no_api_key(self, client, db, monkeypatch):
         import web.api as api_mod
+
         monkeypatch.delenv("POLLO_API_KEY", raising=False)
         proj = db.create_project(name="Resume4")
         db.create_job(job_id="rs4", project=proj.slug, model="pollodance20", prompt="x")
@@ -1747,6 +1909,7 @@ class TestResumePollingJob:
     @patch("web.api.time.sleep")
     def test_resume_exception(self, mock_sleep, mock_task, client, db):
         import web.api as api_mod
+
         proj = db.create_project(name="Resume5")
         db.create_job(job_id="rs5", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("rs5", status="processing", task_id="t1")
@@ -1759,6 +1922,7 @@ class TestResumePollingJob:
     @patch("web.api.time.sleep")
     def test_resume_project_not_found(self, mock_sleep, mock_task, client, db):
         import web.api as api_mod
+
         # Create job with unknown project slug
         proj = db.create_project(name="Resume6")
         db.create_job(job_id="rs6", project=proj.slug, model="pollodance20", prompt="x")
@@ -1811,12 +1975,14 @@ class TestResumePollingJob:
 class TestStartupResumeJobs:
     def test_no_incomplete_jobs(self, client, db):
         import web.api as api_mod
+
         # Should run without error
         api_mod.startup_resume_jobs()
 
     @patch("web.api.threading.Thread")
     def test_with_incomplete_jobs(self, mock_thread, client, db):
         import web.api as api_mod
+
         proj = db.create_project(name="StartupRes")
         db.create_job(job_id="sr1", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("sr1", status="processing", task_id="t1")
@@ -1826,9 +1992,11 @@ class TestStartupResumeJobs:
 
 # ── Invalidate caches ───────────────────────────────────────────────
 
+
 class TestInvalidateProjectCaches:
     def test_invalidate_caches(self, client):
         import web.api as api_mod
+
         # Should run without error
         api_mod._invalidate_project_caches()
 
@@ -1841,10 +2009,12 @@ class TestInvalidateProjectCaches:
 
 # ── _extract_first_frame_uncached with real cv2 ────────────────────
 
+
 class TestExtractFirstFrameUncachedCV2:
     def test_cap_not_opened(self, client, tmp_path):
         """cv2.VideoCapture.isOpened() returns False."""
         import web.api as api_mod
+
         fp = tmp_path / "notavideo.mp4"
         fp.write_bytes(b"definitely not a video")
         result = api_mod._extract_first_frame_uncached(fp)
@@ -1853,6 +2023,7 @@ class TestExtractFirstFrameUncachedCV2:
     def test_read_fails(self, client, tmp_path):
         """Cap opens but read() fails."""
         import web.api as api_mod
+
         fp = tmp_path / "readfail.mp4"
         fp.write_bytes(b"\x00" * 100)
         mock_cap = MagicMock()
@@ -1865,8 +2036,10 @@ class TestExtractFirstFrameUncachedCV2:
 
     def test_success(self, client, tmp_path):
         """Cap opens and read succeeds."""
-        import web.api as api_mod
         import numpy as np
+
+        import web.api as api_mod
+
         fp = tmp_path / "success.mp4"
         fp.write_bytes(b"\x00" * 100)
         mock_cap = MagicMock()
@@ -1881,6 +2054,7 @@ class TestExtractFirstFrameUncachedCV2:
     def test_exception(self, client, tmp_path):
         """Exception during frame extraction returns None."""
         import web.api as api_mod
+
         fp = tmp_path / "exc.mp4"
         fp.write_bytes(b"\x00" * 100)
         with patch("web.api.cv2.VideoCapture", side_effect=Exception("cv2 error")):
@@ -1890,35 +2064,39 @@ class TestExtractFirstFrameUncachedCV2:
 
 # ── _extract_first_frame: cache write fails ─────────────────────────
 
+
 class TestExtractFirstFrameCacheWrite:
     def test_cache_write_fails_still_returns(self, client, tmp_path):
         """Cache write failure is non-fatal."""
         import web.api as api_mod
+
         fp = tmp_path / "writefail.mp4"
         fp.write_bytes(b"\x00" * 100)
-        cache_path = api_mod._get_thumb_cache_path(fp)
-
-        with patch.object(api_mod, "_extract_first_frame_uncached", return_value=b"\xff\xd8data"), \
-             patch.object(Path, "write_bytes", side_effect=OSError("disk full")):
+        with (
+            patch.object(api_mod, "_extract_first_frame_uncached", return_value=b"\xff\xd8data"),
+            patch.object(Path, "write_bytes", side_effect=OSError("disk full")),
+        ):
             result = api_mod._extract_first_frame(fp)
         assert result == b"\xff\xd8data"
 
 
 # ── api_check_job: done with video_path update ─────────────────────
 
+
 class TestCheckJobVideoPathUpdate:
     def test_check_done_job_updates_video_path(self, client, db, tmp_path):
         """When check finds video at different path, updates job."""
         import web.api as api_mod
+
         proj = db.create_project(name="ChkUpdPath")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
         vid = assets / "found.mp4"
         vid.write_bytes(b"\x00")
         db.create_job(job_id="cup1", project=proj.slug, model="pollodance20", prompt="x")
-        db.update_job("cup1", status="done",
-                      video_url="https://cdn.example.com/found.mp4",
-                      video_path="/old/path.mp4")  # Different path
+        db.update_job(
+            "cup1", status="done", video_url="https://cdn.example.com/found.mp4", video_path="/old/path.mp4"
+        )  # Different path
         resp = client.post("/api/jobs/cup1/check")
         assert resp.status_code == 200
         data = resp.json()
@@ -1928,19 +2106,19 @@ class TestCheckJobVideoPathUpdate:
 
 # ── api_download_job_video: update different video_path ─────────────
 
+
 class TestDownloadJobVideoPathUpdate:
     def test_already_exists_different_path(self, client, db, tmp_path):
         """When video exists but at different path from job.video_path."""
         import web.api as api_mod
+
         proj = db.create_project(name="DlUpdPath")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
         vid = assets / "real.mp4"
         vid.write_bytes(b"\x00")
         db.create_job(job_id="dup1", project=proj.slug, model="pollodance20", prompt="x")
-        db.update_job("dup1", status="done",
-                      video_url="https://cdn.example.com/real.mp4",
-                      video_path="/wrong/path.mp4")
+        db.update_job("dup1", status="done", video_url="https://cdn.example.com/real.mp4", video_path="/wrong/path.mp4")
         resp = client.post("/api/jobs/dup1/download")
         assert resp.status_code == 200
         assert "already exists" in resp.json()["message"]
@@ -1948,10 +2126,12 @@ class TestDownloadJobVideoPathUpdate:
 
 # ── api_delete_job: file unlink fails ───────────────────────────────
 
+
 class TestDeleteJobUnlinkFails:
     def test_file_delete_exception(self, client, db, tmp_path):
         """Even if file delete fails, job is still deleted."""
         import web.api as api_mod
+
         proj = db.create_project(name="UnlinkFail")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1967,6 +2147,7 @@ class TestDeleteJobUnlinkFails:
 
 # ── api_list_projects cache hit ─────────────────────────────────────
 
+
 class TestProjectListNoCache:
     def test_no_caching(self, client, db):
         db.create_project(name="NoCache1")
@@ -1980,10 +2161,12 @@ class TestProjectListNoCache:
 
 # ── api_list_projects thumb_ts exception ────────────────────────────
 
+
 class TestProjectListThumbStatFail:
     def test_thumb_stat_exception(self, client, db, tmp_path):
         """When stat fails on thumb.jpg, thumb_ts should be empty string."""
         import web.api as api_mod
+
         proj = db.create_project(name="ThumbStatExc")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -1994,13 +2177,12 @@ class TestProjectListThumbStatFail:
         # so that exists() returns True but stat() fails
         # Simpler: just test that the code handles it — remove the thumb
         # after the exists check by patching the stat on the specific Path object
-        import types
-        
+
         # Actually the easiest way is to just verify that when stat works,
         # thumb_ts is set, which we already test in TestProjectListThumb.
         # For the exception branch, let's just delete the file after it checks exists
         # but before it calls stat. We'll use a mock on st_mtime property.
-        
+
         # Actually, let's just verify the code path works by calling the endpoint
         # and checking the result. The thumb exists, so thumb_ts should be set.
         # To trigger the except, we'd need to break stat ONLY in the thumb_ts block.
@@ -2010,9 +2192,11 @@ class TestProjectListThumbStatFail:
 
 # ── api_delete_project: exception in file/folder delete ─────────────
 
+
 class TestDeleteProjectExceptions:
     def test_file_delete_exception(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="DelExc")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -2020,6 +2204,7 @@ class TestDeleteProjectExceptions:
         vid.write_bytes(b"\x00")
 
         original_unlink = Path.unlink
+
         def unlink_fail(self_path, *args, **kwargs):
             if self_path.name == "v.mp4":
                 raise OSError("perm denied")
@@ -2033,11 +2218,11 @@ class TestDeleteProjectExceptions:
 
     def test_rmtree_exception(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="RmtreeExc")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
 
-        import shutil
         with patch("shutil.rmtree", side_effect=OSError("perm denied")):
             resp = client.delete(f"/api/projects/{proj.slug}")
         assert resp.status_code == 200
@@ -2045,9 +2230,11 @@ class TestDeleteProjectExceptions:
 
 # ── api_delete_video: exception path ────────────────────────────────
 
+
 class TestDeleteVideoException:
     def test_delete_video_exception(self, client, db, tmp_path):
         import web.api as api_mod
+
         proj = db.create_project(name="DelVidExc")
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
@@ -2060,9 +2247,11 @@ class TestDeleteVideoException:
 
 # ── _cleanup_thumb_cache: unlink fail ───────────────────────────────
 
+
 class TestCleanupThumbCacheUnlinkFail:
     def test_unlink_exception_ignored(self, client, db, tmp_path):
         import web.api as api_mod
+
         cache_dir = api_mod.THUMB_CACHE_DIR
         orphan = cache_dir / "orphan123.jpg"
         orphan.write_bytes(b"\xff\xd8")
@@ -2073,12 +2262,14 @@ class TestCleanupThumbCacheUnlinkFail:
 
     def test_thumb_cache_dir_missing(self, client, tmp_path, monkeypatch):
         import web.api as api_mod
+
         monkeypatch.setattr(api_mod, "THUMB_CACHE_DIR", tmp_path / "nonexistent_cache")
         result = api_mod._cleanup_thumb_cache()
         assert result == 0
 
     def test_non_dir_in_assets(self, client, db, tmp_path):
         import web.api as api_mod
+
         # Put a regular file in ASSETS_DIR (not a directory)
         (api_mod.ASSETS_DIR / "not_a_dir.txt").write_bytes(b"hi")
         # Should not crash
@@ -2088,11 +2279,17 @@ class TestCleanupThumbCacheUnlinkFail:
 
 # ── API: Credit estimate ─────────────────────────────────────────────
 
+
 class TestCreditEstimateEndpoint:
     def _job(self, db, proj, job_id, model, resolution, length, generate_audio, credits_used):
         db.create_job(
-            job_id=job_id, project=proj.slug, model=model, prompt="x",
-            resolution=resolution, length=length, generate_audio=generate_audio,
+            job_id=job_id,
+            project=proj.slug,
+            model=model,
+            prompt="x",
+            resolution=resolution,
+            length=length,
+            generate_audio=generate_audio,
         )
         db.update_job(job_id, credits_used=credits_used)
 
@@ -2125,37 +2322,44 @@ class TestCreditEstimateEndpoint:
 
 # ── Lifespan (startup_resume_jobs) ──────────────────────────────────
 
+
 class TestLifespan:
     def test_lifespan(self, client, db):
         """The lifespan manager calls startup_resume_jobs on startup."""
-        import web.api as api_mod
         import asyncio
+
+        import web.api as api_mod
+
         async def run_lifespan():
             async with api_mod.lifespan(api_mod.app):
                 pass
+
         asyncio.run(run_lifespan())
 
 
 # ── if __name__ == "__main__" guards ────────────────────────────────
 
+
 class TestMainGuards:
     def test_api_main_guard(self):
         """Verify the if __name__ == '__main__' block exists."""
         import web.api as api_mod
-        assert hasattr(api_mod, 'app')
+
+        assert hasattr(api_mod, "app")
 
     def test_pollo_img2vid_main_guard(self):
         import img2vid.pollo.pollo_img2vid as mod
+
         assert callable(mod.create_video)
 
     def test_main_module_guard(self):
         import img2vid.pollo.__main__ as mod
+
         assert callable(mod.main)
 
 
-
-
 # ── SPA static file serving ──────────────────────────────────────────
+
 
 class TestStaticFile:
     @pytest.fixture()
@@ -2169,33 +2373,41 @@ class TestStaticFile:
 
     def test_serves_existing_file(self, static):
         from web.api import _static_file
+
         assert _static_file("favicon.ico", static) == (static / "favicon.ico").resolve()
 
     def test_unknown_path_falls_back_to_index(self, static):
         from web.api import _static_file
+
         assert _static_file("project/foo/gallery", static) == static / "index.html"
 
     @pytest.mark.parametrize("path", ["../.env", "assets/../../.env", "/etc/passwd", "..", "../static2/x"])
     def test_traversal_falls_back_to_index(self, static, path):
         from web.api import _static_file
+
         assert _static_file(path, static) == static / "index.html"
 
 
 # ── API: Favourite generations ───────────────────────────────────────
 
+
 class TestFavourites:
-    def _generation(self, db, name="Fav Project", filename="vid_a.mp4", job_id="job-a", job_type="video",
-                    extra=()):
-        import json as _json
+    def _generation(self, db, name="Fav Project", filename="vid_a.mp4", job_id="job-a", job_type="video", extra=()):
         import web.api as api_mod
+
         proj = db.create_project(name=name)
         assets = api_mod.ASSETS_DIR / proj.assets_folder
         assets.mkdir(parents=True, exist_ok=True)
         for f in (filename, *extra):
             (assets / f).write_bytes(b"\x00")
-        db.create_job(job_id=job_id, project=proj.slug, model="seedance20fastv1", prompt="a fox",
-                      job_type=job_type, params={"result_paths": [str(assets / f) for f in (filename, *extra)]}
-                      if extra else None)
+        db.create_job(
+            job_id=job_id,
+            project=proj.slug,
+            model="seedance20fastv1",
+            prompt="a fox",
+            job_type=job_type,
+            params={"result_paths": [str(assets / f) for f in (filename, *extra)]} if extra else None,
+        )
         db.update_job(job_id, status="done", video_path=str(assets / filename))
         return proj, assets
 
@@ -2206,7 +2418,8 @@ class TestFavourites:
         assert [(v["filename"], v["favourite"]) for v in gallery] == [("vid_a.mp4", True)]
         items = client.get("/api/favourites").json()["items"]
         assert [(i["filename"], i["project"], i["project_name"], i["media_type"]) for i in items] == [
-            ("vid_a.mp4", proj.slug, "Fav Project", "video")]
+            ("vid_a.mp4", proj.slug, "Fav Project", "video")
+        ]
         assert items[0]["job"]["prompt"] == "a fox"
 
     def test_unstar(self, client, db):
@@ -2235,6 +2448,7 @@ class TestFavourites:
 
     def test_follows_a_file_moved_to_another_project(self, client, db):
         import web.api as api_mod
+
         proj, assets = self._generation(db)
         client.post("/api/favourites", json={"job_id": "job-a", "filename": "vid_a.mp4"})
         other = db.create_project(name="Elsewhere")

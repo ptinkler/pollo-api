@@ -1,6 +1,8 @@
 """Tests for PolloJourneyImageGenerator."""
-import pytest
+
 from unittest.mock import patch
+
+import pytest
 
 from img2vid.pollo.generators import PolloJourneyImageGenerator
 from img2vid.pollo.pollo_img2vid import IMAGE_GENERATORS, get_image_generator
@@ -8,9 +10,11 @@ from img2vid.pollo.pollo_img2vid import IMAGE_GENERATORS, get_image_generator
 
 class TestPolloJourneyImageGenerator:
     def _make(self, **kwargs):
-        with patch("img2vid.pollo.generators.get_prompt", return_value="test prompt"), \
-             patch("img2vid.pollo.generators.get_image_url", return_value=None), \
-             patch("img2vid.pollo.generators.get_image_path", return_value=None):
+        with (
+            patch("img2vid.pollo.generators.get_prompt", return_value="test prompt"),
+            patch("img2vid.pollo.generators.get_image_url", return_value=None),
+            patch("img2vid.pollo.generators.get_image_path", return_value=None),
+        ):
             return PolloJourneyImageGenerator(api_key="k", project="p", **kwargs)
 
     def test_model_url(self):
@@ -109,9 +113,11 @@ class TestImageGeneratorsRegistry:
         assert "pollojourney" in IMAGE_GENERATORS
 
     def test_get_image_generator(self):
-        with patch("img2vid.pollo.generators.get_prompt", return_value="p"), \
-             patch("img2vid.pollo.generators.get_image_url", return_value=None), \
-             patch("img2vid.pollo.generators.get_image_path", return_value=None):
+        with (
+            patch("img2vid.pollo.generators.get_prompt", return_value="p"),
+            patch("img2vid.pollo.generators.get_image_url", return_value=None),
+            patch("img2vid.pollo.generators.get_image_path", return_value=None),
+        ):
             gen = get_image_generator("pollojourney", api_key="k", project="p", prompt="test")
         assert isinstance(gen, PolloJourneyImageGenerator)
 
@@ -125,8 +131,9 @@ class TestPolloImage2ImageGenerator:
 
     def _make(self, **kwargs):
         with patch("img2vid.pollo.generators.get_image_path", return_value=None):
-            return get_image_generator("polloimage2", api_key="k", project="p", prompt="a fox",
-                                       image_url=None, **kwargs)
+            return get_image_generator(
+                "polloimage2", api_key="k", project="p", prompt="a fox", image_url=None, **kwargs
+            )
 
     def test_model_url(self):
         assert self._make().model_url.endswith("/pollo/pollo-image-v2/image")
@@ -141,10 +148,15 @@ class TestPolloImage2ImageGenerator:
         assert (payload["resolution"], payload["mode"]) == (resolution, "professional")
 
     def test_mode_and_reference_images(self):
-        payload = self._make(mode="fast", aspect_ratio="4:5",
-                             images=["https://x/a.png", "https://x/b.png"]).get_payload()["input"]
-        assert payload == {"prompt": "a fox", "aspectRatio": "4:5", "mode": "fast",
-                           "images": ["https://x/a.png", "https://x/b.png"]}
+        payload = self._make(
+            mode="fast", aspect_ratio="4:5", images=["https://x/a.png", "https://x/b.png"]
+        ).get_payload()["input"]
+        assert payload == {
+            "prompt": "a fox",
+            "aspectRatio": "4:5",
+            "mode": "fast",
+            "images": ["https://x/a.png", "https://x/b.png"],
+        }
 
     def test_invalid_mode_and_resolution_are_dropped(self):
         payload = self._make(mode="turbo", resolution="8K").get_payload()["input"]
@@ -152,5 +164,6 @@ class TestPolloImage2ImageGenerator:
 
     def test_registered_as_legacy_only(self):
         from img2vid.pollo.pollo_img2vid import IMAGE_GENERATORS_LEGACY, IMAGE_GENERATORS_V1
+
         assert "polloimage2" in IMAGE_GENERATORS_LEGACY
         assert not any("polloimage2" in k for k in IMAGE_GENERATORS_V1)

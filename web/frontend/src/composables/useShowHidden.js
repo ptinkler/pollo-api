@@ -6,12 +6,20 @@ import { ref, watch } from 'vue'
 const KEY = 'models.showHidden'
 
 function load() {
-  try { return localStorage.getItem(KEY) === '1' } catch { return false }
+  try {
+    return localStorage.getItem(KEY) === '1'
+  } catch {
+    return false
+  }
 }
 
 const showHidden = ref(load())
-watch(showHidden, (on) => {
-  try { localStorage.setItem(KEY, on ? '1' : '0') } catch { /* storage unavailable */ }
+watch(showHidden, on => {
+  try {
+    localStorage.setItem(KEY, on ? '1' : '0')
+  } catch {
+    /* storage unavailable */
+  }
 })
 
 export function useShowHidden() {

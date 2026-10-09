@@ -78,4 +78,3 @@ describe('useToast', () => {
     expect(toasts.value).toHaveLength(0)
   })
 })
-

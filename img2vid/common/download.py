@@ -1,15 +1,16 @@
-import requests
+import contextlib
 import os
-import uuid
 import re
 import struct
 import threading
+import uuid
 from typing import Any
-from urllib.parse import urlparse, unquote
+from urllib.parse import unquote, urlparse
+
+import requests
 
 from .config import ASSETS_DIR
-from .metadata import record_download, get_db
-
+from .metadata import get_db, record_download
 
 # Per-task lock to prevent concurrent downloads of the same task
 _download_locks: dict[str, threading.Lock] = {}
@@ -33,14 +34,14 @@ def get_filename_from_url(url: str) -> str | None:
         filename = os.path.basename(path)
 
         # Make sure it's a valid video filename
-        if not filename or not filename.endswith('.mp4'):
+        if not filename or not filename.endswith(".mp4"):
             return None
 
         # Clean up the filename - remove any query params that might have snuck in
-        filename = filename.split('?')[0]
+        filename = filename.split("?")[0]
 
         # Sanitize: only allow alphanumeric, dash, underscore, dot
-        filename = re.sub(r'[^a-zA-Z0-9_\-.]', '_', filename)
+        filename = re.sub(r"[^a-zA-Z0-9_\-.]", "_", filename)
 
         return filename
     except Exception:
@@ -69,13 +70,13 @@ def _get_image_extension_from_url(url: str) -> str:
     """Extract image extension from URL, defaulting to .jpg."""
     try:
         parsed = urlparse(url)
-        path = unquote(parsed.path).split('?')[0]
+        path = unquote(parsed.path).split("?")[0]
         ext = os.path.splitext(path)[1].lower()
-        if ext in ('.jpg', '.jpeg', '.png', '.webp', '.gif'):
-            return '.jpg' if ext == '.jpeg' else ext
+        if ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+            return ".jpg" if ext == ".jpeg" else ext
     except Exception:
         pass
-    return '.jpg'
+    return ".jpg"
 
 
 def download_generated_image(
@@ -168,8 +169,13 @@ def download_video(
         task_lock.acquire()
     try:
         return _download_video_inner(
-            url, dest_path, task_id=task_id, model=model,
-            prompt=prompt, metadata=metadata, record=record,
+            url,
+            dest_path,
+            task_id=task_id,
+            model=model,
+            prompt=prompt,
+            metadata=metadata,
+            record=record,
         )
     finally:
         if task_lock:
@@ -216,10 +222,8 @@ def _download_video_inner(
         validate_video(filepath)
     except ValueError as exc:
         # Clean up the broken file so it doesn't linger
-        try:
+        with contextlib.suppress(OSError):
             os.remove(filepath)
-        except OSError:
-            pass
         raise ValueError(str(exc)) from None
 
     # Record in metadata database
@@ -249,15 +253,15 @@ def _has_moov_atom(filepath: str) -> bool:
         size = os.path.getsize(filepath)
         if size < 8:
             return False
-        with open(filepath, 'rb') as f:
+        with open(filepath, "rb") as f:
             pos = 0
             while pos < size:
                 f.seek(pos)
                 header = f.read(8)
                 if len(header) < 8:
                     break
-                box_size, box_type = struct.unpack('>I4s', header)
-                box_type = box_type.decode('ascii', errors='replace')
+                box_size, box_type = struct.unpack(">I4s", header)
+                box_type = box_type.decode("ascii", errors="replace")
                 if box_size == 0:
                     # box extends to end of file
                     box_size = size - pos
@@ -266,10 +270,10 @@ def _has_moov_atom(filepath: str) -> bool:
                     ext = f.read(8)
                     if len(ext) < 8:
                         break
-                    box_size = struct.unpack('>Q', ext)[0]
+                    box_size = struct.unpack(">Q", ext)[0]
                 if box_size < 8:
                     break
-                if box_type == 'moov':
+                if box_type == "moov":
                     return True
                 pos += box_size
     except Exception:
@@ -285,13 +289,9 @@ def validate_video(filepath: str) -> None:
     """
     fsize = os.path.getsize(filepath)
     if fsize < 1024:
-        raise ValueError(
-            f"Downloaded video is too small ({fsize} bytes), likely corrupt: {filepath}"
-        )
-    if filepath.endswith('.mp4') and not _has_moov_atom(filepath):
-        raise ValueError(
-            f"Downloaded video is missing moov atom (corrupt/truncated): {filepath}"
-        )
+        raise ValueError(f"Downloaded video is too small ({fsize} bytes), likely corrupt: {filepath}")
+    if filepath.endswith(".mp4") and not _has_moov_atom(filepath):
+        raise ValueError(f"Downloaded video is missing moov atom (corrupt/truncated): {filepath}")
 
 
 def download_file(url: str, file_dest: str) -> None:
@@ -303,7 +303,7 @@ def download_file(url: str, file_dest: str) -> None:
         )
     response.raise_for_status()
 
-    with open(file_dest, 'wb') as f:
+    with open(file_dest, "wb") as f:
         for chunk in response.iter_content(chunk_size=8192):
             if chunk:
                 f.write(chunk)

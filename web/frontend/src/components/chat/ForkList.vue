@@ -3,8 +3,8 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 
 // The chats branched off at a message: "⑂ 2 branches", opening a list of them
 defineProps({
-  forks: { type: Array, required: true },   // [{ id, title }]
-  align: { type: String, default: 'left' },  // which edge the list lines up with
+  forks: { type: Array, required: true }, // [{ id, title }]
+  align: { type: String, default: 'left' }, // which edge the list lines up with
 })
 const emit = defineEmits(['open'])
 
@@ -29,7 +29,9 @@ function pick(id) {
       ⑂ {{ forks.length }} branch{{ forks.length === 1 ? '' : 'es' }}
     </button>
     <span v-if="open" class="fork-menu" :class="align">
-      <button v-for="f in forks" :key="f.id" class="fork-item" :title="f.title" @click="pick(f.id)">{{ f.title }}</button>
+      <button v-for="f in forks" :key="f.id" class="fork-item" :title="f.title" @click="pick(f.id)">
+        {{ f.title }}
+      </button>
     </span>
   </span>
 </template>

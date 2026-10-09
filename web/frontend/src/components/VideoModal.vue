@@ -6,7 +6,7 @@ import CharacterEditor from './characters/CharacterEditor.vue'
 const props = defineProps({
   video: { type: Object, default: null },
   project: { type: String, required: true },
-  visible: { type: Boolean, default: false }
+  visible: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['close', 'regenerate', 'use-as-ref', 'archive', 'unarchive', 'deleted'])
@@ -18,9 +18,7 @@ const isImageJob = computed(() => job.value.media_type === 'image' || job.value.
 const videoEl = ref(null)
 
 const job = computed(() => props.video?.job || {})
-const videoUrl = computed(() =>
-  props.video ? getVideoUrl(props.project, props.video.filename) : ''
-)
+const videoUrl = computed(() => (props.video ? getVideoUrl(props.project, props.video.filename) : ''))
 
 const metaItems = computed(() => {
   const items = []
@@ -41,9 +39,18 @@ function close() {
 
 // "Make a character": a new saved character starting from this image
 const characterOpen = ref(false)
-const characterSeed = computed(() => props.video ? [{
-  kind: 'generation', project: props.project, filename: props.video.filename, preview: videoUrl.value,
-}] : [])
+const characterSeed = computed(() =>
+  props.video
+    ? [
+        {
+          kind: 'generation',
+          project: props.project,
+          filename: props.video.filename,
+          preview: videoUrl.value,
+        },
+      ]
+    : [],
+)
 
 function onCharacterSaved(c) {
   showToast(`Character “${c.name}” created`, 'success')
@@ -68,12 +75,15 @@ async function handleDelete() {
 }
 
 // Stop video when modal closes
-watch(() => props.visible, (visible) => {
-  if (!visible && videoEl.value) {
-    videoEl.value.pause()
-    videoEl.value.src = ''
-  }
-})
+watch(
+  () => props.visible,
+  visible => {
+    if (!visible && videoEl.value) {
+      videoEl.value.pause()
+      videoEl.value.src = ''
+    }
+  },
+)
 
 // Global keyboard listener for Escape key
 onMounted(() => {
@@ -90,19 +100,8 @@ onUnmounted(() => {
     <div v-if="visible && video" class="modal-overlay">
       <div class="modal-content">
         <button class="modal-close" @click="close">&times;</button>
-        <img
-          v-if="isImageJob"
-          class="modal-image"
-          :src="videoUrl"
-          alt=""
-        />
-        <video
-          v-else
-          ref="videoEl"
-          class="modal-video"
-          :src="videoUrl"
-          controls
-        />
+        <img v-if="isImageJob" class="modal-image" :src="videoUrl" alt="" />
+        <video v-else ref="videoEl" class="modal-video" :src="videoUrl" controls />
         <div class="modal-body">
           <h3>{{ job.model || 'Unknown Model' }}</h3>
           <div class="prompt-text">{{ job.prompt || 'No prompt recorded' }}</div>
@@ -115,7 +114,7 @@ onUnmounted(() => {
             <button class="btn btn-primary" @click="$emit('regenerate', video)">🔄 Regenerate</button>
             <button class="btn btn-primary" @click="$emit('use-as-ref', video)">🎯 Use as Ref</button>
             <button v-if="isImageJob" class="btn btn-secondary" @click="characterOpen = true">👤 Make character</button>
-<button class="btn btn-secondary" @click="$emit(isArchived ? 'unarchive' : 'archive', video)">
+            <button class="btn btn-secondary" @click="$emit(isArchived ? 'unarchive' : 'archive', video)">
               📦 {{ isArchived ? 'Unarchive' : 'Archive' }}
             </button>
             <button class="btn btn-danger" @click="handleDelete">🗑️ Delete</button>
@@ -227,4 +226,3 @@ onUnmounted(() => {
   gap: 12px;
 }
 </style>
-

@@ -7,16 +7,16 @@ Create Date: 2026-10-07
 Reusable characters (name, description, reference images) shared by chat
 and generations, plus the characters attached to each chat.
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
+from alembic import op
 
-
-revision: str = '0009'
-down_revision: Union[str, Sequence[str], None] = '0008'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "0009"
+down_revision: str | Sequence[str] | None = "0008"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

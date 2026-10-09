@@ -2,6 +2,7 @@
 Image upload and filename helpers shared by the Generate page (web/api.py)
 and chat (web/chat.py).
 """
+
 import io
 import mimetypes
 from pathlib import Path
@@ -36,7 +37,7 @@ def is_blank_image(data: bytes) -> bool:
             im.thumbnail((64, 64))
             return im.getextrema()[1] <= 4
     except Exception:
-        return False   # not an image Pillow reads; leave it to the caller
+        return False  # not an image Pillow reads; leave it to the caller
 
 
 async def read_image_upload(file: UploadFile) -> tuple[bytes, str]:
@@ -52,5 +53,5 @@ async def read_image_upload(file: UploadFile) -> tuple[bytes, str]:
     try:
         Image.open(io.BytesIO(content)).verify()
     except Exception:
-        raise HTTPException(400, "File is not a valid image")
+        raise HTTPException(400, "File is not a valid image") from None
     return content, ext

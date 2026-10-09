@@ -65,7 +65,7 @@ async function apiSend(method, endpoint, data) {
 export const apiPost = (endpoint, data = {}) => apiSend('POST', endpoint, data)
 export const apiPut = (endpoint, data = {}) => apiSend('PUT', endpoint, data)
 export const apiPatch = (endpoint, data = {}) => apiSend('PATCH', endpoint, data)
-export const apiDelete = (endpoint) => apiSend('DELETE', endpoint)
+export const apiDelete = endpoint => apiSend('DELETE', endpoint)
 
 /** POST a file as multipart form data (field "file"). */
 export function apiUpload(endpoint, file) {
@@ -75,7 +75,7 @@ export function apiUpload(endpoint, file) {
 }
 
 // `?a=1&b=2` from an object, or '' when empty
-const query = (params) => {
+const query = params => {
   const qs = new URLSearchParams(params).toString()
   return qs ? `?${qs}` : ''
 }
@@ -83,30 +83,30 @@ const query = (params) => {
 // Project APIs
 export const fetchProjects = (params = {}) => apiGet(`/api/projects${query(params)}`)
 export const fetchProject = (name, params = {}) => apiGet(`/api/projects/${encodeURIComponent(name)}${query(params)}`)
-export const createProject = (data) => apiPost('/api/projects', data)
+export const createProject = data => apiPost('/api/projects', data)
 export const updateProject = (name, data) => apiPut(`/api/projects/${encodeURIComponent(name)}`, data)
-export const archiveProject = (slug) => apiPost(`/api/projects/${encodeURIComponent(slug)}/archive`)
-export const unarchiveProject = (slug) => apiPost(`/api/projects/${encodeURIComponent(slug)}/unarchive`)
-export const deleteProject = (slug) => apiDelete(`/api/projects/${encodeURIComponent(slug)}`)
+export const archiveProject = slug => apiPost(`/api/projects/${encodeURIComponent(slug)}/archive`)
+export const unarchiveProject = slug => apiPost(`/api/projects/${encodeURIComponent(slug)}/unarchive`)
+export const deleteProject = slug => apiDelete(`/api/projects/${encodeURIComponent(slug)}`)
 
 // Job APIs
 export const fetchJobs = (params = {}) => apiGet(`/api/jobs${query(params)}`)
-export const fetchJob = (jobId) => apiGet(`/api/jobs/${jobId}`)
-export const checkJob = (jobId) => apiPost(`/api/jobs/${jobId}/check`)
-export const downloadJobVideo = (jobId) => apiPost(`/api/jobs/${jobId}/download`)
-export const deleteJob = (jobId) => apiDelete(`/api/jobs/${jobId}`)
-export const archiveJob = (jobId) => apiPost(`/api/jobs/${jobId}/archive`)
-export const unarchiveJob = (jobId) => apiPost(`/api/jobs/${jobId}/unarchive`)
+export const fetchJob = jobId => apiGet(`/api/jobs/${jobId}`)
+export const checkJob = jobId => apiPost(`/api/jobs/${jobId}/check`)
+export const downloadJobVideo = jobId => apiPost(`/api/jobs/${jobId}/download`)
+export const deleteJob = jobId => apiDelete(`/api/jobs/${jobId}`)
+export const archiveJob = jobId => apiPost(`/api/jobs/${jobId}/archive`)
+export const unarchiveJob = jobId => apiPost(`/api/jobs/${jobId}/unarchive`)
 // Starred generations (per media file) — the home page's Favourites tab
 export const fetchFavourites = () => apiGet('/api/favourites')
 export const addFavourite = (jobId, filename) => apiPost('/api/favourites', { job_id: jobId, filename })
-export const removeFavourite = (filename) => apiDelete(`/api/favourites/${encodeURIComponent(filename)}`)
+export const removeFavourite = filename => apiDelete(`/api/favourites/${encodeURIComponent(filename)}`)
 export const bulkMoveJobs = (jobIds, targetProject) =>
   apiPost('/api/jobs/bulk-move', { job_ids: jobIds, target_project: targetProject })
 
 // Generate API
-export const generateVideo = (data) => apiPost('/api/generate', data)
-export const generateImage = (data) => apiPost('/api/generate-image', data)
+export const generateVideo = data => apiPost('/api/generate', data)
+export const generateImage = data => apiPost('/api/generate-image', data)
 
 // Source / ref image upload (saved in the project; returns { image_url: "local:<file>" })
 export const uploadSourceImage = (project, file) =>
@@ -119,7 +119,7 @@ export const getRefImageUrl = (project, filename) =>
   `/api/projects/${encodeURIComponent(project)}/source-image?f=${encodeURIComponent(filename)}`
 
 // "local:<file>" refs (images uploaded into the project) → their preview URL, else null
-export const localImageFilename = (url) => ((url || '').startsWith('local:') ? url.slice(6) : '')
+export const localImageFilename = url => ((url || '').startsWith('local:') ? url.slice(6) : '')
 export const getLocalImagePreviewUrl = (project, url) => {
   const filename = localImageFilename(url)
   return filename ? getRefImageUrl(project, filename) : null
@@ -131,7 +131,8 @@ export const fetchModels = (legacy = false) => apiGet(`/api/models?legacy=${lega
 // Usage / Credits API
 export const fetchUsage = (days = 30) => apiGet(`/api/usage?days=${days}`)
 export const fetchBalance = () => apiGet('/api/usage/balance')
-export const fetchUsageProjectDetails = (project, days = 30) => apiGet(`/api/usage/project/${encodeURIComponent(project)}?days=${days}`)
+export const fetchUsageProjectDetails = (project, days = 30) =>
+  apiGet(`/api/usage/project/${encodeURIComponent(project)}?days=${days}`)
 export const fetchCreditEstimate = ({ model, resolution, length, generate_audio }) => {
   const params = new URLSearchParams({ model })
   if (resolution != null) params.set('resolution', resolution)
@@ -149,8 +150,10 @@ export const getImageUrl = (project, thumbTs) => {
   const base = `/image/${encodeURIComponent(project)}`
   return thumbTs ? `${base}?t=${thumbTs}` : base
 }
-export const getVideoUrl = (project, filename) => `/video/${encodeURIComponent(project)}/${encodeURIComponent(filename)}`
-export const getVideoThumbUrl = (project, filename) => `/video-thumb/${encodeURIComponent(project)}/${encodeURIComponent(filename)}`
+export const getVideoUrl = (project, filename) =>
+  `/video/${encodeURIComponent(project)}/${encodeURIComponent(filename)}`
+export const getVideoThumbUrl = (project, filename) =>
+  `/video-thumb/${encodeURIComponent(project)}/${encodeURIComponent(filename)}`
 
 export function getFilenameFromPath(videoPath) {
   if (!videoPath) return ''

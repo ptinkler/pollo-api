@@ -4,4 +4,3 @@ export { default as SleekSelect } from './SleekSelect.vue'
 export { default as ToggleSwitch } from './ToggleSwitch.vue'
 export { default as RatioPicker } from './RatioPicker.vue'
 export { default as LengthSlider } from './LengthSlider.vue'
-

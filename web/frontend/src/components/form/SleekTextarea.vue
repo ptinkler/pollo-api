@@ -6,7 +6,7 @@ const props = defineProps({
   label: { type: String, required: true },
   placeholder: { type: String, default: '' },
   rows: { type: Number, default: 4 },
-  hint: { type: String, default: '' }
+  hint: { type: String, default: '' },
 })
 
 const emit = defineEmits(['update:modelValue'])

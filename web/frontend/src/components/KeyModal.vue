@@ -8,7 +8,7 @@ const { hasKey, showKeyModal, login, logout } = useAuth()
 const keyInput = ref('')
 const loginError = ref('')
 
-watch(showKeyModal, (open) => {
+watch(showKeyModal, open => {
   if (open) {
     keyInput.value = ''
     loginError.value = ''
@@ -51,7 +51,7 @@ function onKeydown(e) {
         />
         <p v-if="loginError" class="error-hint">{{ loginError }}</p>
         <div class="modal-actions">
-          <button class="btn btn-primary" @click="save" :disabled="!keyInput.trim()">Save</button>
+          <button class="btn btn-primary" :disabled="!keyInput.trim()" @click="save">Save</button>
           <button class="btn btn-secondary" @click="showKeyModal = false">Cancel</button>
           <button v-if="hasKey" class="btn btn-danger" @click="clear">Log out</button>
         </div>

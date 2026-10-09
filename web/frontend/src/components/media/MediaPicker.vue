@@ -3,6 +3,7 @@ import { ref, computed, watch, inject } from 'vue'
 import MediaGrid from './MediaGrid.vue'
 import MediaFilters from './MediaFilters.vue'
 import { fetchMedia, uploadMedia, useMediaFilters } from '../../composables/useMedia'
+import { takeFiles } from '../../utils/files'
 
 // Pick images from the media library, or upload new ones from this
 // computer (they go into the library and come back selected). Emits
@@ -11,7 +12,7 @@ const props = defineProps({
   open: { type: Boolean, default: false },
   title: { type: String, default: 'Choose images' },
   multiple: { type: Boolean, default: true },
-  max: { type: Number, default: null },   // most that can be picked (null = no limit)
+  max: { type: Number, default: null }, // most that can be picked (null = no limit)
 })
 const emit = defineEmits(['pick', 'close'])
 const showToast = inject('showToast', () => {})
@@ -24,18 +25,21 @@ const images = computed(() => items.value.filter(i => i.kind === 'image'))
 const { filters, filtered } = useMediaFilters(images, { kind: 'image' })
 const limit = computed(() => (props.multiple ? props.max : 1))
 
-watch(() => props.open, async (open) => {
-  if (!open) return
-  selected.value = new Set()
-  loading.value = true
-  try {
-    items.value = await fetchMedia()
-  } catch (e) {
-    showToast(`Couldn't load the library: ${e.message}`, 'error')
-  } finally {
-    loading.value = false
-  }
-})
+watch(
+  () => props.open,
+  async open => {
+    if (!open) return
+    selected.value = new Set()
+    loading.value = true
+    try {
+      items.value = await fetchMedia()
+    } catch (e) {
+      showToast(`Couldn't load the library: ${e.message}`, 'error')
+    } finally {
+      loading.value = false
+    }
+  },
+)
 
 function toggle(item) {
   const next = new Set(limit.value === 1 ? [] : selected.value)
@@ -61,7 +65,10 @@ async function upload(files) {
 }
 
 function confirm() {
-  emit('pick', items.value.filter(i => selected.value.has(i.id)))
+  emit(
+    'pick',
+    items.value.filter(i => selected.value.has(i.id)),
+  )
   emit('close')
 }
 </script>
@@ -69,8 +76,13 @@ function confirm() {
 <template>
   <Teleport to="body">
     <div v-if="open" class="backdrop" @click.self="emit('close')" @keydown.esc="emit('close')">
-      <div class="dialog" role="dialog" :aria-label="title"
-           @dragover.prevent @drop.prevent="upload($event.dataTransfer?.files || [])">
+      <div
+        class="dialog"
+        role="dialog"
+        :aria-label="title"
+        @dragover.prevent
+        @drop.prevent="upload($event.dataTransfer?.files || [])"
+      >
         <div class="head">
           <h3>{{ title }}</h3>
           <button class="x" title="Close" @click="emit('close')">✕</button>
@@ -79,13 +91,18 @@ function confirm() {
         <div class="toolbar">
           <label class="btn btn-secondary upload">
             ⬆ Upload from computer
-            <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" :multiple="multiple" hidden
-                   @change="upload($event.target.files); $event.target.value = ''" />
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              :multiple="multiple"
+              hidden
+              @change="upload(takeFiles($event))"
+            />
           </label>
           <span v-if="uploading" class="muted">Uploading {{ uploading }}…</span>
           <span class="muted hint">or drop images here, or choose from your uploads and creations below</span>
         </div>
-        <MediaFilters :filters="filters" :show-kind="false" />
+        <MediaFilters v-model:filters="filters" :show-kind="false" />
 
         <div class="body">
           <p v-if="loading" class="muted">Loading…</p>

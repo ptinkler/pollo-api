@@ -13,10 +13,24 @@ const props = defineProps({
   convId: { type: String, required: true },
   canRetry: { type: Boolean, default: false },
   canEdit: { type: Boolean, default: false },
-  canSwitch: { type: Boolean, default: false },   // ‹ › arrows usable (not mid-reply)
-  canBranch: { type: Boolean, default: false },   // ⑂ Branch on a reply (prompts go with canEdit)
+  canSwitch: { type: Boolean, default: false }, // ‹ › arrows usable (not mid-reply)
+  canBranch: { type: Boolean, default: false }, // ⑂ Branch on a reply (prompts go with canEdit)
 })
-const emit = defineEmits(['retry', 'open-media', 'stop', 'edit', 'resend', 'regenerate', 'branch', 'use-image', 'use-text', 'pin', 'delete', 'fork', 'open-chat'])
+const emit = defineEmits([
+  'retry',
+  'open-media',
+  'stop',
+  'edit',
+  'resend',
+  'regenerate',
+  'branch',
+  'use-image',
+  'use-text',
+  'pin',
+  'delete',
+  'fork',
+  'open-chat',
+])
 
 // Model catalogues, provided by ChatView, for "Try another model"
 const chatModels = inject('chatModels', { image: [], video: [] })
@@ -28,16 +42,22 @@ const streaming = computed(() => props.message.status === 'streaming')
 // Models sometimes echo a "[generated image: <prompt>]" line in their reply
 // (older chat history recorded media that way). The image itself is shown
 // below, so hide those lines — display only; the stored reply is untouched.
-const MEDIA_NOTE_LINE = /^[ \t]*\[(?:generated (?:image|video)|(?:image|video) (?:rendering|failed))\b[^\n]*\][ \t]*$/gim
+const MEDIA_NOTE_LINE =
+  /^[ \t]*\[(?:generated (?:image|video)|(?:image|video) (?:rendering|failed))\b[^\n]*\][ \t]*$/gim
 const displayText = computed(() =>
-  (props.message.content || '').replace(MEDIA_NOTE_LINE, '').replace(/\n{3,}/g, '\n\n').trim())
+  (props.message.content || '')
+    .replace(MEDIA_NOTE_LINE, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim(),
+)
 const html = computed(() => {
   if (!displayText.value) return ''
   return DOMPurify.sanitize(marked.parse(displayText.value))
 })
 // Image/Video mode failures already show on the media card — don't repeat them
 const errorShownOnMedia = computed(() =>
-  props.message.media?.some(m => m.status === 'error' && m.error === props.message.error))
+  props.message.media?.some(m => m.status === 'error' && m.error === props.message.error),
+)
 const modelShort = computed(() => shortModel(props.message.model))
 // Media-only replies (Image/Video mode) have no text model to name
 const showTextModel = computed(() => !!props.message.content || !props.message.media?.length)
@@ -45,7 +65,11 @@ const showTextModel = computed(() => !!props.message.content || !props.message.m
 // Ticking clock for "rendering 1:23" on pending videos
 const now = ref(Date.now())
 let timer = null
-onMounted(() => { timer = setInterval(() => { now.value = Date.now() }, 1000) })
+onMounted(() => {
+  timer = setInterval(() => {
+    now.value = Date.now()
+  }, 1000)
+})
 onBeforeUnmount(() => clearInterval(timer))
 
 function elapsed() {
@@ -59,18 +83,21 @@ function elapsed() {
 // the provider fills in the rest without saying.
 function specs(item) {
   const p = item.params || {}
-  const out = []
-  if (item.kind === 'video') {
-    if (p.source_video) out.push('from video')
-    if (p.last_frame) out.push('first+last frame')
-    else if (p.first_frame && !p.refs?.length) out.push('from image')
-    if (p.duration) out.push(`${p.duration}s`)
-  }
-  if (p.resolution) out.push(p.resolution)
-  if (p.aspect_ratio) out.push(p.aspect_ratio)
-  if (item.kind === 'video' && p.generate_audio != null) out.push(p.generate_audio ? 'audio' : 'no audio')
-  if (p.character_names?.length) out.push(`👤 ${p.character_names.join(', ')}`)
-  return out
+  const isVideo = item.kind === 'video'
+  return [
+    ...(isVideo ? videoSource(p) : []),
+    isVideo && p.duration && `${p.duration}s`,
+    p.resolution,
+    p.aspect_ratio,
+    isVideo && p.generate_audio != null && (p.generate_audio ? 'audio' : 'no audio'),
+    p.character_names?.length && `👤 ${p.character_names.join(', ')}`,
+  ].filter(Boolean)
+}
+
+// What a video was made from, besides its prompt
+function videoSource(p) {
+  const frames = p.last_frame ? 'first+last frame' : p.first_frame && !p.refs?.length && 'from image'
+  return [p.source_video && 'from video', frames]
 }
 
 // "4 refs", or "2 of 4 refs" when the model took fewer than were picked
@@ -105,12 +132,13 @@ function replyText() {
   return picked || displayText.value
 }
 // Only saved images (not a reply still streaming) can be pinned as references
-const canPin = (item) => item.kind === 'image' && !!item.file && typeof props.message.id === 'number'
-const pinTitle = (item) => item.pinned
-  ? 'Pinned: sent as a reference with every new image. Click to unpin'
-  : 'Pin as a reference: send it with every new image in this chat'
+const canPin = item => item.kind === 'image' && !!item.file && typeof props.message.id === 'number'
+const pinTitle = item =>
+  item.pinned
+    ? 'Pinned: sent as a reference with every new image. Click to unpin'
+    : 'Pin as a reference: send it with every new image in this chat'
 
-const useText = (mode) => emit('use-text', { text: replyText(), mode })
+const useText = mode => emit('use-text', { text: replyText(), mode })
 
 // ── Branches: other versions of this turn (from edits/retries) ──
 const siblings = computed(() => props.message.siblings || [])
@@ -177,7 +205,9 @@ const { copiedKey, copy } = useCopy()
             :title="pinTitle(item)"
             :aria-pressed="!!item.pinned"
             @click.stop="emit('pin', { mediaId: item.id, pinned: !item.pinned })"
-          >📌</button>
+          >
+            📌
+          </button>
           <img
             :src="url(item)"
             class="attachment-thumb"
@@ -185,49 +215,97 @@ const { copiedKey, copy } = useCopy()
             @click="emit('open-media', { url: url(item), kind: 'image', file: item.file })"
           />
           <span class="use-btns">
-            <button title="New picture from this image (attaches it to your next message)" @click="emit('use-image', { file: item.file, mode: 'image' })">🖼</button>
-            <button title="Animate this image into a video (attaches it to your next message)" @click="emit('use-image', { file: item.file, mode: 'video' })">🎬</button>
+            <button
+              title="New picture from this image (attaches it to your next message)"
+              @click="emit('use-image', { file: item.file, mode: 'image' })"
+            >
+              🖼
+            </button>
+            <button
+              title="Animate this image into a video (attaches it to your next message)"
+              @click="emit('use-image', { file: item.file, mode: 'video' })"
+            >
+              🎬
+            </button>
           </span>
         </div>
       </div>
 
       <div v-if="isUser && editing" class="edit-box">
-        <textarea
-          ref="editBox"
-          v-model="editText"
-          rows="1"
-          @input="fitEditBox"
-          @keydown="onEditKeydown"
-        ></textarea>
+        <textarea ref="editBox" v-model="editText" rows="1" @input="fitEditBox" @keydown="onEditKeydown"></textarea>
         <div class="edit-actions">
           <span class="edit-note">Sends as a new branch — the original stays available with the ‹ › arrows.</span>
           <button class="meta-btn" @click="editing = false">Cancel</button>
-          <button class="edit-send" :disabled="!editText.trim() && !message.media?.length" @click="submitEdit">Send</button>
+          <button class="edit-send" :disabled="!editText.trim() && !message.media?.length" @click="submitEdit">
+            Send
+          </button>
         </div>
       </div>
       <div v-else-if="isUser && message.content" class="bubble">{{ message.content }}</div>
-      <div v-if="isUser && !editing && (canEdit || message.content || siblings.length > 1 || modeTag || message.forks?.length)" class="user-actions">
-        <ForkList v-if="message.forks?.length" :forks="message.forks" align="right" @open="id => emit('open-chat', id)" />
-        <span v-if="modeTag" class="mode-tag" :title="`Last run in ${modeTag} mode — retrying or editing uses the mode selected now`">{{ modeTag }}</span>
+      <div
+        v-if="
+          isUser && !editing && (canEdit || message.content || siblings.length > 1 || modeTag || message.forks?.length)
+        "
+        class="user-actions"
+      >
+        <ForkList
+          v-if="message.forks?.length"
+          :forks="message.forks"
+          align="right"
+          @open="id => emit('open-chat', id)"
+        />
+        <span
+          v-if="modeTag"
+          class="mode-tag"
+          :title="`Last run in ${modeTag} mode — retrying or editing uses the mode selected now`"
+          >{{ modeTag }}</span
+        >
         <span v-if="siblings.length > 1" class="branch-nav">
-          <button class="meta-btn" :disabled="!canSwitch || branchIndex <= 0" title="Previous version" @click="goBranch(-1)">‹</button>
+          <button
+            class="meta-btn"
+            :disabled="!canSwitch || branchIndex <= 0"
+            title="Previous version"
+            @click="goBranch(-1)"
+          >
+            ‹
+          </button>
           <span>{{ branchIndex + 1 }}/{{ siblings.length }}</span>
-          <button class="meta-btn" :disabled="!canSwitch || branchIndex >= siblings.length - 1" title="Next version" @click="goBranch(1)">›</button>
+          <button
+            class="meta-btn"
+            :disabled="!canSwitch || branchIndex >= siblings.length - 1"
+            title="Next version"
+            @click="goBranch(1)"
+          >
+            ›
+          </button>
         </span>
         <button v-if="message.content" class="meta-btn" title="Copy prompt" @click="copy(message.content, 'prompt')">
           {{ copiedKey === 'prompt' ? '✓ Copied' : '⧉ Copy' }}
         </button>
         <template v-if="canEdit">
           <button class="meta-btn" title="Edit and resend" @click="startEdit">✎ Edit</button>
-          <button class="meta-btn" title="Resend this prompt for a different response" @click="emit('resend')">↻ Retry</button>
-          <button class="meta-btn" title="Start a new chat from here: everything up to this prompt and its reply, nothing after"
-            @click="emit('fork')">⑂ Branch</button>
-          <button class="meta-btn" title="Delete this prompt and its reply from the chat (images and videos stay in Media)"
-            @click="emit('delete')">🗑 Delete</button>
+          <button class="meta-btn" title="Resend this prompt for a different response" @click="emit('resend')">
+            ↻ Retry
+          </button>
+          <button
+            class="meta-btn"
+            title="Start a new chat from here: everything up to this prompt and its reply, nothing after"
+            @click="emit('fork')"
+          >
+            ⑂ Branch
+          </button>
+          <button
+            class="meta-btn"
+            title="Delete this prompt and its reply from the chat (images and videos stay in Media)"
+            @click="emit('delete')"
+          >
+            🗑 Delete
+          </button>
         </template>
       </div>
 
       <template v-if="!isUser">
+        <!-- eslint-disable-next-line vue/no-v-html -- sanitised with DOMPurify (see `html`) -->
         <div v-if="html" ref="replyEl" class="markdown" v-html="html"></div>
         <div v-else-if="streaming && !message.media?.length" class="thinking">
           <span></span><span></span><span></span>
@@ -255,11 +333,25 @@ const { copiedKey, copy } = useCopy()
                 :title="pinTitle(item)"
                 :aria-pressed="!!item.pinned"
                 @click.stop="emit('pin', { mediaId: item.id, pinned: !item.pinned })"
-              >📌</button>
+              >
+                📌
+              </button>
               <div class="media-overlay">
                 <template v-if="item.kind === 'image'">
-                  <button class="media-btn" title="New picture from this image (attaches it to your next message)" @click.stop="emit('use-image', { file: item.file, mode: 'image' })">🖼</button>
-                  <button class="media-btn" title="Animate this image into a video (attaches it to your next message)" @click.stop="emit('use-image', { file: item.file, mode: 'video' })">🎬</button>
+                  <button
+                    class="media-btn"
+                    title="New picture from this image (attaches it to your next message)"
+                    @click.stop="emit('use-image', { file: item.file, mode: 'image' })"
+                  >
+                    🖼
+                  </button>
+                  <button
+                    class="media-btn"
+                    title="Animate this image into a video (attaches it to your next message)"
+                    @click.stop="emit('use-image', { file: item.file, mode: 'video' })"
+                  >
+                    🎬
+                  </button>
                 </template>
                 <a :href="url(item)" :download="item.file" class="media-btn" title="Download" @click.stop>⤓</a>
               </div>
@@ -283,8 +375,15 @@ const { copiedKey, copy } = useCopy()
               </strong>
               <span>{{ item.error || 'Unknown error' }}</span>
               <!-- Nothing retries automatically — the user picks -->
-              <div v-if="item.source === 'generated' && item.prompt && message.status !== 'streaming'" class="error-actions">
-                <button class="retry-btn" title="Run the same prompt on the same model again" @click="emit('regenerate', { mediaId: item.id, model: null })">
+              <div
+                v-if="item.source === 'generated' && item.prompt && message.status !== 'streaming'"
+                class="error-actions"
+              >
+                <button
+                  class="retry-btn"
+                  title="Run the same prompt on the same model again"
+                  @click="emit('regenerate', { mediaId: item.id, model: null })"
+                >
                   ↻ Retry
                 </button>
                 <ModelPicker
@@ -302,48 +401,97 @@ const { copiedKey, copy } = useCopy()
             <!-- Which model made this — the footer only names the chat model -->
             <div v-if="item.model || item.prompt" class="media-caption">
               <span class="caption-text" :title="[item.model, ...specs(item)].join(' · ')">
-                {{ item.kind === 'image' ? '🖼' : '🎬' }} {{ shortModel(item.model) }}<template
-                  v-if="specs(item).length"> · <span class="caption-specs">{{ specs(item).join(' · ') }}</span></template><template v-if="item.cost"> · {{ fmtCost(item.cost) }}</template><template
-                  v-if="item.credits"> · <span title="Billed to your Pollo account">{{ item.credits }} credit{{ item.credits === 1 ? '' : 's' }}</span></template><template
-                  v-if="item.params?.context"> · <span title="The image model was given the conversation">💬 context</span></template><template
-                  v-if="item.params?.refs?.length"> · <span :title="refsTitle(item.params)">🔗 {{ refsLabel(item.params) }}</span></template>
+                {{ item.kind === 'image' ? '🖼' : '🎬' }} {{ shortModel(item.model)
+                }}<template v-if="specs(item).length">
+                  · <span class="caption-specs">{{ specs(item).join(' · ') }}</span></template
+                ><template v-if="item.cost"> · {{ fmtCost(item.cost) }}</template
+                ><template v-if="item.credits">
+                  ·
+                  <span title="Billed to your Pollo account"
+                    >{{ item.credits }} credit{{ item.credits === 1 ? '' : 's' }}</span
+                  ></template
+                ><template v-if="item.params?.context">
+                  · <span title="The image model was given the conversation">💬 context</span></template
+                ><template v-if="item.params?.refs?.length">
+                  · <span :title="refsTitle(item.params)">🔗 {{ refsLabel(item.params) }}</span></template
+                >
               </span>
               <button
                 v-if="item.prompt"
                 class="caption-btn"
                 :title="`Copy the prompt sent to the ${item.kind} model:\n${item.prompt}`"
                 @click="copy(item.prompt, item.id)"
-              >{{ copiedKey === item.id ? '✓ Copied' : '⧉ Prompt' }}</button>
+              >
+                {{ copiedKey === item.id ? '✓ Copied' : '⧉ Prompt' }}
+              </button>
             </div>
           </div>
         </div>
 
-        <div v-if="message.status === 'error' && message.error && !errorShownOnMedia" class="msg-error">⚠ {{ message.error }}</div>
+        <div v-if="message.status === 'error' && message.error && !errorShownOnMedia" class="msg-error">
+          ⚠ {{ message.error }}
+        </div>
 
         <div class="msg-meta">
           <span v-if="siblings.length > 1" class="branch-nav">
-            <button class="meta-btn" :disabled="!canSwitch || branchIndex <= 0" title="Previous version" @click="goBranch(-1)">‹</button>
+            <button
+              class="meta-btn"
+              :disabled="!canSwitch || branchIndex <= 0"
+              title="Previous version"
+              @click="goBranch(-1)"
+            >
+              ‹
+            </button>
             <span>{{ branchIndex + 1 }}/{{ siblings.length }}</span>
-            <button class="meta-btn" :disabled="!canSwitch || branchIndex >= siblings.length - 1" title="Next version" @click="goBranch(1)">›</button>
+            <button
+              class="meta-btn"
+              :disabled="!canSwitch || branchIndex >= siblings.length - 1"
+              title="Next version"
+              @click="goBranch(1)"
+            >
+              ›
+            </button>
           </span>
           <button v-if="streaming" class="meta-btn" @click="emit('stop')">■ Stop</button>
           <template v-else>
-            <button v-if="displayText" class="meta-btn" @click="copy(displayText, 'reply')">{{ copiedKey === 'reply' ? '✓ Copied' : '⧉ Copy' }}</button>
+            <button v-if="displayText" class="meta-btn" @click="copy(displayText, 'reply')">
+              {{ copiedKey === 'reply' ? '✓ Copied' : '⧉ Copy' }}
+            </button>
             <!-- mousedown.prevent keeps a selection in the reply alive for the click -->
             <!-- These reuse the reply's words; the buttons on an image reuse the image -->
-            <button v-if="displayText" class="meta-btn"
+            <button
+              v-if="displayText"
+              class="meta-btn"
               title="Put this reply's text (or the part you've selected) in the message box as an Image-mode prompt"
-              @mousedown.prevent @click="useText('image')">✎ Text as picture prompt</button>
-            <button v-if="displayText" class="meta-btn"
+              @mousedown.prevent
+              @click="useText('image')"
+            >
+              ✎ Text as picture prompt
+            </button>
+            <button
+              v-if="displayText"
+              class="meta-btn"
               title="Put this reply's text (or the part you've selected) in the message box as a Video-mode prompt"
-              @mousedown.prevent @click="useText('video')">✎ Text as video prompt</button>
+              @mousedown.prevent
+              @click="useText('video')"
+            >
+              ✎ Text as video prompt
+            </button>
             <button v-if="canRetry" class="meta-btn" @click="emit('retry')">↻ Retry</button>
-            <button v-if="canBranch" class="meta-btn" title="Start a new chat from here: everything up to this reply, nothing after"
-              @click="emit('fork')">⑂ Branch</button>
+            <button
+              v-if="canBranch"
+              class="meta-btn"
+              title="Start a new chat from here: everything up to this reply, nothing after"
+              @click="emit('fork')"
+            >
+              ⑂ Branch
+            </button>
           </template>
           <ForkList v-if="message.forks?.length" :forks="message.forks" @open="id => emit('open-chat', id)" />
           <span v-if="modelShort && showTextModel" class="meta-info" :title="message.model">💬 {{ modelShort }}</span>
-          <span v-if="message.cost" class="meta-info" title="Total OpenRouter cost for this reply (text + media)">total {{ fmtCost(message.cost) }}</span>
+          <span v-if="message.cost" class="meta-info" title="Total OpenRouter cost for this reply (text + media)"
+            >total {{ fmtCost(message.cost) }}</span
+          >
         </div>
       </template>
     </div>
@@ -593,15 +741,37 @@ const { copiedKey, copy } = useCopy()
   display: inline;
 }
 
-.markdown :deep(> *:first-child) { margin-top: 0; }
-.markdown :deep(p) { margin: 0 0 0.8em; }
-.markdown :deep(h1), .markdown :deep(h2), .markdown :deep(h3) { margin: 1em 0 0.5em; line-height: 1.3; }
-.markdown :deep(h1) { font-size: 1.35rem; }
-.markdown :deep(h2) { font-size: 1.2rem; }
-.markdown :deep(h3) { font-size: 1.05rem; }
-.markdown :deep(ul), .markdown :deep(ol) { margin: 0 0 0.8em 1.4em; }
-.markdown :deep(li) { margin: 0.2em 0; }
-.markdown :deep(a) { color: var(--accent2); }
+.markdown :deep(> *:first-child) {
+  margin-top: 0;
+}
+.markdown :deep(p) {
+  margin: 0 0 0.8em;
+}
+.markdown :deep(h1),
+.markdown :deep(h2),
+.markdown :deep(h3) {
+  margin: 1em 0 0.5em;
+  line-height: 1.3;
+}
+.markdown :deep(h1) {
+  font-size: 1.35rem;
+}
+.markdown :deep(h2) {
+  font-size: 1.2rem;
+}
+.markdown :deep(h3) {
+  font-size: 1.05rem;
+}
+.markdown :deep(ul),
+.markdown :deep(ol) {
+  margin: 0 0 0.8em 1.4em;
+}
+.markdown :deep(li) {
+  margin: 0.2em 0;
+}
+.markdown :deep(a) {
+  color: var(--accent2);
+}
 .markdown :deep(blockquote) {
   border-left: 3px solid var(--border);
   padding-left: 12px;
@@ -623,11 +793,30 @@ const { copiedKey, copy } = useCopy()
   overflow-x: auto;
   margin: 0 0 0.8em;
 }
-.markdown :deep(pre code) { background: none; padding: 0; font-size: 0.82rem; }
-.markdown :deep(table) { border-collapse: collapse; margin: 0 0 0.8em; display: block; overflow-x: auto; }
-.markdown :deep(th), .markdown :deep(td) { border: 1px solid var(--border); padding: 5px 10px; }
-.markdown :deep(th) { background: var(--surface2); }
-.markdown :deep(hr) { border: none; border-top: 1px solid var(--border); margin: 1em 0; }
+.markdown :deep(pre code) {
+  background: none;
+  padding: 0;
+  font-size: 0.82rem;
+}
+.markdown :deep(table) {
+  border-collapse: collapse;
+  margin: 0 0 0.8em;
+  display: block;
+  overflow-x: auto;
+}
+.markdown :deep(th),
+.markdown :deep(td) {
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+}
+.markdown :deep(th) {
+  background: var(--surface2);
+}
+.markdown :deep(hr) {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1em 0;
+}
 
 .cursor {
   display: inline-block;
@@ -653,8 +842,12 @@ const { copiedKey, copy } = useCopy()
   animation: pulse 1.2s ease-in-out infinite;
 }
 
-.thinking span:nth-child(2) { animation-delay: 0.2s; }
-.thinking span:nth-child(3) { animation-delay: 0.4s; }
+.thinking span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.thinking span:nth-child(3) {
+  animation-delay: 0.4s;
+}
 
 /* ── Media ────────────────────────────── */
 .media-grid {
@@ -780,8 +973,12 @@ const { copiedKey, copy } = useCopy()
 }
 
 @keyframes shimmer {
-  from { background-position: 200% 0; }
-  to { background-position: -200% 0; }
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
 }
 
 .pending-label {

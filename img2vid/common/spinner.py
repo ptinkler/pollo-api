@@ -23,7 +23,9 @@ class Spinner:
     def _spin(self):
         while self.running:
             self._elapsed = time.time() - self._start_time if self._start_time else 0
-            sys.stdout.write(f"\r{self.spinner_chars[self._idx % len(self.spinner_chars)]} {self.message}... {self._elapsed:.1f}s")
+            sys.stdout.write(
+                f"\r{self.spinner_chars[self._idx % len(self.spinner_chars)]} {self.message}... {self._elapsed:.1f}s"
+            )
             sys.stdout.flush()
             self._idx += 1
             time.sleep(self.delay)

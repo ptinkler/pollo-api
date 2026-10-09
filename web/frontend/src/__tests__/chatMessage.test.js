@@ -7,25 +7,54 @@ const video = { id: 'm2', kind: 'video', source: 'generated', status: 'done', fi
 
 describe('ChatMessage "make a video from this image"', () => {
   it('is offered on generated images, not videos', async () => {
-    const w = mount(ChatMessage, { props: { convId: 'c1', message: {
-      id: 1, role: 'assistant', content: '', status: 'done', media: [image, video] } } })
+    const w = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        message: {
+          id: 1,
+          role: 'assistant',
+          content: '',
+          status: 'done',
+          media: [image, video],
+        },
+      },
+    })
     const buttons = w.findAll('button[title="Animate this image into a video (attaches it to your next message)"]')
     expect(buttons).toHaveLength(1)
     await buttons[0].trigger('click')
     expect(w.emitted('use-image')).toEqual([[{ file: 'img_a.png', mode: 'video' }]])
   })
 
-  it('is offered on the user\'s own attachments', async () => {
-    const w = mount(ChatMessage, { props: { convId: 'c1', message: {
-      id: 2, role: 'user', content: 'look', status: 'done',
-      media: [{ id: 'u1', kind: 'image', source: 'upload', status: 'done', file: 'up_b.png' }] } } })
+  it("is offered on the user's own attachments", async () => {
+    const w = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        message: {
+          id: 2,
+          role: 'user',
+          content: 'look',
+          status: 'done',
+          media: [{ id: 'u1', kind: 'image', source: 'upload', status: 'done', file: 'up_b.png' }],
+        },
+      },
+    })
     await w.find('button[title="Animate this image into a video (attaches it to your next message)"]').trigger('click')
     expect(w.emitted('use-image')).toEqual([[{ file: 'up_b.png', mode: 'video' }]])
   })
 
   it('passes the file to the image viewer so it can offer it too', async () => {
-    const w = mount(ChatMessage, { props: { convId: 'c1', message: {
-      id: 3, role: 'assistant', content: '', status: 'done', media: [image] } } })
+    const w = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        message: {
+          id: 3,
+          role: 'assistant',
+          content: '',
+          status: 'done',
+          media: [image],
+        },
+      },
+    })
     await w.find('.media-item img').trigger('click')
     expect(w.emitted('open-media')[0][0]).toMatchObject({ kind: 'image', file: 'img_a.png' })
   })
@@ -33,26 +62,64 @@ describe('ChatMessage "make a video from this image"', () => {
 
 describe('ChatMessage media settings', () => {
   it('shows the settings a video was made with, while rendering and when done', async () => {
-    const params = { duration: 5, resolution: '480p', aspect_ratio: null, first_frame: 'img_a.png', generate_audio: true }
+    const params = {
+      duration: 5,
+      resolution: '480p',
+      aspect_ratio: null,
+      first_frame: 'img_a.png',
+      generate_audio: true,
+    }
     const pending = { id: 'v1', kind: 'video', source: 'generated', status: 'pending', prompt: 'waves', params }
-    const w = mount(ChatMessage, { props: { convId: 'c1', message: {
-      id: 4, role: 'assistant', content: '', status: 'done', created_at: new Date().toISOString(), media: [pending] } } })
+    const w = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        message: {
+          id: 4,
+          role: 'assistant',
+          content: '',
+          status: 'done',
+          created_at: new Date().toISOString(),
+          media: [pending],
+        },
+      },
+    })
     expect(w.find('.pending-specs').text()).toBe('from image · 5s · 480p · audio')
-    await w.setProps({ message: { id: 4, role: 'assistant', content: '', status: 'done',
-      media: [{ ...pending, status: 'done', file: 'vid.mp4' }] } })
+    await w.setProps({
+      message: {
+        id: 4,
+        role: 'assistant',
+        content: '',
+        status: 'done',
+        media: [{ ...pending, status: 'done', file: 'vid.mp4' }],
+      },
+    })
     expect(w.find('.caption-specs').text()).toBe('from image · 5s · 480p · audio')
   })
 
   it('shows ratio and resolution for images', () => {
-    const w = mount(ChatMessage, { props: { convId: 'c1', message: { id: 5, role: 'assistant', content: '', status: 'done',
-      media: [{ ...image, model: 'pollo/seedreamv1', params: { aspect_ratio: '16:9', resolution: '2K', refs: [] } }] } } })
+    const w = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        message: {
+          id: 5,
+          role: 'assistant',
+          content: '',
+          status: 'done',
+          media: [
+            { ...image, model: 'pollo/seedreamv1', params: { aspect_ratio: '16:9', resolution: '2K', refs: [] } },
+          ],
+        },
+      },
+    })
     expect(w.find('.caption-specs').text()).toBe('2K · 16:9')
   })
 })
 
 describe('ChatMessage mode tag', () => {
-  const user = (mode) => mount(ChatMessage, { props: { convId: 'c1', canEdit: true,
-    message: { id: 6, role: 'user', content: 'waves', status: 'done', mode } } })
+  const user = mode =>
+    mount(ChatMessage, {
+      props: { convId: 'c1', canEdit: true, message: { id: 6, role: 'user', content: 'waves', status: 'done', mode } },
+    })
 
   it('marks prompts sent outside Auto mode', () => {
     expect(user('video').find('.mode-tag').text()).toBe('🎬 Video')
@@ -67,15 +134,35 @@ describe('ChatMessage mode tag', () => {
 
 describe('ChatMessage "make a picture" and text-to-media', () => {
   it('offers a picture-from-image button beside the video one', async () => {
-    const w = mount(ChatMessage, { props: { convId: 'c1', message: {
-      id: 7, role: 'assistant', content: '', status: 'done', media: [image] } } })
+    const w = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        message: {
+          id: 7,
+          role: 'assistant',
+          content: '',
+          status: 'done',
+          media: [image],
+        },
+      },
+    })
     await w.find('button[title="New picture from this image (attaches it to your next message)"]').trigger('click')
     expect(w.emitted('use-image')).toEqual([[{ file: 'img_a.png', mode: 'image' }]])
   })
 
   it('turns a text reply into a picture or video prompt', async () => {
-    const w = mount(ChatMessage, { props: { convId: 'c1', message: {
-      id: 8, role: 'assistant', content: 'A lighthouse on a cliff at dusk.', status: 'done', media: [] } } })
+    const w = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        message: {
+          id: 8,
+          role: 'assistant',
+          content: 'A lighthouse on a cliff at dusk.',
+          status: 'done',
+          media: [],
+        },
+      },
+    })
     await w.find('button[title$="as an Image-mode prompt"]').trigger('click')
     await w.find('button[title$="as a Video-mode prompt"]').trigger('click')
     expect(w.emitted('use-text')).toEqual([
@@ -85,8 +172,19 @@ describe('ChatMessage "make a picture" and text-to-media', () => {
   })
 
   it('uses just the selected part of the reply', async () => {
-    const w = mount(ChatMessage, { attachTo: document.body, props: { convId: 'c1', message: {
-      id: 9, role: 'assistant', content: 'First idea.\n\nSecond idea: a red kite.', status: 'done', media: [] } } })
+    const w = mount(ChatMessage, {
+      attachTo: document.body,
+      props: {
+        convId: 'c1',
+        message: {
+          id: 9,
+          role: 'assistant',
+          content: 'First idea.\n\nSecond idea: a red kite.',
+          status: 'done',
+          media: [],
+        },
+      },
+    })
     const para = w.findAll('.markdown p')[1].element
     const range = document.createRange()
     range.selectNodeContents(para)
@@ -99,76 +197,183 @@ describe('ChatMessage "make a picture" and text-to-media', () => {
   })
 
   it('has no text-to-media buttons on media-only replies', () => {
-    const w = mount(ChatMessage, { props: { convId: 'c1', message: {
-      id: 10, role: 'assistant', content: '', status: 'done', media: [image] } } })
+    const w = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        message: {
+          id: 10,
+          role: 'assistant',
+          content: '',
+          status: 'done',
+          media: [image],
+        },
+      },
+    })
     expect(w.find('button[title$="as an Image-mode prompt"]').exists()).toBe(false)
   })
 })
 
 describe('ChatMessage pin as reference', () => {
   it('is offered on generated images and uploads, not videos, and toggles', async () => {
-    const w = mount(ChatMessage, { props: { convId: 'c1', message: {
-      id: 5, role: 'assistant', content: '', status: 'done', media: [image, video] } } })
+    const w = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        message: {
+          id: 5,
+          role: 'assistant',
+          content: '',
+          status: 'done',
+          media: [image, video],
+        },
+      },
+    })
     const pins = w.findAll('.pin-btn')
     expect(pins).toHaveLength(1)
     await pins[0].trigger('click')
     expect(w.emitted('pin')).toEqual([[{ mediaId: 'm1', pinned: true }]])
-    await w.setProps({ message: { id: 5, role: 'assistant', content: '', status: 'done',
-      media: [{ ...image, pinned: true }, video] } })
+    await w.setProps({
+      message: { id: 5, role: 'assistant', content: '', status: 'done', media: [{ ...image, pinned: true }, video] },
+    })
     expect(w.find('.pin-btn').classes()).toContain('on')
     await w.find('.pin-btn').trigger('click')
     expect(w.emitted('pin')[1]).toEqual([{ mediaId: 'm1', pinned: false }])
 
-    const u = mount(ChatMessage, { props: { convId: 'c1', message: {
-      id: 6, role: 'user', content: 'this is Linh', status: 'done',
-      media: [{ id: 'u1', kind: 'image', source: 'upload', status: 'done', file: 'up_b.png' }] } } })
+    const u = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        message: {
+          id: 6,
+          role: 'user',
+          content: 'this is Linh',
+          status: 'done',
+          media: [{ id: 'u1', kind: 'image', source: 'upload', status: 'done', file: 'up_b.png' }],
+        },
+      },
+    })
     expect(u.findAll('.pin-btn')).toHaveLength(1)
   })
 
   it('is not offered before the message is saved', () => {
-    const w = mount(ChatMessage, { props: { convId: 'c1', message: {
-      id: 'tmp-1', role: 'user', content: 'x', status: 'done',
-      media: [{ id: 'u1', kind: 'image', source: 'upload', status: 'done', file: 'up_b.png' }] } } })
+    const w = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        message: {
+          id: 'tmp-1',
+          role: 'user',
+          content: 'x',
+          status: 'done',
+          media: [{ id: 'u1', kind: 'image', source: 'upload', status: 'done', file: 'up_b.png' }],
+        },
+      },
+    })
     expect(w.find('.pin-btn').exists()).toBe(false)
   })
 })
 
 describe('ChatMessage delete', () => {
   it('is offered on saved prompts, not replies', async () => {
-    const user = mount(ChatMessage, { props: { convId: 'c1', canEdit: true, message: {
-      id: 7, role: 'user', content: 'draw a cat', status: 'done', media: [] } } })
+    const user = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        canEdit: true,
+        message: {
+          id: 7,
+          role: 'user',
+          content: 'draw a cat',
+          status: 'done',
+          media: [],
+        },
+      },
+    })
     await user.find('button[title^="Delete this prompt"]').trigger('click')
     expect(user.emitted('delete')).toHaveLength(1)
-    const reply = mount(ChatMessage, { props: { convId: 'c1', canEdit: false, message: {
-      id: 8, role: 'assistant', content: 'Meow', status: 'done', media: [] } } })
+    const reply = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        canEdit: false,
+        message: {
+          id: 8,
+          role: 'assistant',
+          content: 'Meow',
+          status: 'done',
+          media: [],
+        },
+      },
+    })
     expect(reply.find('button[title^="Delete this prompt"]').exists()).toBe(false)
   })
 })
 
 describe('ChatMessage branch to a new chat', () => {
   it('is offered on saved prompts, not replies', async () => {
-    const user = mount(ChatMessage, { props: { convId: 'c1', canEdit: true, message: {
-      id: 7, role: 'user', content: 'draw a cat', status: 'done', media: [] } } })
+    const user = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        canEdit: true,
+        message: {
+          id: 7,
+          role: 'user',
+          content: 'draw a cat',
+          status: 'done',
+          media: [],
+        },
+      },
+    })
     await user.find('button[title^="Start a new chat from here"]').trigger('click')
     expect(user.emitted('fork')).toHaveLength(1)
-    const reply = mount(ChatMessage, { props: { convId: 'c1', message: {
-      id: 8, role: 'assistant', content: 'Meow', status: 'done', media: [] } } })
+    const reply = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        message: {
+          id: 8,
+          role: 'assistant',
+          content: 'Meow',
+          status: 'done',
+          media: [],
+        },
+      },
+    })
     expect(reply.find('button[title^="Start a new chat from here"]').exists()).toBe(false)
   })
 })
 
 describe('ChatMessage branches', () => {
   it('offers Branch on replies too', async () => {
-    const w = mount(ChatMessage, { props: { convId: 'c1', canBranch: true, message: {
-      id: 9, role: 'assistant', content: 'Meow', status: 'done', media: [] } } })
+    const w = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        canBranch: true,
+        message: {
+          id: 9,
+          role: 'assistant',
+          content: 'Meow',
+          status: 'done',
+          media: [],
+        },
+      },
+    })
     await w.find('button[title^="Start a new chat from here: everything up to this reply"]').trigger('click')
     expect(w.emitted('fork')).toHaveLength(1)
   })
 
   it('lists the chats branched off a message and opens one', async () => {
-    const forks = [{ id: 'b1', title: 'Fox (branch)' }, { id: 'b2', title: 'Other' }]
-    const w = mount(ChatMessage, { props: { convId: 'c1', message: {
-      id: 7, role: 'user', content: 'draw a fox', status: 'done', media: [], forks } } })
+    const forks = [
+      { id: 'b1', title: 'Fox (branch)' },
+      { id: 'b2', title: 'Other' },
+    ]
+    const w = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        message: {
+          id: 7,
+          role: 'user',
+          content: 'draw a fox',
+          status: 'done',
+          media: [],
+          forks,
+        },
+      },
+    })
     expect(w.find('.fork-toggle').text()).toBe('⑂ 2 branches')
     await w.find('.fork-toggle').trigger('click')
     const items = w.findAll('.fork-item')
@@ -182,11 +387,31 @@ describe('ChatMessage branches', () => {
 describe('ChatMessage refs sent', () => {
   it('says when a model took fewer reference images than were picked', () => {
     const item = { ...image, params: { refs: ['a.png', 'b.png', 'c.png'], refs_used: 1 } }
-    const w = mount(ChatMessage, { props: { convId: 'c1', message: {
-      id: 9, role: 'assistant', content: '', status: 'done', media: [item] } } })
+    const w = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        message: {
+          id: 9,
+          role: 'assistant',
+          content: '',
+          status: 'done',
+          media: [item],
+        },
+      },
+    })
     expect(w.find('.media-caption').text()).toContain('🔗 1 of 3 refs')
-    const all = mount(ChatMessage, { props: { convId: 'c1', message: {
-      id: 10, role: 'assistant', content: '', status: 'done', media: [{ ...image, params: { refs: ['a.png', 'b.png'] } }] } } })
+    const all = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        message: {
+          id: 10,
+          role: 'assistant',
+          content: '',
+          status: 'done',
+          media: [{ ...image, params: { refs: ['a.png', 'b.png'] } }],
+        },
+      },
+    })
     expect(all.find('.media-caption').text()).toContain('🔗 2 refs')
   })
 })

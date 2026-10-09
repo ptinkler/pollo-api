@@ -16,13 +16,23 @@ const props = defineProps({
   projectName: { type: String, default: '' },
 })
 
-defineEmits(['click', 'regenerate', 'use-as-ref', 'archive', 'unarchive', 'move', 'delete', 'toggle-select', 'toggle-favourite'])
+defineEmits([
+  'click',
+  'regenerate',
+  'use-as-ref',
+  'archive',
+  'unarchive',
+  'move',
+  'delete',
+  'toggle-select',
+  'toggle-favourite',
+])
 
 const job = computed(() => props.video.job || {})
 const isImageJob = computed(() => job.value.media_type === 'image' || job.value.job_type === 'image')
 const model = computed(() => job.value.model || 'Unknown')
 const prompt = computed(() => (job.value.prompt || '').substring(0, 100))
-const date = computed(() => job.value.created_at ? new Date(job.value.created_at).toLocaleDateString() : '')
+const date = computed(() => (job.value.created_at ? new Date(job.value.created_at).toLocaleDateString() : ''))
 const thumbUrl = computed(() => getVideoThumbUrl(props.project, props.video.filename))
 
 const thumbError = ref(false)
@@ -34,22 +44,11 @@ function handleThumbError() {
 
 <template>
   <div :class="['gallery-card', { 'card-selected': selected }]">
-    <label
-      v-if="selectable"
-      class="select-checkbox"
-      @click.stop
-    >
+    <label v-if="selectable" class="select-checkbox" @click.stop>
       <input type="checkbox" :checked="selected" @change="$emit('toggle-select', video)" />
     </label>
     <div class="card-clickable" @click="selectable ? $emit('toggle-select', video) : $emit('click', video)">
-      <img
-        v-if="!thumbError"
-        class="gallery-thumb"
-        :src="thumbUrl"
-        alt=""
-        loading="lazy"
-        @error="handleThumbError"
-      />
+      <img v-if="!thumbError" class="gallery-thumb" :src="thumbUrl" alt="" loading="lazy" @error="handleThumbError" />
       <div v-else class="gallery-thumb-placeholder">{{ isImageJob ? '🖼️' : '🎬' }}</div>
       <div class="gallery-card-body">
         <div class="video-model">{{ model }}</div>
@@ -70,40 +69,27 @@ function handleThumbError() {
         :title="video.favourite ? 'Remove from favourites' : 'Add to favourites'"
         :aria-pressed="!!video.favourite"
         @click.stop="$emit('toggle-favourite', video)"
-      >{{ video.favourite ? '★' : '☆' }}</button>
-      <button
-        v-if="manage"
-        class="action-btn"
-        title="Regenerate"
-        @click.stop="$emit('regenerate', video)"
       >
+        {{ video.favourite ? '★' : '☆' }}
+      </button>
+      <button v-if="manage" class="action-btn" title="Regenerate" @click.stop="$emit('regenerate', video)">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M23 4v6h-6M1 20v-6h6"/>
-          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          <path d="M23 4v6h-6M1 20v-6h6" />
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
         </svg>
       </button>
-      <button
-        v-if="manage"
-        class="action-btn"
-        title="Use as Ref"
-        @click.stop="$emit('use-as-ref', video)"
-      >
+      <button v-if="manage" class="action-btn" title="Use as Ref" @click.stop="$emit('use-as-ref', video)">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M15 3h6v6"/>
-          <path d="M10 14L21 3"/>
-          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+          <path d="M15 3h6v6" />
+          <path d="M10 14L21 3" />
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
         </svg>
       </button>
-<button
-        v-if="manage && showArchive"
-        class="action-btn"
-        title="Archive"
-        @click.stop="$emit('archive', video)"
-      >
+      <button v-if="manage && showArchive" class="action-btn" title="Archive" @click.stop="$emit('archive', video)">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 8v13H3V8"/>
-          <path d="M1 3h22v5H1z"/>
-          <path d="M10 12h4"/>
+          <path d="M21 8v13H3V8" />
+          <path d="M1 3h22v5H1z" />
+          <path d="M10 12h4" />
         </svg>
       </button>
       <button
@@ -113,35 +99,25 @@ function handleThumbError() {
         @click.stop="$emit('unarchive', video)"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 8v13H3V8"/>
-          <path d="M1 3h22v5H1z"/>
-          <path d="M12 12v6"/>
-          <path d="M9 15l3-3 3 3"/>
+          <path d="M21 8v13H3V8" />
+          <path d="M1 3h22v5H1z" />
+          <path d="M12 12v6" />
+          <path d="M9 15l3-3 3 3" />
         </svg>
       </button>
-      <button
-        v-if="manage && showMove"
-        class="action-btn"
-        title="Move to project"
-        @click.stop="$emit('move', video)"
-      >
+      <button v-if="manage && showMove" class="action-btn" title="Move to project" @click.stop="$emit('move', video)">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M5 12h14"/>
-          <path d="M12 5l7 7-7 7"/>
+          <path d="M5 12h14" />
+          <path d="M12 5l7 7-7 7" />
         </svg>
       </button>
-      <button
-        v-if="manage"
-        class="action-btn action-btn-danger"
-        title="Delete"
-        @click.stop="$emit('delete', video)"
-      >
+      <button v-if="manage" class="action-btn action-btn-danger" title="Delete" @click.stop="$emit('delete', video)">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M3 6h18"/>
-          <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
-          <line x1="10" y1="11" x2="10" y2="17"/>
-          <line x1="14" y1="11" x2="14" y2="17"/>
+          <path d="M3 6h18" />
+          <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+          <line x1="10" y1="11" x2="10" y2="17" />
+          <line x1="14" y1="11" x2="14" y2="17" />
         </svg>
       </button>
     </div>
@@ -154,7 +130,9 @@ function handleThumbError() {
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
-  transition: border-color 0.2s, transform 0.15s;
+  transition:
+    border-color 0.2s,
+    transform 0.15s;
   position: relative;
 }
 
@@ -174,7 +152,7 @@ function handleThumbError() {
   left: 8px;
   z-index: 2;
   cursor: pointer;
-  background: rgba(0,0,0,0.55);
+  background: rgba(0, 0, 0, 0.55);
   border-radius: 4px;
   padding: 2px;
   display: flex;

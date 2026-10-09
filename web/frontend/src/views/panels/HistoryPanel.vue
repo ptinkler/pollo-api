@@ -6,7 +6,7 @@ import { PROCESSING_STATUSES } from '../../composables/useJobsQueue'
 
 const props = defineProps({
   project: { type: String, required: true },
-  active: { type: Boolean, default: false }
+  active: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['view-video', 'job-complete', 'video-deleted'])
@@ -25,16 +25,13 @@ const jobStats = computed(() => {
   return { total, done, error, active }
 })
 
-
 async function loadHistory() {
   loading.value = true
   try {
     jobs.value = await fetchJobs({ project: props.project })
 
     // Auto-poll any processing jobs
-    jobs.value
-      .filter(j => PROCESSING_STATUSES.includes(j.status))
-      .forEach(j => startPolling(j.job_id))
+    jobs.value.filter(j => PROCESSING_STATUSES.includes(j.status)).forEach(j => startPolling(j.job_id))
   } catch (err) {
     showToast('Failed to load history', 'error')
     jobs.value = []
@@ -141,11 +138,7 @@ function updateJobInList(jobId, updates) {
   const index = jobs.value.findIndex(j => j.job_id === jobId)
   if (index > -1) {
     // Create a new array to ensure Vue reactivity
-    jobs.value = [
-      ...jobs.value.slice(0, index),
-      { ...jobs.value[index], ...updates },
-      ...jobs.value.slice(index + 1)
-    ]
+    jobs.value = [...jobs.value.slice(0, index), { ...jobs.value[index], ...updates }, ...jobs.value.slice(index + 1)]
   }
 }
 
@@ -175,13 +168,17 @@ async function handleDelete(jobId) {
 }
 
 // Load when active or when project changes, stop polling when inactive
-watch([() => props.active, () => props.project], ([active]) => {
-  // Always stop old polling when anything changes
-  stopAllPolling()
-  if (active) {
-    loadHistory()
-  }
-}, { immediate: true })
+watch(
+  [() => props.active, () => props.project],
+  ([active]) => {
+    // Always stop old polling when anything changes
+    stopAllPolling()
+    if (active) {
+      loadHistory()
+    }
+  },
+  { immediate: true },
+)
 
 // Cleanup on unmount
 onUnmounted(() => {
@@ -261,4 +258,3 @@ onUnmounted(() => {
   gap: 8px;
 }
 </style>
-

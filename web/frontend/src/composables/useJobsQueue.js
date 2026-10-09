@@ -36,9 +36,7 @@ function onJobError(callback) {
 }
 
 // Computed
-const runningJobs = computed(() =>
-  activeJobs.value.filter(j => !TERMINAL_STATUSES.includes(j.status))
-)
+const runningJobs = computed(() => activeJobs.value.filter(j => !TERMINAL_STATUSES.includes(j.status)))
 
 const hasRunningJobs = computed(() => runningJobs.value.length > 0)
 
@@ -53,7 +51,7 @@ function addJob(jobId, model, prompt, project) {
     message: 'Starting...',
     videoPath: null,
     errorShown: false,
-    addedAt: Date.now()
+    addedAt: Date.now(),
   }
   activeJobs.value.unshift(newJob)
   startPolling(jobId)
@@ -75,76 +73,48 @@ function stopPolling(jobId) {
   }
 }
 
+const findActive = jobId => activeJobs.value.find(j => j.jobId === jobId)
+
 async function pollJob(jobId) {
-  const jobIndex = activeJobs.value.findIndex(j => j.jobId === jobId)
-  if (jobIndex === -1) {
-    stopPolling(jobId)
+  if (!findActive(jobId)) return stopPolling(jobId)
+  let job
+  try {
+    job = await fetchJob(jobId)
+  } catch (err) {
+    // A deleted job (404) leaves the sidebar; other network errors keep polling
+    if (err?.message?.includes('404')) dismissJob(jobId)
     return
   }
+  // Looked up again: the list may have changed during the request
+  const activeJob = findActive(jobId)
+  if (!activeJob) return stopPolling(jobId)
+  activeJob.status = job.status
+  activeJob.message = job.message
+  if (job.status === 'done') await onJobDone(jobId, job, activeJob)
+  else if (job.status === 'error') onJobFailed(jobId, job, activeJob)
+}
 
-  try {
-    const job = await fetchJob(jobId)
-    // Re-find index in case array was modified during async call
-    const currentIndex = activeJobs.value.findIndex(j => j.jobId === jobId)
-    if (currentIndex === -1) {
-      stopPolling(jobId)
-      return
-    }
-    const activeJob = activeJobs.value[currentIndex]
-
-    activeJob.status = job.status
-    activeJob.message = job.message
-
-    if (job.status === 'done') {
-      if (job.video_path) {
-        activeJob.videoPath = job.video_path
-      }
-
-      // If done but no video file yet, trigger download and keep polling
-      if (!job.video_exists && !job.video_path && job.video_url && !activeJob._downloadTriggered) {
-        activeJob._downloadTriggered = true
-        activeJob.message = 'Downloading video...'
-        try {
-          await downloadJobVideo(job.job_id)
-        } catch {
-          // Backend will handle it, keep polling
-        }
-        return  // Keep polling until video is available
-      }
-
-      stopPolling(jobId)
-      // Notify
-      if (notifyCallback) {
-        notifyCallback('Video ready! 🎉', 'success')
-      }
-      // Notify completion listeners with full job data
-      for (const cb of completionCallbacks) {
-        cb(job)
-      }
-      return
-    }
-
-    if (job.status === 'error') {
-      stopPolling(jobId)
-      // Notify only once
-      if (!activeJob.errorShown && notifyCallback) {
-        notifyCallback('Generation failed: ' + job.message, 'error', 5000)
-        activeJob.errorShown = true
-      }
-      // Notify error listeners
-      for (const cb of errorCallbacks) {
-        cb(job)
-      }
-      return
-    }
-  } catch (err) {
-    // If job was deleted/not found (404), remove it from the sidebar
-    if (err?.message?.includes('404')) {
-      stopPolling(jobId)
-      activeJobs.value = activeJobs.value.filter(j => j.jobId !== jobId)
-    }
-    // Other network errors - keep polling
+async function onJobDone(jobId, job, activeJob) {
+  if (job.video_path) activeJob.videoPath = job.video_path
+  // Done but no video file yet: ask for the download and keep polling until it's there
+  if (!job.video_exists && !job.video_path && job.video_url && !activeJob._downloadTriggered) {
+    activeJob._downloadTriggered = true
+    activeJob.message = 'Downloading video...'
+    await downloadJobVideo(job.job_id).catch(() => {}) // the backend handles failures; polling continues
+    return
   }
+  stopPolling(jobId)
+  notifyCallback?.('Video ready! 🎉', 'success')
+  for (const cb of completionCallbacks) cb(job)
+}
+
+function onJobFailed(jobId, job, activeJob) {
+  stopPolling(jobId)
+  if (!activeJob.errorShown && notifyCallback) {
+    notifyCallback('Generation failed: ' + job.message, 'error', 5000)
+    activeJob.errorShown = true
+  }
+  for (const cb of errorCallbacks) cb(job)
 }
 
 function dismissJob(jobId) {
@@ -183,7 +153,7 @@ async function initialize() {
           message: job.message,
           videoPath: job.video_path,
           errorShown: false,
-          addedAt: new Date(job.created_at).getTime()
+          addedAt: new Date(job.created_at).getTime(),
         }
         activeJobs.value.push(existingJob)
 
@@ -227,7 +197,6 @@ export function useJobsQueue() {
     cleanup,
     setNotifyCallback,
     onJobComplete,
-    onJobError
+    onJobError,
   }
 }
-

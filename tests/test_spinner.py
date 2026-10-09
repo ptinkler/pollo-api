@@ -1,9 +1,6 @@
 """Tests for img2vid.common.spinner — CLI spinner utility."""
-import sys
+
 import time
-import threading
-import pytest
-from unittest.mock import patch
 
 from img2vid.common.spinner import Spinner
 
@@ -45,4 +42,3 @@ class TestSpinner:
         time.sleep(0.1)
         s.stop()
         assert s._elapsed >= 0.05  # At least some time passed
-

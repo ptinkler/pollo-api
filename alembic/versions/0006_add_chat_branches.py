@@ -7,16 +7,16 @@ Create Date: 2026-10-05
 Chat branching: messages form a tree, so editing or retrying an earlier
 turn adds a sibling branch instead of deleting what came after it.
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
+from alembic import op
 
-
-revision: str = '0006'
-down_revision: Union[str, Sequence[str], None] = '0005'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "0006"
+down_revision: str | Sequence[str] | None = "0005"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -27,13 +27,17 @@ def upgrade() -> None:
         with op.batch_alter_table("chat_messages") as batch_op:
             batch_op.add_column(sa.Column("parent_id", sa.Integer(), nullable=True))
         # Chats so far were linear: each message's parent is the one before it
-        op.execute("UPDATE chat_messages SET parent_id = (SELECT MAX(p.id) FROM chat_messages p "
-                   "WHERE p.conversation_id = chat_messages.conversation_id AND p.id < chat_messages.id)")
+        op.execute(
+            "UPDATE chat_messages SET parent_id = (SELECT MAX(p.id) FROM chat_messages p "
+            "WHERE p.conversation_id = chat_messages.conversation_id AND p.id < chat_messages.id)"
+        )
     if "current_leaf_id" not in {c["name"] for c in insp.get_columns("chat_conversations")}:
         with op.batch_alter_table("chat_conversations") as batch_op:
             batch_op.add_column(sa.Column("current_leaf_id", sa.Integer(), nullable=True))
-        op.execute("UPDATE chat_conversations SET current_leaf_id = (SELECT MAX(m.id) "
-                   "FROM chat_messages m WHERE m.conversation_id = chat_conversations.id)")
+        op.execute(
+            "UPDATE chat_conversations SET current_leaf_id = (SELECT MAX(m.id) "
+            "FROM chat_messages m WHERE m.conversation_id = chat_conversations.id)"
+        )
 
 
 def downgrade() -> None:

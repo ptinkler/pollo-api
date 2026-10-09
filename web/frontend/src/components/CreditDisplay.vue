@@ -6,10 +6,10 @@ const { sessionCreditsUsed, creditsRemaining } = useSessionCredits()
 
 <template>
   <router-link to="/usage" class="credit-display" title="Credits remaining / used this session">
-    <span class="credit-remaining" v-if="creditsRemaining !== null">
+    <span v-if="creditsRemaining !== null" class="credit-remaining">
       {{ Math.round(creditsRemaining).toLocaleString() }}
     </span>
-    <span class="credit-remaining credit-unknown" v-else>—</span>
+    <span v-else class="credit-remaining credit-unknown">—</span>
     <template v-if="sessionCreditsUsed > 0">
       <span class="credit-separator">|</span>
       <span class="credit-session">-{{ Math.round(sessionCreditsUsed) }}</span>
@@ -56,4 +56,3 @@ const { sessionCreditsUsed, creditsRemaining } = useSessionCredits()
   font-size: 0.75rem;
 }
 </style>
-

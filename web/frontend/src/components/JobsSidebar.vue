@@ -7,15 +7,8 @@ import { getVideoThumbUrl, getFilenameFromPath } from '../composables/useApi'
 const showToast = inject('showToast')
 const router = useRouter()
 
-const {
-  activeJobs,
-  runningJobs,
-  hasRunningJobs,
-  dismissJob,
-  dismissAllCompleted,
-  cleanup,
-  setNotifyCallback
-} = useJobsQueue()
+const { activeJobs, runningJobs, hasRunningJobs, dismissJob, dismissAllCompleted, cleanup, setNotifyCallback } =
+  useJobsQueue()
 
 // Set up toast notifications for job events
 setNotifyCallback((message, type, duration) => {
@@ -24,9 +17,12 @@ setNotifyCallback((message, type, duration) => {
 
 function getStatusIcon(status) {
   switch (status) {
-    case 'done': return '✓'
-    case 'error': return '✗'
-    default: return ''
+    case 'done':
+      return '✓'
+    case 'error':
+      return '✗'
+    default:
+      return ''
   }
 }
 
@@ -45,7 +41,7 @@ function openVideo(job) {
   if (fname && job.project) {
     router.push({
       name: 'project-video',
-      params: { project: job.project, videoFilename: fname }
+      params: { project: job.project, videoFilename: fname },
     })
   }
 }
@@ -54,7 +50,7 @@ function openHistory(job) {
   if (job.project) {
     router.push({
       name: 'project-history',
-      params: { project: job.project }
+      params: { project: job.project },
     })
   }
 }
@@ -76,17 +72,16 @@ onUnmounted(() => {
 
     <div class="sidebar-content">
       <div class="jobs-list">
-        <div
-          v-for="job in activeJobs"
-          :key="job.jobId"
-          :class="['job-item', job.status]"
-        >
+        <div v-for="job in activeJobs" :key="job.jobId" :class="['job-item', job.status]">
           <div class="job-left">
             <div v-if="!TERMINAL_STATUSES.includes(job.status)" class="job-spinner"></div>
             <div v-else class="job-icon">{{ getStatusIcon(job.status) }}</div>
           </div>
 
-          <div class="job-info" @click="job.status === 'done' ? openVideo(job) : job.status === 'error' ? openHistory(job) : null">
+          <div
+            class="job-info"
+            @click="job.status === 'done' ? openVideo(job) : job.status === 'error' ? openHistory(job) : null"
+          >
             <div class="job-header">
               <span class="job-model">{{ job.model }}</span>
             </div>
@@ -104,16 +99,16 @@ onUnmounted(() => {
           <button
             v-if="TERMINAL_STATUSES.includes(job.status)"
             class="job-dismiss"
-            @click.stop="dismissJob(job.jobId)"
             title="Dismiss"
-          >×</button>
+            @click.stop="dismissJob(job.jobId)"
+          >
+            ×
+          </button>
         </div>
       </div>
 
       <div v-if="activeJobs.some(j => TERMINAL_STATUSES.includes(j.status))" class="sidebar-footer">
-        <button class="clear-btn" @click="dismissAllCompleted">
-          Clear completed
-        </button>
+        <button class="clear-btn" @click="dismissAllCompleted">Clear completed</button>
       </div>
     </div>
   </aside>
@@ -327,7 +322,8 @@ onUnmounted(() => {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>
-

@@ -14,6 +14,7 @@ saved character (conversation_id None), which can be attached anywhere.
 Images live under <data>/characters/<id>/. Elsewhere they're referred to as
 "char:<id>/<file>" (e.g. in a chat image's stored reference list).
 """
+
 import re
 import shutil
 import uuid
@@ -31,11 +32,12 @@ from .uploads import image_media_type, read_image_upload, safe_filename
 
 router = APIRouter(prefix="/api/characters", dependencies=[Depends(verify_api_key)])
 
-MAX_IMAGES = 6            # stored per character
+MAX_IMAGES = 6  # stored per character
 REF_PREFIX = "char:"
 
 
 # ── Storage ─────────────────────────────────────────────────────────
+
 
 def char_dir(character_id: int) -> Path:
     # Read config at call time so tests can redirect ROOT_DIR
@@ -50,13 +52,14 @@ def ref_path(ref: str) -> Path | None:
     """The file behind a "char:<id>/<file>" reference (None if it isn't one)."""
     if not ref.startswith(REF_PREFIX):
         return None
-    cid, _, file = ref[len(REF_PREFIX):].partition("/")
+    cid, _, file = ref[len(REF_PREFIX) :].partition("/")
     if not cid.isdigit() or not file or Path(file).name != file or file.startswith("."):
         return None
     return char_dir(int(cid)) / file
 
 
 # ── Helpers for chat and generations ───────────────────────────────
+
 
 def load(ids: list[int] | None, db=None) -> list:
     """The characters with these ids, in that order (missing ones skipped)."""
@@ -97,8 +100,7 @@ def _short_name(char, chars: list) -> str | None:
     if len(words) < 2:
         return None
     first = words[0].lower()
-    if any(c.id != char.id and (c.name.strip().lower() == first or c.name.split()[0].lower() == first)
-           for c in chars):
+    if any(c.id != char.id and (c.name.strip().lower() == first or c.name.split()[0].lower() == first) for c in chars):
         return None
     return words[0]
 
@@ -111,8 +113,9 @@ def mentioned(chars: list, text: str, prefer: list = ()) -> list:
     found = [c for c in chars if _has_name(text, c.name)]
     covering = found + list(prefer)
     found = [c for c in found if not any(_part_of(c, o) for o in covering)]
-    short = [c for c in chars if c not in found and c not in prefer
-             and (n := _short_name(c, chars)) and _has_name(text, n)]
+    short = [
+        c for c in chars if c not in found and c not in prefer and (n := _short_name(c, chars)) and _has_name(text, n)
+    ]
     return found + short
 
 
@@ -122,8 +125,9 @@ def named(chars: list, names) -> list:
     out = []
     for n in names or []:
         n = str(n).strip().lower()
-        hit = next((c for c in chars if c.name.strip().lower() == n), None) or \
-            next((c for c in chars if (s := _short_name(c, chars)) and s.lower() == n), None)
+        hit = next((c for c in chars if c.name.strip().lower() == n), None) or next(
+            (c for c in chars if (s := _short_name(c, chars)) and s.lower() == n), None
+        )
         if hit and hit not in out:
             out.append(hit)
     return out
@@ -161,8 +165,10 @@ def describe(chars: list) -> str:
     if not chars:
         return ""
     lines = [f"- {c.name}: {c.description.strip()}" if c.description.strip() else f"- {c.name}" for c in chars]
-    return "Characters (keep each one's appearance consistent with this description and the reference images):\n" \
+    return (
+        "Characters (keep each one's appearance consistent with this description and the reference images):\n"
         + "\n".join(lines)
+    )
 
 
 def with_characters(prompt: str, chars: list) -> str:
@@ -204,16 +210,17 @@ def _delete(character_id: int, db) -> None:
 
 # ── Request models ──────────────────────────────────────────────────
 
+
 class CharacterIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(default="", max_length=4000)
-    conversation_id: str | None = None   # set = ad hoc in that chat (and attached to it)
+    conversation_id: str | None = None  # set = ad hoc in that chat (and attached to it)
 
 
 class CharacterUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = Field(default=None, max_length=4000)
-    images: list[str] | None = None      # reorder (first = main) or drop images
+    images: list[str] | None = None  # reorder (first = main) or drop images
 
 
 class CopyFromChat(BaseModel):
@@ -227,6 +234,7 @@ class CopyFromGeneration(BaseModel):
 
 
 # ── Routes ──────────────────────────────────────────────────────────
+
 
 def _require_char(character_id: int):
     char = get_db().get_character(character_id)
@@ -331,13 +339,16 @@ async def api_upload_character_image(character_id: int, file: UploadFile = File(
 def api_character_image_from_chat(character_id: int, data: CopyFromChat):
     """Copy an image from a chat (uploaded or generated) into the character."""
     char = _require_char(character_id)
-    return add_image_from_file(char, config.ROOT_DIR / "chat" / safe_filename(data.conversation_id) / safe_filename(data.file))
+    return add_image_from_file(
+        char, config.ROOT_DIR / "chat" / safe_filename(data.conversation_id) / safe_filename(data.file)
+    )
 
 
 @router.post("/{character_id}/images/from-generation")
 def api_character_image_from_generation(character_id: int, data: CopyFromGeneration):
     """Copy a generated image from a project into the character."""
-    from . import api   # web.api imports this module's router, so import it lazily
+    from . import api  # web.api imports this module's router, so import it lazily
+
     char = _require_char(character_id)
     proj = get_db().get_project_by_slug(data.project)
     if not proj:
@@ -350,5 +361,6 @@ def api_character_image(character_id: int, filename: str):
     path = char_dir(character_id) / safe_filename(filename)
     if not path.is_file():
         raise HTTPException(404, "Not found")
-    return FileResponse(path, media_type=image_media_type(path),
-                        headers={"Cache-Control": "private, max-age=31536000, immutable"})
+    return FileResponse(
+        path, media_type=image_media_type(path), headers={"Cache-Control": "private, max-age=31536000, immutable"}
+    )

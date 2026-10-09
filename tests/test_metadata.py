@@ -1,14 +1,13 @@
 """Tests for img2vid.common.metadata — MetadataDB, ORM models, convenience functions."""
-import json
-import tempfile
-from pathlib import Path
+
+from datetime import UTC
 
 import pytest
 
-from img2vid.common.metadata import MetadataDB, Project, Download, Job, Base, get_db, record_download
-
+from img2vid.common.metadata import Download, Job, MetadataDB, get_db, record_download
 
 # ── Fixtures ─────────────────────────────────────────────────────────
+
 
 @pytest.fixture()
 def db(tmp_path):
@@ -17,6 +16,7 @@ def db(tmp_path):
 
 
 # ── Project CRUD ─────────────────────────────────────────────────────
+
 
 class TestProjectCRUD:
     def test_create_project_basic(self, db):
@@ -109,6 +109,7 @@ class TestGenerateSlug:
 
 
 # ── Download CRUD ────────────────────────────────────────────────────
+
 
 class TestDownloadCRUD:
     def test_add_download(self, db):
@@ -204,6 +205,7 @@ class TestDownloadCRUD:
 
 # ── Job CRUD ─────────────────────────────────────────────────────────
 
+
 class TestJobCRUD:
     def test_create_job(self, db):
         db.create_project(name="jobproj", slug="jobproj")
@@ -288,7 +290,10 @@ class TestJobCRUD:
     def test_create_job_with_params(self, db):
         db.create_project(name="jobproj", slug="jobproj")
         db.create_job(
-            job_id="p1", project="jobproj", model="pollodance20", prompt="x",
+            job_id="p1",
+            project="jobproj",
+            model="pollodance20",
+            prompt="x",
             image_url="https://img.com/i.jpg",
             aspect_ratio="16:9",
             resolution="720p",
@@ -318,6 +323,7 @@ class TestJobCRUD:
 
 # ── to_dict methods ──────────────────────────────────────────────────
 
+
 class TestToDict:
     def test_project_to_dict(self, db):
         proj = db.create_project(name="Dict Test")
@@ -329,7 +335,10 @@ class TestToDict:
     def test_download_to_dict(self, db):
         db.create_project(name="dlproj", slug="dlproj")
         dl_id = db.add_download(
-            "https://ex.com/v.mp4", "/tmp/v.mp4", "video", "dlproj",
+            "https://ex.com/v.mp4",
+            "/tmp/v.mp4",
+            "video",
+            "dlproj",
             metadata={"key": "val"},
         )
         dl = db.get_download_by_id(dl_id)
@@ -352,7 +361,10 @@ class TestToDict:
     def test_job_to_dict(self, db):
         db.create_project(name="jobproj", slug="jobproj")
         db.create_job(
-            job_id="jd1", project="jobproj", model="pollodance20", prompt="x",
+            job_id="jd1",
+            project="jobproj",
+            model="pollodance20",
+            prompt="x",
             params={"web_search": True},
         )
         job = db.get_job("jd1")
@@ -374,10 +386,12 @@ class TestToDict:
 
 # ── Global instance / convenience ────────────────────────────────────
 
+
 class TestGlobalDB:
     def test_get_db_returns_singleton(self, tmp_path, monkeypatch):
-        import img2vid.common.metadata as meta_mod
         import img2vid.common.config as config_mod
+        import img2vid.common.metadata as meta_mod
+
         old = meta_mod._db_instance
         # Point DB_PATH to tmp so we never touch the real filesystem
         monkeypatch.setattr(config_mod, "DB_PATH", tmp_path / "data" / "singleton.db")
@@ -392,6 +406,7 @@ class TestGlobalDB:
 
     def test_record_download_convenience(self, db, monkeypatch):
         import img2vid.common.metadata as meta_mod
+
         monkeypatch.setattr(meta_mod, "_db_instance", db)
         db.create_project(name="conv", slug="conv")
         dl_id = record_download(
@@ -405,6 +420,7 @@ class TestGlobalDB:
 
 # ── Cascade delete ───────────────────────────────────────────────────
 
+
 class TestCascadeDelete:
     def test_delete_project_cascades_jobs(self, db):
         db.create_project(name="casc", slug="casc")
@@ -413,14 +429,14 @@ class TestCascadeDelete:
         assert db.get_job("cj1") is None
 
 
-
 @pytest.mark.parametrize("tz", ["UTC", "Europe/London", "America/New_York"])
 def test_timestamps_carry_the_servers_utc_offset(tmp_path, monkeypatch, tz):
     """Stored timestamps are naive server-local time. Serialised without an
     offset, a browser in another timezone misreads them (a UTC server and a
     UTC+1 browser showed a 1:20 render as 61:20)."""
     import time
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     monkeypatch.setenv("TZ", tz)
     time.tzset()
     try:
@@ -429,7 +445,7 @@ def test_timestamps_carry_the_servers_utc_offset(tmp_path, monkeypatch, tz):
         stamp = db.add_chat_message(conv.id, "user", "hi").to_dict()["created_at"]
         parsed = datetime.fromisoformat(stamp)
         assert parsed.tzinfo is not None
-        assert abs((datetime.now(timezone.utc) - parsed).total_seconds()) < 5
+        assert abs((datetime.now(UTC) - parsed).total_seconds()) < 5
     finally:
         monkeypatch.undo()
         time.tzset()

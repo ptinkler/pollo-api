@@ -10,7 +10,7 @@ export default defineConfig({
       '/video': 'http://localhost:5000',
       '/video-thumb': 'http://localhost:5000',
       '/image': 'http://localhost:5000',
-    }
+    },
   },
   build: {
     outDir: '../static',
@@ -20,6 +20,5 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/__tests__/setup.js'],
-  }
+  },
 })
-

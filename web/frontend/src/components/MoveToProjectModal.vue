@@ -14,16 +14,22 @@ const projects = ref([])
 const selected = ref(null)
 const loading = ref(false)
 
-watch(() => props.visible, async (v) => {
-  if (!v) { selected.value = null; return }
-  loading.value = true
-  try {
-    const data = await fetchProjects({ archived: false })
-    projects.value = (Array.isArray(data) ? data : []).filter(p => p.slug !== props.currentProject)
-  } finally {
-    loading.value = false
-  }
-})
+watch(
+  () => props.visible,
+  async v => {
+    if (!v) {
+      selected.value = null
+      return
+    }
+    loading.value = true
+    try {
+      const data = await fetchProjects({ archived: false })
+      projects.value = (Array.isArray(data) ? data : []).filter(p => p.slug !== props.currentProject)
+    } finally {
+      loading.value = false
+    }
+  },
+)
 
 function confirm() {
   if (selected.value) emit('move', selected.value)
@@ -38,9 +44,7 @@ function confirm() {
 
       <div v-if="loading" class="move-loading">Loading projects...</div>
 
-      <div v-else-if="!projects.length" class="move-empty">
-        No other projects available.
-      </div>
+      <div v-else-if="!projects.length" class="move-empty">No other projects available.</div>
 
       <ul v-else class="project-list">
         <li
@@ -91,7 +95,9 @@ function confirm() {
   padding: 2px 6px;
 }
 
-.modal-close:hover { color: var(--text); }
+.modal-close:hover {
+  color: var(--text);
+}
 
 .move-loading,
 .move-empty {
@@ -118,8 +124,12 @@ function confirm() {
   transition: background 0.15s;
 }
 
-.project-item:last-child { border-bottom: none; }
-.project-item:hover { background: var(--surface2); }
+.project-item:last-child {
+  border-bottom: none;
+}
+.project-item:hover {
+  background: var(--surface2);
+}
 .project-item.active {
   background: rgba(108, 92, 231, 0.2);
   color: var(--text);

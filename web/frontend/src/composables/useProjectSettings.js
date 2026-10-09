@@ -2,6 +2,19 @@ import { ref, watch } from 'vue'
 
 const STORAGE_PREFIX = 'pollo_settings_'
 
+// A stored ref in the form's shape: stored refs keep the URL under their
+// type's key ("image", "video", "audio"), the form under `url`, and the
+// local file a ref was uploaded from wins over the temporary upload
+function refForForm(r) {
+  const name = r.name || ''
+  if (r.type !== 'subject') return { type: r.type || 'image', name, url: refUrl(r), order: r.order || 0 }
+  const images = (r.images || []).map(img => ({ url: img._local_url || img._local || img.url || '' }))
+  return { type: 'subject', name, images: images.length ? images : [{ url: '' }], subjectId: r.subjectId || '' }
+}
+
+const REF_URL_KEYS = ['_local_image', '_local_url', 'url', 'image', 'video', 'audio']
+const refUrl = r => REF_URL_KEYS.map(key => r[key]).find(Boolean) || ''
+
 export function useProjectSettings(projectName) {
   const settings = ref({
     model: 'seedance20fastv1',
@@ -50,61 +63,43 @@ export function useProjectSettings(projectName) {
     }
   }
 
+  // Apply ALL settings from a job (for regenerate). Not saved to
+  // localStorage — that only happens on generate.
   function applyJobSettings(job) {
-    // Apply ALL settings from a job (for regenerate)
-    // This does NOT save to localStorage - that only happens on generate
-    if (job.model) settings.value.model = job.model
-    if (job.aspect_ratio) settings.value.aspect_ratio = job.aspect_ratio
-    if (job.resolution) settings.value.resolution = job.resolution
-    if (job.length) settings.value.length = job.length
-    
-    // Boolean options - check for explicit true/false
-    settings.value.generate_audio = !!job.generate_audio
-    
-    // Extra params stored in params object
     const params = job.params || {}
-    settings.value.web_search = !!params.web_search
-    settings.value.image_tail = params.image_tail || ''
-    settings.value.seed = params.seed !== null && params.seed !== undefined ? String(params.seed) : ''
-    settings.value.video_num = params.video_num || 1
-    settings.value.max_images = params.max_images ? String(params.max_images) : ''
-    settings.value.character_ids = params.character_ids || []
-    // Map stored ref format back to UI format (stored: image/video/audio key, UI: url key).
-    // Refs that came from characters are re-added from the characters themselves.
-    settings.value.refs = (params.refs || []).filter(r => !r._character).map(r => {
-      if (r.type === 'subject') {
-        // For subject refs prefer the preserved local url if available
-        const images = (r.images || []).map(img => {
-          const local = img._local_url || img._local || null
-          return { url: local || img.url || '' }
-        })
-        return { type: 'subject', name: r.name || '', images: images.length ? images : [{ url: '' }], subjectId: r.subjectId || '' }
-      }
-      // image, video, audio refs store URL under their type key; UI uses `url`
-      // Prefer preserved local refs (_local_image / _local_url) when present
-      const url = r._local_image || r._local_url || r.url || r.image || r.video || r.audio || ''
-      return { type: r.type || 'image', name: r.name || '', url, order: r.order || 0 }
-    })
-    // v1 models only take refs in ref mode, so a job that used refs was one
-    settings.value.ref_mode = (params.refs || []).length > 0
-
-    // Prefer the recorded local reference (if present in job params) so the
-    // regenerate Source Image input shows the permanent local file instead
-    // of the temporary uploaded URL.
-    if (params.source_local) {
-      settings.value.image_url = params.source_local
-    } else {
-      settings.value.image_url = job.image_url || ''
+    const refs = params.refs || []
+    const given = { model: job.model, aspect_ratio: job.aspect_ratio, resolution: job.resolution, length: job.length }
+    for (const [key, value] of Object.entries(given)) {
+      if (value) settings.value[key] = value
     }
+    Object.assign(settings.value, {
+      generate_audio: !!job.generate_audio,
+      web_search: !!params.web_search,
+      image_tail: params.image_tail || '',
+      seed: params.seed != null ? String(params.seed) : '',
+      video_num: params.video_num || 1,
+      max_images: params.max_images ? String(params.max_images) : '',
+      character_ids: params.character_ids || [],
+      // Refs that came from characters are re-added from the characters themselves
+      refs: refs.filter(r => !r._character).map(refForForm),
+      // v1 models only take refs in ref mode, so a job that used refs was one
+      ref_mode: refs.length > 0,
+      // The recorded local file rather than the temporary upload, so the
+      // Source Image input shows the permanent copy
+      image_url: params.source_local || job.image_url || '',
+    })
   }
 
   // Load on project change
-  watch(projectName, () => {
-    if (projectName.value) {
-      load()
-    }
-  }, { immediate: true })
+  watch(
+    projectName,
+    () => {
+      if (projectName.value) {
+        load()
+      }
+    },
+    { immediate: true },
+  )
 
   return { settings, load, save, applyProjectData, applyJobSettings }
 }
-

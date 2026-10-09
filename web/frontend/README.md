@@ -51,18 +51,22 @@ frontend/
 ## Setup
 
 1. Install dependencies:
+
 ```bash
 cd frontend
 npm install
 ```
 
 2. Development (with hot reload):
+
 ```bash
 npm run dev
 ```
+
 This starts Vite dev server on port 5173, proxying API calls to FastAPI on port 5000.
 
 3. Build for production:
+
 ```bash
 npm run build
 ```
@@ -70,19 +74,23 @@ npm run build
 ## Development
 
 **Option 1: Use the dev script (recommended)**
+
 ```bash
 ./dev.sh
 ```
+
 This starts both the FastAPI backend and Vue frontend dev servers.
 
 **Option 2: Run servers separately**
 
 Run the FastAPI backend in one terminal:
+
 ```bash
 python web/api.py
 ```
 
 Run the Vue frontend in another terminal:
+
 ```bash
 cd web/frontend
 npm run dev
@@ -95,6 +103,7 @@ API documentation is available at http://localhost:5000/docs
 ## Production
 
 Run the FastAPI server:
+
 ```bash
 python web/api.py
 ```

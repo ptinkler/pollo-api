@@ -9,12 +9,27 @@ globalThis.fetch = mockFetch
 
 // Now import the module under test
 import {
-  apiGet, apiPost, apiPut, apiDelete,
-  fetchProjects, fetchProject, createProject, updateProject,
-  fetchJobs, fetchJob, checkJob, downloadJobVideo,
-  deleteJob, archiveJob, unarchiveJob,
-  generateVideo, fetchModels, deleteVideo,
-  getImageUrl, getVideoUrl, getVideoThumbUrl,
+  apiGet,
+  apiPost,
+  apiPut,
+  apiDelete,
+  fetchProjects,
+  fetchProject,
+  createProject,
+  updateProject,
+  fetchJobs,
+  fetchJob,
+  checkJob,
+  downloadJobVideo,
+  deleteJob,
+  archiveJob,
+  unarchiveJob,
+  generateVideo,
+  fetchModels,
+  deleteVideo,
+  getImageUrl,
+  getVideoUrl,
+  getVideoThumbUrl,
 } from '../composables/useApi.js'
 
 beforeEach(() => {
@@ -62,9 +77,7 @@ describe('apiGet', () => {
   })
 
   it('retries on network errors', async () => {
-    mockFetch
-      .mockRejectedValueOnce(new Error('Network error'))
-      .mockReturnValueOnce(mockOkResponse({ recovered: true }))
+    mockFetch.mockRejectedValueOnce(new Error('Network error')).mockReturnValueOnce(mockOkResponse({ recovered: true }))
     const data = await apiGet('/api/test')
     expect(data).toEqual({ recovered: true })
   })
@@ -273,4 +286,3 @@ describe('URL helpers', () => {
     expect(getVideoUrl('my proj', 'my vid.mp4')).toBe('/video/my%20proj/my%20vid.mp4')
   })
 })
-

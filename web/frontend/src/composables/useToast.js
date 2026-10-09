@@ -7,11 +7,11 @@ export function useToast() {
   function showToast(message, type = 'success', duration = 3000) {
     const id = ++toastId
     toasts.value.push({ id, message, type })
-    
+
     setTimeout(() => {
       removeToast(id)
     }, duration)
-    
+
     return id
   }
 
@@ -24,4 +24,3 @@ export function useToast() {
 
   return { toasts, showToast, removeToast }
 }
-

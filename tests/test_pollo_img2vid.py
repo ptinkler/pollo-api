@@ -1,24 +1,65 @@
 """Tests for img2vid.pollo.pollo_img2vid — orchestrator (create_video, get_video_generator)."""
+
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from img2vid.pollo.pollo_img2vid import (
-    get_video_generator, create_video, GENERATORS, GENERATORS_LEGACY, GENERATORS_V1, DEFAULT_MODEL,
+    DEFAULT_MODEL,
+    GENERATORS,
+    GENERATORS_LEGACY,
+    GENERATORS_V1,
+    create_video,
+    get_video_generator,
 )
 
 
 class TestGeneratorsMap:
     def test_all_models_present(self):
-        legacy = {"pollo20", "pollo25", "pollodance20", "pollodance20fast",
-                  "pollodanceref", "pollodancereffast",
-                  "seedance20", "seedance20fast", "seedance20mini", "seedance25",
-                  "seedanceref", "seedancereffast", "seedanceminiref",
-                  "minimaxh3", "wan27", "wan30", "wan30prime"}
-        v1 = {"pollo20v1", "pollo25v1", "pollodance20v1", "pollodance20fastv1", "pollo30v1", "pollo30fastv1",
-              "seedance20v1", "seedance20fastv1", "seedance20miniv1", "seedance25v1",
-              "minimaxh3v1", "minimaxh3max", "wan27v1", "wan30v1", "wan30primev1",
-              "klingv21v1", "klingv21masterv1", "klingv25turbov1", "klingvideoo1v1",
-              "klingv26v1", "klingv3v1", "klingv3turbov1", "klingv3omniv1"}
+        legacy = {
+            "pollo20",
+            "pollo25",
+            "pollodance20",
+            "pollodance20fast",
+            "pollodanceref",
+            "pollodancereffast",
+            "seedance20",
+            "seedance20fast",
+            "seedance20mini",
+            "seedance25",
+            "seedanceref",
+            "seedancereffast",
+            "seedanceminiref",
+            "minimaxh3",
+            "wan27",
+            "wan30",
+            "wan30prime",
+        }
+        v1 = {
+            "pollo20v1",
+            "pollo25v1",
+            "pollodance20v1",
+            "pollodance20fastv1",
+            "pollo30v1",
+            "pollo30fastv1",
+            "seedance20v1",
+            "seedance20fastv1",
+            "seedance20miniv1",
+            "seedance25v1",
+            "minimaxh3v1",
+            "minimaxh3max",
+            "wan27v1",
+            "wan30v1",
+            "wan30primev1",
+            "klingv21v1",
+            "klingv21masterv1",
+            "klingv25turbov1",
+            "klingvideoo1v1",
+            "klingv26v1",
+            "klingv3v1",
+            "klingv3turbov1",
+            "klingv3omniv1",
+        }
         assert set(GENERATORS_LEGACY.keys()) == legacy
         assert set(GENERATORS_V1.keys()) == v1
         assert set(GENERATORS.keys()) == legacy | v1
@@ -68,8 +109,16 @@ class TestCreateVideo:
     @patch("img2vid.pollo.generators.get_image_url", return_value="https://img.com/i.jpg")
     @patch("img2vid.pollo.generators.get_image_path", return_value=None)
     def test_successful_generation(
-        self, mock_path, mock_img_url, mock_prompt, mock_sleep, MockSpinner,
-        mock_db, mock_task, mock_dl_img, mock_dl_vid,
+        self,
+        mock_path,
+        mock_img_url,
+        mock_prompt,
+        mock_sleep,
+        MockSpinner,
+        mock_db,
+        mock_task,
+        mock_dl_img,
+        mock_dl_vid,
     ):
         # Setup mocks
         db_inst = MagicMock()
@@ -82,7 +131,7 @@ class TestCreateVideo:
             "data": {"taskId": "t123", "status": "processing"},
         }
 
-        mock_task.return_value = [("succeed", None, "https://video.com/out.mp4")]
+        mock_task.return_value = [("succeed", None, "https://video.com/out.mp4", None)]
         mock_dl_vid.return_value = "/path/to/video.mp4"
 
         spinner = MagicMock()
@@ -94,9 +143,11 @@ class TestCreateVideo:
         # Should have downloaded video
         mock_dl_vid.assert_called_once()
         # Should have updated job status to done
-        done_calls = [c for c in db_inst.update_job.call_args_list
-                      if c.kwargs.get("status") == "done" or
-                         (len(c.args) > 1 and "done" in str(c))]
+        done_calls = [
+            c
+            for c in db_inst.update_job.call_args_list
+            if c.kwargs.get("status") == "done" or (len(c.args) > 1 and "done" in str(c))
+        ]
         assert len(done_calls) > 0, "Expected at least one update_job call with status='done'"
 
     @patch("img2vid.pollo.pollo_img2vid.get_db")
@@ -149,8 +200,18 @@ class TestCreateVideo:
     @patch("img2vid.pollo.generators.get_subject_url", return_value=None)
     def test_all_kwargs(self, *mocks):
         """Cover all optional kwargs paths."""
-        mock_subj, mock_path, mock_img_url, mock_prompt, \
-            mock_sleep, MockSpinner, mock_db, mock_task, mock_dl_img, mock_dl_vid = mocks
+        (
+            mock_subj,
+            mock_path,
+            mock_img_url,
+            mock_prompt,
+            mock_sleep,
+            MockSpinner,
+            mock_db,
+            mock_task,
+            mock_dl_img,
+            mock_dl_vid,
+        ) = mocks
 
         db_inst = MagicMock()
         mock_db.return_value = db_inst
@@ -160,7 +221,7 @@ class TestCreateVideo:
             "code": "SUCCESS",
             "data": {"taskId": "t1", "status": "processing"},
         }
-        mock_task.return_value = [("succeed", None, "https://video.com/out.mp4")]
+        mock_task.return_value = [("succeed", None, "https://video.com/out.mp4", None)]
         mock_dl_vid.return_value = "/path/to/video.mp4"
         MockSpinner.return_value = MagicMock()
 
@@ -190,8 +251,18 @@ class TestCreateVideo:
     @patch("img2vid.pollo.generators.get_subject_url", return_value=None)
     def test_video_edit_mode(self, *mocks):
         """Cover the ref2video mode branch — should NOT download image."""
-        mock_subj, mock_path, mock_img_url, mock_prompt, \
-            mock_sleep, MockSpinner, mock_db, mock_task, mock_dl_img, mock_dl_vid = mocks
+        (
+            mock_subj,
+            mock_path,
+            mock_img_url,
+            mock_prompt,
+            mock_sleep,
+            MockSpinner,
+            mock_db,
+            mock_task,
+            mock_dl_img,
+            mock_dl_vid,
+        ) = mocks
         db_inst = MagicMock()
         mock_db.return_value = db_inst
         mock_response = MagicMock()
@@ -200,7 +271,7 @@ class TestCreateVideo:
             "code": "SUCCESS",
             "data": {"taskId": "t2", "status": "processing"},
         }
-        mock_task.return_value = [("succeed", None, "https://video.com/out.mp4")]
+        mock_task.return_value = [("succeed", None, "https://video.com/out.mp4", None)]
         mock_dl_vid.return_value = "/path/to/video.mp4"
         MockSpinner.return_value = MagicMock()
 
@@ -222,8 +293,7 @@ class TestCreateVideo:
     @patch("img2vid.pollo.generators.get_prompt", return_value="test prompt")
     @patch("img2vid.pollo.generators.get_image_url", return_value=None)
     @patch("img2vid.pollo.generators.get_image_path", return_value=None)
-    def test_polling_error(self, mock_path, mock_url, mock_prompt, mock_sleep,
-                           MockSpinner, mock_db, mock_task):
+    def test_polling_error(self, mock_path, mock_url, mock_prompt, mock_sleep, MockSpinner, mock_db, mock_task):
         db_inst = MagicMock()
         mock_db.return_value = db_inst
         mock_response = MagicMock()
@@ -232,7 +302,7 @@ class TestCreateVideo:
             "code": "SUCCESS",
             "data": {"taskId": "t3", "status": "processing"},
         }
-        mock_task.return_value = [("failed", "Generation failed", None)]
+        mock_task.return_value = [("failed", "Generation failed", None, None)]
         MockSpinner.return_value = MagicMock()
 
         with patch("img2vid.pollo.generators.requests.request", return_value=mock_response):
@@ -248,8 +318,7 @@ class TestCreateVideo:
     @patch("img2vid.pollo.generators.get_prompt", return_value="test prompt")
     @patch("img2vid.pollo.generators.get_image_url", return_value=None)
     @patch("img2vid.pollo.generators.get_image_path", return_value=None)
-    def test_no_url_in_result(self, mock_path, mock_url, mock_prompt, mock_sleep,
-                              MockSpinner, mock_db, mock_task):
+    def test_no_url_in_result(self, mock_path, mock_url, mock_prompt, mock_sleep, MockSpinner, mock_db, mock_task):
         db_inst = MagicMock()
         mock_db.return_value = db_inst
         mock_response = MagicMock()
@@ -258,7 +327,7 @@ class TestCreateVideo:
             "code": "SUCCESS",
             "data": {"taskId": "t4", "status": "processing"},
         }
-        mock_task.return_value = [("succeed", None, None)]
+        mock_task.return_value = [("succeed", None, None, None)]
         MockSpinner.return_value = MagicMock()
 
         with patch("img2vid.pollo.generators.requests.request", return_value=mock_response):
@@ -274,8 +343,9 @@ class TestCreateVideo:
     @patch("img2vid.pollo.generators.get_prompt", return_value="test prompt")
     @patch("img2vid.pollo.generators.get_image_url", return_value=None)
     @patch("img2vid.pollo.generators.get_image_path", return_value=None)
-    def test_cloudflare_block_polling_gives_up(self, mock_path, mock_url, mock_prompt,
-                                                mock_sleep, MockSpinner, mock_db, mock_task):
+    def test_cloudflare_block_polling_gives_up(
+        self, mock_path, mock_url, mock_prompt, mock_sleep, MockSpinner, mock_db, mock_task
+    ):
         """Cloudflare blocks all polling attempts — should give up after max retries."""
         db_inst = MagicMock()
         mock_db.return_value = db_inst
@@ -286,7 +356,7 @@ class TestCreateVideo:
             "data": {"taskId": "t_cf", "status": "processing"},
         }
         # Always return cloudflare_blocked
-        mock_task.return_value = [("cloudflare_blocked", "Cloudflare blocked the request", None)]
+        mock_task.return_value = [("cloudflare_blocked", "Cloudflare blocked the request", None, None)]
         MockSpinner.return_value = MagicMock()
 
         with patch("img2vid.pollo.generators.requests.request", return_value=mock_response):
@@ -306,9 +376,9 @@ class TestCreateVideo:
     @patch("img2vid.pollo.generators.get_prompt", return_value="test prompt")
     @patch("img2vid.pollo.generators.get_image_url", return_value=None)
     @patch("img2vid.pollo.generators.get_image_path", return_value=None)
-    def test_cloudflare_block_polling_recovers(self, mock_path, mock_url, mock_prompt,
-                                                mock_sleep, MockSpinner, mock_db,
-                                                mock_task, mock_dl_img, mock_dl_vid):
+    def test_cloudflare_block_polling_recovers(
+        self, mock_path, mock_url, mock_prompt, mock_sleep, MockSpinner, mock_db, mock_task, mock_dl_img, mock_dl_vid
+    ):
         """Cloudflare blocks a few polls, then clears — should succeed."""
         db_inst = MagicMock()
         mock_db.return_value = db_inst
@@ -320,10 +390,10 @@ class TestCreateVideo:
         }
         # 2 cloudflare blocks, then processing, then success
         mock_task.side_effect = [
-            [("cloudflare_blocked", "Cloudflare blocked", None)],
-            [("cloudflare_blocked", "Cloudflare blocked", None)],
-            [("processing", None, None)],
-            [("succeed", None, "https://video.com/out.mp4")],
+            [("cloudflare_blocked", "Cloudflare blocked", None, None)],
+            [("cloudflare_blocked", "Cloudflare blocked", None, None)],
+            [("processing", None, None, None)],
+            [("succeed", None, "https://video.com/out.mp4", None)],
         ]
         mock_dl_vid.return_value = "/path/to/video.mp4"
         MockSpinner.return_value = MagicMock()
@@ -333,9 +403,11 @@ class TestCreateVideo:
 
         # Should have downloaded the video successfully
         mock_dl_vid.assert_called_once()
-        done_calls = [c for c in db_inst.update_job.call_args_list
-                      if c.kwargs.get("status") == "done" or
-                         (len(c.args) > 1 and "done" in str(c))]
+        done_calls = [
+            c
+            for c in db_inst.update_job.call_args_list
+            if c.kwargs.get("status") == "done" or (len(c.args) > 1 and "done" in str(c))
+        ]
         assert len(done_calls) > 0
 
     # ── Download ValueError (lines 188-191) ────────────────────
@@ -348,9 +420,18 @@ class TestCreateVideo:
     @patch("img2vid.pollo.generators.get_prompt", return_value="test prompt")
     @patch("img2vid.pollo.generators.get_image_url", return_value="https://img.com/i.jpg")
     @patch("img2vid.pollo.generators.get_image_path", return_value=None)
-    def test_download_valueerror(self, mock_path, mock_img_url, mock_prompt,
-                                 mock_sleep, MockSpinner, mock_db, mock_task,
-                                 mock_dl_img, mock_dl_vid):
+    def test_download_valueerror(
+        self,
+        mock_path,
+        mock_img_url,
+        mock_prompt,
+        mock_sleep,
+        MockSpinner,
+        mock_db,
+        mock_task,
+        mock_dl_img,
+        mock_dl_vid,
+    ):
         db_inst = MagicMock()
         mock_db.return_value = db_inst
         mock_response = MagicMock()
@@ -359,7 +440,7 @@ class TestCreateVideo:
             "code": "SUCCESS",
             "data": {"taskId": "t5", "status": "processing"},
         }
-        mock_task.return_value = [("succeed", None, "https://video.com/out.mp4")]
+        mock_task.return_value = [("succeed", None, "https://video.com/out.mp4", None)]
         MockSpinner.return_value = MagicMock()
 
         with patch("img2vid.pollo.generators.requests.request", return_value=mock_response):
@@ -372,9 +453,8 @@ class TestPolloImg2VidMainGuard:
     def test_name_main_guard(self):
         """Cover the if __name__ == '__main__' guard."""
         import img2vid.pollo.pollo_img2vid as mod
-        with patch.object(mod, "create_video") as mock_cv, \
-             patch.object(mod, "__name__", "__main__"):
+
+        with patch.object(mod, "create_video") as mock_cv, patch.object(mod, "__name__", "__main__"):
             if mod.__name__ == "__main__":
                 mod.create_video()
         mock_cv.assert_called_once()
-

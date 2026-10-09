@@ -5,7 +5,7 @@ const props = defineProps({
   modelValue: { type: [String, Number], default: '' },
   label: { type: String, required: true },
   options: { type: Array, required: true },
-  hint: { type: String, default: '' }
+  hint: { type: String, default: '' },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -63,14 +63,20 @@ const groupedOptions = computed(() => {
               {{ getOptionLabel(opt) }}
             </option>
           </optgroup>
-          <option v-else v-for="opt in group.options" :key="getOptionValue(opt)" :value="getOptionValue(opt)">
+          <option v-for="opt in group.options" v-else :key="getOptionValue(opt)" :value="getOptionValue(opt)">
             {{ getOptionLabel(opt) }}
           </option>
         </template>
       </select>
       <div class="select-arrow">
         <svg width="10" height="6" viewBox="0 0 10 6" fill="none">
-          <path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path
+            d="M1 1L5 5L9 1"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
         </svg>
       </div>
       <div class="focus-ring"></div>
@@ -155,7 +161,9 @@ select:hover {
   transform: translateY(-50%);
   color: var(--text2);
   pointer-events: none;
-  transition: color 0.2s, transform 0.25s ease;
+  transition:
+    color 0.2s,
+    transform 0.25s ease;
   opacity: 0.6;
 }
 

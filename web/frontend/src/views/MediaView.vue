@@ -5,10 +5,18 @@ import MediaGrid from '../components/media/MediaGrid.vue'
 import MediaFilters from '../components/media/MediaFilters.vue'
 import CharacterEditor from '../components/characters/CharacterEditor.vue'
 import {
-  fetchMedia, uploadMedia, deleteMedia, importMedia, mediaOrigin, useMediaFilters, fetchBlockedCounts, clearBlocked,
+  fetchMedia,
+  uploadMedia,
+  deleteMedia,
+  importMedia,
+  mediaOrigin,
+  useMediaFilters,
+  fetchBlockedCounts,
+  clearBlocked,
 } from '../composables/useMedia'
 import { fetchCharacters } from '../composables/useCharacters'
 import { fmtCost } from '../utils/format'
+import { takeFiles } from '../utils/files'
 
 const showToast = inject('showToast', () => {})
 
@@ -30,7 +38,9 @@ const clearing = ref(false)
 async function loadBlocked() {
   try {
     blocked.value = await fetchBlockedCounts()
-  } catch { /* the button just stays hidden */ }
+  } catch {
+    /* the button just stays hidden */
+  }
 }
 
 async function clearAllBlocked() {
@@ -75,7 +85,9 @@ async function load() {
 async function loadCharacters() {
   try {
     savedCharacters.value = await fetchCharacters()
-  } catch { /* 401 handled by auth prompt */ }
+  } catch {
+    /* 401 handled by auth prompt */
+  }
 }
 
 async function upload(files) {
@@ -102,7 +114,8 @@ function toggle(item) {
   selected.value = next
 }
 
-const DELETE_NOTE = 'Creations also lose their generation record or chat message; copies used by characters, chats and generations stay.'
+const DELETE_NOTE =
+  'Creations also lose their generation record or chat message; copies used by characters, chats and generations stay.'
 
 async function remove(list) {
   if (!list.length) return
@@ -124,7 +137,9 @@ async function remove(list) {
 }
 
 function newCharacter(list) {
-  const seed = list.filter(i => i.kind === 'image').slice(0, 6)
+  const seed = list
+    .filter(i => i.kind === 'image')
+    .slice(0, 6)
     .map(i => ({ kind: 'media', mediaId: i.id, preview: i.thumb_url || i.url }))
   if (!seed.length) return showToast('Pick at least one image', 'error')
   preview.value = null
@@ -151,7 +166,7 @@ function sourceLink(item) {
   return null
 }
 
-const fmtDate = (s) => (s ? new Date(s).toLocaleString() : '')
+const fmtDate = s => (s ? new Date(s).toLocaleString() : '')
 
 onMounted(() => {
   load()
@@ -166,22 +181,33 @@ onMounted(() => {
       <div>
         <h1>Media</h1>
         <p class="sub">
-          Everything you've uploaded or created, in projects, chats and here. Use them for characters,
-          generations and chats with the 🗂 buttons there. Drop images anywhere on this page to upload.
+          Everything you've uploaded or created, in projects, chats and here. Use them for characters, generations and
+          chats with the 🗂 buttons there. Drop images anywhere on this page to upload.
         </p>
       </div>
       <label class="btn btn-primary upload">
         ⬆ Upload
-        <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden
-               @change="upload($event.target.files); $event.target.value = ''" />
+        <input
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          multiple
+          hidden
+          @change="upload(takeFiles($event))"
+        />
       </label>
     </header>
 
     <div class="bar">
-      <MediaFilters :filters="filters" />
-      <button v-if="blockedTotal" class="btn btn-secondary small clear-blocked" :disabled="clearing"
-              title="Remove failed generations a content filter blocked, and black images it sent back"
-              @click="clearAllBlocked">🧹 Clear blocked ({{ blockedTotal }})</button>
+      <MediaFilters v-model:filters="filters" />
+      <button
+        v-if="blockedTotal"
+        class="btn btn-secondary small clear-blocked"
+        :disabled="clearing"
+        title="Remove failed generations a content filter blocked, and black images it sent back"
+        @click="clearAllBlocked"
+      >
+        🧹 Clear blocked ({{ blockedTotal }})
+      </button>
       <button class="btn btn-secondary small" @click="toggleSelectMode">{{ selectMode ? 'Cancel' : 'Select' }}</button>
     </div>
     <p v-if="uploading" class="muted">Uploading {{ uploading }}…</p>
@@ -189,9 +215,15 @@ onMounted(() => {
     <div v-if="selectMode && selected.size" class="selection-bar">
       <span>{{ selected.size }} selected</span>
       <span class="spacer"></span>
-      <button v-if="selectedImages.length" class="btn btn-secondary small" @click="newCharacter(selectedItems)">👤 New character</button>
-      <select v-if="selectedImages.length && savedCharacters.length" v-model="addToCharacterId" class="char-select"
-              @change="addToCharacter(selectedItems)">
+      <button v-if="selectedImages.length" class="btn btn-secondary small" @click="newCharacter(selectedItems)">
+        👤 New character
+      </button>
+      <select
+        v-if="selectedImages.length && savedCharacters.length"
+        v-model="addToCharacterId"
+        class="char-select"
+        @change="addToCharacter(selectedItems)"
+      >
         <option value="">Add to character…</option>
         <option v-for="c in savedCharacters" :key="c.id" :value="c.id">{{ c.name }}</option>
       </select>
@@ -203,7 +235,14 @@ onMounted(() => {
       <h3>{{ items.length ? 'Nothing matches these filters' : 'No media yet' }}</h3>
       <p>Upload images here, or make some in a project or chat.</p>
     </div>
-    <MediaGrid v-else :items="filtered" :selected="selected" :selectable="selectMode" @toggle="toggle" @open="preview = $event" />
+    <MediaGrid
+      v-else
+      :items="filtered"
+      :selected="selected"
+      :selectable="selectMode"
+      @toggle="toggle"
+      @open="preview = $event"
+    />
 
     <!-- Preview -->
     <Teleport to="body">
@@ -220,12 +259,18 @@ onMounted(() => {
               · {{ fmtDate(preview.created_at) }}
             </p>
             <p v-if="preview.prompt" class="prompt">{{ preview.prompt }}</p>
-            <p v-if="preview.model" class="muted">{{ preview.model }}<template v-if="preview.cost"> · {{ fmtCost(preview.cost) }}</template></p>
+            <p v-if="preview.model" class="muted">
+              {{ preview.model }}<template v-if="preview.cost"> · {{ fmtCost(preview.cost) }}</template>
+            </p>
             <div class="actions">
               <template v-if="preview.kind === 'image'">
                 <button class="btn btn-secondary small" @click="newCharacter([preview])">👤 New character</button>
-                <select v-if="savedCharacters.length" v-model="addToCharacterId" class="char-select"
-                        @change="addToCharacter([preview])">
+                <select
+                  v-if="savedCharacters.length"
+                  v-model="addToCharacterId"
+                  class="char-select"
+                  @change="addToCharacter([preview])"
+                >
                   <option value="">Add to character…</option>
                   <option v-for="c in savedCharacters" :key="c.id" :value="c.id">{{ c.name }}</option>
                 </select>
@@ -243,7 +288,12 @@ onMounted(() => {
       :open="charEditor.open"
       :seed="charEditor.seed"
       @close="charEditor.open = false"
-      @saved="c => { showToast(`Character “${c.name}” saved`, 'success'); loadCharacters() }"
+      @saved="
+        c => {
+          showToast(`Character “${c.name}” saved`, 'success')
+          loadCharacters()
+        }
+      "
     />
   </div>
 </template>

@@ -2,6 +2,8 @@
 Metadata database for tracking projects, downloads, and generation jobs.
 Uses SQLAlchemy ORM.
 """
+
+import json
 import re
 import threading
 import uuid
@@ -9,9 +11,9 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-import json
-from sqlalchemy import create_engine, event, func, String, Integer, Float, Text, Boolean, DateTime, ForeignKey
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session, relationship
+
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, create_engine, event, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 from sqlalchemy.pool import StaticPool
 
 from .config import DB_PATH
@@ -31,6 +33,7 @@ def iso(dt: datetime | None) -> str | None:
 # ═══════════════════════════════════════════════════════════════════
 #  ORM Models
 # ═══════════════════════════════════════════════════════════════════
+
 
 class Base(DeclarativeBase):
     pass
@@ -170,6 +173,7 @@ class GenerationFavourite(Base):
     """A starred generation (one media file — a job can have several, e.g. a
     4-image result). Keyed by filename, which stays the same when a file is
     moved between projects; the job says which project it's in now."""
+
     __tablename__ = "generation_favourites"
     id: Mapped[int] = mapped_column(primary_key=True)
     filename: Mapped[str] = mapped_column(String(255), unique=True, index=True)
@@ -205,10 +209,13 @@ class ChatConversation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
     messages: Mapped[list["ChatMessage"]] = relationship(
-        back_populates="conversation", cascade="all, delete-orphan", order_by="ChatMessage.id",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="ChatMessage.id",
     )
     library_items: Mapped[list["ChatLibraryItem"]] = relationship(
-        back_populates="conversation", cascade="all, delete-orphan",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
     )
 
     def to_dict(self) -> dict[str, Any]:
@@ -257,6 +264,7 @@ class Character(Base):
     (files under <data>/characters/<id>/, see web/characters.py), attachable
     to chats and generations. With `conversation_id` set it's ad hoc — made
     in that chat and deleted with it — until promoted (conversation_id None)."""
+
     __tablename__ = "characters"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100))
@@ -292,11 +300,12 @@ class Character(Base):
 
 class ChatInstruction(Base):
     """User-written custom instructions, saved for reuse and attached to chats."""
+
     __tablename__ = "chat_instructions"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
     content: Mapped[str] = mapped_column(Text, default="")
-    is_default: Mapped[bool] = mapped_column(Boolean, default=False)   # attached to new chats
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)  # attached to new chats
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -317,10 +326,13 @@ class ChatMessage(Base):
 
     Messages form a tree through `parent_id` (None = first message of a
     branch); siblings are alternative versions of the same turn."""
+
     __tablename__ = "chat_messages"
     id: Mapped[int] = mapped_column(primary_key=True)
     conversation_id: Mapped[str] = mapped_column(
-        String(50), ForeignKey("chat_conversations.id", ondelete="CASCADE"), index=True,
+        String(50),
+        ForeignKey("chat_conversations.id", ondelete="CASCADE"),
+        index=True,
     )
     parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     role: Mapped[str] = mapped_column(String(20))  # 'user' | 'assistant'
@@ -366,11 +378,14 @@ class ChatLibraryItem(Base):
     """Chat media detached from its message (the message was removed by an
     edit or retry). Media still attached to messages lives in
     ChatMessage.media_json; the library view shows both."""
+
     __tablename__ = "chat_library_items"
     id: Mapped[int] = mapped_column(primary_key=True)
     media_id: Mapped[str] = mapped_column(String(50), unique=True, index=True)
     conversation_id: Mapped[str] = mapped_column(
-        String(50), ForeignKey("chat_conversations.id", ondelete="CASCADE"), index=True,
+        String(50),
+        ForeignKey("chat_conversations.id", ondelete="CASCADE"),
+        index=True,
     )
     item_json: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
@@ -389,8 +404,10 @@ class ChatLibraryItem(Base):
 #  Database Manager
 # ═══════════════════════════════════════════════════════════════════
 
+
 class MetadataDB:
     """SQLAlchemy-based database manager for tracking projects, downloads, and jobs."""
+
     def __init__(self, db_path: Path | None = None):
         self.db_path = db_path or DB_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -423,30 +440,36 @@ class MetadataDB:
     # missing *tables*; Docker runs Alembic on start, but a local dev server
     # doesn't, so add them here too (same as the Alembic migration).
     _LATE_COLUMNS = {
-        "chat_conversations": {"instruction_id": "INTEGER", "current_leaf_id": "INTEGER",
-                               "character_ids_json": "TEXT", "forked_from_id": "VARCHAR(50)",
-                               "forked_from_message_id": "INTEGER", "inherited_cost": "FLOAT",
-                               "inherited_credits": "INTEGER", "pinned": "BOOLEAN NOT NULL DEFAULT 0",
-                               "settings_json": "TEXT"},
+        "chat_conversations": {
+            "instruction_id": "INTEGER",
+            "current_leaf_id": "INTEGER",
+            "character_ids_json": "TEXT",
+            "forked_from_id": "VARCHAR(50)",
+            "forked_from_message_id": "INTEGER",
+            "inherited_cost": "FLOAT",
+            "inherited_credits": "INTEGER",
+            "pinned": "BOOLEAN NOT NULL DEFAULT 0",
+            "settings_json": "TEXT",
+        },
         "chat_messages": {"parent_id": "INTEGER", "mode": "VARCHAR(10)"},
     }
     # Run once when the column is added: chats from before branching were
     # linear, so each message's parent is the one before it
     _BACKFILLS = {
         "parent_id": "UPDATE chat_messages SET parent_id = (SELECT MAX(p.id) FROM chat_messages p "
-                     "WHERE p.conversation_id = chat_messages.conversation_id AND p.id < chat_messages.id)",
+        "WHERE p.conversation_id = chat_messages.conversation_id AND p.id < chat_messages.id)",
         "current_leaf_id": "UPDATE chat_conversations SET current_leaf_id = (SELECT MAX(m.id) "
-                           "FROM chat_messages m WHERE m.conversation_id = chat_conversations.id)",
+        "FROM chat_messages m WHERE m.conversation_id = chat_conversations.id)",
     }
 
     def _add_missing_columns(self) -> None:
         from sqlalchemy import inspect, text
+
         # Read the schema first: the inspector shares the one StaticPool
         # connection and rolls back after each query, which would undo the
         # backfill UPDATEs if it ran between them
         insp = inspect(self.engine)
-        existing = {t: {c["name"] for c in insp.get_columns(t)}
-                    for t in self._LATE_COLUMNS if insp.has_table(t)}
+        existing = {t: {c["name"] for c in insp.get_columns(t)} for t in self._LATE_COLUMNS if insp.has_table(t)}
         with self.engine.begin() as conn:
             for table, columns in self._LATE_COLUMNS.items():
                 if table not in existing:
@@ -465,9 +488,8 @@ class MetadataDB:
         serialise all database work through a threading.Lock so two
         threads never interleave SQL on the same connection.
         """
-        with self._lock:
-            with Session(self.engine) as session:
-                yield session
+        with self._lock, Session(self.engine) as session:
+            yield session
 
     # ── Project methods ──────────────────────────────────────────────
 
@@ -491,9 +513,9 @@ class MetadataDB:
     def _generate_slug(self, name: str) -> str:
         """Generate a URL-friendly slug from a name."""
         slug = name.lower().strip()
-        slug = re.sub(r'[^a-z0-9]+', '_', slug)
-        slug = re.sub(r'_+', '_', slug).strip('_')
-        return slug or 'project'
+        slug = re.sub(r"[^a-z0-9]+", "_", slug)
+        slug = re.sub(r"_+", "_", slug).strip("_")
+        return slug or "project"
 
     def _ensure_unique_slug(self, session: Session, slug: str) -> str:
         """Ensure slug is unique by adding a number suffix if needed."""
@@ -604,36 +626,40 @@ class MetadataDB:
 
     def get_downloads_by_project(self, project: str) -> list[Download]:
         with self._session() as session:
-            downloads = session.query(Download).filter(Download.project == project)\
-                .order_by(Download.created_at.desc()).all()
+            downloads = (
+                session.query(Download).filter(Download.project == project).order_by(Download.created_at.desc()).all()
+            )
             for d in downloads:
                 session.expunge(d)
             return downloads
 
     def get_download_by_url(self, url: str) -> Download | None:
         with self._session() as session:
-            download = session.query(Download).filter(Download.url == url)\
-                .order_by(Download.created_at.desc()).first()
+            download = session.query(Download).filter(Download.url == url).order_by(Download.created_at.desc()).first()
             if download:
                 session.expunge(download)
             return download
 
     def get_videos_by_project(self, project: str) -> list[Download]:
         with self._session() as session:
-            downloads = session.query(Download).filter(
-                Download.project == project,
-                Download.file_type == 'video'
-            ).order_by(Download.created_at.desc()).all()
+            downloads = (
+                session.query(Download)
+                .filter(Download.project == project, Download.file_type == "video")
+                .order_by(Download.created_at.desc())
+                .all()
+            )
             for d in downloads:
                 session.expunge(d)
             return downloads
 
     def get_latest_video(self, project: str) -> Download | None:
         with self._session() as session:
-            download = session.query(Download).filter(
-                Download.project == project,
-                Download.file_type == 'video'
-            ).order_by(Download.created_at.desc()).first()
+            download = (
+                session.query(Download)
+                .filter(Download.project == project, Download.file_type == "video")
+                .order_by(Download.created_at.desc())
+                .first()
+            )
             if download:
                 session.expunge(download)
             return download
@@ -717,8 +743,7 @@ class MetadataDB:
 
     def get_jobs_by_project(self, project: str) -> list[Job]:
         with self._session() as session:
-            jobs = session.query(Job).filter(Job.project == project)\
-                .order_by(Job.created_at.desc()).all()
+            jobs = session.query(Job).filter(Job.project == project).order_by(Job.created_at.desc()).all()
             for j in jobs:
                 session.expunge(j)
             return jobs
@@ -733,9 +758,7 @@ class MetadataDB:
 
     def get_active_jobs(self) -> list[Job]:
         with self._session() as session:
-            jobs = session.query(Job).filter(
-                ~Job.status.in_(['done', 'error'])
-            ).order_by(Job.created_at.desc()).all()
+            jobs = session.query(Job).filter(~Job.status.in_(["done", "error"])).order_by(Job.created_at.desc()).all()
             for j in jobs:
                 session.expunge(j)
             return jobs
@@ -749,8 +772,7 @@ class MetadataDB:
 
     def get_jobs_by_status(self, status: str, limit: int = 50) -> list[Job]:
         with self._session() as session:
-            jobs = session.query(Job).filter(Job.status == status)\
-                .order_by(Job.created_at.desc()).limit(limit).all()
+            jobs = session.query(Job).filter(Job.status == status).order_by(Job.created_at.desc()).limit(limit).all()
             for j in jobs:
                 session.expunge(j)
             return jobs
@@ -815,8 +837,11 @@ class MetadataDB:
     def list_favourites(self) -> list[GenerationFavourite]:
         """Newest first."""
         with self._session() as session:
-            items = session.query(GenerationFavourite).order_by(GenerationFavourite.created_at.desc(),
-                                                                GenerationFavourite.id.desc()).all()
+            items = (
+                session.query(GenerationFavourite)
+                .order_by(GenerationFavourite.created_at.desc(), GenerationFavourite.id.desc())
+                .all()
+            )
             for i in items:
                 session.expunge(i)
             return items
@@ -846,8 +871,12 @@ class MetadataDB:
     def list_conversations(self, limit: int = 200) -> list[ChatConversation]:
         """Pinned chats first, then the most recently active."""
         with self._session() as session:
-            convs = session.query(ChatConversation)\
-                .order_by(ChatConversation.pinned.desc(), ChatConversation.updated_at.desc()).limit(limit).all()
+            convs = (
+                session.query(ChatConversation)
+                .order_by(ChatConversation.pinned.desc(), ChatConversation.updated_at.desc())
+                .limit(limit)
+                .all()
+            )
             for c in convs:
                 session.expunge(c)
             return convs
@@ -859,12 +888,21 @@ class MetadataDB:
         pattern = "%" + re.sub(r"([\\%_])", r"\\\1", query) + "%"
         with self._session() as session:
             snippets: dict[str, str] = {}
-            for conv_id, content in session.query(ChatMessage.conversation_id, ChatMessage.content)\
-                    .filter(ChatMessage.content.ilike(pattern, escape="\\")).order_by(ChatMessage.id):
+            for conv_id, content in (
+                session.query(ChatMessage.conversation_id, ChatMessage.content)
+                .filter(ChatMessage.content.ilike(pattern, escape="\\"))
+                .order_by(ChatMessage.id)
+            ):
                 snippets.setdefault(conv_id, content)
-            convs = session.query(ChatConversation).filter(
-                ChatConversation.title.ilike(pattern, escape="\\") | ChatConversation.id.in_(list(snippets)),
-            ).order_by(ChatConversation.updated_at.desc()).limit(limit).all()
+            convs = (
+                session.query(ChatConversation)
+                .filter(
+                    ChatConversation.title.ilike(pattern, escape="\\") | ChatConversation.id.in_(list(snippets)),
+                )
+                .order_by(ChatConversation.updated_at.desc())
+                .limit(limit)
+                .all()
+            )
             for c in convs:
                 session.expunge(c)
             return [(c, None if query.lower() in c.title.lower() else snippets.get(c.id)) for c in convs]
@@ -872,8 +910,12 @@ class MetadataDB:
     def list_conversation_forks(self, conv_id: str) -> list[ChatConversation]:
         """Chats branched off this one, oldest first."""
         with self._session() as session:
-            convs = session.query(ChatConversation).filter(ChatConversation.forked_from_id == conv_id)\
-                .order_by(ChatConversation.created_at).all()
+            convs = (
+                session.query(ChatConversation)
+                .filter(ChatConversation.forked_from_id == conv_id)
+                .order_by(ChatConversation.created_at)
+                .all()
+            )
             for c in convs:
                 session.expunge(c)
             return convs
@@ -882,7 +924,8 @@ class MetadataDB:
         """Pin or unpin. Not an edit, so the chat keeps its place among the rest."""
         with self._session() as session:
             session.query(ChatConversation).filter(ChatConversation.id == conv_id).update(
-                {ChatConversation.pinned: pinned, ChatConversation.updated_at: ChatConversation.updated_at})
+                {ChatConversation.pinned: pinned, ChatConversation.updated_at: ChatConversation.updated_at}
+            )
             session.commit()
 
     def update_conversation(self, conv_id: str, **fields) -> ChatConversation | None:
@@ -935,8 +978,9 @@ class MetadataDB:
                 item.updated_at = datetime.now()
             if fields.get("is_default"):
                 session.flush()
-                session.query(ChatInstruction).filter(ChatInstruction.id != item.id)\
-                    .update({ChatInstruction.is_default: False})
+                session.query(ChatInstruction).filter(ChatInstruction.id != item.id).update(
+                    {ChatInstruction.is_default: False}
+                )
             session.commit()
             session.refresh(item)
             session.expunge(item)
@@ -948,8 +992,9 @@ class MetadataDB:
             item = session.get(ChatInstruction, instruction_id)
             if not item:
                 return False
-            session.query(ChatConversation).filter(ChatConversation.instruction_id == instruction_id)\
-                .update({ChatConversation.instruction_id: None})
+            session.query(ChatConversation).filter(ChatConversation.instruction_id == instruction_id).update(
+                {ChatConversation.instruction_id: None}
+            )
             session.delete(item)
             session.commit()
             return True
@@ -1054,8 +1099,7 @@ class MetadataDB:
         """The shown branch's last message, falling back to the newest one."""
         if conv.current_leaf_id and session.get(ChatMessage, conv.current_leaf_id):
             return conv.current_leaf_id
-        return session.query(func.max(ChatMessage.id))\
-            .filter(ChatMessage.conversation_id == conv.id).scalar()
+        return session.query(func.max(ChatMessage.id)).filter(ChatMessage.conversation_id == conv.id).scalar()
 
     def get_chat_leaf_id(self, conversation_id: str) -> int | None:
         with self._session() as session:
@@ -1066,18 +1110,27 @@ class MetadataDB:
         """Show another branch. Not an edit, so the chat keeps its place in the list."""
         with self._session() as session:
             session.query(ChatConversation).filter(ChatConversation.id == conversation_id).update(
-                {ChatConversation.current_leaf_id: leaf_id, ChatConversation.updated_at: ChatConversation.updated_at})
+                {ChatConversation.current_leaf_id: leaf_id, ChatConversation.updated_at: ChatConversation.updated_at}
+            )
             session.commit()
 
     def get_chat_sibling_ids(self, conversation_id: str, parent_id: int | None) -> list[int]:
         """Ids of every version of a turn (messages sharing a parent), oldest first."""
         with self._session() as session:
-            rows = session.query(ChatMessage.id).filter(
-                ChatMessage.conversation_id == conversation_id, ChatMessage.parent_id == parent_id,
-            ).order_by(ChatMessage.id).all()
+            rows = (
+                session.query(ChatMessage.id)
+                .filter(
+                    ChatMessage.conversation_id == conversation_id,
+                    ChatMessage.parent_id == parent_id,
+                )
+                .order_by(ChatMessage.id)
+                .all()
+            )
             return [r[0] for r in rows]
 
-    def update_chat_message(self, message_id: int, media: list[dict[str, Any]] | None = None, **fields) -> ChatMessage | None:
+    def update_chat_message(
+        self, message_id: int, media: list[dict[str, Any]] | None = None, **fields
+    ) -> ChatMessage | None:
         with self._session() as session:
             msg = session.get(ChatMessage, message_id)
             if not msg:
@@ -1162,8 +1215,9 @@ class MetadataDB:
         Media detached into the library still counts; its message is gone."""
         with self._session() as session:
             usd, credits = 0.0, 0
-            for cost, media_json in session.query(ChatMessage.cost, ChatMessage.media_json)\
-                    .filter(ChatMessage.conversation_id == conversation_id):
+            for cost, media_json in session.query(ChatMessage.cost, ChatMessage.media_json).filter(
+                ChatMessage.conversation_id == conversation_id
+            ):
                 usd += cost or 0
                 for item in json.loads(media_json) if media_json else []:
                     credits += item.get("credits") or 0
@@ -1174,9 +1228,12 @@ class MetadataDB:
 
     def get_chat_messages(self, conversation_id: str) -> list[ChatMessage]:
         with self._session() as session:
-            msgs = session.query(ChatMessage)\
-                .filter(ChatMessage.conversation_id == conversation_id)\
-                .order_by(ChatMessage.id).all()
+            msgs = (
+                session.query(ChatMessage)
+                .filter(ChatMessage.conversation_id == conversation_id)
+                .order_by(ChatMessage.id)
+                .all()
+            )
             for m in msgs:
                 session.expunge(m)
             return msgs
@@ -1190,19 +1247,27 @@ class MetadataDB:
         Returns the detached media items.
         """
         with self._session() as session:
-            msgs = session.query(ChatMessage).filter(
-                ChatMessage.conversation_id == conversation_id,
-                ChatMessage.id > after_id,
-            ).all()
+            msgs = (
+                session.query(ChatMessage)
+                .filter(
+                    ChatMessage.conversation_id == conversation_id,
+                    ChatMessage.id > after_id,
+                )
+                .all()
+            )
             detached = []
             for msg in msgs:
                 for item in msg.media:
                     if item.get("source") == "upload" or not (item.get("file") or item.get("job_id")):
                         continue
-                    session.add(ChatLibraryItem(
-                        media_id=item["id"], conversation_id=conversation_id,
-                        item_json=json.dumps(item), created_at=msg.created_at,
-                    ))
+                    session.add(
+                        ChatLibraryItem(
+                            media_id=item["id"],
+                            conversation_id=conversation_id,
+                            item_json=json.dumps(item),
+                            created_at=msg.created_at,
+                        )
+                    )
                     detached.append(item)
                 session.delete(msg)
             session.commit()
@@ -1213,8 +1278,9 @@ class MetadataDB:
         prompt = session.get(ChatMessage, user_message_id)
         if not prompt or prompt.conversation_id != conversation_id or prompt.role != "user":
             return None
-        msgs = {m.id: m for m in session.query(ChatMessage)
-                .filter(ChatMessage.conversation_id == conversation_id).all()}
+        msgs = {
+            m.id: m for m in session.query(ChatMessage).filter(ChatMessage.conversation_id == conversation_id).all()
+        }
         children: dict[int | None, list[int]] = {}
         for m in msgs.values():
             children.setdefault(m.parent_id, []).append(m.id)
@@ -1238,9 +1304,14 @@ class MetadataDB:
             doomed.append(mid)
             stack += [c for c in children.get(mid, []) if c not in kept_next]
         turn = set(versions) | set(replies)
-        return {"prompt": prompt, "msgs": msgs, "doomed": doomed, "kept_next": kept_next,
-                "other_versions": len(versions) - 1,
-                "other_messages": len([d for d in doomed if d not in turn])}
+        return {
+            "prompt": prompt,
+            "msgs": msgs,
+            "doomed": doomed,
+            "kept_next": kept_next,
+            "other_versions": len(versions) - 1,
+            "other_messages": len([d for d in doomed if d not in turn]),
+        }
 
     def chat_exchange_delete_info(self, conversation_id: str, user_message_id: int) -> dict | None:
         """How much deleting this prompt's turn removes, for the confirmation."""
@@ -1271,15 +1342,19 @@ class MetadataDB:
                 for item in msg.media:
                     if item.get("source") == "upload" or not (item.get("file") or item.get("job_id")):
                         continue
-                    session.add(ChatLibraryItem(
-                        media_id=item["id"], conversation_id=conversation_id,
-                        item_json=json.dumps(item), created_at=msg.created_at,
-                    ))
+                    session.add(
+                        ChatLibraryItem(
+                            media_id=item["id"],
+                            conversation_id=conversation_id,
+                            item_json=json.dumps(item),
+                            created_at=msg.created_at,
+                        )
+                    )
                     detached.append(item)
                 session.delete(msg)
             conv = session.get(ChatConversation, conversation_id)
             if conv and conv.current_leaf_id in set(plan["doomed"]):
-                conv.current_leaf_id = prompt.parent_id   # the branch now ends before the turn
+                conv.current_leaf_id = prompt.parent_id  # the branch now ends before the turn
             session.commit()
             return detached
 
@@ -1308,16 +1383,19 @@ class MetadataDB:
 
     def get_chat_messages_with_media(self) -> list[ChatMessage]:
         with self._session() as session:
-            msgs = session.query(ChatMessage).filter(ChatMessage.media_json.isnot(None))\
-                .order_by(ChatMessage.id.desc()).all()
+            msgs = (
+                session.query(ChatMessage)
+                .filter(ChatMessage.media_json.isnot(None))
+                .order_by(ChatMessage.id.desc())
+                .all()
+            )
             for m in msgs:
                 session.expunge(m)
             return msgs
 
     def get_chat_messages_with_pending_media(self) -> list[ChatMessage]:
         with self._session() as session:
-            msgs = session.query(ChatMessage)\
-                .filter(ChatMessage.media_json.contains('"status": "pending"')).all()
+            msgs = session.query(ChatMessage).filter(ChatMessage.media_json.contains('"status": "pending"')).all()
             for m in msgs:
                 session.expunge(m)
             return msgs

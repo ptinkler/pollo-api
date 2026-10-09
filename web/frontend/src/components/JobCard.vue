@@ -5,12 +5,12 @@ import { PROCESSING_STATUSES } from '../composables/useJobsQueue'
 
 const props = defineProps({
   job: { type: Object, required: true },
-  project: { type: String, default: '' }
+  project: { type: String, default: '' },
 })
 
 defineEmits(['download', 'view-video', 'delete', 'check'])
 
-const isProcessing = (status) => PROCESSING_STATUSES.includes(status)
+const isProcessing = status => PROCESSING_STATUSES.includes(status)
 
 const thumbError = ref(false)
 
@@ -21,12 +21,14 @@ const thumbUrl = computed(() => {
 })
 
 // Reset thumb error when video becomes available (e.g., after download)
-watch(() => [props.job.video_exists, props.job.video_path], () => {
-  if (props.job.video_exists && props.job.video_path) {
-    thumbError.value = false
-  }
-})
-
+watch(
+  () => [props.job.video_exists, props.job.video_path],
+  () => {
+    if (props.job.video_exists && props.job.video_path) {
+      thumbError.value = false
+    }
+  },
+)
 
 function handleThumbError() {
   thumbError.value = true
@@ -36,7 +38,11 @@ function handleThumbError() {
 <template>
   <div :class="['job-card', job.status]" :data-job-id="job.job_id">
     <!-- Thumbnail -->
-    <div v-if="thumbUrl && !thumbError" class="job-thumb" @click.stop="$emit('view-video', getFilenameFromPath(job.video_path))">
+    <div
+      v-if="thumbUrl && !thumbError"
+      class="job-thumb"
+      @click.stop="$emit('view-video', getFilenameFromPath(job.video_path))"
+    >
       <img :src="thumbUrl" alt="" @error="handleThumbError" />
     </div>
     <div v-else class="dot"></div>
@@ -45,12 +51,7 @@ function handleThumbError() {
       <div class="job-model">{{ job.model }}</div>
       <div class="job-message">{{ job.message }}</div>
       <div class="job-links">
-        <a
-          href="https://pollo.ai/api-platform/logs"
-          target="_blank"
-          class="job-link"
-          @click.stop
-        >
+        <a href="https://pollo.ai/api-platform/logs" target="_blank" class="job-link" @click.stop>
           {{ job.job_id }}
         </a>
         <a
@@ -97,13 +98,7 @@ function handleThumbError() {
 
     <span class="badge">{{ job.status }}</span>
 
-    <button
-      class="btn-delete"
-      title="Delete job and video"
-      @click.stop="$emit('delete', job.job_id)"
-    >
-      🗑️
-    </button>
+    <button class="btn-delete" title="Delete job and video" @click.stop="$emit('delete', job.job_id)">🗑️</button>
   </div>
 </template>
 
@@ -127,7 +122,9 @@ function handleThumbError() {
   flex-shrink: 0;
   cursor: pointer;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: border-color 0.2s, transform 0.15s;
+  transition:
+    border-color 0.2s,
+    transform 0.15s;
 }
 
 .job-thumb:hover {
@@ -243,12 +240,19 @@ function handleThumbError() {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 
 .btn-delete {

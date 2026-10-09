@@ -7,8 +7,8 @@ import { apiGet, apiPost, apiDelete, apiUpload } from './useApi'
 const enc = encodeURIComponent
 
 export const fetchMedia = () => apiGet('/api/media').then(r => r.items)
-export const uploadMedia = (file) => apiUpload('/api/media/upload', file)
-export const deleteMedia = (id) => apiDelete(`/api/media/${enc(id)}`)
+export const uploadMedia = file => apiUpload('/api/media/upload', file)
+export const deleteMedia = id => apiDelete(`/api/media/${enc(id)}`)
 
 /** Chat generations a content filter blocked: { moderated, black } counts, and clearing them all. */
 export const fetchBlockedCounts = () => apiGet('/api/media/blocked')
@@ -32,11 +32,13 @@ export function useMediaFilters(items, { kind = 'all' } = {}) {
   const filters = reactive({ kind, source: 'all', origin: 'all', q: '' })
   const filtered = computed(() => {
     const q = filters.q.trim().toLowerCase()
-    return items.value.filter(i =>
-      (filters.kind === 'all' || i.kind === filters.kind)
-      && (filters.source === 'all' || i.source === filters.source)
-      && (filters.origin === 'all' || i.origin === filters.origin)
-      && (!q || [i.prompt, i.name, mediaOrigin(i)].some(s => s?.toLowerCase().includes(q))))
+    return items.value.filter(
+      i =>
+        (filters.kind === 'all' || i.kind === filters.kind) &&
+        (filters.source === 'all' || i.source === filters.source) &&
+        (filters.origin === 'all' || i.origin === filters.origin) &&
+        (!q || [i.prompt, i.name, mediaOrigin(i)].some(s => s?.toLowerCase().includes(q))),
+    )
   })
   return { filters, filtered }
 }

@@ -14,11 +14,14 @@ function streamOf(chunks) {
 describe('readSSE', () => {
   it('parses events split across arbitrary chunk boundaries', async () => {
     const events = []
-    await readSSE(streamOf([
-      'data: {"type":"st',
-      'art"}\n\ndata: {"type":"delta","text":"hi"}\n',
-      '\n: keep-alive\n\ndata: {"type":"done"}\n\n',
-    ]), e => events.push(e))
+    await readSSE(
+      streamOf([
+        'data: {"type":"st',
+        'art"}\n\ndata: {"type":"delta","text":"hi"}\n',
+        '\n: keep-alive\n\ndata: {"type":"done"}\n\n',
+      ]),
+      e => events.push(e),
+    )
     expect(events).toEqual([{ type: 'start' }, { type: 'delta', text: 'hi' }, { type: 'done' }])
   })
 

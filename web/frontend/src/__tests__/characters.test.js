@@ -47,7 +47,11 @@ describe('CharacterEditor', () => {
 
   it('creates an ad-hoc character and copies the seed image from the chat', async () => {
     const w = mount(CharacterEditor, {
-      props: { open: false, conversationId: 'c1', seed: [{ kind: 'chat', conversationId: 'c1', file: 'g.png', preview: '/p' }] },
+      props: {
+        open: false,
+        conversationId: 'c1',
+        seed: [{ kind: 'chat', conversationId: 'c1', file: 'g.png', preview: '/p' }],
+      },
       attachTo: document.body,
     })
     await w.setProps({ open: true })
@@ -64,8 +68,16 @@ describe('CharacterEditor', () => {
     dialog.querySelector('.btn-primary').click()
     await flushPromises()
 
-    expect(requests[0]).toEqual(['POST', '/api/characters', { name: 'Linh', description: 'red scarf', conversation_id: 'c1' }])
-    expect(requests[1]).toEqual(['POST', '/api/characters/7/images/from-chat', { conversation_id: 'c1', file: 'g.png' }])
+    expect(requests[0]).toEqual([
+      'POST',
+      '/api/characters',
+      { name: 'Linh', description: 'red scarf', conversation_id: 'c1' },
+    ])
+    expect(requests[1]).toEqual([
+      'POST',
+      '/api/characters/7/images/from-chat',
+      { conversation_id: 'c1', file: 'g.png' },
+    ])
     expect(w.emitted('saved')[0][0].images).toEqual(['img_x.png'])
     w.unmount()
   })
@@ -95,10 +107,15 @@ describe('which models can use characters', () => {
     const { nextTick } = await import('vue')
     const ModelPicker = (await import('../components/chat/ModelPicker.vue')).default
     const w = mount(ModelPicker, {
-      props: { kind: 'image', label: 'Image', modelValue: '', models: [
-        { id: 'a/refs', name: 'Refs', input_modalities: ['text', 'image'] },
-        { id: 'b/prompt', name: 'Prompt only', input_modalities: ['text'] },
-      ] },
+      props: {
+        kind: 'image',
+        label: 'Image',
+        modelValue: '',
+        models: [
+          { id: 'a/refs', name: 'Refs', input_modalities: ['text', 'image'] },
+          { id: 'b/prompt', name: 'Prompt only', input_modalities: ['text'] },
+        ],
+      },
       attachTo: document.body,
     })
     await w.find('.picker-btn').trigger('click')

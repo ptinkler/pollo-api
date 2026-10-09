@@ -6,36 +6,55 @@ import { useVideoList } from '../../composables/useVideoList'
 
 const props = defineProps({
   project: { type: String, required: true },
-  active: { type: Boolean, default: false }
+  active: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['open-video', 'regenerate', 'use-as-ref', 'video-deleted'])
 
 const {
-  videos, loading, load,
-  handleDelete, openVideo, handleRegenerate, handleToggleFavourite, handleArchive,
-  getVideoByFilename, removeVideo,
-  selectMode, selectedFilenames, toggleSelectMode, toggleSelect,
-  showMoveModal, pendingMoveJobIds, handleCardMove, handleBulkMove, handleMove, handleBulkDelete,
+  videos,
+  loading,
+  load,
+  handleDelete,
+  openVideo,
+  handleRegenerate,
+  handleToggleFavourite,
+  handleArchive,
+  getVideoByFilename,
+  removeVideo,
+  selectMode,
+  selectedFilenames,
+  toggleSelectMode,
+  toggleSelect,
+  showMoveModal,
+  pendingMoveJobIds,
+  handleCardMove,
+  handleBulkMove,
+  handleMove,
+  handleBulkDelete,
 } = useVideoList(props, { archived: false, emit })
 
 // Filter state
 const showVideos = ref(true)
 const showImages = ref(true)
 const favouritesOnly = ref(false)
-const filteredVideos = computed(() => videos.value.filter(v => {
-  if (favouritesOnly.value && !v.favourite) return false
-  const mt = v.media_type || v.job?.media_type || v.job?.job_type || 'video'
-  if (mt === 'image') return showImages.value
-  return showVideos.value
-}))
+const filteredVideos = computed(() =>
+  videos.value.filter(v => {
+    if (favouritesOnly.value && !v.favourite) return false
+    const mt = v.media_type || v.job?.media_type || v.job?.job_type || 'video'
+    if (mt === 'image') return showImages.value
+    return showVideos.value
+  }),
+)
 
 function addVideo(video) {
   if (videos.value.some(v => v.filename === video.filename)) return
   videos.value = [video, ...videos.value]
 }
 
-function refresh() { load() }
+function refresh() {
+  load()
+}
 
 defineExpose({ refresh, getVideoByFilename, removeVideo, addVideo })
 </script>
@@ -49,15 +68,9 @@ defineExpose({ refresh, getVideoByFilename, removeVideo, addVideo })
     <template v-else-if="videos.length">
       <div class="panel-toolbar">
         <div class="filter-checks">
-          <label class="filter-check">
-            <input type="checkbox" v-model="showVideos" /> Videos
-          </label>
-          <label class="filter-check">
-            <input type="checkbox" v-model="showImages" /> Images
-          </label>
-          <label class="filter-check">
-            <input type="checkbox" v-model="favouritesOnly" /> ★ Favourites only
-          </label>
+          <label class="filter-check"> <input v-model="showVideos" type="checkbox" /> Videos </label>
+          <label class="filter-check"> <input v-model="showImages" type="checkbox" /> Images </label>
+          <label class="filter-check"> <input v-model="favouritesOnly" type="checkbox" /> ★ Favourites only </label>
         </div>
         <button class="btn btn-secondary toolbar-btn" @click="toggleSelectMode">
           {{ selectMode ? 'Cancel' : 'Select' }}
@@ -90,7 +103,7 @@ defineExpose({ refresh, getVideoByFilename, removeVideo, addVideo })
           :selected="selectedFilenames.has(video.filename)"
           @click="openVideo"
           @regenerate="handleRegenerate"
-          @use-as-ref="(v) => emit('use-as-ref', v)"
+          @use-as-ref="v => emit('use-as-ref', v)"
           @archive="handleArchive"
           @move="handleCardMove"
           @delete="handleDelete"

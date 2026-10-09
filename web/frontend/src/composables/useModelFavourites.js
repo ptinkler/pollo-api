@@ -18,7 +18,9 @@ const favourites = reactive(load())
 function save() {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify(favourites))
-  } catch { /* storage unavailable — favourites last for this session only */ }
+  } catch {
+    /* storage unavailable — favourites last for this session only */
+  }
 }
 
 export function useModelFavourites() {

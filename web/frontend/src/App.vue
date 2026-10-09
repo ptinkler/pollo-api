@@ -20,7 +20,7 @@ const { activeJobs, initialize, onJobComplete, onJobError } = useJobsQueue()
 const { addCredits, refreshBalance } = useSessionCredits()
 
 // Track credits when jobs complete — subtract locally for instant feedback
-onJobComplete((job) => {
+onJobComplete(job => {
   if (job.credits_used) {
     addCredits(job.credits_used)
   }

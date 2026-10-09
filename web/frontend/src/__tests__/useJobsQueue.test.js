@@ -156,11 +156,7 @@ describe('useJobsQueue', () => {
     await vi.runAllTimersAsync()
 
     expect(activeJobs.value[0].status).toBe('error')
-    expect(notify).toHaveBeenCalledWith(
-      expect.stringContaining('Generation failed'),
-      'error',
-      5000
-    )
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining('Generation failed'), 'error', 5000)
   })
 
   it('onJobComplete callback fires on done', async () => {
@@ -178,7 +174,7 @@ describe('useJobsQueue', () => {
     await vi.runAllTimersAsync()
 
     expect(callback).toHaveBeenCalledWith(expect.objectContaining({ status: 'done' }))
-    
+
     // Unsubscribe should work
     unsubscribe()
   })
@@ -192,4 +188,3 @@ describe('useJobsQueue', () => {
     cleanup()
   })
 })
-

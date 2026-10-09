@@ -3,7 +3,14 @@ import { ref, computed, onMounted, inject } from 'vue'
 import { useRouter } from 'vue-router'
 import ProjectCard from '../components/ProjectCard.vue'
 import VideoCard from '../components/VideoCard.vue'
-import { fetchProjects, createProject, archiveProject, unarchiveProject, deleteProject, fetchFavourites } from '../composables/useApi'
+import {
+  fetchProjects,
+  createProject,
+  archiveProject,
+  unarchiveProject,
+  deleteProject,
+  fetchFavourites,
+} from '../composables/useApi'
 import { toggleFavourite } from '../composables/useVideoList'
 
 const router = useRouter()
@@ -12,13 +19,14 @@ const showToast = inject('showToast')
 const projects = ref([])
 const newProjectName = ref('')
 const loading = ref(true)
-const activeTab = ref('active')  // 'active' | 'archived' | 'favourites'
+const activeTab = ref('active') // 'active' | 'archived' | 'favourites'
 
 // ── Favourites: starred generations from every project ──
 const favourites = ref([])
-const favFilter = ref('all')   // all | video | image
+const favFilter = ref('all') // all | video | image
 const shownFavourites = computed(() =>
-  favFilter.value === 'all' ? favourites.value : favourites.value.filter(f => f.media_type === favFilter.value))
+  favFilter.value === 'all' ? favourites.value : favourites.value.filter(f => f.media_type === favFilter.value),
+)
 
 async function loadFavourites() {
   loading.value = true
@@ -114,37 +122,34 @@ onMounted(loadProjects)
 <template>
   <div class="home-view">
     <div class="home-bar">
-      <input
-        v-model="newProjectName"
-        type="text"
-        placeholder="New project name..."
-        @keydown="handleKeydown"
-      />
+      <input v-model="newProjectName" type="text" placeholder="New project name..." @keydown="handleKeydown" />
       <button class="btn btn-primary" @click="handleCreate">+ Create</button>
     </div>
 
     <div class="tab-bar">
-      <button
-        class="tab-btn"
-        :class="{ active: activeTab === 'active' }"
-        @click="switchTab('active')"
-      >Projects</button>
-      <button
-        class="tab-btn"
-        :class="{ active: activeTab === 'archived' }"
-        @click="switchTab('archived')"
-      >Archived</button>
-      <button
-        class="tab-btn"
-        :class="{ active: activeTab === 'favourites' }"
-        @click="switchTab('favourites')"
-      >★ Favourites</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'active' }" @click="switchTab('active')">Projects</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'archived' }" @click="switchTab('archived')">
+        Archived
+      </button>
+      <button class="tab-btn" :class="{ active: activeTab === 'favourites' }" @click="switchTab('favourites')">
+        ★ Favourites
+      </button>
     </div>
 
     <template v-if="activeTab === 'favourites'">
       <div v-if="favourites.length" class="fav-filters">
-        <button v-for="f in [['all', 'All'], ['video', 'Videos'], ['image', 'Images']]" :key="f[0]"
-          :class="['fav-filter', { active: favFilter === f[0] }]" @click="favFilter = f[0]">{{ f[1] }}</button>
+        <button
+          v-for="f in [
+            ['all', 'All'],
+            ['video', 'Videos'],
+            ['image', 'Images'],
+          ]"
+          :key="f[0]"
+          :class="['fav-filter', { active: favFilter === f[0] }]"
+          @click="favFilter = f[0]"
+        >
+          {{ f[1] }}
+        </button>
       </div>
       <div v-if="loading" class="loading"><p>Loading...</p></div>
       <div v-else-if="!shownFavourites.length" class="empty-state">
@@ -262,7 +267,9 @@ onMounted(loadProjects)
   padding: 8px 16px;
   font-size: 0.9rem;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .tab-btn:hover {

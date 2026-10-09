@@ -1,12 +1,22 @@
 <script setup>
 import { ref, reactive, computed, watch, inject } from 'vue'
 import { RatioPicker, LengthSlider, ToggleSwitch, SleekTextarea, SleekSelect, SleekInput } from '../../components/form'
-import { generateVideo, generateImage, uploadSourceImage, deleteSourceImage, uploadRefImage, fetchCreditEstimate, localImageFilename, getLocalImagePreviewUrl } from '../../composables/useApi'
+import {
+  generateVideo,
+  generateImage,
+  uploadSourceImage,
+  deleteSourceImage,
+  uploadRefImage,
+  fetchCreditEstimate,
+  localImageFilename,
+  getLocalImagePreviewUrl,
+} from '../../composables/useApi'
 import { useProjectSettings } from '../../composables/useProjectSettings'
 import { useJobsQueue } from '../../composables/useJobsQueue'
 import { useShowHidden } from '../../composables/useShowHidden'
 import { fetchCharacters, generateModelTakesCharacters } from '../../composables/useCharacters'
 import { importMedia } from '../../composables/useMedia'
+import { REF_TYPE_LABELS, hasLocalUploads, legacyRefs, v1Refs, v1RefsError } from '../../utils/generateRefs'
 import MediaPicker from '../../components/media/MediaPicker.vue'
 import CharacterPicker from '../../components/characters/CharacterPicker.vue'
 import CharacterEditor from '../../components/characters/CharacterEditor.vue'
@@ -31,7 +41,7 @@ const { settings, save: saveSettings, applyProjectData, applyJobSettings } = use
 
 const prompt = ref('')
 const isSubmitting = ref(false)
-const submitStatus = ref('')  // '', 'uploading', 'starting'
+const submitStatus = ref('') // '', 'uploading', 'starting'
 const submitButtonText = computed(() => {
   let text = '🚀 Generate'
   if (submitStatus.value === 'uploading') text = 'Uploading'
@@ -50,18 +60,24 @@ const modelType = computed(() => selectedModel.value.type || 'img2vid')
 const refModeInfo = computed(() => selectedModel.value.ref_mode || null)
 const inV1RefMode = computed(() => !!refModeInfo.value && !!settings.value.ref_mode)
 const showRefFields = computed(() => modelType.value === 'ref' || inV1RefMode.value)
-const refHiddenOptions = computed(() => inV1RefMode.value ? (refModeInfo.value.hide_options || []) : [])
+const refHiddenOptions = computed(() => (inV1RefMode.value ? refModeInfo.value.hide_options || [] : []))
 
-const modelLengths = computed(() => (inV1RefMode.value && refModeInfo.value.lengths) || selectedModel.value.lengths || [])
+const modelLengths = computed(
+  () => (inV1RefMode.value && refModeInfo.value.lengths) || selectedModel.value.lengths || [],
+)
 const modelRatios = computed(() => selectedModel.value.ratios || [])
-const modelOptions = computed(() => (selectedModel.value.options || []).filter(o => !refHiddenOptions.value.includes(o)))
+const modelOptions = computed(() =>
+  (selectedModel.value.options || []).filter(o => !refHiddenOptions.value.includes(o)),
+)
 
 const showAudioOption = computed(() => modelOptions.value.includes('generate_audio'))
 const showWebSearchOption = computed(() => modelOptions.value.includes('web_search') && !inV1RefMode.value)
 const showImageTailOption = computed(() => modelOptions.value.includes('image_tail') && !inV1RefMode.value)
 const showSeedOption = computed(() => modelOptions.value.includes('seed'))
 const showMaxImagesOption = computed(() => modelOptions.value.includes('max_images'))
-const modelResolutions = computed(() => (inV1RefMode.value && refModeInfo.value.resolutions) || selectedModel.value.resolutions || null)
+const modelResolutions = computed(
+  () => (inV1RefMode.value && refModeInfo.value.resolutions) || selectedModel.value.resolutions || null,
+)
 const showResolution = computed(() => modelType.value !== 'image' || !!modelResolutions.value)
 const resolutions = computed(() => modelResolutions.value || ['480p', '720p', '1080p'])
 const showVideoNumOption = computed(() => modelOptions.value.includes('video_num'))
@@ -72,7 +88,8 @@ const isDeprecatedModel = computed(() => !!selectedModel.value.deprecated)
 const savedCharacters = ref([])
 const charEditor = reactive({ open: false, character: null })
 const attachedCharacters = computed(() =>
-  (settings.value.character_ids || []).map(id => savedCharacters.value.find(c => c.id === id)).filter(Boolean))
+  (settings.value.character_ids || []).map(id => savedCharacters.value.find(c => c.id === id)).filter(Boolean),
+)
 // Characters need a model that takes reference images; with one that can't,
 // attached characters stay selected but aren't sent
 const characterSupport = computed(() => {
@@ -84,7 +101,9 @@ const characterSupport = computed(() => {
 async function loadCharacters() {
   try {
     savedCharacters.value = await fetchCharacters()
-  } catch { /* 401 handled by auth prompt */ }
+  } catch {
+    /* 401 handled by auth prompt */
+  }
 }
 loadCharacters()
 
@@ -119,28 +138,32 @@ const estimateParams = computed(() => ({
 }))
 let estimateDebounce = null
 let estimateToken = 0
-watch(estimateParams, (params) => {
-  clearTimeout(estimateDebounce)
-  if (!params.model) {
-    creditEstimate.value = null
-    return
-  }
-  const token = ++estimateToken
-  estimateDebounce = setTimeout(async () => {
-    try {
-      const result = await fetchCreditEstimate(params)
-      if (token === estimateToken) creditEstimate.value = result
-    } catch {
-      if (token === estimateToken) creditEstimate.value = null
+watch(
+  estimateParams,
+  params => {
+    clearTimeout(estimateDebounce)
+    if (!params.model) {
+      creditEstimate.value = null
+      return
     }
-  }, 300)
-}, { immediate: true, deep: true })
+    const token = ++estimateToken
+    estimateDebounce = setTimeout(async () => {
+      try {
+        const result = await fetchCreditEstimate(params)
+        if (token === estimateToken) creditEstimate.value = result
+      } catch {
+        if (token === estimateToken) creditEstimate.value = null
+      }
+    }, 300)
+  },
+  { immediate: true, deep: true },
+)
 
 // Source image upload
 const isUploading = ref(false)
 const fileInputRef = ref(null)
 // Preview of an image uploaded into the project ("local:<file>"), else null
-const previewUrl = (url) => getLocalImagePreviewUrl(props.project, url)
+const previewUrl = url => getLocalImagePreviewUrl(props.project, url)
 const sourceImagePreviewUrl = computed(() => previewUrl(settings.value.image_url))
 
 function triggerFileInput() {
@@ -154,11 +177,8 @@ async function handleFileUpload(event) {
 
   isUploading.value = true
   try {
-    const [result, bitmap] = await Promise.all([
-      uploadSourceImage(props.project, file),
-      createImageBitmap(file),
-    ])
-    settings.value.image_url = result.image_url  // "local:src-abc123.jpg"
+    const [result, bitmap] = await Promise.all([uploadSourceImage(props.project, file), createImageBitmap(file)])
+    settings.value.image_url = result.image_url // "local:src-abc123.jpg"
     fitAspectRatio(bitmap.width, bitmap.height)
     bitmap.close()
     showToast('Source image uploaded', 'success')
@@ -174,16 +194,19 @@ function fitAspectRatio(width, height) {
   const numeric = modelRatios.value.filter(r => r.includes(':'))
   if (!numeric.length || !width || !height) return
   const imageRatio = width / height
-  const off = (r) => { const [a, b] = r.split(':').map(Number); return Math.abs(a / b - imageRatio) }
+  const off = r => {
+    const [a, b] = r.split(':').map(Number)
+    return Math.abs(a / b - imageRatio)
+  }
   settings.value.aspect_ratio = numeric.reduce((best, r) => (off(r) < off(best) ? r : best))
 }
 
 // Picking from the media library: the image is copied into this project,
 // just like an upload. `libraryTarget` says where it goes.
-const libraryTarget = ref(null)   // { kind: 'source' } | { kind: 'ref', target, busyKey }
+const libraryTarget = ref(null) // { kind: 'source' } | { kind: 'ref', target, busyKey }
 
 function imageSize(url) {
-  return new Promise((resolve) => {
+  return new Promise(resolve => {
     const img = new Image()
     img.onload = () => resolve([img.naturalWidth, img.naturalHeight])
     img.onerror = () => resolve([0, 0])
@@ -198,10 +221,14 @@ async function onLibraryPick([item]) {
   if (source) isUploading.value = true
   else uploadingRefIndex.value = t.busyKey
   try {
-    const { image_url } = await importMedia(item.id, { target: 'project', project: props.project, prefix: source ? 'src' : 'ref' })
+    const { image_url } = await importMedia(item.id, {
+      target: 'project',
+      project: props.project,
+      prefix: source ? 'src' : 'ref',
+    })
     if (source) {
       settings.value.image_url = image_url
-      fitAspectRatio(...await imageSize(item.url))
+      fitAspectRatio(...(await imageSize(item.url)))
     } else {
       t.target.url = image_url
     }
@@ -238,7 +265,7 @@ const MULTI_WORD_BRANDS = ['Nano Banana']
 const BRAND_GROUPS = { Seedream: 'ByteDance', Seedance: 'ByteDance' }
 
 function modelGroup(label) {
-  const brand = MULTI_WORD_BRANDS.find((b) => label.startsWith(b)) || label.split(' ')[0]
+  const brand = MULTI_WORD_BRANDS.find(b => label.startsWith(b)) || label.split(' ')[0]
   return BRAND_GROUPS[brand] || brand
 }
 
@@ -253,96 +280,110 @@ const modelSelectOptions = computed(() => {
       value: key,
       // 👤 = can use characters (takes reference images; video models in Ref mode)
       label: `${info.label}${info.type === 'ref' ? ' (ref)' : ''}${generateModelTakesCharacters(info, true) ? ' 👤' : ''}${info.hidden ? ' (hidden)' : ''}`,
-      group: modelGroup(info.label)
+      group: modelGroup(info.label),
     }))
 })
 
 // Watch for project data changes
-watch(() => props.projectData, (data) => {
-  if (data) {
-    prompt.value = data.prompt || ''
-    applyProjectData(data)
-  }
-}, { immediate: true })
+watch(
+  () => props.projectData,
+  data => {
+    if (data) {
+      prompt.value = data.prompt || ''
+      applyProjectData(data)
+    }
+  },
+  { immediate: true },
+)
 
 // Watch for regenerate job - apply settings from the job being regenerated
-watch(() => props.regenerateJob, (job) => {
-  if (job) {
-    prompt.value = job.prompt || ''
-    applyJobSettings(job)
-    const remapped = DEPRECATED_REMAP[settings.value.model]
-    if (remapped) settings.value.model = remapped
-    emit('regenerate-applied')
-    showToast('Settings loaded from video', 'success')
-  }
-}, { immediate: true })
+watch(
+  () => props.regenerateJob,
+  job => {
+    if (job) {
+      prompt.value = job.prompt || ''
+      applyJobSettings(job)
+      const remapped = DEPRECATED_REMAP[settings.value.model]
+      if (remapped) settings.value.model = remapped
+      emit('regenerate-applied')
+      showToast('Settings loaded from video', 'success')
+    }
+  },
+  { immediate: true },
+)
 
 // Watch for use-as-ref - switch to ref model and prefill refs
-watch(() => props.useAsRef, (data) => {
-  if (data) {
-    const refs = data.refs || []
-    if (props.models.seedanceref) {
-      settings.value.model = 'seedanceref'
-    } else {
-      // v1: keep the current model if its ref mode takes these refs, else Seedance 2.0
-      const types = props.models[settings.value.model]?.ref_mode?.types || []
-      if (!refs.every(r => types.includes(r.type))) settings.value.model = 'seedance20v1'
-      settings.value.ref_mode = true
+watch(
+  () => props.useAsRef,
+  data => {
+    if (data) {
+      const refs = data.refs || []
+      if (props.models.seedanceref) {
+        settings.value.model = 'seedanceref'
+      } else {
+        // v1: keep the current model if its ref mode takes these refs, else Seedance 2.0
+        const types = props.models[settings.value.model]?.ref_mode?.types || []
+        if (!refs.every(r => types.includes(r.type))) settings.value.model = 'seedance20v1'
+        settings.value.ref_mode = true
+      }
+      settings.value.refs = refs
+      if (data.prompt) {
+        prompt.value = data.prompt
+      }
+      emit('use-as-ref-applied')
+      showToast('Video added as reference', 'success')
     }
-    settings.value.refs = refs
-    if (data.prompt) {
-      prompt.value = data.prompt
-    }
-    emit('use-as-ref-applied')
-    showToast('Video added as reference', 'success')
-  }
-}, { immediate: true })
+  },
+  { immediate: true },
+)
 
 // Toggling legacy mode swaps the entire models list (legacy and v1 model
 // keys are disjoint — see MODEL_INFO in web/api.py) — fall back to
 // whatever model comes first in the new list if the current selection
 // no longer exists in it.
-watch(() => props.models, (newModels) => {
-  const keys = Object.keys(newModels || {})
-  if (keys.length && !newModels[settings.value.model]) {
-    settings.value.model = keys[0]
-  }
-})
+watch(
+  () => props.models,
+  newModels => {
+    const keys = Object.keys(newModels || {})
+    if (keys.length && !newModels[settings.value.model]) {
+      settings.value.model = keys[0]
+    }
+  },
+)
 
 // Ensure length is valid when model changes
-watch(modelLengths, (lengths) => {
+watch(modelLengths, lengths => {
   if (lengths.length && !lengths.includes(settings.value.length)) {
     settings.value.length = lengths[Math.floor(lengths.length / 2)]
   }
 })
 
 // Ensure ratio is valid when model changes
-watch(modelRatios, (ratios) => {
+watch(modelRatios, ratios => {
   if (ratios.length && !ratios.includes(settings.value.aspect_ratio)) {
     settings.value.aspect_ratio = ratios[0]
   }
 })
 
 // Ensure resolution is valid when model changes, defaulting to lowest
-watch(resolutions, (res) => {
+watch(resolutions, res => {
   if (res.length && !res.includes(settings.value.resolution)) {
     settings.value.resolution = res[0]
   }
 })
 
 // --- Refs management for ref2video ---
-const REF_TYPE_LABELS = {
-  image: 'Image', subject: 'Subject', video: 'Video', audio: 'Audio', file: 'Document', link: 'Web page',
-}
 const REF_URL_PLACEHOLDERS = {
   file: 'https://example.com/document.pdf',
   link: 'https://example.com/page',
 }
 const refTypes = computed(() =>
-  (inV1RefMode.value ? refModeInfo.value.types : ['image', 'subject', 'video', 'audio'])
-    .map(value => ({ value, label: REF_TYPE_LABELS[value] || value }))
+  (inV1RefMode.value ? refModeInfo.value.types : ['image', 'subject', 'video', 'audio']).map(value => ({
+    value,
+    label: REF_TYPE_LABELS[value] || value,
+  })),
 )
-const maxRefs = computed(() => inV1RefMode.value ? refModeInfo.value.max : 13)
+const maxRefs = computed(() => (inV1RefMode.value ? refModeInfo.value.max : 13))
 
 function newRefItem(type = 'image') {
   const order = settings.value.refs.length + 1
@@ -363,7 +404,9 @@ function removeRef(index) {
   // Reorder non-subject refs
   let order = 1
   settings.value.refs.forEach(r => {
-    if (r.type !== 'subject') { r.order = order++ }
+    if (r.type !== 'subject') {
+      r.order = order++
+    }
   })
 }
 
@@ -420,7 +463,7 @@ async function handleRefFileUpload(event, target, busyKey, label = 'Ref image') 
   uploadingRefIndex.value = busyKey
   try {
     const result = await uploadRefImage(props.project, file)
-    target.url = result.image_url  // "local:ref-abc123.jpg"
+    target.url = result.image_url // "local:ref-abc123.jpg"
     showToast(`${label} uploaded`, 'success')
   } catch (err) {
     showToast('Upload failed: ' + err.message, 'error')
@@ -434,137 +477,23 @@ function removeRefLocalImage(refItem) {
 }
 
 // Initialize refs with one empty ref when switching to ref mode
-watch(showRefFields, (show) => {
+watch(showRefFields, show => {
   if (show && settings.value.refs.length === 0) {
     addRef()
   }
 })
 
 async function handleSubmit() {
-  if (!prompt.value.trim()) {
-    showToast('Prompt is required', 'error')
-    return
-  }
+  if (!prompt.value.trim()) return showToast('Prompt is required', 'error')
+  const data = requestData()
+  const refsError = addRefs(data)
+  if (refsError) return showToast(refsError, 'error')
 
   isSubmitting.value = true
   saveSettings()
-
-  const data = {
-    model: settings.value.model,
-    project: props.project,
-    prompt: prompt.value,
-    image_url: settings.value.image_url,
-    aspect_ratio: settings.value.aspect_ratio,
-    length: settings.value.length,
-    resolution: settings.value.resolution,
-    generate_audio: settings.value.generate_audio,
-    web_search: settings.value.web_search,
-    image_tail: settings.value.image_tail,
-    character_ids: characterSupport.value.ok ? attachedCharacters.value.map(c => c.id) : [],
-    ref_mode: inV1RefMode.value,
-  }
-  // Character images count as references in ref mode
-  const characterRefs = characterSupport.value.ok && attachedCharacters.value.some(c => c.images.length)
-
-  // Seed (optional number)
-  if (showSeedOption.value && settings.value.seed) {
-    data.seed = parseInt(settings.value.seed, 10) || undefined
-  }
-
-  // Max images (optional, 1–4)
-  if (showMaxImagesOption.value && settings.value.max_images) {
-    const n = parseInt(settings.value.max_images, 10)
-    if (n >= 1 && n <= 4) data.max_images = n
-  }
-
-  if (showThinkingLevelOption.value) {
-    data.thinking_level = settings.value.thinking_level
-  }
-
-  if (inV1RefMode.value) {
-    // v1 refs are just { type, url } — no names, order or subjects
-    const info = refModeInfo.value
-    const validRefs = settings.value.refs
-      .filter(r => r.url && r.url.trim())
-      .map(r => ({ type: r.type, url: r.url.trim() }))
-    const counts = {}
-    validRefs.forEach(r => { counts[r.type] = (counts[r.type] || 0) + 1 })
-    const error = (() => {
-      if (!characterRefs && !validRefs.some(r => r.type !== 'audio')) return 'At least one non-audio reference (or a character with images) is required'
-      const badType = validRefs.find(r => !info.types.includes(r.type))
-      if (badType) return `This model doesn't accept ${REF_TYPE_LABELS[badType.type] || badType.type} references`
-      if (validRefs.length > info.max) return `Too many references (max ${info.max})`
-      for (const [type, limit] of Object.entries(info.limits || {})) {
-        if ((counts[type] || 0) > limit) return `Too many ${REF_TYPE_LABELS[type]} references (max ${limit})`
-      }
-      if ((info.exclusive || []).filter(t => counts[t]).length > 1) {
-        return `Can't combine ${info.exclusive.map(t => REF_TYPE_LABELS[t]).join(' and ')} references`
-      }
-      if (info.max_length_with_video && counts.video && settings.value.length > info.max_length_with_video) {
-        return `Length must be ${info.max_length_with_video}s or less with a video reference`
-      }
-      return null
-    })()
-    if (error) {
-      showToast(error, 'error')
-      isSubmitting.value = false
-      return
-    }
-    data.refs = validRefs
-    delete data.image_url
-    delete data.image_tail
-  } else if (showRefFields.value) {
-    // Build refs payload per type
-    let order = 1
-    const validRefs = []
-    for (const r of settings.value.refs) {
-      const name = (r.name || `ref${validRefs.length + 1}`).slice(0, 20)
-      if (r.type === 'subject') {
-        const urls = (r.images || []).filter(img => img.url && img.url.trim()).map(img => ({ url: img.url.trim() }))
-        if (urls.length === 0) continue
-        validRefs.push({ type: 'subject', name, images: urls, subjectId: r.subjectId || '' })
-      } else if (r.type === 'video') {
-        if (!r.url || !r.url.trim()) continue
-        validRefs.push({ type: 'video', name, video: r.url.trim(), order: order++ })
-      } else if (r.type === 'audio') {
-        if (!r.url || !r.url.trim()) continue
-        validRefs.push({ type: 'audio', name, audio: r.url.trim(), order: order++ })
-      } else {
-        // image (default)
-        if (!r.url || !r.url.trim()) continue
-        validRefs.push({ type: 'image', name, image: r.url.trim(), order: order++ })
-      }
-    }
-    if (validRefs.length === 0 && !characterRefs) {
-      showToast('At least one reference (or a character with images) is required', 'error')
-      isSubmitting.value = false
-      return
-    }
-    data.refs = validRefs
-    if (settings.value.video_num > 1) {
-      data.video_num = settings.value.video_num
-    }
-    // Ref models don't use source image
-    delete data.image_url
-  }
-
+  submitStatus.value = hasLocalUploads(data) ? 'uploading' : 'starting'
   try {
-    // Show "Uploading image..." if using a local source image or local ref images
-    const hasLocalSource = data.image_url && data.image_url.startsWith('local:')
-    const hasLocalRefs = (data.refs || []).some(r => {
-      if (r.type === 'image' && (r.image || r.url || '').startsWith('local:')) return true
-      if (r.type === 'subject' && r.images) return r.images.some(img => img.url && img.url.startsWith('local:'))
-      return false
-    })
-    if (hasLocalSource || hasLocalRefs) {
-      submitStatus.value = 'uploading'
-    } else {
-      submitStatus.value = 'starting'
-    }
-
     const result = await (modelType.value === 'image' ? generateImage(data) : generateVideo(data))
-
-    // Add to global jobs queue
     addJob(result.job_id, settings.value.model, prompt.value, props.project)
     showToast('Generation started!', 'success')
   } catch (err) {
@@ -573,6 +502,49 @@ async function handleSubmit() {
     isSubmitting.value = false
     submitStatus.value = ''
   }
+}
+
+// The request body from the form, without references
+function requestData() {
+  const s = settings.value
+  const data = {
+    model: s.model,
+    project: props.project,
+    prompt: prompt.value,
+    image_url: s.image_url,
+    aspect_ratio: s.aspect_ratio,
+    length: s.length,
+    resolution: s.resolution,
+    generate_audio: s.generate_audio,
+    web_search: s.web_search,
+    image_tail: s.image_tail,
+    character_ids: characterSupport.value.ok ? attachedCharacters.value.map(c => c.id) : [],
+    ref_mode: inV1RefMode.value,
+  }
+  if (showSeedOption.value && s.seed) data.seed = parseInt(s.seed, 10) || undefined
+  const maxImages = parseInt(s.max_images, 10)
+  if (showMaxImagesOption.value && maxImages >= 1 && maxImages <= 4) data.max_images = maxImages
+  if (showThinkingLevelOption.value) data.thinking_level = s.thinking_level
+  return data
+}
+
+// Put the form's references on the request (ref models and Ref mode drop
+// the source image); why they can't be sent, or null
+function addRefs(data) {
+  // Character images count as references
+  const characterRefs = characterSupport.value.ok && attachedCharacters.value.some(c => c.images.length)
+  if (inV1RefMode.value) {
+    const refs = v1Refs(settings.value.refs)
+    const error = v1RefsError(refs, refModeInfo.value, { characterRefs, length: settings.value.length })
+    if (error) return error
+    Object.assign(data, { refs, image_url: undefined, image_tail: undefined })
+  } else if (showRefFields.value) {
+    const refs = legacyRefs(settings.value.refs)
+    if (!refs.length && !characterRefs) return 'At least one reference (or a character with images) is required'
+    Object.assign(data, { refs, image_url: undefined })
+    if (settings.value.video_num > 1) data.video_num = settings.value.video_num
+  }
+  return null
 }
 </script>
 
@@ -595,12 +567,7 @@ async function handleSubmit() {
     <form @submit.prevent="handleSubmit">
       <!-- Prompt -->
       <div class="form-section">
-        <SleekTextarea
-          v-model="prompt"
-          label="Prompt"
-          placeholder="Describe what you want to generate..."
-          :rows="4"
-        />
+        <SleekTextarea v-model="prompt" label="Prompt" placeholder="Describe what you want to generate..." :rows="4" />
       </div>
 
       <!-- Characters -->
@@ -610,7 +577,8 @@ async function handleSubmit() {
           <p class="char-hint">
             {{ characterSupport.reason }}
             <template v-if="attachedCharacters.length">
-              {{ attachedCharacters.map(c => c.name).join(', ') }} {{ attachedCharacters.length === 1 ? 'stays' : 'stay' }}
+              {{ attachedCharacters.map(c => c.name).join(', ') }}
+              {{ attachedCharacters.length === 1 ? 'stays' : 'stay' }}
               selected for when you switch back.
             </template>
           </p>
@@ -658,7 +626,9 @@ async function handleSubmit() {
               <div class="source-preview-info">
                 <span class="source-label">Uploaded image</span>
                 <div class="source-actions">
-                  <button type="button" class="btn-change" @click="triggerFileInput" :disabled="isUploading">Change</button>
+                  <button type="button" class="btn-change" :disabled="isUploading" @click="triggerFileInput">
+                    Change
+                  </button>
                   <button type="button" class="btn-remove" @click="removeSourceImage">✕</button>
                 </div>
               </div>
@@ -676,14 +646,21 @@ async function handleSubmit() {
                 type="button"
                 class="btn-upload"
                 :disabled="isUploading"
-                @click="triggerFileInput"
                 :title="isUploading ? 'Uploading...' : 'Upload local image'"
+                @click="triggerFileInput"
               >
                 <span v-if="isUploading" class="btn-spinner"></span>
                 <span v-else>📁</span>
               </button>
-              <button type="button" class="btn-upload" title="Choose from your uploads and creations"
-                      :disabled="isUploading" @click="libraryTarget = { kind: 'source' }">🗂</button>
+              <button
+                type="button"
+                class="btn-upload"
+                title="Choose from your uploads and creations"
+                :disabled="isUploading"
+                @click="libraryTarget = { kind: 'source' }"
+              >
+                🗂
+              </button>
             </div>
             <input
               ref="fileInputRef"
@@ -693,29 +670,18 @@ async function handleSubmit() {
               @change="handleFileUpload"
             />
           </div>
-          <SleekSelect
-            v-model="settings.model"
-            label="Model"
-            :options="modelSelectOptions"
-          />
+          <SleekSelect v-model="settings.model" label="Model" :options="modelSelectOptions" />
         </div>
       </div>
 
       <!-- Video Settings Row -->
       <div class="form-section settings-row">
-        <div class="setting-group" v-if="modelRatios.length > 0">
+        <div v-if="modelRatios.length > 0" class="setting-group">
           <label>Aspect</label>
-          <RatioPicker
-            v-model="settings.aspect_ratio"
-            :ratios="modelRatios"
-          />
+          <RatioPicker v-model="settings.aspect_ratio" :ratios="modelRatios" />
         </div>
 
-        <LengthSlider
-          v-if="modelLengths.length > 0"
-          v-model="settings.length"
-          :lengths="modelLengths"
-        />
+        <LengthSlider v-if="modelLengths.length > 0" v-model="settings.length" :lengths="modelLengths" />
 
         <SleekSelect
           v-if="showResolution"
@@ -739,7 +705,10 @@ async function handleSubmit() {
           v-if="showThinkingLevelOption"
           v-model="settings.thinking_level"
           label="Thinking"
-          :options="[{ value: 'minimal', label: 'Minimal' }, { value: 'high', label: 'High' }]"
+          :options="[
+            { value: 'minimal', label: 'Minimal' },
+            { value: 'high', label: 'High' },
+          ]"
           class="compact"
         />
 
@@ -752,18 +721,8 @@ async function handleSubmit() {
             label="Refs"
             title="Reference mode: generate from reference images/videos/audio instead of a source image"
           />
-          <ToggleSwitch
-            v-if="showAudioOption"
-            id="generate_audio"
-            v-model="settings.generate_audio"
-            label="Audio"
-          />
-          <ToggleSwitch
-            v-if="showWebSearchOption"
-            id="web_search"
-            v-model="settings.web_search"
-            label="Web"
-          />
+          <ToggleSwitch v-if="showAudioOption" id="generate_audio" v-model="settings.generate_audio" label="Audio" />
+          <ToggleSwitch v-if="showWebSearchOption" id="web_search" v-model="settings.web_search" label="Web" />
         </div>
       </div>
 
@@ -796,18 +755,14 @@ async function handleSubmit() {
           <span class="ref2-hint">{{ settings.refs.length }}/{{ maxRefs }} refs</span>
         </div>
 
-        <div
-          v-for="(refItem, index) in settings.refs"
-          :key="index"
-          class="ref-item"
-        >
+        <div v-for="(refItem, index) in settings.refs" :key="index" class="ref-item">
           <div class="ref-item-header">
             <SleekSelect
               v-model="refItem.type"
               label="Type"
               :options="refTypes"
               class="ref-type"
-              @update:modelValue="onRefTypeChange(index)"
+              @update:model-value="onRefTypeChange(index)"
             />
             <SleekInput
               v-if="!inV1RefMode"
@@ -816,12 +771,7 @@ async function handleSubmit() {
               :placeholder="`ref${index + 1}`"
               class="ref-name"
             />
-            <button
-              type="button"
-              class="btn-remove-ref"
-              @click="removeRef(index)"
-              title="Remove"
-            >✕</button>
+            <button type="button" class="btn-remove-ref" title="Remove" @click="removeRef(index)">✕</button>
           </div>
 
           <!-- Image / Video / Audio: single URL -->
@@ -832,7 +782,14 @@ async function handleSubmit() {
               <div class="ref-preview-info">
                 <span class="source-label">Uploaded ref image</span>
                 <div class="source-actions">
-                  <button type="button" class="btn-change" @click="triggerRefFileInput(index)" :disabled="uploadingRefIndex === index">Change</button>
+                  <button
+                    type="button"
+                    class="btn-change"
+                    :disabled="uploadingRefIndex === index"
+                    @click="triggerRefFileInput(index)"
+                  >
+                    Change
+                  </button>
                   <button type="button" class="btn-remove" @click="removeRefLocalImage(refItem)">✕</button>
                 </div>
               </div>
@@ -850,18 +807,24 @@ async function handleSubmit() {
                 type="button"
                 class="btn-upload"
                 :disabled="uploadingRefIndex === index"
-                @click="triggerRefFileInput(index)"
                 :title="uploadingRefIndex === index ? 'Uploading...' : 'Upload local image'"
+                @click="triggerRefFileInput(index)"
               >
                 <span v-if="uploadingRefIndex === index" class="btn-spinner"></span>
                 <span v-else>📁</span>
               </button>
-              <button type="button" class="btn-upload" title="Choose from your uploads and creations"
-                      :disabled="uploadingRefIndex === index"
-                      @click="libraryTarget = { kind: 'ref', target: refItem, busyKey: index }">🗂</button>
+              <button
+                type="button"
+                class="btn-upload"
+                title="Choose from your uploads and creations"
+                :disabled="uploadingRefIndex === index"
+                @click="libraryTarget = { kind: 'ref', target: refItem, busyKey: index }"
+              >
+                🗂
+              </button>
             </div>
             <input
-              :ref="(el) => setRefFileInput(index, el)"
+              :ref="el => setRefFileInput(index, el)"
               type="file"
               accept="image/jpeg,image/png,image/webp,image/gif"
               style="display: none"
@@ -908,11 +871,7 @@ async function handleSubmit() {
               class="subject-id"
             />
             <div class="subject-images">
-              <div
-                v-for="(img, imgIdx) in refItem.images"
-                :key="imgIdx"
-                class="subject-image-row"
-              >
+              <div v-for="(img, imgIdx) in refItem.images" :key="imgIdx" class="subject-image-row">
                 <!-- Local image preview for subject -->
                 <div v-if="previewUrl(img.url)" class="ref-preview ref-preview-inline">
                   <img :src="previewUrl(img.url)" alt="Subject" class="ref-thumb-small" />
@@ -931,18 +890,24 @@ async function handleSubmit() {
                     type="button"
                     class="btn-upload btn-upload-small"
                     :disabled="uploadingRefIndex === `subject-${imgIdx}`"
-                    @click="triggerSubjectFileInput(index, imgIdx)"
                     title="Upload local image"
+                    @click="triggerSubjectFileInput(index, imgIdx)"
                   >
                     <span v-if="uploadingRefIndex === `subject-${imgIdx}`" class="btn-spinner"></span>
                     <span v-else>📁</span>
                   </button>
-                  <button type="button" class="btn-upload btn-upload-small" title="Choose from your uploads and creations"
-                          :disabled="uploadingRefIndex === `subject-${imgIdx}`"
-                          @click="libraryTarget = { kind: 'ref', target: img, busyKey: `subject-${imgIdx}` }">🗂</button>
+                  <button
+                    type="button"
+                    class="btn-upload btn-upload-small"
+                    title="Choose from your uploads and creations"
+                    :disabled="uploadingRefIndex === `subject-${imgIdx}`"
+                    @click="libraryTarget = { kind: 'ref', target: img, busyKey: `subject-${imgIdx}` }"
+                  >
+                    🗂
+                  </button>
                 </template>
                 <input
-                  :ref="(el) => setSubjectFileInput(index, imgIdx, el)"
+                  :ref="el => setSubjectFileInput(index, imgIdx, el)"
                   type="file"
                   accept="image/jpeg,image/png,image/webp,image/gif"
                   style="display: none"
@@ -952,26 +917,25 @@ async function handleSubmit() {
                   v-if="refItem.images.length > 1"
                   type="button"
                   class="btn-remove-ref btn-remove-small"
-                  @click="removeSubjectImage(refItem, imgIdx)"
                   title="Remove image"
-                >✕</button>
+                  @click="removeSubjectImage(refItem, imgIdx)"
+                >
+                  ✕
+                </button>
               </div>
               <button
                 v-if="refItem.images.length < 3"
                 type="button"
                 class="btn-add-subject-img"
                 @click="addSubjectImage(refItem)"
-              >+ Add Image ({{ refItem.images.length }}/3)</button>
+              >
+                + Add Image ({{ refItem.images.length }}/3)
+              </button>
             </div>
           </div>
         </div>
 
-        <button
-          type="button"
-          class="btn-add-ref"
-          :disabled="settings.refs.length >= maxRefs"
-          @click="addRef"
-        >
+        <button type="button" class="btn-add-ref" :disabled="settings.refs.length >= maxRefs" @click="addRef">
           + Add Reference
         </button>
 
@@ -986,7 +950,9 @@ async function handleSubmit() {
                 type="button"
                 :class="['num-btn', { active: settings.video_num === n }]"
                 @click="settings.video_num = n"
-              >{{ n }}</button>
+              >
+                {{ n }}
+              </button>
             </div>
           </div>
         </div>
@@ -997,7 +963,11 @@ async function handleSubmit() {
       </div>
 
       <div class="actions">
-        <button type="submit" :class="['btn', isDeprecatedModel ? 'btn-deprecated' : 'btn-primary']" :disabled="isSubmitting">
+        <button
+          type="submit"
+          :class="['btn', isDeprecatedModel ? 'btn-deprecated' : 'btn-primary']"
+          :disabled="isSubmitting"
+        >
           <span v-if="isSubmitting" class="btn-spinner"></span>
           {{ submitButtonText }}
         </button>
@@ -1508,4 +1478,3 @@ async function handleSubmit() {
   box-shadow: 0 0 12px rgba(245, 158, 11, 0.2);
 }
 </style>
-

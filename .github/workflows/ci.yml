@@ -13,6 +13,32 @@ env:
   IMAGE_NGX: ghcr.io/ptinkler/pollo-nginx
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Python — ruff
+        run: |
+          pip install ruff==0.16.10
+          ruff check .
+          ruff format --check .
+
+      - name: Frontend — ESLint and Prettier
+        working-directory: web/frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run format:check
+
   test-python:
     runs-on: ubuntu-latest
     steps:
@@ -29,8 +55,7 @@ jobs:
 
       - name: Install Python deps
         run: |
-          pip install -r requirements.txt
-          pip install pytest
+          pip install -r requirements-dev.txt
 
       - name: Run Python tests
         run: python -m pytest
@@ -53,7 +78,7 @@ jobs:
         run: npm test
 
   build-and-push:
-    needs: [test-python, test-frontend]
+    needs: [lint, test-python, test-frontend]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     concurrency:

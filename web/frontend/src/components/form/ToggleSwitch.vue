@@ -2,7 +2,7 @@
 defineProps({
   modelValue: { type: Boolean, default: false },
   label: { type: String, required: true },
-  id: { type: String, required: true }
+  id: { type: String, required: true },
 })
 
 defineEmits(['update:modelValue'])
@@ -12,8 +12,8 @@ defineEmits(['update:modelValue'])
   <div class="toggle-row">
     <label class="toggle">
       <input
-        type="checkbox"
         :id="id"
+        type="checkbox"
         :checked="modelValue"
         @change="$emit('update:modelValue', $event.target.checked)"
       />

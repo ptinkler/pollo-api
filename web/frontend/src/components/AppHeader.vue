@@ -14,17 +14,25 @@ const { hasKey, showKeyModal } = useAuth()
       <h1>🎬 <span>Pollo</span> Video Generator</h1>
     </RouterLink>
     <div class="header-right">
-      <RouterLink to="/media" class="nav-link" :class="{ active: route.path.startsWith('/media') }">🗂<span class="nav-text"> Media</span></RouterLink>
-      <RouterLink to="/characters" class="nav-link" :class="{ active: route.path.startsWith('/characters') }">👤<span class="nav-text"> Characters</span></RouterLink>
-      <RouterLink to="/chat" class="nav-link" :class="{ active: route.path.startsWith('/chat') }">💬<span class="nav-text"> Chat</span></RouterLink>
+      <RouterLink to="/media" class="nav-link" :class="{ active: route.path.startsWith('/media') }"
+        >🗂<span class="nav-text"> Media</span></RouterLink
+      >
+      <RouterLink to="/characters" class="nav-link" :class="{ active: route.path.startsWith('/characters') }"
+        >👤<span class="nav-text"> Characters</span></RouterLink
+      >
+      <RouterLink to="/chat" class="nav-link" :class="{ active: route.path.startsWith('/chat') }"
+        >💬<span class="nav-text"> Chat</span></RouterLink
+      >
       <CreditDisplay />
       <VpnStatus />
       <button
         class="key-btn"
         :class="{ 'key-set': hasKey, 'key-missing': !hasKey }"
-        @click="showKeyModal = true"
         :title="hasKey ? 'API key set — click to change' : 'No API key — click to set'"
-      >🔑</button>
+        @click="showKeyModal = true"
+      >
+        🔑
+      </button>
     </div>
   </header>
 </template>
@@ -90,7 +98,9 @@ const { hasKey, showKeyModal } = useAuth()
   cursor: pointer;
   font-size: 1rem;
   line-height: 1;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
 }
 
 .key-btn.key-set {

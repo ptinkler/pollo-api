@@ -13,11 +13,32 @@ import { importMedia } from '../composables/useMedia'
 import MediaPicker from '../components/media/MediaPicker.vue'
 import { shortModel, fmtCost } from '../utils/format'
 import {
-  fetchChatStatus, fetchChatModels, fetchConversations, fetchConversation,
-  createConversation, deleteConversation, fetchChatMessage,
-  cancelChatMessage, uploadChatAttachment, chatMediaUrl, sendChatMessage, retryChatMessage,
-  editChatMessage, switchChatBranch, forkConversation, fetchConversationSpend, fetchOpenRouterCredits, fetchVeniceBalance, regenerateChatMedia, pinChatMedia, deleteChatExchange, fetchDeleteInfo, fetchInstructions, patchConversation,
+  fetchChatStatus,
+  fetchChatModels,
+  fetchConversations,
+  fetchConversation,
+  createConversation,
+  deleteConversation,
+  fetchChatMessage,
+  cancelChatMessage,
+  uploadChatAttachment,
+  chatMediaUrl,
+  sendChatMessage,
+  retryChatMessage,
+  editChatMessage,
+  switchChatBranch,
+  forkConversation,
+  fetchConversationSpend,
+  fetchOpenRouterCredits,
+  fetchVeniceBalance,
+  regenerateChatMedia,
+  pinChatMedia,
+  deleteChatExchange,
+  fetchDeleteInfo,
+  fetchInstructions,
+  patchConversation,
 } from '../composables/useChat'
+import { takeFiles } from '../utils/files'
 
 const route = useRoute()
 const router = useRouter()
@@ -43,11 +64,15 @@ const MEMORY_STEPS = [2, 4, 6, 10, 14, 20, 30, 40, 60, 80, 100, null]
 const DEFAULT_MEMORY = 20
 // Image slider stops: how many recent chat images go with each request (null = all)
 const IMAGE_STEPS = [0, 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, null]
-const DEFAULT_IMAGES = 6   // mirrors DEFAULT_IMAGE_LIMIT in web/chat.py
+const DEFAULT_IMAGES = 6 // mirrors DEFAULT_IMAGE_LIMIT in web/chat.py
 
 // ── Persistent prefs (per browser) ───────────────────────────────────
 function loadPrefs() {
-  try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {} } catch { return {} }
+  try {
+    return JSON.parse(localStorage.getItem(STORE_KEY)) || {}
+  } catch {
+    return {}
+  }
 }
 const prefs = loadPrefs()
 const selected = reactive({
@@ -56,48 +81,75 @@ const selected = reactive({
   video: prefs.video ?? '',
 })
 const mode = ref(prefs.mode || 'auto')
-const memoryIndex = ref((() => {
-  const i = MEMORY_STEPS.indexOf('memory' in prefs ? prefs.memory : DEFAULT_MEMORY)
-  return i === -1 ? MEMORY_STEPS.indexOf(DEFAULT_MEMORY) : i
-})())
+const memoryIndex = ref(
+  (() => {
+    const i = MEMORY_STEPS.indexOf('memory' in prefs ? prefs.memory : DEFAULT_MEMORY)
+    return i === -1 ? MEMORY_STEPS.indexOf(DEFAULT_MEMORY) : i
+  })(),
+)
 const historyLimit = computed(() => MEMORY_STEPS[memoryIndex.value])
-const imageIndex = ref((() => {
-  const i = IMAGE_STEPS.indexOf('images' in prefs ? prefs.images : DEFAULT_IMAGES)
-  return i === -1 ? IMAGE_STEPS.indexOf(DEFAULT_IMAGES) : i
-})())
+const imageIndex = ref(
+  (() => {
+    const i = IMAGE_STEPS.indexOf('images' in prefs ? prefs.images : DEFAULT_IMAGES)
+    return i === -1 ? IMAGE_STEPS.indexOf(DEFAULT_IMAGES) : i
+  })(),
+)
 const imageLimit = computed(() => IMAGE_STEPS[imageIndex.value])
 // Composer settings for generated media, used in every mode (Auto too).
 // '' = let the chat model choose (Auto), else the media model's default.
 const imageOpts = reactive({ aspect_ratio: '', resolution: '', ...prefs.imageOpts })
 const videoOpts = reactive({ aspect_ratio: '', resolution: '', duration: '', generate_audio: true, ...prefs.videoOpts })
 
-watch([() => ({ ...selected }), mode, memoryIndex, imageIndex, () => ({ ...imageOpts }), () => ({ ...videoOpts })], () => {
-  try {
-    localStorage.setItem(STORE_KEY, JSON.stringify({
-      ...selected, mode: mode.value, memory: historyLimit.value, images: imageLimit.value,
-      imageOpts: { ...imageOpts }, videoOpts: { ...videoOpts },
-    }))
-  } catch { /* storage unavailable */ }
-}, { deep: true })
+watch(
+  [() => ({ ...selected }), mode, memoryIndex, imageIndex, () => ({ ...imageOpts }), () => ({ ...videoOpts })],
+  () => {
+    try {
+      localStorage.setItem(
+        STORE_KEY,
+        JSON.stringify({
+          ...selected,
+          mode: mode.value,
+          memory: historyLimit.value,
+          images: imageLimit.value,
+          imageOpts: { ...imageOpts },
+          videoOpts: { ...videoOpts },
+        }),
+      )
+    } catch {
+      /* storage unavailable */
+    }
+  },
+  { deep: true },
+)
 
 // Sidebar sections folded away (per browser); headings show a summary instead
 const FOLD_KEY = 'chat.folded'
-const folded = ref((() => {
-  try { return new Set(JSON.parse(localStorage.getItem(FOLD_KEY)) || []) } catch { return new Set() }
-})())
-const isFolded = (key) => folded.value.has(key)
+const folded = ref(
+  (() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(FOLD_KEY)) || [])
+    } catch {
+      return new Set()
+    }
+  })(),
+)
+const isFolded = key => folded.value.has(key)
 function toggleFold(key) {
   const next = new Set(folded.value)
   if (!next.delete(key)) next.add(key)
   folded.value = next
-  try { localStorage.setItem(FOLD_KEY, JSON.stringify([...next])) } catch { /* storage unavailable */ }
+  try {
+    localStorage.setItem(FOLD_KEY, JSON.stringify([...next]))
+  } catch {
+    /* storage unavailable */
+  }
 }
 
 // ── Server state ─────────────────────────────────────────────────────
 const configured = ref(true)
-const providers = reactive({ openrouter: true, venice: false })   // which API keys the server has
+const providers = reactive({ openrouter: true, venice: false }) // which API keys the server has
 const models = reactive({ text: [], image: [], video: [] })
-provide('chatModels', models)   // for "Try another model" on failed media
+provide('chatModels', models) // for "Try another model" on failed media
 const modelsLoading = ref(true)
 const conversations = ref([])
 const conversation = ref(null)
@@ -108,7 +160,7 @@ const convId = computed(() => route.params.id || null)
 
 // ── Composer state ───────────────────────────────────────────────────
 const draft = ref('')
-const attachments = ref([])   // { key, file?, preview, uploading, error }
+const attachments = ref([]) // { key, file?, preview, uploading, error }
 const sending = ref(false)
 const streamingId = ref(null)
 const textarea = ref(null)
@@ -125,7 +177,8 @@ const memoryHint = computed(() => {
   const total = messages.value.length + 1
   const limit = historyLimit.value
   const n = imageLimit.value
-  const imgs = n === null ? 'every image' : n === 0 ? 'no images' : `the ${n === 1 ? 'latest image' : `${n} most recent images`}`
+  const imgs =
+    n === null ? 'every image' : n === 0 ? 'no images' : `the ${n === 1 ? 'latest image' : `${n} most recent images`}`
   if (!limit || limit >= total) {
     return messages.value.length
       ? `Sending the whole chat (${total} messages) plus ${imgs}.`
@@ -151,7 +204,7 @@ const textInfo = computed(() => models.text.find(m => m.id === selected.text))
 const imageInfo = computed(() => models.image.find(m => m.id === selected.image))
 const videoInfo = computed(() => models.video.find(m => m.id === selected.video))
 
-const ratiosOf = (info) => (info?.aspect_ratios?.length ? info.aspect_ratios : DEFAULT_RATIOS)
+const ratiosOf = info => (info?.aspect_ratios?.length ? info.aspect_ratios : DEFAULT_RATIOS)
 const imageRatioOptions = computed(() => ratiosOf(imageInfo.value))
 const imageResOptions = computed(() => imageInfo.value?.resolutions || [])
 const videoRatioOptions = computed(() => ratiosOf(videoInfo.value))
@@ -166,34 +219,58 @@ function dropUnsupported(opts, ratios, resolutions, durations = null) {
   if (opts.resolution && !resolutions.includes(opts.resolution)) opts.resolution = ''
   if (durations && opts.duration && !durations.includes(Number(opts.duration))) opts.duration = ''
 }
-watch(imageInfo, (info) => { if (info) dropUnsupported(imageOpts, imageRatioOptions.value, imageResOptions.value) })
-watch(videoInfo, (info) => {
+watch(imageInfo, info => {
+  if (info) dropUnsupported(imageOpts, imageRatioOptions.value, imageResOptions.value)
+})
+watch(videoInfo, info => {
   if (info) dropUnsupported(videoOpts, videoRatioOptions.value, videoResOptions.value, durationOptions.value)
 })
 
-const modeWarning = computed(() => {
-  if (mode.value === 'image' && !selected.image) return 'Pick an image model to use Image mode.'
-  if (mode.value === 'video' && !selected.video) return 'Pick a video model to use Video mode.'
-  if (mode.value === 'image' && attachments.value.length && imageInfo.value
-      && !imageInfo.value.input_modalities?.includes('image'))
-    return `${imageInfo.value.name} can't take reference images — pick one tagged “edits” or “context” to use the attached image.`
-  if (mode.value === 'auto' && textInfo.value && !textInfo.value.supports_tools)
-    return `${textInfo.value.name} can't call tools, so Auto mode will only chat. Use Image/Video mode, or pick a model tagged “tools”.`
-  if (attachments.value.length && textInfo.value && !textInfo.value.input_modalities?.includes('image') && ['auto', 'text'].includes(mode.value))
-    return `${textInfo.value.name} can't see images; it will only know you attached one.`
-  return ''
-})
+const takesImages = info => !!info?.input_modalities?.includes('image')
+const hasAttachments = () => attachments.value.length > 0
 
-const canSend = computed(() =>
-  !sending.value &&
-  (draft.value.trim() || attachments.value.some(a => a.file)) &&
-  !attachments.value.some(a => a.uploading) &&
-  (mode.value === 'image' ? selected.image : mode.value === 'video' ? selected.video : selected.text),
+// What's wrong with the current mode and models, first match wins
+const MODE_WARNINGS = [
+  {
+    when: () => mode.value === 'image' && !selected.image,
+    text: () => 'Pick an image model to use Image mode.',
+  },
+  {
+    when: () => mode.value === 'video' && !selected.video,
+    text: () => 'Pick a video model to use Video mode.',
+  },
+  {
+    when: () => mode.value === 'image' && hasAttachments() && imageInfo.value && !takesImages(imageInfo.value),
+    text: () =>
+      `${imageInfo.value.name} can't take reference images — pick one tagged “edits” or “context” to use the attached image.`,
+  },
+  {
+    when: () => mode.value === 'auto' && textInfo.value && !textInfo.value.supports_tools,
+    text: () =>
+      `${textInfo.value.name} can't call tools, so Auto mode will only chat. Use Image/Video mode, or pick a model tagged “tools”.`,
+  },
+  {
+    when: () =>
+      ['auto', 'text'].includes(mode.value) && hasAttachments() && textInfo.value && !takesImages(textInfo.value),
+    text: () => `${textInfo.value.name} can't see images; it will only know you attached one.`,
+  },
+]
+const modeWarning = computed(() => MODE_WARNINGS.find(w => w.when())?.text() ?? '')
+
+const canSend = computed(
+  () =>
+    !sending.value &&
+    (draft.value.trim() || attachments.value.some(a => a.file)) &&
+    !attachments.value.some(a => a.uploading) &&
+    (mode.value === 'image' ? selected.image : mode.value === 'video' ? selected.video : selected.text),
 )
 
 // Images pinned as references on the shown branch (the server uses the same set)
-const pinned = computed(() => messages.value.flatMap(m =>
-  (m.media || []).filter(i => i.pinned && i.kind === 'image').map(i => ({ msg: m, mediaId: i.id }))))
+const pinned = computed(() =>
+  messages.value.flatMap(m =>
+    (m.media || []).filter(i => i.pinned && i.kind === 'image').map(i => ({ msg: m, mediaId: i.id })),
+  ),
+)
 
 const lastAssistantId = computed(() => {
   const last = messages.value[messages.value.length - 1]
@@ -234,7 +311,7 @@ async function loadModels(refresh = false) {
 
 // ── Custom instructions ──────────────────────────────────────────────
 const instructions = ref([])
-const instructionId = ref(null)       // attached to this chat (or the next new one)
+const instructionId = ref(null) // attached to this chat (or the next new one)
 const instructionsOpen = ref(false)
 const defaultInstructionId = () => instructions.value.find(i => i.is_default)?.id ?? null
 const attachedInstruction = computed(() => instructions.value.find(i => i.id === instructionId.value))
@@ -243,7 +320,9 @@ async function loadInstructions() {
   try {
     instructions.value = (await fetchInstructions()).instructions
     if (!convId.value) instructionId.value = defaultInstructionId()
-  } catch { /* 401 handled by auth prompt */ }
+  } catch {
+    /* 401 handled by auth prompt */
+  }
 }
 
 // Picking from the sidebar: saved on the chat right away (new chats get it on creation)
@@ -266,11 +345,12 @@ async function onInstructionsChanged({ saved, deleted }) {
 }
 
 // ── Characters ───────────────────────────────────────────────────────
-const characters = ref([])          // saved ones plus this chat's ad-hoc ones
-const characterIds = ref([])        // attached to this chat (or the next new one)
+const characters = ref([]) // saved ones plus this chat's ad-hoc ones
+const characterIds = ref([]) // attached to this chat (or the next new one)
 const charEditor = reactive({ open: false, character: null, conversationId: null, seed: [] })
 const attachedCharacters = computed(() =>
-  characterIds.value.map(id => characters.value.find(c => c.id === id)).filter(Boolean))
+  characterIds.value.map(id => characters.value.find(c => c.id === id)).filter(Boolean),
+)
 
 // Whether the current mode + models can use characters (mirrors _characters_usable
 // in web/chat.py). When they can't, attached ones stay attached but unused.
@@ -297,12 +377,14 @@ const characterSupport = computed(() => {
 async function loadCharacters() {
   try {
     characters.value = await fetchCharacters({ conversationId: convId.value })
-  } catch { /* 401 handled by auth prompt */ }
+  } catch {
+    /* 401 handled by auth prompt */
+  }
 }
 
 async function setCharacters(ids) {
   characterIds.value = ids
-  if (!convId.value) return   // new chats get them on creation
+  if (!convId.value) return // new chats get them on creation
   try {
     await patchConversation(convId.value, { character_ids: ids })
   } catch (e) {
@@ -343,7 +425,7 @@ function onCharacterSaved(c) {
 
 function onCharacterDeleted(id) {
   characters.value = characters.value.filter(c => c.id !== id)
-  characterIds.value = characterIds.value.filter(x => x !== id)   // the server detaches it too
+  characterIds.value = characterIds.value.filter(x => x !== id) // the server detaches it too
 }
 
 async function loadConversations() {
@@ -351,15 +433,17 @@ async function loadConversations() {
     const data = await fetchConversations()
     conversations.value = data.conversations
     moreConversations.value = !!data.more
-  } catch { /* shown elsewhere via 401 prompt */ }
+  } catch {
+    /* shown elsewhere via 401 prompt */
+  }
 }
 
 // ── Chat list: search, pins, date groups ─────────────────────────────
-const moreConversations = ref(false)   // older chats beyond the list's limit
+const moreConversations = ref(false) // older chats beyond the list's limit
 const search = ref('')
-const searchResults = ref(null)        // null = not searching
+const searchResults = ref(null) // null = not searching
 let searchTimer = null
-watch(search, (q) => {
+watch(search, q => {
   clearTimeout(searchTimer)
   if (!q.trim()) {
     searchResults.value = null
@@ -413,18 +497,21 @@ async function togglePin(c) {
 function applyChatSettings(st) {
   if (!st) return
   if (MODES.some(m => m.id === st.mode)) mode.value = st.mode
-  const mi = MEMORY_STEPS.indexOf(st.history_limit ?? null)
-  if (mi !== -1) memoryIndex.value = mi
-  const ii = IMAGE_STEPS.indexOf(st.image_limit ?? null)
-  if (ii !== -1) imageIndex.value = ii
-  const io = st.image_options || {}
-  Object.assign(imageOpts, { aspect_ratio: io.aspect_ratio || '', resolution: io.resolution || '' })
-  const vo = st.video_options || {}
-  Object.assign(videoOpts, {
-    aspect_ratio: vo.aspect_ratio || '', resolution: vo.resolution || '', duration: vo.duration || '',
-    generate_audio: vo.generate_audio ?? videoOpts.generate_audio,
-  })
+  setStep(memoryIndex, MEMORY_STEPS, st.history_limit)
+  setStep(imageIndex, IMAGE_STEPS, st.image_limit)
+  Object.assign(imageOpts, optionsOrUnset(st.image_options, ['aspect_ratio', 'resolution']))
+  Object.assign(videoOpts, optionsOrUnset(st.video_options, ['aspect_ratio', 'resolution', 'duration']))
+  if (st.video_options?.generate_audio != null) videoOpts.generate_audio = st.video_options.generate_audio
 }
+
+// Move a slider to a saved value's stop (null = "All"), if it's one of them
+function setStep(index, steps, value) {
+  const i = steps.indexOf(value ?? null)
+  if (i !== -1) index.value = i
+}
+
+// Saved media options in the composer's shape: '' for unset
+const optionsOrUnset = (saved, keys) => Object.fromEntries(keys.map(k => [k, saved?.[k] || '']))
 
 const spend = computed(() => conversation.value?.spend)
 const spendLabel = computed(() => {
@@ -435,10 +522,16 @@ const spendLabel = computed(() => {
 const spendTitle = computed(() => {
   const s = spend.value
   if (!s) return ''
-  const inherited = [s.inherited_usd ? fmtCost(s.inherited_usd) : '', s.inherited_credits ? `${s.inherited_credits} credits` : '']
-    .filter(Boolean).join(' + ')
-  return 'Spent on this chat, every branch included (dollars: OpenRouter/Venice; credits: Pollo)'
-    + (inherited ? `. ${inherited} of it was spent before it was branched off another chat.` : '')
+  const inherited = [
+    s.inherited_usd ? fmtCost(s.inherited_usd) : '',
+    s.inherited_credits ? `${s.inherited_credits} credits` : '',
+  ]
+    .filter(Boolean)
+    .join(' + ')
+  return (
+    'Spent on this chat, every branch included (dollars: OpenRouter/Venice; credits: Pollo)' +
+    (inherited ? `. ${inherited} of it was spent before it was branched off another chat.` : '')
+  )
 })
 
 async function refreshSpend(id) {
@@ -446,7 +539,9 @@ async function refreshSpend(id) {
   try {
     const data = await fetchConversationSpend(id)
     if (conversation.value?.id === id) conversation.value.spend = data
-  } catch { /* keeps the last figure */ }
+  } catch {
+    /* keeps the last figure */
+  }
 }
 
 async function loadConversation(id) {
@@ -482,7 +577,7 @@ async function loadConversation(id) {
   }
 }
 
-watch(convId, (id) => {
+watch(convId, id => {
   if (id && id === skipLoadFor) {
     skipLoadFor = null
     return
@@ -499,7 +594,7 @@ async function ensureConversation() {
     text_model: selected.text || null,
     image_model: selected.image || null,
     video_model: selected.video || null,
-    instruction_id: instructionId.value,   // explicit, so "None" sticks
+    instruction_id: instructionId.value, // explicit, so "None" sticks
     character_ids: characterIds.value,
   })
   conversation.value = conv
@@ -552,15 +647,24 @@ async function addFiles(files) {
     return showToast(e.message, 'error')
   }
   for (const f of images.slice(0, 8 - attachments.value.length)) {
-    const att = reactive({ key: Math.random().toString(36).slice(2), file: null, preview: URL.createObjectURL(f), uploading: true })
+    const att = reactive({
+      key: Math.random().toString(36).slice(2),
+      file: null,
+      preview: URL.createObjectURL(f),
+      uploading: true,
+    })
     attachments.value.push(att)
     uploadChatAttachment(id, f)
-      .then(r => { att.file = r.file })
+      .then(r => {
+        att.file = r.file
+      })
       .catch(e => {
         showToast(e.message, 'error')
         removeAttachment(att)
       })
-      .finally(() => { att.uploading = false })
+      .finally(() => {
+        att.uploading = false
+      })
   }
 }
 
@@ -575,15 +679,24 @@ async function attachFromLibrary(items) {
     return showToast(e.message, 'error')
   }
   for (const item of items.slice(0, 8 - attachments.value.length)) {
-    const att = reactive({ key: Math.random().toString(36).slice(2), file: null, preview: item.thumb_url || item.url, uploading: true })
+    const att = reactive({
+      key: Math.random().toString(36).slice(2),
+      file: null,
+      preview: item.thumb_url || item.url,
+      uploading: true,
+    })
     attachments.value.push(att)
     importMedia(item.id, { target: 'chat', conversation_id: id })
-      .then(r => { att.file = r.file })
+      .then(r => {
+        att.file = r.file
+      })
       .catch(e => {
         showToast(e.message, 'error')
         attachments.value = attachments.value.filter(a => a !== att)
       })
-      .finally(() => { att.uploading = false })
+      .finally(() => {
+        att.uploading = false
+      })
   }
 }
 
@@ -595,9 +708,14 @@ function useImage({ file, mode: target }) {
   lightbox.value = null
   if (!attachments.value.some(a => a.file === file)) {
     if (attachments.value.length >= 8) return showToast('Up to 8 attachments per message', 'error')
-    attachments.value.push(reactive({
-      key: Math.random().toString(36).slice(2), file, preview: chatMediaUrl(convId.value, file), uploading: false,
-    }))
+    attachments.value.push(
+      reactive({
+        key: Math.random().toString(36).slice(2),
+        file,
+        preview: chatMediaUrl(convId.value, file),
+        uploading: false,
+      }),
+    )
   }
   mode.value = target
   nextTick(() => textarea.value?.focus())
@@ -658,59 +776,57 @@ function turnSettings() {
   return body
 }
 
+// Replace the item with the same id in a list, or add it
+function upsert(list, item) {
+  const i = list.findIndex(x => x.id === item.id)
+  if (i === -1) list.push(item)
+  else list.splice(i, 1, item)
+}
+
+const messageIndex = id => messages.value.findIndex(m => m.id === id)
+
+// What each event of a streamed turn does to the shown chat
+const TURN_EVENTS = {
+  start(ev, tempUser) {
+    if (ev.user_message) {
+      // New message: swap out the optimistic copy. Edit: refresh it in place.
+      const i = tempUser ? messages.value.indexOf(tempUser) : messageIndex(ev.user_message.id)
+      if (i !== -1) messages.value.splice(i, 1, ev.user_message)
+    }
+    messages.value.push(ev.assistant_message)
+    streamingId.value = ev.assistant_message.id
+    scrollToBottom(true)
+  },
+  delta(ev) {
+    const m = messages.value[messageIndex(streamingId.value)]
+    if (m) m.content += ev.text
+    scrollToBottom()
+  },
+  media(ev) {
+    const m = messages.value[messageIndex(ev.message_id)]
+    if (!m) return
+    upsert(m.media || (m.media = []), ev.item)
+    scrollToBottom()
+  },
+  characters(ev) {
+    // The chat model used (or created) a character: it's attached now
+    for (const c of ev.characters) upsert(characters.value, c)
+    characterIds.value = ev.character_ids
+  },
+  title(ev) {
+    if (conversation.value) conversation.value.title = ev.title
+    const c = conversations.value.find(x => x.id === convId.value)
+    if (c) c.title = ev.title
+    document.title = `${ev.title} — Chat`
+  },
+  done(ev) {
+    const i = messageIndex(streamingId.value)
+    if (i !== -1 && ev.message) messages.value.splice(i, 1, ev.message)
+  },
+}
+
 function handleEvent(ev, tempUser) {
-  const idx = (id) => messages.value.findIndex(m => m.id === id)
-  switch (ev.type) {
-    case 'start': {
-      if (ev.user_message) {
-        // New message: swap out the optimistic copy. Edit: refresh it in place.
-        const i = tempUser ? messages.value.indexOf(tempUser) : idx(ev.user_message.id)
-        if (i !== -1) messages.value.splice(i, 1, ev.user_message)
-      }
-      messages.value.push(ev.assistant_message)
-      streamingId.value = ev.assistant_message.id
-      scrollToBottom(true)
-      break
-    }
-    case 'delta': {
-      const m = messages.value[idx(streamingId.value)]
-      if (m) m.content += ev.text
-      scrollToBottom()
-      break
-    }
-    case 'media': {
-      const m = messages.value[idx(ev.message_id)]
-      if (!m) break
-      const media = m.media || (m.media = [])
-      const j = media.findIndex(x => x.id === ev.item.id)
-      if (j === -1) media.push(ev.item)
-      else media.splice(j, 1, ev.item)
-      scrollToBottom()
-      break
-    }
-    case 'characters': {
-      // The chat model used (or created) a character: it's attached now
-      for (const c of ev.characters) {
-        const i = characters.value.findIndex(x => x.id === c.id)
-        if (i === -1) characters.value.push(c)
-        else characters.value.splice(i, 1, c)
-      }
-      characterIds.value = ev.character_ids
-      break
-    }
-    case 'title': {
-      if (conversation.value) conversation.value.title = ev.title
-      const c = conversations.value.find(x => x.id === convId.value)
-      if (c) c.title = ev.title
-      document.title = `${ev.title} — Chat`
-      break
-    }
-    case 'done': {
-      const i = idx(streamingId.value)
-      if (i !== -1 && ev.message) messages.value.splice(i, 1, ev.message)
-      break
-    }
-  }
+  TURN_EVENTS[ev.type]?.(ev, tempUser)
 }
 
 async function runTurn(fn, id, body, tempUser) {
@@ -718,10 +834,15 @@ async function runTurn(fn, id, body, tempUser) {
   abort = new AbortController()
   let started = false
   try {
-    await fn(id, body, ev => {
-      if (ev.type === 'start') started = true
-      handleEvent(ev, tempUser)
-    }, abort.signal)
+    await fn(
+      id,
+      body,
+      ev => {
+        if (ev.type === 'start') started = true
+        handleEvent(ev, tempUser)
+      },
+      abort.signal,
+    )
   } catch (e) {
     // Once the reply has started, the server finishes it regardless of this
     // connection — a dropped stream (throttled background tab, network blip)
@@ -754,7 +875,10 @@ async function send() {
   const content = draft.value.trim()
   const files = attachments.value.filter(a => a.file)
   const tempUser = reactive({
-    id: `tmp-${Date.now()}`, role: 'user', content, status: 'done',
+    id: `tmp-${Date.now()}`,
+    role: 'user',
+    content,
+    status: 'done',
     media: files.map(a => ({ id: a.key, kind: 'image', status: 'done', file: a.file })),
   })
   messages.value.push(tempUser)
@@ -785,8 +909,7 @@ async function editMessage(msg, content) {
   const tempUser = reactive({ ...msg, id: `tmp-${Date.now()}`, content, mode: mode.value, siblings: [] })
   messages.value = [...messages.value.slice(0, i), tempUser]
   scrollToBottom(true)
-  await runTurn(editChatMessage, convId.value,
-    { ...turnSettings(), message_id: msg.id, content }, tempUser)
+  await runTurn(editChatMessage, convId.value, { ...turnSettings(), message_id: msg.id, content }, tempUser)
 }
 
 // Same as an edit with unchanged text: a new branch with a fresh reply
@@ -797,7 +920,8 @@ async function resendMessage(msg) {
 function deleteQuestion({ other_versions: versions, other_messages: after }) {
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
   let extra = ''
-  if (versions && after) extra = ` This also removes ${plural(versions, 'other version')} and ${plural(after, 'message')} that followed them.`
+  if (versions && after)
+    extra = ` This also removes ${plural(versions, 'other version')} and ${plural(after, 'message')} that followed them.`
   else if (versions) extra = ` This also removes ${plural(versions, 'other version')}.`
   else if (after) extra = ` This also removes ${plural(after, 'message')} on other branches.`
   return `Delete this prompt and its reply?${extra} Images and videos stay in Media.`
@@ -875,7 +999,11 @@ async function unpinAll() {
 
 async function stop() {
   if (streamingId.value) {
-    try { await cancelChatMessage(streamingId.value) } catch { abort?.abort() }
+    try {
+      await cancelChatMessage(streamingId.value)
+    } catch {
+      abort?.abort()
+    }
   }
 }
 
@@ -889,7 +1017,7 @@ function bumpConversation(id) {
   const i = conversations.value.findIndex(c => c.id === id)
   if (i === -1) return
   const [c] = conversations.value.splice(i, 1)
-  c.updated_at = new Date().toISOString()   // moves it into "Today"
+  c.updated_at = new Date().toISOString() // moves it into "Today"
   conversations.value.unshift(c)
 }
 
@@ -903,7 +1031,10 @@ function onKeydown(e) {
 function useSuggestion(text, m) {
   draft.value = text
   if (m) mode.value = m
-  nextTick(() => { autosize(); textarea.value?.focus() })
+  nextTick(() => {
+    autosize()
+    textarea.value?.focus()
+  })
 }
 
 // ── Polling (anything not covered by a live stream) ─────────────────
@@ -914,7 +1045,7 @@ function useSuggestion(text, m) {
 let pollTimer = null
 
 function hasPending(m) {
-  if (m.status === 'streaming') return m.id !== streamingId.value   // no live stream for it
+  if (m.status === 'streaming') return m.id !== streamingId.value // no live stream for it
   return !!m.media?.some(x => x.status === 'pending')
 }
 
@@ -927,9 +1058,12 @@ async function pollOnce() {
       const fresh = await fetchChatMessage(m.id)
       replaceMessage(fresh)
       finished ||= !hasPending(fresh)
-    } catch { /* retry next tick */ }
+    } catch {
+      /* retry next tick */
+    }
   }
-  if (finished) {   // a video/image landed — it was billed
+  if (finished) {
+    // a video/image landed — it was billed
     refreshBalances()
     refreshSpend(convId.value)
   }
@@ -945,17 +1079,21 @@ async function refreshBalances() {
   if (providers.openrouter) {
     try {
       openrouterBalance.value = (await fetchOpenRouterCredits()).remaining
-    } catch { /* shown as — */ }
+    } catch {
+      /* shown as — */
+    }
   }
   if (providers.venice) {
     try {
       veniceBalance.value = (await fetchVeniceBalance()).usd
-    } catch { /* shown as — */ }
+    } catch {
+      /* shown as — */
+    }
   }
 }
 
-const fmtUsd = (v) => (v == null ? '—' : `$${v.toFixed(2)}`)
-const fmtCredits = (v) => (v == null ? '—' : Math.round(v).toLocaleString())
+const fmtUsd = v => (v == null ? '—' : `$${v.toFixed(2)}`)
+const fmtCredits = v => (v == null ? '—' : Math.round(v).toLocaleString())
 
 function ensurePolling() {
   if (pollTimer || !messages.value.some(hasPending)) return
@@ -1030,7 +1168,9 @@ onMounted(async () => {
     configured.value = status.configured
     providers.openrouter = status.openrouter ?? status.configured
     providers.venice = !!status.venice
-  } catch { /* 401 handled by auth prompt */ }
+  } catch {
+    /* 401 handled by auth prompt */
+  }
   loadConversations()
   loadInstructions()
   loadConversation(convId.value)
@@ -1063,12 +1203,41 @@ onBeforeUnmount(() => {
           <div class="side-heading">
             <button class="fold" :class="{ folded: isFolded('models') }" @click="toggleFold('models')">Models</button>
             <span v-if="isFolded('models')" class="heading-value">{{ shortModel(selected.text) || '—' }}</span>
-            <button v-else class="mini-btn" title="Refresh model lists" :disabled="modelsLoading" @click="loadModels(true)">⟳</button>
+            <button
+              v-else
+              class="mini-btn"
+              title="Refresh model lists"
+              :disabled="modelsLoading"
+              @click="loadModels(true)"
+            >
+              ⟳
+            </button>
           </div>
           <div v-show="!isFolded('models')" class="side-body">
-            <ModelPicker v-model="selected.text" :models="models.text" label="Chat" icon="💬" kind="text" :loading="modelsLoading" />
-            <ModelPicker v-model="selected.image" :models="models.image" label="Image" icon="🖼" kind="image" :loading="modelsLoading" />
-            <ModelPicker v-model="selected.video" :models="models.video" label="Video" icon="🎬" kind="video" :loading="modelsLoading" />
+            <ModelPicker
+              v-model="selected.text"
+              :models="models.text"
+              label="Chat"
+              icon="💬"
+              kind="text"
+              :loading="modelsLoading"
+            />
+            <ModelPicker
+              v-model="selected.image"
+              :models="models.image"
+              label="Image"
+              icon="🖼"
+              kind="image"
+              :loading="modelsLoading"
+            />
+            <ModelPicker
+              v-model="selected.video"
+              :models="models.video"
+              label="Video"
+              icon="🎬"
+              kind="video"
+              :loading="modelsLoading"
+            />
           </div>
         </div>
 
@@ -1078,70 +1247,93 @@ onBeforeUnmount(() => {
             <span v-if="isFolded('mode')" class="heading-value">{{ currentMode.icon }} {{ currentMode.label }}</span>
           </div>
           <div v-show="!isFolded('mode')" class="side-body">
-          <div class="modes">
-            <button
-              v-for="m in MODES"
-              :key="m.id"
-              class="mode"
-              :class="{ active: mode === m.id }"
-              :title="m.hint"
-              @click="mode = m.id"
-            >{{ m.icon }} {{ m.label }}</button>
-          </div>
-          <p class="mode-hint">{{ MODES.find(m => m.id === mode)?.hint }}</p>
+            <div class="modes">
+              <button
+                v-for="m in MODES"
+                :key="m.id"
+                class="mode"
+                :class="{ active: mode === m.id }"
+                :title="m.hint"
+                @click="mode = m.id"
+              >
+                {{ m.icon }} {{ m.label }}
+              </button>
+            </div>
+            <p class="mode-hint">{{ MODES.find(m => m.id === mode)?.hint }}</p>
           </div>
         </div>
 
         <div class="side-section">
           <div class="side-heading">
-            <button class="fold" :class="{ folded: isFolded('instructions') }" @click="toggleFold('instructions')">Instructions</button>
+            <button class="fold" :class="{ folded: isFolded('instructions') }" @click="toggleFold('instructions')">
+              Instructions
+            </button>
             <span v-if="isFolded('instructions')" class="heading-value">{{ attachedInstruction?.name || 'None' }}</span>
-            <button v-else class="mini-btn" title="Create and edit saved instructions" @click="instructionsOpen = true">Manage</button>
+            <button v-else class="mini-btn" title="Create and edit saved instructions" @click="instructionsOpen = true">
+              Manage
+            </button>
           </div>
           <div v-show="!isFolded('instructions')" class="side-body">
-          <select
-            class="instruction-select"
-            :value="instructionId ?? ''"
-            aria-label="Custom instructions for this chat"
-            @change="setInstruction($event.target.value === '' ? null : Number($event.target.value))"
-          >
-            <option value="">None</option>
-            <option v-for="i in instructions" :key="i.id" :value="i.id">{{ i.name }}{{ i.is_default ? ' (default)' : '' }}</option>
-          </select>
-          <p v-if="attachedInstruction && (mode === 'video' || (mode === 'image' && !imageInfo?.conversational))" class="mode-hint">
-            {{ mode === 'video' ? 'Video models' : 'This image model' }} can't take instructions; they apply in Auto and Chat modes.
-          </p>
+            <select
+              class="instruction-select"
+              :value="instructionId ?? ''"
+              aria-label="Custom instructions for this chat"
+              @change="setInstruction($event.target.value === '' ? null : Number($event.target.value))"
+            >
+              <option value="">None</option>
+              <option v-for="i in instructions" :key="i.id" :value="i.id">
+                {{ i.name }}{{ i.is_default ? ' (default)' : '' }}
+              </option>
+            </select>
+            <p
+              v-if="attachedInstruction && (mode === 'video' || (mode === 'image' && !imageInfo?.conversational))"
+              class="mode-hint"
+            >
+              {{ mode === 'video' ? 'Video models' : 'This image model' }} can't take instructions; they apply in Auto
+              and Chat modes.
+            </p>
           </div>
         </div>
 
         <div class="side-section">
           <div class="side-heading">
-            <button class="fold" :class="{ folded: isFolded('characters') }" @click="toggleFold('characters')">Characters</button>
-            <span v-if="isFolded('characters')" class="heading-value">{{ attachedCharacters.map(c => c.name).join(', ') || 'None' }}</span>
-            <button v-else class="mini-btn" title="All characters" @click="router.push({ name: 'characters' })">Manage</button>
+            <button class="fold" :class="{ folded: isFolded('characters') }" @click="toggleFold('characters')">
+              Characters
+            </button>
+            <span v-if="isFolded('characters')" class="heading-value">{{
+              attachedCharacters.map(c => c.name).join(', ') || 'None'
+            }}</span>
+            <button v-else class="mini-btn" title="All characters" @click="router.push({ name: 'characters' })">
+              Manage
+            </button>
           </div>
           <div v-show="!isFolded('characters')" class="side-body">
-          <template v-if="!characterSupport.ok">
-            <p class="side-warn">{{ characterSupport.reason }}</p>
-            <p v-if="attachedCharacters.length" class="mode-hint">
-              {{ attachedCharacters.map(c => c.name).join(', ') }} {{ attachedCharacters.length === 1 ? 'stays' : 'stay' }}
-              attached and will be used again when you switch back.
+            <template v-if="!characterSupport.ok">
+              <p class="side-warn">{{ characterSupport.reason }}</p>
+              <p v-if="attachedCharacters.length" class="mode-hint">
+                {{ attachedCharacters.map(c => c.name).join(', ') }}
+                {{ attachedCharacters.length === 1 ? 'stays' : 'stay' }}
+                attached and will be used again when you switch back.
+              </p>
+            </template>
+            <CharacterPicker
+              v-else
+              :model-value="characterIds"
+              :characters="characters"
+              create-label="＋ New character (this chat)"
+              @update:model-value="setCharacters"
+              @edit="editCharacter"
+              @create="newCharacter()"
+            />
+            <p v-if="characterSupport.ok && attachedCharacters.length" class="mode-hint">
+              {{
+                mode === 'auto'
+                  ? 'The chat model knows them and sends their description and images when it puts one in a picture.'
+                  : mode === 'image'
+                    ? 'Their descriptions and images go with every image.'
+                    : 'The chat model knows them.'
+              }}
             </p>
-          </template>
-          <CharacterPicker
-            v-else
-            :model-value="characterIds"
-            :characters="characters"
-            create-label="＋ New character (this chat)"
-            @update:model-value="setCharacters"
-            @edit="editCharacter"
-            @create="newCharacter()"
-          />
-          <p v-if="characterSupport.ok && attachedCharacters.length" class="mode-hint">
-            {{ mode === 'auto' ? 'The chat model knows them and sends their description and images when it puts one in a picture.'
-              : mode === 'image' ? 'Their descriptions and images go with every image.'
-              : 'The chat model knows them.' }}
-          </p>
           </div>
         </div>
 
@@ -1151,45 +1343,51 @@ onBeforeUnmount(() => {
             <span class="heading-value">{{ historyLimit ? `${historyLimit} messages` : 'All' }}</span>
           </div>
           <div v-show="!isFolded('memory')" class="side-body">
-          <input
-            v-model.number="memoryIndex"
-            class="memory-slider"
-            type="range"
-            min="0"
-            :max="MEMORY_STEPS.length - 1"
-            step="1"
-            aria-label="Messages of history sent to the chat model"
-          />
-          <p class="mode-hint">{{ memoryHint }} More memory means better continuity but more tokens per reply.</p>
+            <input
+              v-model.number="memoryIndex"
+              class="memory-slider"
+              type="range"
+              min="0"
+              :max="MEMORY_STEPS.length - 1"
+              step="1"
+              aria-label="Messages of history sent to the chat model"
+            />
+            <p class="mode-hint">{{ memoryHint }} More memory means better continuity but more tokens per reply.</p>
           </div>
         </div>
 
         <div v-if="mode !== 'video'" class="side-section">
           <div class="side-heading">
-            <button class="fold" :class="{ folded: isFolded('images') }" @click="toggleFold('images')">Chat images</button>
+            <button class="fold" :class="{ folded: isFolded('images') }" @click="toggleFold('images')">
+              Chat images
+            </button>
             <span class="heading-value">{{ imageLimit === null ? 'All' : imageLimit }}</span>
           </div>
           <div v-show="!isFolded('images')" class="side-body">
-          <input
-            v-model.number="imageIndex"
-            class="memory-slider"
-            type="range"
-            min="0"
-            :max="IMAGE_STEPS.length - 1"
-            step="1"
-            aria-label="Recent chat images sent with each request"
-          />
-          <p class="mode-hint">
-            Recent chat images the models see, and the most sent as references with a new picture.
-            Character images always go on top. More helps consistency but makes bigger, pricier requests.
-          </p>
+            <input
+              v-model.number="imageIndex"
+              class="memory-slider"
+              type="range"
+              min="0"
+              :max="IMAGE_STEPS.length - 1"
+              step="1"
+              aria-label="Recent chat images sent with each request"
+            />
+            <p class="mode-hint">
+              Recent chat images the models see, and the most sent as references with a new picture. Character images
+              always go on top. More helps consistency but makes bigger, pricier requests.
+            </p>
           </div>
         </div>
 
         <div v-if="showImageOpts" class="side-section">
           <div class="side-heading">
-            <button class="fold" :class="{ folded: isFolded('imageOpts') }" @click="toggleFold('imageOpts')">Image options</button>
-            <span v-if="isFolded('imageOpts')" class="heading-value">{{ [imageOpts.aspect_ratio || 'auto', imageOpts.resolution].filter(Boolean).join(' · ') }}</span>
+            <button class="fold" :class="{ folded: isFolded('imageOpts') }" @click="toggleFold('imageOpts')">
+              Image options
+            </button>
+            <span v-if="isFolded('imageOpts')" class="heading-value">{{
+              [imageOpts.aspect_ratio || 'auto', imageOpts.resolution].filter(Boolean).join(' · ')
+            }}</span>
           </div>
           <div v-show="!isFolded('imageOpts')" class="opts">
             <select v-model="imageOpts.aspect_ratio" title="Aspect ratio">
@@ -1205,15 +1403,28 @@ onBeforeUnmount(() => {
 
         <div v-if="showVideoOpts" class="side-section">
           <div class="side-heading">
-            <button class="fold" :class="{ folded: isFolded('videoOpts') }" @click="toggleFold('videoOpts')">Video options</button>
-            <span v-if="isFolded('videoOpts')" class="heading-value">{{ [videoOpts.aspect_ratio || 'auto', videoOpts.resolution, videoOpts.duration && `${videoOpts.duration}s`].filter(Boolean).join(' · ') }}</span>
+            <button class="fold" :class="{ folded: isFolded('videoOpts') }" @click="toggleFold('videoOpts')">
+              Video options
+            </button>
+            <span v-if="isFolded('videoOpts')" class="heading-value">{{
+              [videoOpts.aspect_ratio || 'auto', videoOpts.resolution, videoOpts.duration && `${videoOpts.duration}s`]
+                .filter(Boolean)
+                .join(' · ')
+            }}</span>
           </div>
           <div v-show="!isFolded('videoOpts')" class="opts">
-            <select v-model="videoOpts.aspect_ratio" title="Aspect ratio (ignored when animating an image — the image sets it)">
+            <select
+              v-model="videoOpts.aspect_ratio"
+              title="Aspect ratio (ignored when animating an image — the image sets it)"
+            >
               <option value="">Ratio: auto</option>
               <option v-for="r in videoRatioOptions" :key="r" :value="r">{{ r }}</option>
             </select>
-            <select v-if="videoResOptions.length" v-model="videoOpts.resolution" title="Resolution (Kling: quality tier)">
+            <select
+              v-if="videoResOptions.length"
+              v-model="videoOpts.resolution"
+              title="Resolution (Kling: quality tier)"
+            >
               <option value="">Res: default</option>
               <option v-for="r in videoResOptions" :key="r" :value="r">{{ r }}</option>
             </select>
@@ -1222,7 +1433,7 @@ onBeforeUnmount(() => {
               <option v-for="d in durationOptions" :key="d" :value="d">{{ d }}s</option>
             </select>
             <label v-if="videoInfo?.generate_audio" class="opt-check">
-              <input type="checkbox" v-model="videoOpts.generate_audio" /> Audio
+              <input v-model="videoOpts.generate_audio" type="checkbox" /> Audio
             </label>
           </div>
         </div>
@@ -1232,11 +1443,14 @@ onBeforeUnmount(() => {
 
         <p v-if="modeWarning" class="side-warn">{{ modeWarning }}</p>
         <p v-if="!configured" class="side-warn">
-          No chat provider is configured. Add <code>OPENROUTER_API_KEY</code> and/or <code>VENICE_API_KEY</code> to the server's <code>.env</code> and restart.
+          No chat provider is configured. Add <code>OPENROUTER_API_KEY</code> and/or <code>VENICE_API_KEY</code> to the
+          server's <code>.env</code> and restart.
         </p>
       </div>
 
-      <button class="library-link" title="Every image and video from your chats, in Media" @click="openLibrary">🗂 Media</button>
+      <button class="library-link" title="Every image and video from your chats, in Media" @click="openLibrary">
+        🗂 Media
+      </button>
 
       <div class="side-heading chats-heading">
         <button class="fold" :class="{ folded: isFolded('chats') }" @click="toggleFold('chats')">Chats</button>
@@ -1256,11 +1470,16 @@ onBeforeUnmount(() => {
             @click="openConversation(c.id)"
           >
             <span class="conv-text">
-              <span class="conv-title"><span v-if="c.forked_from_id" class="conv-fork" title="Branched off another chat">⑂ </span>{{ c.title }}</span>
+              <span class="conv-title"
+                ><span v-if="c.forked_from_id" class="conv-fork" title="Branched off another chat">⑂ </span
+                >{{ c.title }}</span
+              >
               <span v-if="c.snippet" class="conv-snippet">{{ c.snippet }}</span>
             </span>
             <span class="conv-actions" @click.stop>
-              <button :class="{ on: c.pinned }" :title="c.pinned ? 'Unpin' : 'Pin to the top'" @click="togglePin(c)">📌</button>
+              <button :class="{ on: c.pinned }" :title="c.pinned ? 'Unpin' : 'Pin to the top'" @click="togglePin(c)">
+                📌
+              </button>
               <button title="Rename" @click="rename(c)">✎</button>
               <button title="Delete" @click="removeConversation(c)">🗑</button>
             </span>
@@ -1268,7 +1487,9 @@ onBeforeUnmount(() => {
         </template>
         <p v-if="searchResults && !searchResults.length" class="conv-empty">No chats match</p>
         <p v-else-if="!searchResults && !conversations.length" class="conv-empty">No chats yet</p>
-        <p v-if="!searchResults && moreConversations" class="conv-empty">Older chats aren't listed. Search to find them.</p>
+        <p v-if="!searchResults && moreConversations" class="conv-empty">
+          Older chats aren't listed. Search to find them.
+        </p>
       </div>
 
       <div class="side-bottom">
@@ -1277,7 +1498,9 @@ onBeforeUnmount(() => {
           :class="{ missing: !hasKey }"
           :title="hasKey ? 'API key set — click to change' : 'No API key — click to set'"
           @click="showKeyModal = true"
-        >🔑 {{ hasKey ? 'Signed in' : 'Sign in' }}</button>
+        >
+          🔑 {{ hasKey ? 'Signed in' : 'Sign in' }}
+        </button>
       </div>
     </aside>
     <div class="sidebar-scrim" @click="sidebarOpen = false"></div>
@@ -1292,14 +1515,28 @@ onBeforeUnmount(() => {
       <button class="sidebar-toggle" title="Chats & settings" @click="sidebarOpen = !sidebarOpen">☰</button>
 
       <div class="balances">
-        <span v-if="spendLabel" class="balance spend" :title="spendTitle">This chat <b>{{ spendLabel }}</b></span>
-        <span v-if="providers.openrouter" class="balance" title="OpenRouter balance — credits bought minus used (chat text, OpenRouter images/videos)">
+        <span v-if="spendLabel" class="balance spend" :title="spendTitle"
+          >This chat <b>{{ spendLabel }}</b></span
+        >
+        <span
+          v-if="providers.openrouter"
+          class="balance"
+          title="OpenRouter balance — credits bought minus used (chat text, OpenRouter images/videos)"
+        >
           OpenRouter <b>{{ fmtUsd(openrouterBalance) }}</b>
         </span>
-        <span v-if="providers.venice" class="balance venice" title="Venice balance in USD (Venice text, images and videos)">
+        <span
+          v-if="providers.venice"
+          class="balance venice"
+          title="Venice balance in USD (Venice text, images and videos)"
+        >
           Venice <b>{{ fmtUsd(veniceBalance) }}</b>
         </span>
-        <RouterLink to="/usage" class="balance pollo" title="Pollo credits remaining (Pollo images/videos) — open Usage">
+        <RouterLink
+          to="/usage"
+          class="balance pollo"
+          title="Pollo credits remaining (Pollo images/videos) — open Usage"
+        >
           Pollo <b>{{ fmtCredits(polloCredits) }}</b>
         </RouterLink>
       </div>
@@ -1309,19 +1546,51 @@ onBeforeUnmount(() => {
 
         <div v-else-if="!messages.length" class="welcome">
           <h2><span>Hello.</span> What shall we make?</h2>
-          <p>Chat with any OpenRouter model. Ask for a picture or a clip and it'll make one with your image and video models.</p>
+          <p>
+            Chat with any OpenRouter model. Ask for a picture or a clip and it'll make one with your image and video
+            models.
+          </p>
           <div class="suggestions">
-            <button @click="useSuggestion('Explain how diffusion models generate images, simply.', 'auto')">💡 Explain diffusion models</button>
-            <button @click="useSuggestion('Draw a cozy isometric cabin in a snowy forest at dusk, warm window light', 'auto')">🖼 Draw a snowy cabin</button>
-            <button @click="useSuggestion('Make a short video of ocean waves crashing on black sand at golden hour, slow dolly shot', 'auto')">🎬 Video of waves</button>
-            <button @click="useSuggestion('Brainstorm 5 visual concepts for a coffee brand launch, then draw your favourite', 'auto')">✨ Brainstorm & draw</button>
+            <button @click="useSuggestion('Explain how diffusion models generate images, simply.', 'auto')">
+              💡 Explain diffusion models
+            </button>
+            <button
+              @click="useSuggestion('Draw a cozy isometric cabin in a snowy forest at dusk, warm window light', 'auto')"
+            >
+              🖼 Draw a snowy cabin
+            </button>
+            <button
+              @click="
+                useSuggestion(
+                  'Make a short video of ocean waves crashing on black sand at golden hour, slow dolly shot',
+                  'auto',
+                )
+              "
+            >
+              🎬 Video of waves
+            </button>
+            <button
+              @click="
+                useSuggestion(
+                  'Brainstorm 5 visual concepts for a coffee brand launch, then draw your favourite',
+                  'auto',
+                )
+              "
+            >
+              ✨ Brainstorm & draw
+            </button>
           </div>
         </div>
 
         <div v-else ref="messagesEl" class="messages">
           <div v-if="conversation?.forked_from" class="fork-origin">
             ⑂ Branched from
-            <a v-if="conversation.forked_from.exists" href="#" @click.prevent="openConversation(conversation.forked_from.id)">{{ conversation.forked_from.title }}</a>
+            <a
+              v-if="conversation.forked_from.exists"
+              href="#"
+              @click.prevent="openConversation(conversation.forked_from.id)"
+              >{{ conversation.forked_from.title }}</a
+            >
             <span v-else>a chat that's since been deleted</span>
           </div>
           <ChatMessage
@@ -1357,7 +1626,7 @@ onBeforeUnmount(() => {
             <div v-for="a in attachments" :key="a.key" class="att">
               <img :src="a.preview" alt="" />
               <div v-if="a.uploading" class="att-busy"><div class="spinner"></div></div>
-              <button class="att-x" @click="removeAttachment(a)" title="Remove">✕</button>
+              <button class="att-x" title="Remove" @click="removeAttachment(a)">✕</button>
             </div>
           </div>
 
@@ -1367,16 +1636,27 @@ onBeforeUnmount(() => {
           </div>
 
           <div v-if="pinned.length && mode !== 'text'" class="pinned-row">
-            <span>📌 {{ pinned.length }} image{{ pinned.length !== 1 ? 's' : '' }} pinned: sent as references with every new image</span>
+            <span
+              >📌 {{ pinned.length }} image{{ pinned.length !== 1 ? 's' : '' }} pinned: sent as references with every
+              new image</span
+            >
             <button @click="unpinAll">Unpin all</button>
           </div>
 
           <div class="composer-row">
             <label class="icon-btn" title="Attach images (or paste / drop)">
               📎
-              <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden @change="addFiles($event.target.files); $event.target.value = ''" />
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                multiple
+                hidden
+                @change="addFiles(takeFiles($event))"
+              />
             </label>
-            <button class="icon-btn" title="Attach from your uploads and creations" @click="libraryOpen = true">🗂</button>
+            <button class="icon-btn" title="Attach from your uploads and creations" @click="libraryOpen = true">
+              🗂
+            </button>
             <button class="mode-chip" :title="`Mode: ${currentMode.label} — click to switch`" @click="cycleMode">
               {{ currentMode.icon }} {{ currentMode.label }}
             </button>
@@ -1384,7 +1664,13 @@ onBeforeUnmount(() => {
               ref="textarea"
               v-model="draft"
               rows="1"
-              :placeholder="mode === 'image' ? 'Describe an image…' : mode === 'video' ? 'Describe a video (attach an image to animate it)…' : 'Message, or ask for an image or video…'"
+              :placeholder="
+                mode === 'image'
+                  ? 'Describe an image…'
+                  : mode === 'video'
+                    ? 'Describe a video (attach an image to animate it)…'
+                    : 'Message, or ask for an image or video…'
+              "
               @input="autosize"
               @keydown="onKeydown"
               @paste="onPaste"
@@ -1428,9 +1714,15 @@ onBeforeUnmount(() => {
         <img :src="lightbox.url" alt="" @click.stop />
         <p v-if="lightbox.prompt" class="lightbox-caption" @click.stop>{{ lightbox.prompt }}</p>
         <div v-if="lightbox.file" class="lightbox-actions" @click.stop>
-          <button class="lightbox-animate" @click="useImage({ file: lightbox.file, mode: 'image' })">🖼 Make a picture from this</button>
-          <button class="lightbox-animate" @click="useImage({ file: lightbox.file, mode: 'video' })">🎬 Make a video from this</button>
-          <button class="lightbox-animate" @click="characterFromImage(lightbox.file)">👤 Make a character from this</button>
+          <button class="lightbox-animate" @click="useImage({ file: lightbox.file, mode: 'image' })">
+            🖼 Make a picture from this
+          </button>
+          <button class="lightbox-animate" @click="useImage({ file: lightbox.file, mode: 'video' })">
+            🎬 Make a video from this
+          </button>
+          <button class="lightbox-animate" @click="characterFromImage(lightbox.file)">
+            👤 Make a character from this
+          </button>
         </div>
       </div>
     </Teleport>
@@ -1462,7 +1754,7 @@ onBeforeUnmount(() => {
   height: 100vh;
   height: 100dvh;
   position: relative;
-  overflow: hidden;   /* only the panes inside scroll, never the page */
+  overflow: hidden; /* only the panes inside scroll, never the page */
   background: var(--bg);
 }
 
@@ -1897,7 +2189,7 @@ onBeforeUnmount(() => {
 }
 
 .side-bottom {
-  margin-top: auto;   /* stays at the bottom when the chat list is folded */
+  margin-top: auto; /* stays at the bottom when the chat list is folded */
   padding: 8px 12px 12px;
   border-top: 1px solid #222;
 }
@@ -2021,7 +2313,9 @@ onBeforeUnmount(() => {
   cursor: pointer;
   font-size: 0.87rem;
   line-height: 1.4;
-  transition: border-color 0.2s, transform 0.2s;
+  transition:
+    border-color 0.2s,
+    transform 0.2s;
 }
 
 .suggestions button:hover {
@@ -2041,7 +2335,9 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border);
   border-radius: 24px;
   padding: 6px 6px 6px 8px;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
 }
 
 .composer:focus-within {
@@ -2164,7 +2460,9 @@ button.icon-btn {
   font-size: 1.1rem;
   font-weight: 700;
   cursor: pointer;
-  transition: opacity 0.2s, transform 0.15s;
+  transition:
+    opacity 0.2s,
+    transform 0.15s;
 }
 
 .send:hover:not(:disabled) {

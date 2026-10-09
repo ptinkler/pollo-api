@@ -1,4 +1,5 @@
 """Global test fixtures — prevent tests from touching the real database or assets."""
+
 import pytest
 
 
@@ -11,4 +12,3 @@ def _guard_real_db(monkeypatch, tmp_path):
     monkeypatch.setattr(config_mod, "ROOT_DIR", tmp_path)
     monkeypatch.setattr(config_mod, "ASSETS_DIR", tmp_path / "assets")
     monkeypatch.setattr(config_mod, "DB_PATH", tmp_path / "data" / "metadata.db")
-

@@ -47,8 +47,8 @@ describe('ToastContainer', () => {
         toasts: [
           { id: 1, message: 'Success!', type: 'success' },
           { id: 2, message: 'Oops!', type: 'error' },
-        ]
-      }
+        ],
+      },
     })
     expect(wrapper.text()).toContain('Success!')
     expect(wrapper.text()).toContain('Oops!')
@@ -62,8 +62,8 @@ describe('ToastContainer', () => {
   it('emits remove on click', async () => {
     const wrapper = mount(ToastContainer, {
       props: {
-        toasts: [{ id: 1, message: 'Click me', type: 'success' }]
-      }
+        toasts: [{ id: 1, message: 'Click me', type: 'success' }],
+      },
     })
     await wrapper.find('.toast').trigger('click')
     expect(wrapper.emitted('remove')).toBeTruthy()
@@ -77,8 +77,8 @@ describe('ToastContainer', () => {
           { id: 1, message: 'ok', type: 'success' },
           { id: 2, message: 'bad', type: 'error' },
           { id: 3, message: 'info', type: 'info' },
-        ]
-      }
+        ],
+      },
     })
     const icons = wrapper.findAll('.toast-icon')
     expect(icons[0].text()).toBe('✓')
@@ -164,7 +164,7 @@ describe('VideoCard', () => {
       aspect_ratio: '16:9',
       length: 10,
       created_at: '2025-01-01T00:00:00',
-    }
+    },
   }
 
   it('renders model name', () => {
@@ -330,7 +330,7 @@ describe('LengthSlider', () => {
     })
     const opts = wrapper.findAll('datalist option')
     expect(opts).toHaveLength(3)
-    expect(opts.map((o) => o.attributes('label'))).toEqual(['5s', '10s', '15s'])
+    expect(opts.map(o => o.attributes('label'))).toEqual(['5s', '10s', '15s'])
   })
 
   it('positions the slider at the index of the current value', () => {
@@ -441,4 +441,3 @@ describe('ToggleSwitch', () => {
     expect(wrapper.find('input').element.checked).toBe(false)
   })
 })
-

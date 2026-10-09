@@ -1,7 +1,7 @@
 <script setup>
-const props = defineProps({
+defineProps({
   modelValue: { type: String, default: '' },
-  ratios: { type: Array, required: true }
+  ratios: { type: Array, required: true },
 })
 
 const emit = defineEmits(['update:modelValue'])

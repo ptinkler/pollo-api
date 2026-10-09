@@ -4,12 +4,14 @@ API Authentication & Authorization system using FastAPI security.
 Provides API key validation for securing endpoints.
 Supports cookie, Bearer header, and query parameter authentication.
 """
+
 import os
-from typing import Optional
-from fastapi import HTTPException, status, Header, Query, Cookie
 from functools import lru_cache
 
+from fastapi import Cookie, Header, HTTPException, Query, status
+
 # ── Configuration ────────────────────────────────────────────────────
+
 
 @lru_cache(maxsize=1)
 def get_api_keys() -> set[str]:
@@ -29,6 +31,7 @@ def is_auth_enabled() -> bool:
 
 # ── Shared key extraction ────────────────────────────────────────────
 
+
 def _extract_key(
     auth_keys: set[str],
     session: str | None,
@@ -44,8 +47,7 @@ def _extract_key(
         key = session.strip()
         if key in auth_keys:
             return key
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail="Invalid session cookie")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session cookie")
 
     if authorization:
         parts = authorization.split()
@@ -68,18 +70,18 @@ def _extract_key(
         key = api_key.strip()
         if key in auth_keys:
             return key
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail="Invalid API key in query parameter")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key in query parameter")
 
     return None
 
 
 # ── API Key Validation ───────────────────────────────────────────────
 
+
 async def verify_api_key(
-    authorization: Optional[str] = Header(None),
-    api_key: Optional[str] = Query(None),
-    session: Optional[str] = Cookie(None),
+    authorization: str | None = Header(None),
+    api_key: str | None = Query(None),
+    session: str | None = Cookie(None),
 ) -> str:
     """Verify API key from session cookie, Authorization header, or query param.
 
@@ -99,13 +101,12 @@ async def verify_api_key(
 
 
 def optional_api_key(
-    authorization: Optional[str] = Header(None),
-    api_key: Optional[str] = Query(None),
-    session: Optional[str] = Cookie(None),
-) -> Optional[str]:
+    authorization: str | None = Header(None),
+    api_key: str | None = Query(None),
+    session: str | None = Cookie(None),
+) -> str | None:
     """Optional API key validation. Returns key if valid, None if absent, raises on invalid."""
     auth_keys = get_api_keys()
     if not auth_keys:
         return None
     return _extract_key(auth_keys, session, authorization, api_key)
-

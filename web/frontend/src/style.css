@@ -104,7 +104,9 @@ body {
 }
 
 /* ── Form Elements ───────────────────── */
-input, select, textarea {
+input,
+select,
+textarea {
   background: var(--surface2);
   border: 1px solid var(--border);
   color: var(--text);
@@ -115,7 +117,9 @@ input, select, textarea {
   transition: border 0.2s;
 }
 
-input:focus, select:focus, textarea:focus {
+input:focus,
+select:focus,
+textarea:focus {
   border-color: var(--accent);
 }
 
@@ -180,29 +184,41 @@ label {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 
 /* ── Transitions ─────────────────────── */
-.fade-enter-active, .fade-leave-active {
+.fade-enter-active,
+.fade-leave-active {
   transition: opacity 0.2s ease;
 }
 
-.fade-enter-from, .fade-leave-to {
+.fade-enter-from,
+.fade-leave-to {
   opacity: 0;
 }
 
-.slide-enter-active, .slide-leave-active {
-  transition: transform 0.2s ease, opacity 0.2s ease;
+.slide-enter-active,
+.slide-leave-active {
+  transition:
+    transform 0.2s ease,
+    opacity 0.2s ease;
 }
 
-.slide-enter-from, .slide-leave-to {
+.slide-enter-from,
+.slide-leave-to {
   transform: translateY(-10px);
   opacity: 0;
 }
-

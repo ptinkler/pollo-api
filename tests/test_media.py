@@ -1,4 +1,5 @@
 """Tests for web.media — the library of every upload and creation."""
+
 import io
 
 import pytest
@@ -16,13 +17,14 @@ def _png(color="red") -> bytes:
 @pytest.fixture()
 def project(db):
     import web.api as api_mod
+
     proj = db.create_project(name="Media Proj")
     folder = api_mod.ASSETS_DIR / proj.assets_folder
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / "src-abc.png").write_bytes(_png())            # an upload
-    (folder / "thumb.jpg").write_bytes(_png())              # project thumbnail — not media
-    (folder / "vid1.mp4").write_bytes(b"fake mp4")          # a generated video
-    (folder / "gen1.png").write_bytes(_png("blue"))         # a generated image
+    (folder / "src-abc.png").write_bytes(_png())  # an upload
+    (folder / "thumb.jpg").write_bytes(_png())  # project thumbnail — not media
+    (folder / "vid1.mp4").write_bytes(b"fake mp4")  # a generated video
+    (folder / "gen1.png").write_bytes(_png("blue"))  # a generated image
     db.create_job(job_id="jv", project=proj.slug, model="seedance20v1", prompt="a fox runs")
     db.update_job("jv", status="done", video_path=str(folder / "vid1.mp4"))
     db.create_job(job_id="ji", project=proj.slug, model="seedreamv1", prompt="a fox portrait", job_type="image")
@@ -33,17 +35,35 @@ def project(db):
 @pytest.fixture()
 def conv(db, tmp_path):
     import img2vid.common.config as config
+
     c = db.create_conversation(title="Fox chat")
     d = config.ROOT_DIR / "chat" / c.id
     d.mkdir(parents=True)
     (d / "up_1.png").write_bytes(_png())
     (d / "img_1.png").write_bytes(_png("green"))
-    db.add_chat_message(c.id, "user", "here", media=[
-        {"id": "u", "kind": "image", "source": "upload", "status": "done", "file": "up_1.png"}])
-    db.add_chat_message(c.id, "assistant", "drawn", media=[
-        {"id": "g", "kind": "image", "source": "generated", "status": "done", "file": "img_1.png",
-         "prompt": "fox in snow", "model": "a/b"},
-        {"id": "p", "kind": "video", "source": "generated", "status": "pending", "file": None, "prompt": "x"}])
+    db.add_chat_message(
+        c.id,
+        "user",
+        "here",
+        media=[{"id": "u", "kind": "image", "source": "upload", "status": "done", "file": "up_1.png"}],
+    )
+    db.add_chat_message(
+        c.id,
+        "assistant",
+        "drawn",
+        media=[
+            {
+                "id": "g",
+                "kind": "image",
+                "source": "generated",
+                "status": "done",
+                "file": "img_1.png",
+                "prompt": "fox in snow",
+                "model": "a/b",
+            },
+            {"id": "p", "kind": "video", "source": "generated", "status": "pending", "file": None, "prompt": "x"},
+        ],
+    )
     return c
 
 
@@ -65,7 +85,7 @@ class TestListing:
         assert items[f"chat:{conv.id}:up_1.png"]["source"] == "upload"
         chat_gen = items[f"chat:{conv.id}:img_1.png"]
         assert chat_gen["source"] == "generated" and chat_gen["conversation_title"] == "Fox chat"
-        assert not any(i.startswith(f"chat:{conv.id}:") and "None" in i for i in items)   # pending skipped
+        assert not any(i.startswith(f"chat:{conv.id}:") and "None" in i for i in items)  # pending skipped
 
     def test_upload_serve_delete(self, client):
         r = client.post("/api/media/upload", files={"file": ("a.png", _png(), "image/png")})
@@ -87,30 +107,47 @@ class TestListing:
 class TestImport:
     def test_into_a_project(self, client, project, conv):
         import web.api as api_mod
-        r = client.post("/api/media/import", json={"media_id": f"chat:{conv.id}:img_1.png", "target": "project",
-                                                   "project": project.slug, "prefix": "src"}).json()
+
+        r = client.post(
+            "/api/media/import",
+            json={
+                "media_id": f"chat:{conv.id}:img_1.png",
+                "target": "project",
+                "project": project.slug,
+                "prefix": "src",
+            },
+        ).json()
         name = r["image_url"].removeprefix("local:")
         assert name.startswith("src-") and (api_mod.ASSETS_DIR / project.assets_folder / name).is_file()
         # An upload already in that project is reused, not copied
-        same = client.post("/api/media/import", json={"media_id": f"proj:{project.slug}:src-abc.png",
-                                                      "target": "project", "project": project.slug}).json()
+        same = client.post(
+            "/api/media/import",
+            json={"media_id": f"proj:{project.slug}:src-abc.png", "target": "project", "project": project.slug},
+        ).json()
         assert same == {"image_url": "local:src-abc.png"}
 
     def test_into_a_chat(self, client, project, conv):
         import img2vid.common.config as config
-        r = client.post("/api/media/import", json={"media_id": f"proj:{project.slug}:gen1.png",
-                                                   "target": "chat", "conversation_id": conv.id}).json()
+
+        r = client.post(
+            "/api/media/import",
+            json={"media_id": f"proj:{project.slug}:gen1.png", "target": "chat", "conversation_id": conv.id},
+        ).json()
         assert r["file"].startswith("up_") and (config.ROOT_DIR / "chat" / conv.id / r["file"]).is_file()
 
     def test_into_a_character(self, client, conv):
         char = client.post("/api/characters", json={"name": "Fox"}).json()
-        r = client.post("/api/media/import", json={"media_id": f"chat:{conv.id}:img_1.png",
-                                                   "target": "character", "character_id": char["id"]}).json()
+        r = client.post(
+            "/api/media/import",
+            json={"media_id": f"chat:{conv.id}:img_1.png", "target": "character", "character_id": char["id"]},
+        ).json()
         assert len(r["images"]) == 1
 
     def test_videos_cant_be_imported(self, client, project, conv):
-        r = client.post("/api/media/import", json={"media_id": f"proj:{project.slug}:vid1.mp4",
-                                                   "target": "chat", "conversation_id": conv.id})
+        r = client.post(
+            "/api/media/import",
+            json={"media_id": f"proj:{project.slug}:vid1.mp4", "target": "chat", "conversation_id": conv.id},
+        )
         assert r.status_code == 400
 
 
@@ -126,6 +163,7 @@ class TestDelete:
 
     def test_chat_item_leaves_its_message(self, client, db, conv):
         import img2vid.common.config as config
+
         assert client.delete(f"/api/media/chat:{conv.id}:img_1.png").status_code == 200
         reply = db.get_chat_messages(conv.id)[-1]
         assert [i["id"] for i in reply.media] == ["p"]
@@ -133,8 +171,10 @@ class TestDelete:
 
     def test_copies_survive(self, client, conv):
         char = client.post("/api/characters", json={"name": "Fox"}).json()
-        client.post("/api/media/import", json={"media_id": f"chat:{conv.id}:img_1.png",
-                                               "target": "character", "character_id": char["id"]})
+        client.post(
+            "/api/media/import",
+            json={"media_id": f"chat:{conv.id}:img_1.png", "target": "character", "character_id": char["id"]},
+        )
         client.delete(f"/api/media/chat:{conv.id}:img_1.png")
         c = client.get(f"/api/characters/{char['id']}").json()
         assert client.get(f"/api/characters/{c['id']}/images/{c['images'][0]}").status_code == 200
@@ -146,17 +186,52 @@ class TestBlocked:
         """conv plus: a moderated failure and a black image in a reply, an
         ordinary failure (kept), and a moderated failure detached to the library."""
         import img2vid.common.config as config
+
         d = config.ROOT_DIR / "chat" / conv.id
         (d / "img_black.png").write_bytes(_png("black"))
         db.add_chat_message(conv.id, "user", "again")
-        db.add_chat_message(conv.id, "assistant", "", media=[
-            {"id": "m", "kind": "image", "source": "generated", "status": "error", "moderated": True, "error": "flagged"},
-            {"id": "b", "kind": "image", "source": "generated", "status": "done", "file": "img_black.png"},
-            {"id": "t", "kind": "image", "source": "generated", "status": "error", "moderated": False, "error": "timeout"}])
+        db.add_chat_message(
+            conv.id,
+            "assistant",
+            "",
+            media=[
+                {
+                    "id": "m",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "error",
+                    "moderated": True,
+                    "error": "flagged",
+                },
+                {"id": "b", "kind": "image", "source": "generated", "status": "done", "file": "img_black.png"},
+                {
+                    "id": "t",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "error",
+                    "moderated": False,
+                    "error": "timeout",
+                },
+            ],
+        )
         old = db.add_chat_message(conv.id, "user", "older")
-        db.add_chat_message(conv.id, "assistant", "", parent_id=old.id, media=[
-            {"id": "lm", "kind": "video", "source": "generated", "status": "error", "moderated": True, "error": "nsfw",
-             "job_id": "venice:m:q"}])
+        db.add_chat_message(
+            conv.id,
+            "assistant",
+            "",
+            parent_id=old.id,
+            media=[
+                {
+                    "id": "lm",
+                    "kind": "video",
+                    "source": "generated",
+                    "status": "error",
+                    "moderated": True,
+                    "error": "nsfw",
+                    "job_id": "venice:m:q",
+                }
+            ],
+        )
         db.delete_chat_exchange(conv.id, old.id)
         return d
 
@@ -183,14 +258,16 @@ class TestThumbnails:
         r = client.get(item["thumb_url"])
         assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
         thumb = Image.open(io.BytesIO(r.content))
-        assert min(thumb.size) == 320 and thumb.size[0] > thumb.size[1]   # shorter side, shape kept
+        assert min(thumb.size) == 320 and thumb.size[0] > thumb.size[1]  # shorter side, shape kept
         # Second request comes from the cache — no re-encoding
         import web.media as media_mod
+
         monkeypatch.setattr(media_mod.Image, "open", lambda *a, **k: pytest.fail("re-encoded"))
         assert client.get(item["thumb_url"]).content == r.content
 
     def test_video_thumb_uses_the_first_frame(self, client, project, monkeypatch):
         import web.api as api_mod
+
         buf = io.BytesIO()
         Image.new("RGB", (640, 360), "orange").save(buf, "JPEG")
         monkeypatch.setattr(api_mod, "_extract_first_frame_uncached", lambda p: buf.getvalue())
@@ -199,11 +276,13 @@ class TestThumbnails:
 
     def test_unreadable_file_has_no_thumb(self, client, project, monkeypatch):
         import web.api as api_mod
+
         monkeypatch.setattr(api_mod, "_extract_first_frame_uncached", lambda p: None)
         assert client.get(f"/api/media/thumb/proj:{project.slug}:vid1.mp4").status_code == 404
 
     def test_delete_drops_the_cached_thumb(self, client):
         import web.media as media_mod
+
         item = client.post("/api/media/upload", files={"file": ("a.png", _png(), "image/png")}).json()
         client.get(item["thumb_url"])
         assert list(media_mod.thumb_dir().iterdir())
@@ -214,9 +293,13 @@ class TestThumbnails:
         import threading
         import time
         from concurrent.futures import ThreadPoolExecutor
+
         import web.media as media_mod
-        ids = [client.post("/api/media/upload", files={"file": (f"{n}.png", _png(), "image/png")}).json()["thumb_url"]
-               for n in range(8)]
+
+        ids = [
+            client.post("/api/media/upload", files={"file": (f"{n}.png", _png(), "image/png")}).json()["thumb_url"]
+            for n in range(8)
+        ]
         real, lock, state = media_mod.make_thumb, threading.Lock(), {"now": 0, "peak": 0}
 
         def slow_thumb(path):
@@ -229,6 +312,7 @@ class TestThumbnails:
             finally:
                 with lock:
                     state["now"] -= 1
+
         monkeypatch.setattr(media_mod, "make_thumb", slow_thumb)
         with ThreadPoolExecutor(8) as pool:
             codes = list(pool.map(lambda u: client.get(u).status_code, ids))

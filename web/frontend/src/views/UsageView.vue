@@ -1,6 +1,12 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { fetchUsage, fetchBalance, fetchUsageProjectDetails, getVideoThumbUrl, getFilenameFromPath } from '../composables/useApi'
+import {
+  fetchUsage,
+  fetchBalance,
+  fetchUsageProjectDetails,
+  getVideoThumbUrl,
+  getFilenameFromPath,
+} from '../composables/useApi'
 
 const usage = ref(null)
 const balance = ref(null)
@@ -13,10 +19,7 @@ const projectLoading = ref({})
 async function loadUsage() {
   loading.value = true
   try {
-    const [usageData, balanceData] = await Promise.all([
-      fetchUsage(days.value),
-      fetchBalance().catch(() => null),
-    ])
+    const [usageData, balanceData] = await Promise.all([fetchUsage(days.value), fetchBalance().catch(() => null)])
     usage.value = usageData
     balance.value = balanceData
     // Reset expansions on reload
@@ -81,7 +84,12 @@ function formatDate(dateStr) {
 
 function formatDateTime(isoStr) {
   if (!isoStr) return ''
-  return new Date(isoStr).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  return new Date(isoStr).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
 }
 
 function getThumbUrl(projectSlug, job) {
@@ -98,12 +106,9 @@ onMounted(loadUsage)
     <header class="usage-header">
       <h1>Credit Usage</h1>
       <div class="period-selector">
-        <button
-          v-for="d in [7, 30, 90]"
-          :key="d"
-          :class="{ active: days === d }"
-          @click="changePeriod(d)"
-        >{{ d }}d</button>
+        <button v-for="d in [7, 30, 90]" :key="d" :class="{ active: days === d }" @click="changePeriod(d)">
+          {{ d }}d
+        </button>
       </div>
     </header>
 
@@ -116,9 +121,7 @@ onMounted(loadUsage)
           <span class="balance-value">{{ balance.availableCredits.toLocaleString() }}</span>
           <span class="balance-label">credits available</span>
         </div>
-        <div class="balance-total">
-          of {{ balance.totalCredits.toLocaleString() }} total
-        </div>
+        <div class="balance-total">of {{ balance.totalCredits.toLocaleString() }} total</div>
       </div>
 
       <!-- Summary Cards -->
@@ -132,7 +135,9 @@ onMounted(loadUsage)
           <div class="card-label">Generations</div>
         </div>
         <div class="card">
-          <div class="card-value">{{ usage.total_generations ? Math.round(usage.total_credits / usage.total_generations) : 0 }}</div>
+          <div class="card-value">
+            {{ usage.total_generations ? Math.round(usage.total_credits / usage.total_generations) : 0 }}
+          </div>
           <div class="card-label">Avg per Generation</div>
         </div>
       </div>
@@ -211,7 +216,6 @@ onMounted(loadUsage)
     </template>
   </div>
 </template>
-
 
 <style scoped>
 .usage-view {
@@ -327,7 +331,9 @@ onMounted(loadUsage)
   margin-bottom: 0.75rem;
 }
 
-.model-grid, .project-grid, .daily-grid {
+.model-grid,
+.project-grid,
+.daily-grid {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -600,4 +606,3 @@ onMounted(loadUsage)
   }
 }
 </style>
-
