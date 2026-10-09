@@ -11,11 +11,12 @@ import CharacterEditor from '../components/characters/CharacterEditor.vue'
 import { fetchCharacters, chatImageModelTakesCharacters } from '../composables/useCharacters'
 import { importMedia } from '../composables/useMedia'
 import MediaPicker from '../components/media/MediaPicker.vue'
+import { shortModel } from '../utils/format'
 import {
   fetchChatStatus, fetchChatModels, fetchConversations, fetchConversation,
   createConversation, deleteConversation, fetchChatMessage,
   cancelChatMessage, uploadChatAttachment, chatMediaUrl, sendChatMessage, retryChatMessage,
-  editChatMessage, switchChatBranch, fetchOpenRouterCredits, fetchVeniceBalance, regenerateChatMedia, pinChatMedia, deleteChatExchange, fetchDeleteInfo, fetchInstructions, patchConversation,
+  editChatMessage, switchChatBranch, forkConversation, fetchOpenRouterCredits, fetchVeniceBalance, regenerateChatMedia, pinChatMedia, deleteChatExchange, fetchDeleteInfo, fetchInstructions, patchConversation,
 } from '../composables/useChat'
 
 const route = useRoute()
@@ -78,6 +79,19 @@ watch([() => ({ ...selected }), mode, memoryIndex, imageIndex, () => ({ ...image
     }))
   } catch { /* storage unavailable */ }
 }, { deep: true })
+
+// Sidebar sections folded away (per browser); headings show a summary instead
+const FOLD_KEY = 'chat.folded'
+const folded = ref((() => {
+  try { return new Set(JSON.parse(localStorage.getItem(FOLD_KEY)) || []) } catch { return new Set() }
+})())
+const isFolded = (key) => folded.value.has(key)
+function toggleFold(key) {
+  const next = new Set(folded.value)
+  if (!next.delete(key)) next.add(key)
+  folded.value = next
+  try { localStorage.setItem(FOLD_KEY, JSON.stringify([...next])) } catch { /* storage unavailable */ }
+}
 
 // ── Server state ─────────────────────────────────────────────────────
 const configured = ref(true)
@@ -714,6 +728,19 @@ async function switchBranch(messageId) {
   }
 }
 
+// Carry on down a different path in a new chat, leaving this one as it is
+async function forkFrom(msg) {
+  if (sending.value) return
+  try {
+    const conv = await forkConversation(convId.value, msg.id)
+    conversations.value = [conv, ...conversations.value]
+    router.push({ name: 'chat-conversation', params: { id: conv.id } })
+    showToast('Branched into a new chat', 'success')
+  } catch (e) {
+    showToast(e.message, 'error')
+  }
+}
+
 // Chat creations live in Media, with everything else (filtered to chats)
 function openLibrary() {
   sidebarOpen.value = false
@@ -928,16 +955,23 @@ onBeforeUnmount(() => {
       <div class="side-controls">
         <div class="side-section">
           <div class="side-heading">
-            <span>Models</span>
-            <button class="mini-btn" title="Refresh model lists" :disabled="modelsLoading" @click="loadModels(true)">⟳</button>
+            <button class="fold" :class="{ folded: isFolded('models') }" @click="toggleFold('models')">Models</button>
+            <span v-if="isFolded('models')" class="heading-value">{{ shortModel(selected.text) || '—' }}</span>
+            <button v-else class="mini-btn" title="Refresh model lists" :disabled="modelsLoading" @click="loadModels(true)">⟳</button>
           </div>
-          <ModelPicker v-model="selected.text" :models="models.text" label="Chat" icon="💬" kind="text" :loading="modelsLoading" />
-          <ModelPicker v-model="selected.image" :models="models.image" label="Image" icon="🖼" kind="image" :loading="modelsLoading" />
-          <ModelPicker v-model="selected.video" :models="models.video" label="Video" icon="🎬" kind="video" :loading="modelsLoading" />
+          <div v-show="!isFolded('models')" class="side-body">
+            <ModelPicker v-model="selected.text" :models="models.text" label="Chat" icon="💬" kind="text" :loading="modelsLoading" />
+            <ModelPicker v-model="selected.image" :models="models.image" label="Image" icon="🖼" kind="image" :loading="modelsLoading" />
+            <ModelPicker v-model="selected.video" :models="models.video" label="Video" icon="🎬" kind="video" :loading="modelsLoading" />
+          </div>
         </div>
 
         <div class="side-section">
-          <div class="side-heading"><span>Mode</span></div>
+          <div class="side-heading">
+            <button class="fold" :class="{ folded: isFolded('mode') }" @click="toggleFold('mode')">Mode</button>
+            <span v-if="isFolded('mode')" class="heading-value">{{ currentMode.icon }} {{ currentMode.label }}</span>
+          </div>
+          <div v-show="!isFolded('mode')" class="side-body">
           <div class="modes">
             <button
               v-for="m in MODES"
@@ -949,13 +983,16 @@ onBeforeUnmount(() => {
             >{{ m.icon }} {{ m.label }}</button>
           </div>
           <p class="mode-hint">{{ MODES.find(m => m.id === mode)?.hint }}</p>
+          </div>
         </div>
 
         <div class="side-section">
           <div class="side-heading">
-            <span>Instructions</span>
-            <button class="mini-btn" title="Create and edit saved instructions" @click="instructionsOpen = true">Manage</button>
+            <button class="fold" :class="{ folded: isFolded('instructions') }" @click="toggleFold('instructions')">Instructions</button>
+            <span v-if="isFolded('instructions')" class="heading-value">{{ attachedInstruction?.name || 'None' }}</span>
+            <button v-else class="mini-btn" title="Create and edit saved instructions" @click="instructionsOpen = true">Manage</button>
           </div>
+          <div v-show="!isFolded('instructions')" class="side-body">
           <select
             class="instruction-select"
             :value="instructionId ?? ''"
@@ -968,13 +1005,16 @@ onBeforeUnmount(() => {
           <p v-if="attachedInstruction && (mode === 'video' || (mode === 'image' && !imageInfo?.conversational))" class="mode-hint">
             {{ mode === 'video' ? 'Video models' : 'This image model' }} can't take instructions; they apply in Auto and Chat modes.
           </p>
+          </div>
         </div>
 
         <div class="side-section">
           <div class="side-heading">
-            <span>Characters</span>
-            <button class="mini-btn" title="All characters" @click="router.push({ name: 'characters' })">Manage</button>
+            <button class="fold" :class="{ folded: isFolded('characters') }" @click="toggleFold('characters')">Characters</button>
+            <span v-if="isFolded('characters')" class="heading-value">{{ attachedCharacters.map(c => c.name).join(', ') || 'None' }}</span>
+            <button v-else class="mini-btn" title="All characters" @click="router.push({ name: 'characters' })">Manage</button>
           </div>
+          <div v-show="!isFolded('characters')" class="side-body">
           <template v-if="!characterSupport.ok">
             <p class="side-warn">{{ characterSupport.reason }}</p>
             <p v-if="attachedCharacters.length" class="mode-hint">
@@ -996,13 +1036,15 @@ onBeforeUnmount(() => {
               : mode === 'image' ? 'Their descriptions and images go with every image.'
               : 'The chat model knows them.' }}
           </p>
+          </div>
         </div>
 
         <div v-if="mode === 'auto' || mode === 'text'" class="side-section">
           <div class="side-heading">
-            <span>Memory</span>
+            <button class="fold" :class="{ folded: isFolded('memory') }" @click="toggleFold('memory')">Memory</button>
             <span class="heading-value">{{ historyLimit ? `${historyLimit} messages` : 'All' }}</span>
           </div>
+          <div v-show="!isFolded('memory')" class="side-body">
           <input
             v-model.number="memoryIndex"
             class="memory-slider"
@@ -1013,13 +1055,15 @@ onBeforeUnmount(() => {
             aria-label="Messages of history sent to the chat model"
           />
           <p class="mode-hint">{{ memoryHint }} More memory means better continuity but more tokens per reply.</p>
+          </div>
         </div>
 
         <div v-if="mode !== 'video'" class="side-section">
           <div class="side-heading">
-            <span>Chat images</span>
+            <button class="fold" :class="{ folded: isFolded('images') }" @click="toggleFold('images')">Chat images</button>
             <span class="heading-value">{{ imageLimit === null ? 'All' : imageLimit }}</span>
           </div>
+          <div v-show="!isFolded('images')" class="side-body">
           <input
             v-model.number="imageIndex"
             class="memory-slider"
@@ -1033,11 +1077,15 @@ onBeforeUnmount(() => {
             Recent chat images the models see, and the most sent as references with a new picture.
             Character images always go on top. More helps consistency but makes bigger, pricier requests.
           </p>
+          </div>
         </div>
 
         <div v-if="showImageOpts" class="side-section">
-          <div class="side-heading"><span>Image options</span></div>
-          <div class="opts">
+          <div class="side-heading">
+            <button class="fold" :class="{ folded: isFolded('imageOpts') }" @click="toggleFold('imageOpts')">Image options</button>
+            <span v-if="isFolded('imageOpts')" class="heading-value">{{ [imageOpts.aspect_ratio || 'auto', imageOpts.resolution].filter(Boolean).join(' · ') }}</span>
+          </div>
+          <div v-show="!isFolded('imageOpts')" class="opts">
             <select v-model="imageOpts.aspect_ratio" title="Aspect ratio">
               <option value="">Ratio: auto</option>
               <option v-for="r in imageRatioOptions" :key="r" :value="r">{{ r }}</option>
@@ -1050,8 +1098,11 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-if="showVideoOpts" class="side-section">
-          <div class="side-heading"><span>Video options</span></div>
-          <div class="opts">
+          <div class="side-heading">
+            <button class="fold" :class="{ folded: isFolded('videoOpts') }" @click="toggleFold('videoOpts')">Video options</button>
+            <span v-if="isFolded('videoOpts')" class="heading-value">{{ [videoOpts.aspect_ratio || 'auto', videoOpts.resolution, videoOpts.duration && `${videoOpts.duration}s`].filter(Boolean).join(' · ') }}</span>
+          </div>
+          <div v-show="!isFolded('videoOpts')" class="opts">
             <select v-model="videoOpts.aspect_ratio" title="Aspect ratio (ignored when animating an image — the image sets it)">
               <option value="">Ratio: auto</option>
               <option v-for="r in videoRatioOptions" :key="r" :value="r">{{ r }}</option>
@@ -1081,8 +1132,11 @@ onBeforeUnmount(() => {
 
       <button class="library-link" title="Every image and video from your chats, in Media" @click="openLibrary">🗂 Media</button>
 
-      <div class="side-heading chats-heading"><span>Chats</span></div>
-      <div class="conv-list">
+      <div class="side-heading chats-heading">
+        <button class="fold" :class="{ folded: isFolded('chats') }" @click="toggleFold('chats')">Chats</button>
+        <span v-if="isFolded('chats')" class="heading-value">{{ conversations.length }}</span>
+      </div>
+      <div v-show="!isFolded('chats')" class="conv-list">
         <div
           v-for="c in conversations"
           :key="c.id"
@@ -1163,6 +1217,7 @@ onBeforeUnmount(() => {
             @regenerate="payload => regenerateMedia(m, payload)"
             @pin="payload => pinMedia(m, payload)"
             @delete="deleteExchange(m)"
+            @fork="forkFrom(m)"
             @stop="stop"
             @open-media="openMedia"
           />
@@ -1417,6 +1472,50 @@ onBeforeUnmount(() => {
   padding: 16px 14px 4px;
 }
 
+/* Section headings fold their section away */
+.fold {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.fold::before {
+  content: '▾';
+  font-size: 0.8rem;
+  transition: transform 0.15s;
+}
+
+.fold.folded::before {
+  transform: rotate(-90deg);
+}
+
+.fold:hover {
+  color: var(--text);
+}
+
+.side-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.side-heading .heading-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  margin-left: 8px;
+}
+
 .mini-btn {
   background: none;
   border: none;
@@ -1593,6 +1692,7 @@ onBeforeUnmount(() => {
 }
 
 .side-bottom {
+  margin-top: auto;   /* stays at the bottom when the chat list is folded */
   padding: 8px 12px 12px;
   border-top: 1px solid #222;
 }

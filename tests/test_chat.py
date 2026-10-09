@@ -1791,3 +1791,117 @@ class TestDeleteExchange:
         db.add_chat_message(conv["id"], "assistant", "", status="streaming")
         assert client.delete(f"/api/chat/messages/{u1.id}").status_code == 409
         assert client.delete("/api/chat/messages/999999").status_code == 404
+
+
+class TestFork:
+    def _chat(self, chat, db, conv):
+        d = chat._conv_dir(conv["id"])
+        (d / "fox.png").write_bytes(_png_bytes())
+        (d / "cat.png").write_bytes(_png_bytes(color="blue"))
+        u1 = db.add_chat_message(conv["id"], "user", "draw a fox", mode="auto")
+        a1 = db.add_chat_message(conv["id"], "assistant", "Here!", model="t/model", media=[
+            {"id": "f1", "kind": "image", "source": "generated", "status": "done", "file": "fox.png", "pinned": True}])
+        db.update_chat_message(a1.id, cost=0.02)
+        u2 = db.add_chat_message(conv["id"], "user", "now a cat", parent_id=a1.id)
+        a2 = db.add_chat_message(conv["id"], "assistant", "Meow", parent_id=u2.id, media=[
+            {"id": "c1", "kind": "image", "source": "generated", "status": "done", "file": "cat.png"}])
+        return u1, a1, u2, a2
+
+    def _fork(self, client, conv, message_id):
+        return client.post(f"/api/chat/conversations/{conv['id']}/fork", json={"message_id": message_id})
+
+    def test_new_chat_ends_at_the_prompt_and_its_reply(self, client, conv, chat, db):
+        u1, a1, u2, a2 = self._chat(chat, db, conv)
+        client.patch(f"/api/chat/conversations/{conv['id']}", json={"title": "Animals", **SETTINGS})
+        r = self._fork(client, conv, u1.id)
+        assert r.status_code == 200
+        new = r.json()
+        assert new["id"] != conv["id"] and new["title"] == "Animals (branch)"
+        assert (new["text_model"], new["image_model"]) == ("t/model", "i/model")
+
+        msgs = client.get(f"/api/chat/conversations/{new['id']}").json()["messages"]
+        assert [(m["role"], m["content"]) for m in msgs] == [("user", "draw a fox"), ("assistant", "Here!")]
+        assert msgs[0]["mode"] == "auto" and msgs[1]["cost"] == 0.02 and msgs[1]["model"] == "t/model"
+        assert msgs[1]["parent_id"] == msgs[0]["id"] and msgs[0]["parent_id"] is None
+        img = msgs[1]["media"][0]
+        assert img["file"] == "fox.png" and img["pinned"] and img["id"] != "f1"
+        assert client.get(f"/api/chat/media/{new['id']}/fox.png").status_code == 200
+        # The original is untouched
+        orig = client.get(f"/api/chat/conversations/{conv['id']}").json()["messages"]
+        assert [m["content"] for m in orig] == ["draw a fox", "Here!", "now a cat", "Meow"]
+
+    def test_new_chat_survives_deleting_the_original(self, client, conv, chat, db):
+        u1, *_ = self._chat(chat, db, conv)
+        new = self._fork(client, conv, u1.id).json()
+        client.delete(f"/api/chat/conversations/{conv['id']}")
+        assert client.get(f"/api/chat/media/{new['id']}/fox.png").status_code == 200
+
+    def test_takes_the_shown_reply(self, client, conv, chat, db):
+        u1, a1, u2, a2 = self._chat(chat, db, conv)
+        retry = db.add_chat_message(conv["id"], "assistant", "Purr", parent_id=u2.id)
+        db.set_chat_leaf(conv["id"], a2.id)
+        new = self._fork(client, conv, u2.id).json()
+        msgs = client.get(f"/api/chat/conversations/{new['id']}").json()["messages"]
+        assert [m["content"] for m in msgs] == ["draw a fox", "Here!", "now a cat", "Meow"]
+        assert all(m["siblings"] == [m["id"]] for m in msgs)   # no other versions come along
+        db.set_chat_leaf(conv["id"], retry.id)
+        new = self._fork(client, conv, u2.id).json()
+        assert client.get(f"/api/chat/conversations/{new['id']}").json()["messages"][-1]["content"] == "Purr"
+
+    def test_media_shows_once(self, client, conv, chat, db):
+        u1, *_ = self._chat(chat, db, conv)
+        self._fork(client, conv, u1.id)
+        items = [i for i in client.get("/api/media").json()["items"] if i["origin"] == "chat"]
+        assert sorted(i["name"] for i in items) == ["cat.png", "fox.png"]
+        assert all(i["conversation_id"] == conv["id"] for i in items)
+
+    def test_pending_video_is_not_copied_as_pending(self, client, conv, chat, db):
+        u = db.add_chat_message(conv["id"], "user", "a clip")
+        db.add_chat_message(conv["id"], "assistant", "", media=[
+            {"id": "v1", "kind": "video", "source": "generated", "status": "pending", "file": None, "job_id": "j"}])
+        new = self._fork(client, conv, u.id).json()
+        item = client.get(f"/api/chat/conversations/{new['id']}").json()["messages"][1]["media"][0]
+        assert item["status"] == "error"
+
+    def test_only_prompts_in_this_chat_and_not_while_replying(self, client, conv, chat, db):
+        u1, a1, *_ = self._chat(chat, db, conv)
+        assert self._fork(client, conv, a1.id).status_code == 400
+        other = client.post("/api/chat/conversations", json={}).json()
+        assert self._fork(client, other, u1.id).status_code == 400
+        db.add_chat_message(conv["id"], "assistant", "", status="streaming")
+        assert self._fork(client, conv, u1.id).status_code == 409
+
+    def test_chat_made_characters_are_copied_and_saved_ones_shared(self, client, conv, chat, db):
+        import web.characters as characters_mod
+        saved = db.create_character("Rex", "a dog")
+        own = db.create_character("Bob", "a fox", conversation_id=conv["id"])
+        d = characters_mod.char_dir(own.id)
+        d.mkdir(parents=True)
+        (d / "img_bob.png").write_bytes(_png_bytes())
+        own = db.update_character(own.id, images=["img_bob.png"])
+        unused = db.create_character("Ann", "", conversation_id=conv["id"])
+        client.patch(f"/api/chat/conversations/{conv['id']}", json={"character_ids": [saved.id, own.id]})
+        (chat._conv_dir(conv["id"]) / "bob.png").write_bytes(_png_bytes())
+        (chat._conv_dir(conv["id"]) / "up_src.png").write_bytes(_png_bytes())
+        u = db.add_chat_message(conv["id"], "user", "draw Bob")
+        db.add_chat_message(conv["id"], "assistant", "", media=[
+            {"id": "b1", "kind": "image", "source": "generated", "status": "done", "file": "bob.png",
+             "params": {"characters": [own.id], "refs": ["up_src.png", f"char:{own.id}/img_bob.png"]}}])
+
+        new = self._fork(client, conv, u.id).json()
+        copy_id = next(i for i in new["character_ids"] if i != saved.id)
+        assert new["character_ids"] == [saved.id, copy_id] and copy_id != own.id
+        copy = db.get_character(copy_id)
+        assert (copy.name, copy.conversation_id, copy.images) == ("Bob", new["id"], ["img_bob.png"])
+        assert (characters_mod.char_dir(copy_id) / "img_bob.png").is_file()
+        assert not any(c.name == "Ann" and c.conversation_id == new["id"] for c in db.list_characters())
+
+        params = client.get(f"/api/chat/conversations/{new['id']}").json()["messages"][1]["media"][0]["params"]
+        assert params == {"characters": [copy_id], "refs": ["up_src.png", f"char:{copy_id}/img_bob.png"]}
+        assert (chat._conv_dir(new["id"]) / "up_src.png").is_file()
+
+        # Deleting the original takes its own characters, not the branch's
+        client.delete(f"/api/chat/conversations/{conv['id']}")
+        assert db.get_character(own.id) is None and db.get_character(unused.id) is None
+        assert client.get(f"/api/chat/conversations/{new['id']}").json()["conversation"]["character_ids"] == [saved.id, copy_id]
+        assert (characters_mod.char_dir(copy_id) / "img_bob.png").is_file()

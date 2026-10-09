@@ -143,6 +143,19 @@ def create_from_files(name: str, description: str, files: list[Path], conversati
     return db.update_character(char.id, images=names)
 
 
+def copy_to_conversation(char, conversation_id: str, db=None):
+    """A copy of a character, ad hoc in another chat (a branch of the one it
+    was made in), its images kept under the same file names."""
+    db = db or get_db()
+    copy = db.create_character(char.name, char.description, conversation_id)
+    d = char_dir(copy.id)
+    d.mkdir(parents=True, exist_ok=True)
+    files = [f for f in char.images if (char_dir(char.id) / f).is_file()]
+    for f in files:
+        shutil.copyfile(char_dir(char.id) / f, d / f)
+    return db.update_character(copy.id, images=files)
+
+
 def describe(chars: list) -> str:
     """The characters as a prompt block ('' for none)."""
     if not chars:

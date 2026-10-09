@@ -14,7 +14,7 @@ const props = defineProps({
   canEdit: { type: Boolean, default: false },
   canSwitch: { type: Boolean, default: false },   // ‹ › arrows usable (not mid-reply)
 })
-const emit = defineEmits(['retry', 'open-media', 'stop', 'edit', 'resend', 'regenerate', 'branch', 'use-image', 'use-text', 'pin', 'delete'])
+const emit = defineEmits(['retry', 'open-media', 'stop', 'edit', 'resend', 'regenerate', 'branch', 'use-image', 'use-text', 'pin', 'delete', 'fork'])
 
 // Model catalogues, provided by ChatView, for "Try another model"
 const chatModels = inject('chatModels', { image: [], video: [] })
@@ -217,6 +217,8 @@ const { copiedKey, copy } = useCopy()
         <template v-if="canEdit">
           <button class="meta-btn" title="Edit and resend" @click="startEdit">✎ Edit</button>
           <button class="meta-btn" title="Resend this prompt for a different response" @click="emit('resend')">↻ Retry</button>
+          <button class="meta-btn" title="Start a new chat from here: everything up to this prompt and its reply, nothing after"
+            @click="emit('fork')">⑂ Branch</button>
           <button class="meta-btn" title="Delete this prompt and its reply from the chat (images and videos stay in Media)"
             @click="emit('delete')">🗑 Delete</button>
         </template>

@@ -218,30 +218,31 @@ def _project_items(db) -> list[dict[str, Any]]:
 
 def _chat_items(db) -> list[dict[str, Any]]:
     titles = {c.id: c.title for c in db.list_conversations(limit=100000)}
-    seen: set[tuple[str, str]] = set()
-    items = []
+    # Keyed by file name alone: a branched chat links its media in under the
+    # same names (web/chat.py api_fork_conversation), so each shows once —
+    # in the oldest chat that still has it
+    items: dict[str, dict[str, Any]] = {}
 
-    def add(conv_id: str, item: dict, created_at) -> None:
+    def add(conv_id: str, item: dict, created_at, replace: bool = False) -> None:
         file = item.get("file")
-        if not file or item.get("status", "done") != "done" or (conv_id, file) in seen:
+        if not file or item.get("status", "done") != "done" or (file in items and not replace):
             return
         if not (_chat_dir(conv_id) / file).is_file():
             return
-        seen.add((conv_id, file))
-        items.append({
+        items[file] = {
             "id": f"chat:{conv_id}:{file}", "kind": item.get("kind") or _kind(file),
             "source": "upload" if item.get("source") == "upload" else "generated", "origin": "chat",
             "name": file, "url": f"/api/chat/media/{conv_id}/{file}", "thumb_url": _thumb_url(f"chat:{conv_id}:{file}"),
             "created_at": iso(created_at), "conversation_id": conv_id, "conversation_title": titles.get(conv_id),
             "prompt": item.get("prompt"), "model": item.get("model"), "cost": item.get("cost"),
-        })
+        }
 
-    for msg in db.get_chat_messages_with_media():
+    for msg in db.get_chat_messages_with_media():   # newest first, so older copies win
         for item in msg.media:
-            add(msg.conversation_id, item, msg.created_at)
+            add(msg.conversation_id, item, msg.created_at, replace=True)
     for lib in db.list_chat_library():   # media detached from its message by older edits/retries
         add(lib.conversation_id, lib.item, lib.created_at)
-    return items
+    return list(items.values())
 
 
 @router.get("")

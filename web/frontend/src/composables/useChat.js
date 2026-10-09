@@ -17,6 +17,9 @@ export const cancelChatMessage = (id) => apiPost(`/api/chat/messages/${id}/cance
 // Show the branch through this message (edits/retries are kept as sibling branches)
 export const switchChatBranch = (convId, messageId) =>
   apiPost(`/api/chat/conversations/${enc(convId)}/branch`, { message_id: messageId })
+// New chat from a prompt: the messages up to it, it and its reply — nothing after
+export const forkConversation = (convId, messageId) =>
+  apiPost(`/api/chat/conversations/${enc(convId)}/fork`, { message_id: messageId })
 export const regenerateChatMedia = (messageId, mediaId, model = null) =>
   apiPost(`/api/chat/messages/${messageId}/media/${enc(mediaId)}/regenerate`, { model })
 // Pinned images go to the image model as references with every new image on this branch

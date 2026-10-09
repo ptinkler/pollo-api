@@ -79,3 +79,38 @@ describe('ChatView balances', () => {
     w.unmount()
   })
 })
+
+describe('ChatView sidebar sections', () => {
+  it('fold away, show a summary and stay folded', async () => {
+    localStorage.removeItem('chat.folded')
+    globalThis.fetch = vi.fn(async (url) => ({
+      ok: true, status: 200,
+      json: async () => (String(url).includes('/models') ? { text: [], image: [], video: [], errors: {} }
+        : String(url).includes('/instructions') ? { instructions: [] }
+        : String(url).includes('/conversations') ? { conversations: [] }
+        : { configured: true }),
+    }))
+    const ChatView = (await import('../views/ChatView.vue')).default
+    const mountView = async () => {
+      const r = createChatRouter({ history: createMemoryHistory(), routes: [{ path: '/chat', name: 'chat', component: ChatView }] })
+      r.push('/chat')
+      await r.isReady()
+      const w = mountChat({ template: '<router-view />' }, { global: { plugins: [r] }, attachTo: document.body })
+      await flushChat()
+      return w
+    }
+    let w = await mountView()
+    const modeFold = () => w.findAll('button.fold').find(b => b.text() === 'Mode')
+    expect(w.find('.modes').isVisible()).toBe(true)
+    await modeFold().trigger('click')
+    expect(w.find('.modes').isVisible()).toBe(false)
+    expect(modeFold().element.parentElement.textContent).toContain('Auto')
+    w.unmount()
+
+    w = await mountView()
+    expect(w.find('.modes').isVisible()).toBe(false)
+    await modeFold().trigger('click')
+    expect(w.find('.modes').isVisible()).toBe(true)
+    w.unmount()
+  })
+})

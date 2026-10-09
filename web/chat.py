@@ -229,6 +229,10 @@ class SwitchBranch(BaseModel):
     message_id: int                    # show the branch this message is on (its newest version)
 
 
+class ForkConversation(BaseModel):
+    message_id: int                    # the prompt to branch from: the new chat ends with it and its reply
+
+
 # ── Paths & media helpers ───────────────────────────────────────────
 
 def _chat_root() -> Path:
@@ -487,6 +491,112 @@ def api_switch_branch(conv_id: str, data: SwitchBranch):
             below.add(m.id)
     db.set_chat_leaf(conv_id, max(below))
     return api_get_conversation(conv_id)
+
+
+@router.post("/conversations/{conv_id}/fork")
+def api_fork_conversation(conv_id: str, data: ForkConversation):
+    """Branch a new chat off at a prompt: it gets the messages leading up to
+    that prompt, the prompt and its shown reply — nothing that came after —
+    plus this chat's models, instructions and characters. Media files are
+    linked (or copied) into the new chat and characters made in this chat
+    are copied into it, so either chat can be edited or deleted on its own."""
+    conv = _require_conv(conv_id)
+    _require_idle(conv_id)
+    db = get_db()
+    messages = db.get_chat_messages(conv_id)
+    prompt = next((m for m in messages if m.id == data.message_id), None)
+    if not prompt or prompt.role != "user":
+        raise HTTPException(400, "Can only branch from a prompt in this conversation")
+    path = _branch_to(messages, prompt.id)
+    replies = [m for m in messages if m.parent_id == prompt.id]
+    if replies:
+        shown = {m.id for m in _branch_to(messages, db.get_chat_leaf_id(conv_id))}
+        path.append(next((m for m in replies if m.id in shown), replies[-1]))
+
+    new = db.create_conversation(
+        title=f"{conv.title} (branch)"[:255], text_model=conv.text_model, image_model=conv.image_model,
+        video_model=conv.video_model, instruction_id=conv.instruction_id,
+    )
+    # This chat's own characters, attached or used by the copied media, get
+    # copies owned by the new chat; saved characters are shared as they are
+    used = set(conv.character_ids)
+    for msg in path:
+        for item in msg.media:
+            used.update(_media_character_ids(item.get("params") or {}))
+    char_map = {c.id: characters.copy_to_conversation(c, new.id, db).id
+                for c in characters.load(sorted(used), db) if c.conversation_id == conv_id}
+    db.update_conversation(new.id, character_ids=[char_map.get(i, i) for i in conv.character_ids])
+
+    fork = _Fork(_chat_root() / conv_id, _conv_dir(new.id), char_map)
+    parent_id = None
+    for msg in path:
+        media = [fork.media_item(item) for item in msg.media]
+        copy = db.add_chat_message(new.id, msg.role, msg.content, media=media, model=msg.model,
+                                   status=msg.status, parent_id=parent_id, mode=msg.mode)
+        if msg.error or msg.cost:
+            copy = db.update_chat_message(copy.id, error=msg.error, cost=msg.cost)
+        parent_id = copy.id
+    return db.get_conversation(new.id).to_dict()
+
+
+_PARAM_FILES = ("first_frame", "last_frame", "source_video")   # media params naming one reference file
+
+
+def _media_character_ids(params: dict) -> set[int]:
+    """Characters a media item was made with: by id, or through their images."""
+    ids = {i for i in params.get("characters") or [] if isinstance(i, int)}
+    for ref in [*(params.get("refs") or []), *(params.get(k) for k in _PARAM_FILES)]:
+        if isinstance(ref, str) and ref.startswith(characters.REF_PREFIX):
+            cid = ref[len(characters.REF_PREFIX):].partition("/")[0]
+            if cid.isdigit():
+                ids.add(int(cid))
+    return ids
+
+
+class _Fork:
+    """Copies media items into a branched chat: files are linked into its
+    folder under the same names (Media shows each pair once) and references
+    to copied characters point at the copies, so regenerating works there."""
+
+    def __init__(self, src: Path, dst: Path, char_map: dict[int, int]):
+        self.src, self.dst, self.char_map = src, dst, char_map
+
+    def media_item(self, item: dict) -> dict:
+        item = {**item, "id": uuid.uuid4().hex[:8]}
+        if item.get("status") == "pending":
+            # Its poller keeps updating the original chat only
+            return {**item, "status": "error", "error": "Still rendering in the original chat when this one was branched"}
+        if item.get("file"):
+            self._link(item["file"])
+        if item.get("params"):
+            params = item["params"] = {**item["params"]}
+            if params.get("characters"):
+                params["characters"] = [self.char_map.get(i, i) for i in params["characters"]]
+            if params.get("refs"):
+                params["refs"] = [self._ref(r) for r in params["refs"]]
+            for key in _PARAM_FILES:
+                if params.get(key):
+                    params[key] = self._ref(params[key])
+        return item
+
+    def _ref(self, ref: str) -> str:
+        """A reference for the new chat: a copied character's image, or a chat file (linked over)."""
+        if ref.startswith(characters.REF_PREFIX):
+            cid, _, file = ref[len(characters.REF_PREFIX):].partition("/")
+            if cid.isdigit() and int(cid) in self.char_map:
+                return characters.image_ref(self.char_map[int(cid)], file)
+            return ref
+        self._link(ref)
+        return ref
+
+    def _link(self, name: str) -> None:
+        if Path(name).name != name or name.startswith(".") or not (self.src / name).is_file() \
+                or (self.dst / name).exists():
+            return
+        try:
+            (self.dst / name).hardlink_to(self.src / name)
+        except OSError:
+            shutil.copy2(self.src / name, self.dst / name)
 
 
 @router.patch("/conversations/{conv_id}")

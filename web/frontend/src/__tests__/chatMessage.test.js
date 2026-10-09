@@ -145,6 +145,18 @@ describe('ChatMessage delete', () => {
   })
 })
 
+describe('ChatMessage branch to a new chat', () => {
+  it('is offered on saved prompts, not replies', async () => {
+    const user = mount(ChatMessage, { props: { convId: 'c1', canEdit: true, message: {
+      id: 7, role: 'user', content: 'draw a cat', status: 'done', media: [] } } })
+    await user.find('button[title^="Start a new chat from here"]').trigger('click')
+    expect(user.emitted('fork')).toHaveLength(1)
+    const reply = mount(ChatMessage, { props: { convId: 'c1', message: {
+      id: 8, role: 'assistant', content: 'Meow', status: 'done', media: [] } } })
+    expect(reply.find('button[title^="Start a new chat from here"]').exists()).toBe(false)
+  })
+})
+
 describe('ChatMessage refs sent', () => {
   it('says when a model took fewer reference images than were picked', () => {
     const item = { ...image, params: { refs: ['a.png', 'b.png', 'c.png'], refs_used: 1 } }
