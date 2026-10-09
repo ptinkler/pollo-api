@@ -942,12 +942,13 @@ class TestConsistencyReferences:
         got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "next scene"})
         assert item["params"]["refs"] == ["g0.png"] and len(got["input_images"]) == 1
 
-    def test_pins_come_after_the_models_own_picks(self, client, conv, chat, db, monkeypatch):
+    def test_order_is_edit_source_then_pins_then_recent_picks(self, client, conv, chat, db, monkeypatch):
+        """Also the priority when a model takes fewer images (Venice edit models keep the first N)."""
         self._prior_images(chat, db, conv, 3)
         self._pin(client, db, conv, "g0")
         got, item = self._run(client, conv, chat, monkeypatch,
                               {"prompt": "make it night", "source_image": "latest", "keep_consistent": True})
-        assert item["params"]["refs"] == ["g2.png", "g1.png", "g0.png"]
+        assert item["params"]["refs"] == ["g2.png", "g0.png", "g1.png"]
         assert item["params"]["ref_args"] == {"source_image": "latest", "keep_consistent": True}
 
     def test_unpinned_images_stop_being_sent(self, client, conv, chat, db, monkeypatch):

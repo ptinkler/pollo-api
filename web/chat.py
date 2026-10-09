@@ -786,8 +786,11 @@ class Turn:
         frames = [m["file"] for m in (user.media if user else []) if m["kind"] == "image" and m.get("file")]
         if not prompt and not frames:
             raise openrouter.OpenRouterError("Video mode needs a prompt or an image")
+        # Attached images: the first frame, the last frame (first+last-frame
+        # models) and, for reference models, all of them are references
         self._generate_video(prompt, self.s.video_options.duration, self.s.video_options.aspect_ratio,
-                             frames[0] if frames else None, chars=self.characters)
+                             frames[0] if frames else None, chars=self.characters,
+                             last_frame=frames[1] if len(frames) > 1 else None, attached=frames)
 
     # ― chat with tools ―
     def _chat(self, tools_enabled: bool) -> None:
@@ -922,7 +925,13 @@ class Turn:
                 return result
             if name == "generate_video":
                 duration = opts.duration or args.get("duration")
-                self._generate_video(prompt, duration, ratio, source, chars)
+                last = None
+                if "last_frame" in ((_model_info("video", self.s.video_model) or {}).get("frame_images") or []):
+                    # First+last-frame models: the two most recent images, older one first
+                    recent = self._latest_images(2)
+                    if len(recent) == 2:
+                        source, last = recent[1], recent[0]
+                self._generate_video(prompt, duration, ratio, source, chars, last_frame=last)
                 return {"ok": True, "result": VIDEO_TOOL_RESULT}
         except openrouter.OpenRouterError as e:
             return {"ok": False, "error": str(e), "moderated": _is_moderation_error(e)}
@@ -996,11 +1005,15 @@ class Turn:
         """Whether this turn can use characters — mirrors characterSupport in
         ChatView. Their point is reference images, so it takes an image model
         that accepts them (and, in Auto, a chat model that can call it).
-        Chat mode just tells the chat model about them; Video mode doesn't
-        use them."""
+        Chat mode just tells the chat model about them; Video mode only
+        uses them with video models that take reference images."""
         if self.s.mode == "text":
             return True
-        if self.s.mode == "video" or not self.s.image_model or not self._accepts_refs():
+        if self.s.mode == "video":
+            # Only video models that take reference images (Venice's refs→video)
+            info = _model_info("video", self.s.video_model) or {}
+            return bool(info.get("reference_images") or info.get("family") == "motion")
+        if not self.s.image_model or not self._accepts_refs():
             return False
         if self.s.mode == "auto":
             info = _model_info("text", self.s.text_model)
@@ -1013,17 +1026,20 @@ class Turn:
 
     def _image_refs(self, args: dict, source: str | None, chars: list) -> list[str]:
         """Reference images for generate_image: the edit source (source_image),
-        the most recent images if the model asked (keep_consistent), the
-        images of the characters it named, and the images the user pinned.
+        the images of the characters it named, the images the user pinned,
+        and the most recent images if the model asked (keep_consistent).
+        That order is also the priority when a model takes fewer images than
+        that (Venice's edit models): recent picks go first, then pins.
         Pins are the user's choice; the app never adds references on its own."""
         if not self._accepts_refs():
             return []  # this image model can't take references
-        refs = [source] if source else []
+        lead = [source] if source else []
         pinned = self._pinned_images()
+        recent = []
         if args.get("keep_consistent") is True:
-            refs += [f for f in self._latest_images(CONSISTENCY_REFS) if f not in pinned]
-        refs = _dedupe(refs)[:max(CONSISTENCY_REFS, 1)]
-        return _with_character_refs(refs + pinned, chars, self.s.image_limit, after=len(refs))
+            recent = [f for f in self._latest_images(CONSISTENCY_REFS) if f not in pinned and f not in lead]
+        chat_refs = _dedupe(lead + pinned + recent[:max(CONSISTENCY_REFS - len(lead), 0)])
+        return _with_character_refs(chat_refs, chars, self.s.image_limit, after=len(lead))
 
     # ― generation ―
     def _add_media(self, item: dict) -> None:
@@ -1075,7 +1091,8 @@ class Turn:
                 self._add_media(_saved_media("image", "generated", name, prompt=prompt, model=self.s.image_model))
 
     def _generate_video(self, prompt: str, duration: int | None, aspect_ratio: str | None,
-                        first_frame: str | None, chars: list | None = None) -> None:
+                        first_frame: str | None, chars: list | None = None, last_frame: str | None = None,
+                        attached: list[str] | None = None) -> None:
         if not self.s.video_model:
             raise openrouter.OpenRouterError("No video model selected")
         duration, aspect_ratio, resolution = _fit_video_params(
@@ -1084,6 +1101,7 @@ class Turn:
                   "first_frame": first_frame, "generate_audio": self.s.video_options.generate_audio}
         if chars:
             params["characters"] = [c.id for c in chars]
+        params.update(self._video_inputs(first_frame, last_frame, attached or [], chars or []))
         item = _new_media("video", "generated", prompt=prompt, model=self.s.video_model, params=params)
         self._add_media(item)
         try:
@@ -1094,6 +1112,29 @@ class Turn:
         # Pollo reports what it was actually sent, defaults included
         self._update_media(item, job_id=job["id"], params={**params, **job.get("params", {})})
         start_video_poller(self.conv_id, self.message_id, item["id"], job["id"])
+
+    def _video_inputs(self, first_frame: str | None, last_frame: str | None, attached: list[str],
+                      chars: list) -> dict:
+        """The extra inputs the video model's family takes (Venice): reference
+        images (attached ones, the frame, characters' images and pins), a
+        last frame, or the chat's latest video."""
+        info = _model_info("video", self.s.video_model) or {}
+        out: dict[str, Any] = {}
+        if info.get("reference_images") or info.get("family") == "motion":
+            own = _dedupe([*attached, *([first_frame] if first_frame else []), *self._pinned_images()])
+            out["refs"] = _with_character_refs(own, chars, None, after=len(attached) or (1 if first_frame else 0))
+        if last_frame and "last_frame" in (info.get("frame_images") or []):
+            out["last_frame"] = last_frame
+        if info.get("video_input"):
+            out["source_video"] = self._latest_video()
+        return out
+
+    def _latest_video(self) -> str | None:
+        """The most recent finished video (this turn first, then history)."""
+        for item in [*reversed(self.media), *(i for m in reversed(self.history) for i in reversed(m.media))]:
+            if item["kind"] == "video" and item.get("status") == "done" and item.get("file"):
+                return item["file"]
+        return None
 
     # ― history → OpenRouter messages ―
     def _build_llm_messages(self, vision: bool, as_tool_calls: bool = False) -> list[dict]:
@@ -1392,10 +1433,14 @@ def _submit_video_generation(conv_id: str, model: str, prompt: str, params: dict
     frame = _ref_file(conv_id, params["first_frame"]) if params.get("first_frame") else None
     prompt = characters.with_characters(prompt, _param_characters(params))
     if venice_chat.is_venice(model):
+        conv_dir = _conv_dir(conv_id)
         return venice_chat.submit_video(
             model, prompt, duration=params.get("duration"), aspect_ratio=params.get("aspect_ratio"),
             resolution=params.get("resolution"), generate_audio=params.get("generate_audio"),
             first_frame=frame,
+            last_frame=_ref_file(conv_id, params["last_frame"]) if params.get("last_frame") else None,
+            refs=[_ref_file(conv_id, r) for r in params.get("refs") or []],
+            source_video=conv_dir / params["source_video"] if params.get("source_video") else None,
         )
     if pollo_chat.is_pollo(model):
         return pollo_chat.submit_video(

@@ -265,7 +265,13 @@ const attachedCharacters = computed(() =>
 // Unknown models (catalogue still loading) count as able, like on the server.
 const characterSupport = computed(() => {
   if (mode.value === 'text') return { ok: true }
-  if (mode.value === 'video') return { ok: false, reason: "Video mode doesn't use characters." }
+  if (mode.value === 'video') {
+    // Only video models that take reference images (Venice refs→video, motion control)
+    const v = videoInfo.value
+    return v && (v.reference_images || v.family === 'motion')
+      ? { ok: true }
+      : { ok: false, reason: "This video model doesn't take reference images, so it can't use characters." }
+  }
   if (!selected.image) return { ok: false, reason: 'Pick an image model to use characters.' }
   if (imageInfo.value && !chatImageModelTakesCharacters(imageInfo.value)) {
     return { ok: false, reason: `${imageInfo.value.name} can't take reference images, so it can't use characters.` }

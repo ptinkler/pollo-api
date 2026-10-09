@@ -59,7 +59,9 @@ function specs(item) {
   const p = item.params || {}
   const out = []
   if (item.kind === 'video') {
-    if (p.first_frame) out.push('from image')
+    if (p.source_video) out.push('from video')
+    if (p.last_frame) out.push('first+last frame')
+    else if (p.first_frame && !p.refs?.length) out.push('from image')
     if (p.duration) out.push(`${p.duration}s`)
   }
   if (p.resolution) out.push(p.resolution)
@@ -67,6 +69,21 @@ function specs(item) {
   if (item.kind === 'video' && p.generate_audio != null) out.push(p.generate_audio ? 'audio' : 'no audio')
   if (p.character_names?.length) out.push(`👤 ${p.character_names.join(', ')}`)
   return out
+}
+
+// "4 refs", or "2 of 4 refs" when the model took fewer than were picked
+// (Venice edit models cap the count; the first ones win)
+function refsLabel(p) {
+  const n = p.refs.length
+  const used = p.refs_used
+  return used != null && used < n ? `${used} of ${n} refs` : `${n} ref${n === 1 ? '' : 's'}`
+}
+function refsTitle(p) {
+  const used = p.refs_used
+  const list = p.refs.join(', ')
+  return used != null && used < p.refs.length
+    ? `The model takes ${used} image${used === 1 ? '' : 's'}, so only the first ${used} of these were sent: ${list}`
+    : `Based on earlier image(s): ${list}`
 }
 
 function url(item) {
@@ -284,7 +301,7 @@ const { copiedKey, copy } = useCopy()
                   v-if="specs(item).length"> · <span class="caption-specs">{{ specs(item).join(' · ') }}</span></template><template v-if="item.cost"> · {{ fmtCost(item.cost) }}</template><template
                   v-if="item.credits"> · <span title="Billed to your Pollo account">{{ item.credits }} credit{{ item.credits === 1 ? '' : 's' }}</span></template><template
                   v-if="item.params?.context"> · <span title="The image model was given the conversation">💬 context</span></template><template
-                  v-if="item.params?.refs?.length"> · <span :title="'Based on earlier image(s): ' + item.params.refs.join(', ')">🔗 {{ item.params.refs.length }} ref{{ item.params.refs.length === 1 ? '' : 's' }}</span></template>
+                  v-if="item.params?.refs?.length"> · <span :title="refsTitle(item.params)">🔗 {{ refsLabel(item.params) }}</span></template>
               </span>
               <button
                 v-if="item.prompt"

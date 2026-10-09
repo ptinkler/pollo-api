@@ -180,6 +180,21 @@ class TestInChat:
         assert item["params"]["refs"] == [f"char:{linh['id']}/{linh['images'][0]}", f"char:{bao['id']}/{bao['images'][0]}"]
         assert "Linh:" in got["prompt"] and "- Bao" in got["prompt"]
 
+    def test_character_images_come_before_pins_and_recent_picks(self, client, conv, chat, db, monkeypatch):
+        """The priority when a model takes fewer images than that (Venice edit models keep the first N)."""
+        linh = _make(client)
+        self._attach(client, conv, linh)
+        (chat._conv_dir(conv["id"]) / "g.png").write_bytes(_png_bytes())
+        db.add_chat_message(conv["id"], "user", "x")
+        msg = db.add_chat_message(conv["id"], "assistant", "", media=[
+            {"id": "g", "kind": "image", "source": "generated", "status": "done", "file": "g.png", "prompt": "p"}])
+        client.post(f"/api/chat/messages/{msg.id}/media/g/pin", json={"pinned": True})
+        replies = iter([_tool_chunks("generate_image", {"prompt": "Linh", "characters": ["Linh"]}), _text_chunks("ok")])
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+        self._capture(chat, monkeypatch)
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "go", **SETTINGS}))
+        assert ev[-1]["message"]["media"][0]["params"]["refs"] == [f"char:{linh['id']}/{linh['images'][0]}", "g.png"]
+
     def test_character_refs_are_shared_round_robin(self, chat, client):
         a, b = _make(client, name="A", images=3), _make(client, name="B", images=3)
         import web.characters as characters_mod

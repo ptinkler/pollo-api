@@ -144,3 +144,15 @@ describe('ChatMessage delete', () => {
     expect(reply.find('button[title^="Delete this prompt"]').exists()).toBe(false)
   })
 })
+
+describe('ChatMessage refs sent', () => {
+  it('says when a model took fewer reference images than were picked', () => {
+    const item = { ...image, params: { refs: ['a.png', 'b.png', 'c.png'], refs_used: 1 } }
+    const w = mount(ChatMessage, { props: { convId: 'c1', message: {
+      id: 9, role: 'assistant', content: '', status: 'done', media: [item] } } })
+    expect(w.find('.media-caption').text()).toContain('🔗 1 of 3 refs')
+    const all = mount(ChatMessage, { props: { convId: 'c1', message: {
+      id: 10, role: 'assistant', content: '', status: 'done', media: [{ ...image, params: { refs: ['a.png', 'b.png'] } }] } } })
+    expect(all.find('.media-caption').text()).toContain('🔗 2 refs')
+  })
+})

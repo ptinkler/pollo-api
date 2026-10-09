@@ -39,10 +39,23 @@ PREFIX = "venice/"
 JOB_PREFIX = "venice:"
 CATALOGUE_TTL = 30 * 60
 DEFAULT_TIMEOUT = httpx.Timeout(30)
-# Video variants that need inputs chat doesn't provide (reference clips,
-# end frames, camera paths…) — only plain text/image-to-video is offered
-_SKIP_VIDEO = ("reference-to-video", "video-to-video", "transition", "first-last-frame", "multi-angle",
-               "motion-control", "recast", "upscale")
+# Video model families, by what they need from the chat (see _video_family)
+VIDEO_FAMILIES = {
+    "standard": "text → video, or animate an image",
+    "reference": "reference images (characters, pins, attached images) → video",
+    "frames": "first frame + last frame → video",
+    "angles": "image → video with a camera move around the subject",
+    "video": "the chat's latest video → a new video",
+    "motion": "the chat's latest video's motion + an image → video",
+    "upscale": "upscale the chat's latest video",
+}
+FAMILY_LABELS = {"reference": "refs→video", "frames": "first+last frame", "angles": "multi-angle",
+                 "video": "video→video", "motion": "motion control", "upscale": "upscale"}
+# Multi-angle models need a camera path; chat uses a slow quarter orbit
+DEFAULT_CAMERA_TRAJECTORY = [
+    {"time": 0, "azimuth": 0, "elevation": 0, "distance": 1},
+    {"time": 1, "azimuth": 90, "elevation": 10, "distance": 1},
+]
 
 _client = httpx.Client(transport=httpx.HTTPTransport(socket_options=_keepalive_socket_options()))
 _catalogue: dict[str, Any] = {"at": 0.0, "data": None}
@@ -226,36 +239,77 @@ def _build_catalogue() -> dict[str, Any]:
             "_price": None, "_edit_price": _usd((spec.get("pricing") or {}).get("inpaint")),
         })
 
-    # Pair "…-text-to-video…" with "…-image-to-video…" under one entry
+    # Plain models: pair "…-text-to-video…" with "…-image-to-video…" under
+    # one entry. Every other family is listed as it is.
     groups: dict[str, dict[str, dict]] = {}
-    for m in _fetch_models("video"):
-        spec = m.get("model_spec") or {}
-        mtype = (spec.get("constraints") or {}).get("model_type")
-        if mtype not in ("text-to-video", "image-to-video") or any(s in m["id"] for s in _SKIP_VIDEO):
-            continue
-        key = m["id"].replace("text-to-video", "*").replace("image-to-video", "*")
-        groups.setdefault(key, {})[mtype] = m
     video = []
+    for m in _fetch_models("video"):
+        family = _video_family(m)
+        if family == "standard":
+            mtype = ((m.get("model_spec") or {}).get("constraints") or {}).get("model_type")
+            key = m["id"].replace("text-to-video", "*").replace("image-to-video", "*")
+            groups.setdefault(key, {})[mtype] = m
+        else:
+            video.append(_video_entry(family, m, None))
     for pair in groups.values():
         t2v, i2v = pair.get("text-to-video"), pair.get("image-to-video")
-        main = t2v or i2v
-        spec = main.get("model_spec") or {}
-        c = spec.get("constraints") or {}
-        video.append({
-            "id": PREFIX + main["id"],
-            "name": f"Venice: {spec.get('name') or main['id']}" + ("" if t2v else " (image→video only)"),
-            "durations": _seconds(c.get("durations")) or None,
-            "resolutions": c.get("resolutions") or None,
-            "aspect_ratios": c.get("aspect_ratios") or None,
-            "frame_images": ["first_frame"] if i2v else [],
-            "uncensored": _uncensored(t2v, i2v),
-            "generate_audio": bool(c.get("audio_configurable")),
-            "created": main.get("created"),
-            "_text": t2v and t2v["id"], "_image": i2v and i2v["id"],
-            "_constraints": {k: (v.get("model_spec") or {}).get("constraints") or {}
-                             for k, v in (("text", t2v), ("image", i2v)) if v},
-        })
-    return {"text": text, "image": image, "video": video}
+        video.append(_video_entry("standard", t2v, i2v))
+    by_uncensored = lambda m: not m.get("uncensored")   # noqa: E731 — uncensored first, as the user asked
+    return {"text": sorted(text, key=by_uncensored), "image": sorted(image, key=by_uncensored),
+            "video": sorted(video, key=by_uncensored)}
+
+
+def _video_family(m: dict) -> str:
+    mid = m["id"]
+    mtype = ((m.get("model_spec") or {}).get("constraints") or {}).get("model_type")
+    if "reference-to-video" in mid:
+        return "reference"
+    if "first-last-frame" in mid or "transition" in mid:
+        return "frames"
+    if "multi-angle" in mid:
+        return "angles"
+    if "upscale" in mid:
+        return "upscale"
+    if "motion-control" in mid:
+        return "motion"
+    if mtype == "video":
+        return "video"
+    return "standard"
+
+
+def _video_entry(family: str, main: dict | None, i2v: dict | None) -> dict:
+    """One catalogue entry. For "standard", main is the text-to-video model
+    (None if there's only an image-to-video one) and i2v its twin."""
+    first = main or i2v
+    spec = first.get("model_spec") or {}
+    c = spec.get("constraints") or {}
+    name = f"Venice: {spec.get('name') or first['id']}"
+    if family == "standard" and not main:
+        name += " (image→video only)"
+    elif family != "standard":
+        name += f" ({FAMILY_LABELS[family]})"
+    frames = {"standard": ["first_frame"] if i2v else [], "frames": ["first_frame", "last_frame"],
+              "angles": ["first_frame"], "motion": ["first_frame"]}.get(family, [])
+    return {
+        "id": PREFIX + first["id"],
+        "name": name,
+        "family": family,
+        "family_hint": VIDEO_FAMILIES[family],
+        "durations": _seconds(c.get("durations")) or None,
+        "resolutions": c.get("resolutions") or None,
+        "aspect_ratios": c.get("aspect_ratios") or None,
+        "frame_images": frames,
+        "reference_images": family == "reference",
+        "video_input": family in ("video", "motion", "upscale"),
+        "uncensored": _uncensored(main, i2v),
+        "generate_audio": bool(c.get("audio_configurable")),
+        "created": first.get("created"),
+        "_text": main["id"] if main and family == "standard" else None,
+        "_image": i2v["id"] if i2v else (None if family == "standard" else first["id"]),
+        "_constraints": {k: (v.get("model_spec") or {}).get("constraints") or {}
+                         for k, v in (("text", main), ("image", i2v)) if v} if family == "standard"
+        else {"image": c},
+    }
 
 
 def _get_catalogue(refresh: bool = False) -> dict[str, Any]:
@@ -416,38 +470,92 @@ def _snap(value, allowed: list):
 
 def submit_video(model_id: str, prompt: str, duration: int | None = None, aspect_ratio: str | None = None,
                  resolution: str | None = None, generate_audio: bool | None = None,
-                 first_frame: Path | None = None) -> dict:
+                 first_frame: Path | None = None, last_frame: Path | None = None,
+                 refs: list[Path] | None = None, source_video: Path | None = None) -> dict:
     """Queue a video. Returns {"id": "venice:<model>:<queue_id>", "params":
-    the settings actually sent}, like openrouter.submit_video."""
-    info = _entry("video", model_id)
-    kind = "image" if first_frame else "text"
-    model = info["_image"] if first_frame else info["_text"]
-    if not model:
-        raise VeniceError("This Venice model needs an image to animate" if not first_frame
-                          else "This Venice model can't animate an image — pick an image→video model")
-    c = info["_constraints"][kind]
-    durations = _seconds(c.get("durations"))
-    if durations and (not duration or duration not in durations):
-        target = duration or 5
-        duration = min(durations, key=lambda d: (abs(d - target), d))
-    aspect_ratio = _snap(aspect_ratio, c.get("aspect_ratios") or [])
-    if first_frame and not c.get("aspect_ratios"):
-        aspect_ratio = None   # the image sets the shape
-    resolution = _snap(resolution, c.get("resolutions") or [])
+    the settings actually sent}, like openrouter.submit_video.
 
-    body: dict[str, Any] = {"model": model, "prompt": prompt, "duration": f"{duration}s" if duration else "auto"}
+    What's used depends on the model's family: reference models take `refs`
+    (the first frame joins them if there are none), first/last-frame models
+    both frames, video models `source_video` (motion control also an image)."""
+    info = _entry("video", model_id)
+    family = info.get("family", "standard")
+    refs = [p for p in refs or [] if p.is_file()]
+    if family == "standard":
+        model = info["_image"] if first_frame else info["_text"]
+        if not model:
+            raise VeniceError("This Venice model needs an image to animate" if not first_frame
+                              else "This Venice model can't animate an image — pick an image→video model")
+        c = info["_constraints"]["image" if first_frame else "text"]
+    else:
+        model, c = info["_image"], info["_constraints"]["image"]
+
+    body: dict[str, Any] = {"model": model, "prompt": prompt}
+    sent: dict[str, Any] = {}
+    image_used = False
+    if family == "reference":
+        refs = refs or ([first_frame] if first_frame else [])
+        if not refs:
+            raise VeniceError("This Venice model makes a video from reference images: attach a character, "
+                              "pin an image or attach one first")
+        refs = refs[:30]
+        body["reference_image_urls"] = [_data_url(p) for p in refs]
+        sent["refs_used"] = len(refs)
+    elif family == "frames":
+        if not (first_frame and last_frame):
+            raise VeniceError("This Venice model needs a first and a last frame: attach two images "
+                              "(the first is the start, the second the end)")
+        body["image_url"], body["end_image_url"] = _data_url(first_frame), _data_url(last_frame)
+        image_used = True
+    elif family in ("video", "motion", "upscale"):
+        if not source_video or not source_video.is_file():
+            raise VeniceError("This Venice model works on a video: make or keep a video in this chat first "
+                              "(it uses the latest one)")
+        body["video_url"] = _data_url(source_video)
+        sent["source_video"] = source_video.name
+        if family == "motion":
+            image = first_frame or (refs[0] if refs else None)
+            if not image:
+                raise VeniceError("Motion control needs an image of who should move: attach or pin one")
+            body["image_url"] = _data_url(image)
+            image_used = True
+    elif first_frame:   # standard image→video, multi-angle
+        body["image_url"] = _data_url(first_frame)
+        image_used = True
+    if family == "angles":
+        body["camera_trajectory"] = DEFAULT_CAMERA_TRAJECTORY
+
+    allowed = c.get("durations") or []
+    seconds = _seconds(allowed)
+    if seconds:
+        if not duration or duration not in seconds:
+            target = duration or 5
+            duration = min(seconds, key=lambda d: (abs(d - target), d))
+        body["duration"] = f"{duration}s"
+    else:
+        duration = None
+        body["duration"] = allowed[0] if allowed else "auto"   # e.g. "Auto": follows the source video
+
+    if family == "upscale":
+        factor = {"2x": 2, "4x": 4}.get(str(resolution).lower())
+        body["upscale_factor"] = factor or 2
+        resolution = f"{body['upscale_factor']}x"
+    else:
+        resolution = _snap(resolution, c.get("resolutions") or [])
+        if resolution:
+            body["resolution"] = resolution
+    aspect_ratio = _snap(aspect_ratio, c.get("aspect_ratios") or [])
+    if image_used and not c.get("aspect_ratios"):
+        aspect_ratio = None   # the image sets the shape
     if aspect_ratio:
         body["aspect_ratio"] = aspect_ratio
-    if resolution:
-        body["resolution"] = resolution
     if c.get("audio_configurable") and generate_audio is not None:
         body["audio"] = bool(generate_audio)
-    if first_frame:
-        body["image_url"] = _data_url(first_frame)
 
     quote = None
     try:
-        quote_body = {k: v for k, v in body.items() if k in ("model", "duration", "aspect_ratio", "resolution", "audio")}
+        quote_body = {k: v for k, v in body.items()
+                      if k in ("model", "duration", "aspect_ratio", "resolution", "audio", "upscale_factor")}
         quote = _usd(_request("POST", "/video/quote", json=quote_body).json().get("quote"))
     except VeniceError:
         pass   # the price is nice to show, not needed to generate
@@ -461,7 +569,7 @@ def submit_video(model_id: str, prompt: str, duration: int | None = None, aspect
         _video_quotes[job_id] = quote
     audio = body.get("audio", bool(c.get("audio")) or None)
     return {"id": job_id, "params": {"duration": duration, "aspect_ratio": aspect_ratio,
-                                     "resolution": resolution, "generate_audio": audio}}
+                                     "resolution": resolution, "generate_audio": audio, **sent}}
 
 
 def _split_job(job_id: str) -> tuple[str, str]:

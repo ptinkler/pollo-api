@@ -36,6 +36,12 @@ MODELS = {
             "aspect_ratios": [], "audio": True, "audio_configurable": True}}},
         {"id": "wan-3-0-reference-to-video", "model_spec": {"name": "Wan Ref", "constraints": {
             "model_type": "image-to-video", "durations": ["5s"]}}},
+        {"id": "flux-3-first-last-frame-to-video", "model_spec": {"name": "Flux 3 FLF", "constraints": {
+            "model_type": "image-to-video", "durations": ["5s", "10s"], "resolutions": ["720p"]}}},
+        {"id": "wan-2-7-video-to-video", "model_spec": {"name": "Wan 2.7 V2V", "uncensored": True, "constraints": {
+            "model_type": "video", "durations": ["Auto"], "resolutions": ["720p"]}}},
+        {"id": "topaz-video-upscale", "model_spec": {"name": "Topaz", "constraints": {
+            "model_type": "video", "durations": ["Auto"], "resolutions": ["2x", "4x"]}}},
         {"id": "ovi-image-to-video", "model_spec": {"name": "Ovi", "uncensored": True, "constraints": {
             "model_type": "image-to-video", "durations": ["5s"], "audio": True, "audio_configurable": False}}},
     ],
@@ -95,7 +101,7 @@ def _calls(fake, path):
 class TestCatalogue:
     def test_lists_text_models_with_prices_and_tools(self, venice):
         v, _ = venice
-        m, unc = v.list_models("text")
+        unc, m = v.list_models("text")   # uncensored first
         assert m["id"] == "venice/llama-big" and m["name"] == "Venice: Llama Big"
         assert m["uncensored"] is None and unc["uncensored"] is True
         assert m["supports_tools"] is True and m["input_modalities"] == ["text", "image"]
@@ -116,7 +122,18 @@ class TestCatalogue:
     def test_video_models_pair_text_and_image_variants(self, venice):
         v, _ = venice
         by_id = {m["id"]: m for m in v.list_models("video")}
-        assert set(by_id) == {"venice/wan-3-0-text-to-video", "venice/ovi-image-to-video"}   # no reference-to-video
+        assert set(by_id) == {"venice/wan-3-0-text-to-video", "venice/ovi-image-to-video",
+                              "venice/wan-3-0-reference-to-video", "venice/flux-3-first-last-frame-to-video",
+                              "venice/wan-2-7-video-to-video", "venice/topaz-video-upscale"}
+        assert [by_id[f"venice/{i}"]["family"] for i in ("flux-3-first-last-frame-to-video", "wan-2-7-video-to-video",
+                                                          "topaz-video-upscale")] == ["frames", "video", "upscale"]
+        assert by_id["venice/flux-3-first-last-frame-to-video"]["frame_images"] == ["first_frame", "last_frame"]
+        assert by_id["venice/wan-2-7-video-to-video"]["video_input"] is True
+        ids = [m["id"] for m in v.list_models("video")]
+        assert all(by_id[i]["uncensored"] for i in ids[:2]) and not any(by_id[i]["uncensored"] for i in ids[2:])   # uncensored first
+        assert by_id["venice/wan-3-0-reference-to-video"]["family"] == "reference"
+        assert by_id["venice/wan-3-0-reference-to-video"]["reference_images"] is True
+        assert "refs→video" in by_id["venice/wan-3-0-reference-to-video"]["name"]
         wan = by_id["venice/wan-3-0-text-to-video"]
         assert wan["frame_images"] == ["first_frame"] and wan["durations"] == [2, 5, 10]
         assert wan["generate_audio"] is True
@@ -128,7 +145,7 @@ class TestCatalogue:
         monkeypatch.setattr(chat.openrouter, "list_image_models", lambda: [])
         monkeypatch.setattr(chat.openrouter, "list_video_models", lambda: [])
         data = client.get("/api/chat/models").json()
-        assert [m["id"] for m in data["text"]] == ["venice/llama-big", "venice/venice-uncensored", "or/text"]
+        assert [m["id"] for m in data["text"]] == ["venice/venice-uncensored", "venice/llama-big", "or/text"]
         assert any(m["id"] == "venice/seedream-v5-pro" for m in data["image"])
 
     def test_not_listed_without_a_key(self, venice, monkeypatch):
@@ -279,3 +296,84 @@ def test_balance_falls_back_to_the_response_header(client, venice):
     fake.routes["/billing/balance"] = httpx.Response(401, json={"error": "Admin API key required"})
     fake.routes["/api_keys/rate_limits"] = httpx.Response(200, json={}, headers={"x-venice-balance-usd": "7.25"})
     assert client.get("/api/chat/venice-balance").json() == {"usd": 7.25}
+
+
+class TestVideoFamiliesInChat:
+    """Reference, first+last-frame and video-input models get the right inputs from the chat."""
+
+    def _load_catalogue(self, client, chat, monkeypatch):
+        for fn in ("list_text_models", "list_image_models", "list_video_models"):
+            monkeypatch.setattr(chat.openrouter, fn, lambda: [])
+        client.get("/api/chat/models")
+
+    def _queue(self, fake, queue_id="q"):
+        fake.routes["/video/quote"] = httpx.Response(200, json={"quote": 0.1})
+        fake.routes["/video/queue"] = httpx.Response(200, json={"queue_id": queue_id})
+
+    def _image(self, chat, conv, name):
+        (chat._conv_dir(conv["id"]) / name).write_bytes(_png_bytes())
+
+    def test_reference_model_gets_attached_pinned_and_character_images(self, client, conv, chat, db, venice, monkeypatch):
+        v, fake = venice
+        self._load_catalogue(client, chat, monkeypatch)
+        self._queue(fake)
+        for f in ("pin.png", "a.png", "b.png"):
+            self._image(chat, conv, f)
+        db.add_chat_message(conv["id"], "user", "x")
+        msg = db.add_chat_message(conv["id"], "assistant", "", media=[
+            {"id": "p", "kind": "image", "source": "generated", "status": "done", "file": "pin.png", "prompt": "p"}])
+        client.post(f"/api/chat/messages/{msg.id}/media/p/pin", json={"pinned": True})
+        ups = [client.post(f"/api/chat/conversations/{conv['id']}/attachments",
+                           files={"file": (n, _png_bytes(), "image/png")}).json()["file"] for n in ("a.png", "b.png")]
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
+            "content": "they dance", "attachments": ups, **SETTINGS, "mode": "video",
+            "video_model": "venice/wan-3-0-reference-to-video"}))
+        body = _calls(fake, "/video/queue")[0][2]
+        assert body["model"] == "wan-3-0-reference-to-video" and len(body["reference_image_urls"]) == 3
+        item = ev[-1]["message"]["media"][0]
+        assert item["params"]["refs"] == [*ups, "pin.png"] and item["params"]["refs_used"] == 3
+
+    def test_first_and_last_frame_from_two_attachments(self, client, conv, chat, venice, monkeypatch):
+        v, fake = venice
+        self._load_catalogue(client, chat, monkeypatch)
+        self._queue(fake)
+        ups = [client.post(f"/api/chat/conversations/{conv['id']}/attachments",
+                           files={"file": (n, _png_bytes(), "image/png")}).json()["file"] for n in ("s.png", "e.png")]
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
+            "content": "morph", "attachments": ups, **SETTINGS, "mode": "video",
+            "video_model": "venice/flux-3-first-last-frame-to-video"}))
+        body = _calls(fake, "/video/queue")[0][2]
+        assert body["image_url"].startswith("data:image") and body["end_image_url"].startswith("data:image")
+        assert ev[-1]["message"]["media"][0]["params"]["last_frame"] == ups[1]
+
+    def test_video_to_video_uses_the_latest_chat_video(self, client, conv, chat, db, venice, monkeypatch):
+        v, fake = venice
+        self._load_catalogue(client, chat, monkeypatch)
+        self._queue(fake)
+        (chat._conv_dir(conv["id"]) / "vid_old.mp4").write_bytes(b"MP4")
+        db.add_chat_message(conv["id"], "user", "x")
+        db.add_chat_message(conv["id"], "assistant", "", media=[
+            {"id": "v1", "kind": "video", "source": "generated", "status": "done", "file": "vid_old.mp4", "prompt": "p"}])
+        ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={
+            "content": "make it anime", **SETTINGS, "mode": "video", "video_model": "venice/wan-2-7-video-to-video"}))
+        body = _calls(fake, "/video/queue")[0][2]
+        assert body["video_url"].startswith("data:") and body["duration"] == "Auto"
+        assert ev[-1]["message"]["media"][0]["params"]["source_video"] == "vid_old.mp4"
+
+    def test_upscale_maps_the_resolution_pick_to_a_factor(self, venice, tmp_path):
+        v, fake = venice
+        self._queue(fake)
+        src = tmp_path / "in.mp4"
+        src.write_bytes(b"MP4")
+        job = v.submit_video("venice/topaz-video-upscale", "", resolution="4x", source_video=src)
+        body = _calls(fake, "/video/queue")[0][2]
+        assert body["upscale_factor"] == 4 and "resolution" not in body and job["params"]["resolution"] == "4x"
+
+    def test_missing_inputs_explain_what_is_needed(self, venice, tmp_path):
+        v, _ = venice
+        with pytest.raises(v.VeniceError, match="reference images"):
+            v.submit_video("venice/wan-3-0-reference-to-video", "x")
+        with pytest.raises(v.VeniceError, match="first and a last frame"):
+            v.submit_video("venice/flux-3-first-last-frame-to-video", "x")
+        with pytest.raises(v.VeniceError, match="works on a video"):
+            v.submit_video("venice/wan-2-7-video-to-video", "x")

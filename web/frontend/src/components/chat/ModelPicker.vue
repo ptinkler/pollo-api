@@ -2,6 +2,7 @@
 import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
 import { useModelFavourites } from '../../composables/useModelFavourites'
 import { useShowHidden } from '../../composables/useShowHidden'
+import { useUncensoredOnly } from '../../composables/useUncensoredOnly'
 import { chatImageModelTakesCharacters } from '../../composables/useCharacters'
 
 const props = defineProps({
@@ -31,8 +32,11 @@ const { favourites, isFavourite, toggleFavourite } = useModelFavourites()
 // hidden" — except the current pick, so the picker never loses it
 const { showHidden } = useShowHidden()
 const hiddenCount = computed(() => props.models.filter(m => m.hidden).length)
-const visibleModels = computed(() =>
-  showHidden.value ? props.models : props.models.filter(m => !m.hidden || m.id === props.modelValue))
+// "Uncensored only" narrows the list the same way (the current pick always stays)
+const { uncensoredOnly } = useUncensoredOnly()
+const uncensoredCount = computed(() => props.models.filter(m => m.uncensored && (showHidden.value || !m.hidden)).length)
+const visibleModels = computed(() => props.models.filter(m => m.id === props.modelValue || (
+  (showHidden.value || !m.hidden) && (!uncensoredOnly.value || !uncensoredCount.value || m.uncensored))))
 
 // ── Provider tabs: Pollo ("pollo/…", billed in Pollo credits), Venice
 // ("venice/…", billed to the Venice account) and OpenRouter. Only shown when
@@ -47,7 +51,7 @@ const providerOf = (id) => {
   return prefix === 'pollo' || prefix === 'venice' ? prefix : 'openrouter'
 }
 const PROVIDERS = computed(() => Object.fromEntries(
-  Object.entries(ALL_PROVIDERS).filter(([id]) => props.models.some(m => providerOf(m.id) === id))))
+  Object.entries(ALL_PROVIDERS).filter(([id]) => visibleModels.value.some(m => providerOf(m.id) === id))))
 const showTabs = computed(() => Object.keys(PROVIDERS.value).length > 1)
 const tab = ref(Object.keys(ALL_PROVIDERS)[0])
 
@@ -112,7 +116,12 @@ function badges(m) {
     else if (m.input_modalities?.includes('image')) out.push({ t: 'edits', title: 'Takes reference images (tends to edit them)' })
     if (chatImageModelTakesCharacters(m)) out.push({ t: '👤', title: 'Can use characters (sends their reference images)' })
   } else if (props.kind === 'video') {
-    if (m.frame_images?.includes('first_frame')) out.push({ t: 'img→vid', title: 'Can animate an image' })
+    const FAMILY = {
+      reference: 'refs→vid', frames: 'first+last', angles: 'multi-angle',
+      video: 'vid→vid', motion: 'motion', upscale: 'upscale',
+    }
+    if (FAMILY[m.family]) out.push({ t: FAMILY[m.family], title: m.family_hint })
+    else if (m.frame_images?.includes('first_frame')) out.push({ t: 'img→vid', title: 'Can animate an image' })
     if (m.durations?.length) out.push({ t: `${Math.min(...m.durations)}–${Math.max(...m.durations)}s`, title: 'Durations' })
     if (m.generate_audio) out.push({ t: 'audio', title: 'Can generate audio' })
   }
@@ -221,6 +230,10 @@ onBeforeUnmount(close)
           @click="tab = id; searchInput?.focus()"
         >{{ p.label }} <span class="tab-count">{{ tabCounts[id] }}</span></button>
       </div>
+      <label v-if="uncensoredCount" class="show-hidden uncensored-only" title="Only list models marked uncensored">
+        <input v-model="uncensoredOnly" type="checkbox" @change="searchInput?.focus()" />
+        🔞 Uncensored only ({{ uncensoredCount }})
+      </label>
       <label v-if="hiddenCount" class="show-hidden" title="Models left out of the list: not enabled for this API key, or retired">
         <input v-model="showHidden" type="checkbox" @change="searchInput?.focus()" />
         Show hidden ({{ hiddenCount }})
@@ -442,6 +455,10 @@ onBeforeUnmount(close)
   color: var(--accent2);
   font-size: 0.8rem;
   cursor: pointer;
+}
+
+.uncensored-only {
+  color: #ff8a6e;
 }
 
 .show-hidden {

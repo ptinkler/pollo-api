@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { copyText } from '../composables/useClipboard'
 import { nextTick } from 'vue'
+import { useUncensoredOnly } from '../composables/useUncensoredOnly'
 import ModelPicker from '../components/chat/ModelPicker.vue'
 import { useModelFavourites } from '../composables/useModelFavourites'
 import { useShowHidden } from '../composables/useShowHidden'
@@ -262,6 +263,36 @@ describe('ModelPicker provider tabs', () => {
     const closed = mount(ModelPicker, { props: { models, label: 'Image', kind: 'image', modelValue: 'venice/lustify-v8' } })
     expect(closed.find('.picker-value .uncensored').text()).toContain('uncensored')
     closed.unmount()
+  })
+})
+
+describe('ModelPicker uncensored filter', () => {
+  const MODELS = [
+    { id: 'venice/lustify-v8', name: 'Venice: Lustify', uncensored: true },
+    { id: 'venice/flux-2-pro', name: 'Venice: Flux 2 Pro' },
+    { id: 'or/img', name: 'OpenRouter Img' },
+  ]
+  beforeEach(() => {
+    localStorage.clear()
+    useUncensoredOnly().uncensoredOnly.value = false
+  })
+
+  it('narrows every tab to uncensored models, and hides tabs left empty', async () => {
+    const w = mount(ModelPicker, { attachTo: document.body, props: { models: MODELS, label: 'Image', kind: 'image' } })
+    await w.find('.picker-btn').trigger('click')
+    const toggle = w.find('.uncensored-only input')
+    expect(w.find('.uncensored-only').text()).toContain('(1)')
+    await toggle.setValue(true)
+    expect(w.findAll('.picker-tab')).toHaveLength(0)          // only Venice is left
+    expect(w.findAll('.item-name').map(n => n.text()).filter(n => n !== 'None')).toEqual(['Venice: Lustify'])
+    w.unmount()
+  })
+
+  it('is only offered when the list has uncensored models', async () => {
+    const w = mount(ModelPicker, { attachTo: document.body, props: { models: MODELS.slice(1), label: 'Image', kind: 'image' } })
+    await w.find('.picker-btn').trigger('click')
+    expect(w.find('.uncensored-only').exists()).toBe(false)
+    w.unmount()
   })
 })
 
