@@ -3,7 +3,7 @@ Thin OpenRouter client (https://openrouter.ai/docs) used by the chat mode.
 
 Covers the three surfaces chat needs:
   • text   — POST /chat/completions (SSE streaming, tool calls)
-  • image  — POST /images           (synchronous, base64 results)
+  • image  — POST /images           (streamed SSE, base64 results)
   • video  — POST /videos           (async job: submit → poll → download /content)
 
 Request/response shapes were taken from https://openrouter.ai/openapi.json,
@@ -279,10 +279,23 @@ def generate_image(model: str, prompt: str, aspect_ratio: str | None = None,
     if session_id:
         body["session_id"] = session_id
 
+    # Streamed so the connection carries traffic while the image renders:
+    # a silent request was cut at exactly 60s by something between us and
+    # OpenRouter (TCP keepalive didn't help). Only the final image is kept.
+    body["stream"] = True
     with _connection_guard("image"):
-        resp = _client.post(f"{OPENROUTER_BASE}/images", headers=_headers(), json=body, timeout=IMAGE_TIMEOUT)
-    _raise_for_response(resp)
-    data = resp.json()
+        with _client.stream("POST", f"{OPENROUTER_BASE}/images", headers=_headers(), json=body,
+                            timeout=IMAGE_TIMEOUT) as resp:
+            if resp.status_code >= 400:
+                resp.read()
+                _raise_for_response(resp)
+            if "text/event-stream" not in resp.headers.get("content-type", ""):
+                resp.read()   # a provider that doesn't stream answers with plain JSON
+                return _images_from_json(resp.json())
+            return _images_from_stream(resp.iter_lines())
+
+
+def _images_from_json(data: dict) -> tuple[list[tuple[bytes, str]], float | None]:
     images = [
         (base64.b64decode(item["b64_json"]), item.get("media_type") or "image/png")
         for item in data.get("data", []) if item.get("b64_json")
@@ -290,6 +303,39 @@ def generate_image(model: str, prompt: str, aspect_ratio: str | None = None,
     if not images:
         raise OpenRouterError("Image model returned no images")
     return images, (data.get("usage") or {}).get("cost")
+
+
+def _images_from_stream(lines: Iterator[str]) -> tuple[list[tuple[bytes, str]], float | None]:
+    """The finished images from an /images SSE stream (image_generation.completed
+    events; partial previews and ": OPENROUTER PROCESSING" keep-alives skipped)."""
+    images: list[tuple[bytes, str]] = []
+    cost = None
+    event = ""
+    for line in lines:
+        if line.startswith("event:"):
+            event = line[6:].strip()
+            continue
+        if not line.startswith("data:"):
+            if not line:
+                event = ""
+            continue
+        payload = line[5:].strip()
+        if payload == "[DONE]":
+            break
+        try:
+            chunk = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        kind = chunk.get("type") or event
+        if kind == "error" or chunk.get("error"):
+            err = chunk.get("error") or chunk
+            raise OpenRouterError((err.get("message") if isinstance(err, dict) else str(err)) or "Image generation failed")
+        if kind.endswith("completed") and chunk.get("b64_json"):
+            images.append((base64.b64decode(chunk["b64_json"]), chunk.get("media_type") or "image/png"))
+            cost = (chunk.get("usage") or {}).get("cost", cost)
+    if not images:
+        raise OpenRouterError("Image model returned no images")
+    return images, cost
 
 
 def generate_image_chat(model: str, messages: list[dict], aspect_ratio: str | None = None,

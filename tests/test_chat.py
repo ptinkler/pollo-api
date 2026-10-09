@@ -1624,13 +1624,76 @@ class TestOpenRouterConnection:
         import httpx
         def drop(*a, **k):
             raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
-        monkeypatch.setattr(chat.openrouter._client, "post", drop)
+        monkeypatch.setattr(chat.openrouter._client, "stream", drop)
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
         msg = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages",
                                   json={"content": "a fox", "mode": "image", **SETTINGS}))[-1]["message"]
         item = msg["media"][0]
         assert item["status"] == "error" and item["moderated"] is False
         assert "connection to OpenRouter dropped after" in item["error"] and "RemoteProtocolError" in item["error"]
+
+
+class TestOpenRouterImageStream:
+    """/images is streamed so the connection isn't silent while the image renders."""
+
+    class _Stream:
+        def __init__(self, lines, content_type="text/event-stream", status=200, body=None):
+            self.lines, self.status_code, self._body = lines, status, body
+            self.headers = {"content-type": content_type}
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def iter_lines(self):
+            yield from self.lines
+        def read(self):
+            return b""
+        def json(self):
+            return self._body
+
+    def _b64(self, color="red"):
+        import base64
+        return base64.b64encode(_png_bytes(color=color)).decode()
+
+    def test_keeps_only_completed_images_and_cost(self, chat, monkeypatch):
+        sent = {}
+        lines = [": OPENROUTER PROCESSING", "",
+                 "event: image_generation.partial_image",
+                 "data: " + json.dumps({"type": "image_generation.partial_image", "b64_json": self._b64("blue")}), "",
+                 ": OPENROUTER PROCESSING", "",
+                 "event: image_generation.completed",
+                 "data: " + json.dumps({"type": "image_generation.completed", "b64_json": self._b64(),
+                                        "usage": {"cost": 0.03}}), "",
+                 "data: [DONE]"]
+        monkeypatch.setattr(chat.openrouter._client, "stream",
+                            lambda method, url, **kw: (sent.update(kw["json"]), self._Stream(lines))[1])
+        images, cost = chat.openrouter.generate_image("x/img", "a fox")
+        assert sent["stream"] is True
+        assert images == [(_png_bytes(), "image/png")] and cost == 0.03
+
+    def test_event_name_alone_identifies_the_final_image(self, chat, monkeypatch):
+        lines = ["event: image_generation.completed", "data: " + json.dumps({"b64_json": self._b64()}), ""]
+        monkeypatch.setattr(chat.openrouter._client, "stream", lambda *a, **k: self._Stream(lines))
+        images, _ = chat.openrouter.generate_image("x/img", "a fox")
+        assert len(images) == 1
+
+    def test_error_event_raises(self, chat, monkeypatch):
+        lines = ["event: error", "data: " + json.dumps({"error": {"message": "flagged by moderation"}}), ""]
+        monkeypatch.setattr(chat.openrouter._client, "stream", lambda *a, **k: self._Stream(lines))
+        with pytest.raises(chat.openrouter.OpenRouterError, match="flagged"):
+            chat.openrouter.generate_image("x/img", "a fox")
+
+    def test_plain_json_answer_still_works(self, chat, monkeypatch):
+        body = {"data": [{"b64_json": self._b64(), "media_type": "image/png"}], "usage": {"cost": 0.01}}
+        monkeypatch.setattr(chat.openrouter._client, "stream",
+                            lambda *a, **k: self._Stream([], content_type="application/json", body=body))
+        images, cost = chat.openrouter.generate_image("x/img", "a fox")
+        assert len(images) == 1 and cost == 0.01
+
+    def test_stream_without_an_image_raises(self, chat, monkeypatch):
+        monkeypatch.setattr(chat.openrouter._client, "stream", lambda *a, **k: self._Stream(["data: [DONE]"]))
+        with pytest.raises(chat.openrouter.OpenRouterError, match="no images"):
+            chat.openrouter.generate_image("x/img", "a fox")
 
 
 class TestDeleteExchange:
