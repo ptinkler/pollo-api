@@ -98,8 +98,8 @@ describe('ChatMessage user actions', () => {
 
   it('hides Edit and Retry while a reply is streaming, but keeps Copy', () => {
     const w = mount(ChatMessage, { props: { message: msg, convId: 'c1', canEdit: false } })
-    const labels = w.findAll('.user-actions button').map(b => b.text())
-    expect(labels).toEqual(['⧉ Copy'])
+    const labels = w.findAll('.user-actions button').map(b => b.attributes('title'))
+    expect(labels).toEqual(['Copy prompt'])
   })
 
   it('Copy puts the prompt on the clipboard and shows feedback', async () => {
@@ -109,7 +109,7 @@ describe('ChatMessage user actions', () => {
     await w.find('button[title="Copy prompt"]').trigger('click')
     await flushPromises()
     expect(writeText).toHaveBeenCalledWith('hello')
-    expect(w.find('button[title="Copy prompt"]').text()).toBe('✓ Copied')
+    expect(w.find('button[title="Copy prompt"]').text()).toBe('✓')
   })
 
   it('media caption copies the prompt sent to the image model', async () => {
@@ -210,7 +210,7 @@ describe('Media note lines in replies', () => {
     })
     expect(w.find('.markdown').exists()).toBe(false)
     expect(w.find('.media-item img').exists()).toBe(true)
-    expect(w.find('.msg-meta').text()).not.toContain('Copy')
+    expect(w.find('.msg-meta button[title="Copy reply"]').exists()).toBe(false)
   })
 
   it('keeps the story and drops only the note lines', async () => {

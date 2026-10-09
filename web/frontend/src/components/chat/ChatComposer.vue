@@ -82,19 +82,6 @@ defineExpose({ focus, autosize })
         </div>
       </div>
 
-      <div v-if="characterNames.length" class="pinned-row">
-        <span>👤 {{ characterNames.join(', ') }}</span>
-        <button @click="emit('show-sidebar')">Change</button>
-      </div>
-
-      <div v-if="pinnedCount && mode.id !== 'text'" class="pinned-row">
-        <span
-          >📌 {{ pinnedCount }} image{{ pinnedCount !== 1 ? 's' : '' }} pinned: sent as references with every new
-          image</span
-        >
-        <button @click="emit('unpin-all')">Unpin all</button>
-      </div>
-
       <div class="composer-row">
         <label class="icon-btn" title="Attach images (or paste / drop)">
           📎
@@ -110,6 +97,22 @@ defineExpose({ focus, autosize })
         <button class="mode-chip" :title="`Mode: ${mode.label} — click to switch`" @click="emit('cycle-mode')">
           {{ mode.icon }} {{ mode.label }}
         </button>
+        <button
+          v-if="characterNames.length"
+          class="ctx-chip"
+          :title="`Characters in this chat: ${characterNames.join(', ')} — click to change`"
+          @click="emit('show-sidebar')"
+        >
+          👤 <span class="ctx-names">{{ characterNames.join(', ') }}</span>
+        </button>
+        <span
+          v-if="pinnedCount && mode.id !== 'text'"
+          class="ctx-chip pins"
+          :title="`${pinnedCount} pinned image${pinnedCount !== 1 ? 's' : ''}: sent as references with every new image`"
+        >
+          📌 {{ pinnedCount }}
+          <button class="ctx-x" title="Unpin all" @click="emit('unpin-all')">✕</button>
+        </span>
         <textarea
           ref="textarea"
           v-model="draft"
@@ -127,23 +130,61 @@ defineExpose({ focus, autosize })
 </template>
 
 <style scoped>
-.pinned-row {
-  display: flex;
+/* What goes with the message: attached characters, pinned images */
+.ctx-chip {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 180px;
+  height: 30px;
+  margin-bottom: 3px;
+  padding: 0 10px;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 12px 0;
-  font-size: 0.75rem;
+  gap: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
   color: var(--text2);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  cursor: pointer;
 }
 
-.pinned-row button {
+.ctx-chip:hover {
+  color: var(--text);
+}
+
+.ctx-chip.pins {
+  flex-shrink: 0;
+  cursor: default;
+  padding-right: 4px;
+}
+
+.ctx-names {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ctx-x {
+  width: 20px;
+  height: 20px;
   border: none;
+  border-radius: 50%;
   background: none;
-  color: var(--accent);
-  font-size: 0.75rem;
+  color: var(--text2);
+  font-size: 0.65rem;
   cursor: pointer;
-  padding: 0;
+}
+
+.ctx-x:hover {
+  background: var(--surface2);
+  color: var(--text);
+}
+
+@media (max-width: 600px) {
+  .ctx-names {
+    display: none;
+  }
 }
 
 .composer-wrap {

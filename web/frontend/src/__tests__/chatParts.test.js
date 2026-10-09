@@ -31,11 +31,20 @@ describe('ChatComposer', () => {
   it('shows a stop button while sending, and what goes with the message', () => {
     const w = mountComposer({ sending: true, characterNames: ['Linh'], pinnedCount: 2 })
     expect(w.find('.send.stop').exists()).toBe(true)
-    expect(w.text()).toContain('👤 Linh')
-    expect(w.text()).toContain('📌 2 images pinned')
-    expect(mountComposer({ mode: { id: 'text', label: 'Chat', icon: '💬' }, pinnedCount: 2 }).text()).not.toContain(
-      'pinned',
+    expect(w.find('.ctx-chip').text()).toContain('👤 Linh')
+    expect(w.find('.ctx-chip.pins').text()).toContain('📌 2')
+    expect(mountComposer({ mode: { id: 'text', label: 'Chat', icon: '💬' }, pinnedCount: 2 }).find('.pins').exists()).toBe(
+      false,
     )
+  })
+
+  it('keeps characters and pins in the one row: change characters, or unpin all', async () => {
+    const w = mountComposer({ characterNames: ['Young Linh', 'Bao'], pinnedCount: 3 })
+    expect(w.findAll('.composer-row .ctx-chip')).toHaveLength(2)
+    await w.find('.ctx-chip').trigger('click')
+    expect(w.emitted('show-sidebar')).toHaveLength(1)
+    await w.find('.ctx-x').trigger('click')
+    expect(w.emitted('unpin-all')).toHaveLength(1)
   })
 })
 

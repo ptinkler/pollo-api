@@ -280,26 +280,24 @@ const { copiedKey, copy } = useCopy()
           </button>
         </span>
         <button v-if="message.content" class="meta-btn" title="Copy prompt" @click="copy(message.content, 'prompt')">
-          {{ copiedKey === 'prompt' ? '✓ Copied' : '⧉ Copy' }}
+          {{ copiedKey === 'prompt' ? '✓' : '⧉' }}
         </button>
         <template v-if="canEdit">
-          <button class="meta-btn" title="Edit and resend" @click="startEdit">✎ Edit</button>
-          <button class="meta-btn" title="Resend this prompt for a different response" @click="emit('resend')">
-            ↻ Retry
-          </button>
+          <button class="meta-btn" title="Edit and resend" @click="startEdit">✎</button>
+          <button class="meta-btn" title="Resend this prompt for a different response" @click="emit('resend')">↻</button>
           <button
             class="meta-btn"
             title="Start a new chat from here: everything up to this prompt and its reply, nothing after"
             @click="emit('fork')"
           >
-            ⑂ Branch
+            ⑂
           </button>
           <button
             class="meta-btn"
             title="Delete this prompt and its reply from the chat (images and videos stay in Media)"
             @click="emit('delete')"
           >
-            🗑 Delete
+            🗑
           </button>
         </template>
       </div>
@@ -454,8 +452,8 @@ const { copiedKey, copy } = useCopy()
           </span>
           <button v-if="streaming" class="meta-btn" @click="emit('stop')">■ Stop</button>
           <template v-else>
-            <button v-if="displayText" class="meta-btn" @click="copy(displayText, 'reply')">
-              {{ copiedKey === 'reply' ? '✓ Copied' : '⧉ Copy' }}
+            <button v-if="displayText" class="meta-btn" title="Copy reply" @click="copy(displayText, 'reply')">
+              {{ copiedKey === 'reply' ? '✓' : '⧉' }}
             </button>
             <!-- mousedown.prevent keeps a selection in the reply alive for the click -->
             <!-- These reuse the reply's words; the buttons on an image reuse the image -->
@@ -466,7 +464,7 @@ const { copiedKey, copy } = useCopy()
               @mousedown.prevent
               @click="useText('image')"
             >
-              ✎ Text as picture prompt
+              ✎🖼
             </button>
             <button
               v-if="displayText"
@@ -475,20 +473,21 @@ const { copiedKey, copy } = useCopy()
               @mousedown.prevent
               @click="useText('video')"
             >
-              ✎ Text as video prompt
+              ✎🎬
             </button>
-            <button v-if="canRetry" class="meta-btn" @click="emit('retry')">↻ Retry</button>
+            <button v-if="canRetry" class="meta-btn" title="Retry: another version of this reply" @click="emit('retry')">↻</button>
             <button
               v-if="canBranch"
               class="meta-btn"
               title="Start a new chat from here: everything up to this reply, nothing after"
               @click="emit('fork')"
             >
-              ⑂ Branch
+              ⑂
             </button>
           </template>
           <ForkList v-if="message.forks?.length" :forks="message.forks" @open="id => emit('open-chat', id)" />
-          <span v-if="modelShort && showTextModel" class="meta-info" :title="message.model">💬 {{ modelShort }}</span>
+          <span class="meta-spacer"></span>
+          <span v-if="modelShort && showTextModel" class="meta-info model" :title="message.model">💬 {{ modelShort }}</span>
           <span v-if="message.cost" class="meta-info" title="Total OpenRouter cost for this reply (text + media)"
             >total {{ fmtCost(message.cost) }}</span
           >
@@ -1067,8 +1066,9 @@ const { copiedKey, copy } = useCopy()
 
 .msg-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: 2px 4px;
   margin-top: 6px;
   min-height: 24px;
 }
@@ -1077,8 +1077,11 @@ const { copiedKey, copy } = useCopy()
   background: none;
   border: none;
   color: var(--text2);
-  font-size: 0.75rem;
-  padding: 3px 7px;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  min-width: 26px;
+  padding: 3px 6px;
   border-radius: 6px;
   cursor: pointer;
 }
@@ -1093,5 +1096,17 @@ const { copiedKey, copy } = useCopy()
   color: var(--text2);
   padding: 0 6px;
   opacity: 0.7;
+  white-space: nowrap;
+}
+
+/* Model and cost sit at the right end; a long model name is cut short */
+.meta-spacer {
+  flex: 1;
+}
+
+.meta-info.model {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>
