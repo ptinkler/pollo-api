@@ -17,7 +17,7 @@ Media item shape (stored in ChatMessage.media_json, sent to the frontend):
       "pinned": optional bool,        # user pinned this image: sent as a reference with every new image
       "prompt", "model", "job_id", "error", "cost": optional,
       "credits": optional,            # Pollo images bill in credits, not dollars
-      "request": optional             # the body sent to the provider, images cut short (web/request_log.py)
+      "request", "response": optional # what was sent to the provider and what it answered (web/request_log.py)
     }
 
 Characters (web/characters.py): only characters the user attached to the
@@ -1458,7 +1458,7 @@ class Turn:
             raise
         if cost:
             self.cost += float(cost)
-        sent, request = _take_request(sent)
+        sent, exchange = _take_log(sent)
         for i, name in enumerate(names):
             if i == 0:
                 self._update_media(
@@ -1468,7 +1468,7 @@ class Turn:
                     cost=cost,
                     credits=credits,
                     params={**params, **sent},
-                    request=request,
+                    **exchange,
                 )
             else:
                 self._add_media(_saved_media("image", "generated", name, prompt=prompt, model=self.s.image_model))
@@ -1507,7 +1507,7 @@ class Turn:
             raise
         # Pollo reports what it was actually sent, defaults included
         self._update_media(
-            item, job_id=job["id"], params={**params, **job.get("params", {})}, request=job.get("request")
+            item, job_id=job["id"], params={**params, **job.get("params", {})}, **_exchange(job.get("log"))
         )
         start_video_poller(self.conv_id, self.message_id, item["id"], job["id"])
 
@@ -1897,21 +1897,23 @@ def _is_moderation_error(e: openrouter.OpenRouterError) -> bool:
 
 def _failure_fields(e: openrouter.OpenRouterError) -> dict[str, Any]:
     """A failed media item's fields. Called right after the generation call,
-    on its thread: the request it sent comes from the error, or — when the
-    call itself worked but the result didn't (a Pollo task that failed, a
+    on its thread: what it sent and got back comes from the error, or — when
+    the call itself worked but the result didn't (a Pollo task that failed, a
     black image) — from the request log."""
     fields = {"status": "error", "error": str(e), "moderated": _is_moderation_error(e)}
-    request = getattr(e, "request", None) or request_log.take_last()
-    if request is not None:
-        fields["request"] = request
-    return fields
+    return {**fields, **_exchange(getattr(e, "log_entry", None) or request_log.take_last())}
 
 
-def _take_request(sent: dict) -> tuple[dict, dict | None]:
-    """(the settings sent, minus the provider request body; that body) — the
-    body is kept on the media item for the UI's "Request" view, not in params."""
-    sent = dict(sent)
-    return sent, sent.pop("request", None)
+def _exchange(entry: dict | None) -> dict[str, Any]:
+    """A request-log entry as media item fields: the body sent to the provider
+    and what it answered, for the UI's "Request" view."""
+    return {"request": entry.get("request"), "response": entry.get("response")} if entry else {}
+
+
+def _take_log(result: dict) -> tuple[dict, dict[str, Any]]:
+    """(a generation's settings/job, minus its request-log entry; that entry as media item fields)."""
+    result = dict(result)
+    return result, _exchange(result.pop("log", None))
 
 
 BLACK_IMAGE_ERROR = (
@@ -1964,14 +1966,14 @@ def _run_image_generation(
         name = f"img_{uuid.uuid4().hex[:12]}{IMAGE_EXTS.get(media_type, '.png')}"
         (conv_dir / name).write_bytes(data)
         names.append(name)
-    return names, cost, credits, {**sent, "request": request_log.take_last()}
+    return names, cost, credits, {**sent, "log": request_log.take_last()}
 
 
 def _submit_video_generation(conv_id: str, model: str, prompt: str, params: dict[str, Any]) -> dict:
     """Start a video job on the model's provider. Returns the job plus
-    "request": the body sent (from the request log)."""
+    "log": what was sent and answered (from the request log)."""
     request_log.forget_last()
-    return {**_submit_video(conv_id, model, prompt, params), "request": request_log.take_last()}
+    return {**_submit_video(conv_id, model, prompt, params), "log": request_log.take_last()}
 
 
 def _submit_video(conv_id: str, model: str, prompt: str, params: dict[str, Any]) -> dict:
@@ -2101,7 +2103,7 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
                 )
             params["context"] = context is not None
             names, cost, credits, sent = _run_image_generation(conv_id, model, item["prompt"], params, context)
-            sent, request = _take_request(sent)
+            sent, exchange = _take_log(sent)
             db.update_chat_media_item(
                 message_id,
                 media_id,
@@ -2110,7 +2112,7 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
                 cost=cost,
                 credits=credits,
                 params={**params, **sent},
-                request=request,
+                **exchange,
             )
             for extra in names[1:]:
                 db.append_chat_media_item(
@@ -2128,7 +2130,7 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
                 media_id,
                 job_id=job["id"],
                 params={**params, **job.get("params", {})},
-                request=job.get("request"),
+                **_exchange(job.get("log")),
             )
             start_video_poller(conv_id, message_id, media_id, job["id"])
     except openrouter.OpenRouterError as e:

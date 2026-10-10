@@ -190,7 +190,7 @@ function onEditKeydown(e) {
 }
 
 const { copiedKey, copy } = useCopy()
-// The media item whose provider request is open (RequestDialog)
+// The media item whose provider request and response are open (RequestDialog)
 const requestItem = ref(null)
 </script>
 
@@ -519,6 +519,7 @@ const requestItem = ref(null)
     <RequestDialog
       v-if="requestItem"
       :request="requestItem.request"
+      :response="requestItem.response"
       :error="requestItem.status === 'error' ? requestItem.error : ''"
       @close="requestItem = null"
     />

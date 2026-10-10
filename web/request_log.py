@@ -8,14 +8,17 @@ can be read in the app (GET /api/chat/request-log) or filtered with jq:
      "path": "/image/multi-edit", "model": "seedream-v5-pro-edit",
      "status": 422, "seconds": 1.8, "error": "Venice: Your prompt violates…",
      "flags": {"x-venice-is-content-violation": "true"},
-     "request": {…the body exactly as sent, images cut down to type and size…}}
+     "request": {…the body exactly as sent, images cut down to type and size…},
+     "response": {…what came back: an error's body as sent, a JSON answer,
+                  a chat reply's text and tool calls, or a file's type and size…}}
 
 The file is capped: past MAX_BYTES it's moved to requests.1.jsonl (replacing
 the previous one) and a new one starts.
 
-Providers wrap each generation call in `logged(...)`. The chat then reads the
-body back for the media card's "Request" view: `take_last()` after a call
-that worked, or the `request` attribute of the error raised.
+Providers wrap each generation call in `logged(...)` and put what came back
+in its outcome (`response_of(resp)`, or `chat_reply` for a streamed chat).
+The chat then reads the request and response back for the media card's
+"Request" view: `take_last()` after a call, or the error's `log_entry`.
 """
 
 import contextlib
@@ -31,7 +34,8 @@ from img2vid.common import config
 
 MAX_BYTES = 5 * 1024 * 1024
 _lock = threading.Lock()
-_last = threading.local()  # the latest logged request on this thread (each chat turn runs on its own)
+_last = threading.local()  # the latest logged call on this thread (each chat turn runs on its own)
+MAX_TEXT = 4000  # a non-JSON response body is kept up to this many characters
 
 
 def log_path() -> Path:
@@ -49,7 +53,45 @@ def redact(value: Any) -> Any:
     if isinstance(value, str) and value.startswith("data:") and ";base64," in value:
         head, data = value.split(",", 1)
         return f"{head},… ({len(data) * 3 // 4 // 1024} KB)"
+    if isinstance(value, str) and len(value) > 2000 and " " not in value:
+        return f"… ({len(value) * 3 // 4 // 1024} KB of base64)"  # a bare base64 image, e.g. Venice's "images"
     return value
+
+
+def response_of(resp: Any) -> Any:
+    """What an HTTP response (httpx or requests, already read) said, for the
+    log: its JSON (images cut short), its text, or a file's type and size."""
+    content_type = ((getattr(resp, "headers", None) or {}).get("content-type") or "").split(";")[0].strip()
+    if "json" in content_type or not content_type:
+        with contextlib.suppress(Exception):
+            return redact(resp.json())
+    if content_type.startswith("text/") or not content_type:
+        with contextlib.suppress(Exception):
+            text = resp.text
+            return text if len(text) <= MAX_TEXT else f"{text[:MAX_TEXT]}… ({len(text)} characters)"
+        return None
+    return {"content_type": content_type, "bytes": len(resp.content)}
+
+
+def chat_reply(chunks: Iterator[dict], outcome: dict) -> Iterator[dict]:
+    """Pass a streamed chat reply's chunks through, building its response for
+    the log as they go (so a reply cut short still shows how far it got):
+    the text, the tool calls, why it finished, and the usage."""
+    reply: dict[str, Any] = {"content": "", "tool_calls": {}, "finish_reason": None, "usage": None}
+    outcome["response"] = reply
+    for chunk in chunks:
+        for choice in chunk.get("choices") or []:
+            delta = choice.get("delta") or {}
+            reply["content"] += delta.get("content") or ""
+            for call in delta.get("tool_calls") or []:
+                slot = reply["tool_calls"].setdefault(call.get("index", 0), {"name": "", "arguments": ""})
+                fn = call.get("function") or {}
+                slot["name"] += fn.get("name") or ""
+                slot["arguments"] += fn.get("arguments") or ""
+            reply["finish_reason"] = choice.get("finish_reason") or reply["finish_reason"]
+        if chunk.get("usage"):
+            reply["usage"] = chunk["usage"]
+        yield chunk
 
 
 def record(
@@ -63,9 +105,10 @@ def record(
     error: str | None = None,
     flags: dict | None = None,
     model: str | None = None,
-) -> None:
-    """Append one entry. `request` should already be redacted. Never raises:
-    a full disk mustn't fail a generation."""
+    response: Any = None,
+) -> dict:
+    """Append one entry and return it. `request` and `response` should
+    already be redacted. Never raises: a full disk mustn't fail a generation."""
     entry = {
         "at": datetime.now().isoformat(timespec="seconds"),
         "provider": provider,
@@ -77,6 +120,7 @@ def record(
         "error": error,
         "flags": flags or None,
         "request": request,
+        "response": _jsonable(response),
     }
     try:
         with _lock:
@@ -88,6 +132,14 @@ def record(
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except OSError:
         pass
+    return entry
+
+
+def _jsonable(value: Any) -> Any:
+    """Chat replies collect tool calls by index (int keys): list them instead."""
+    if isinstance(value, dict) and isinstance(value.get("tool_calls"), dict):
+        return {**value, "tool_calls": list(value["tool_calls"].values()) or None}
+    return value
 
 
 def recent(limit: int = 100) -> list[dict]:
@@ -111,16 +163,18 @@ def recent(limit: int = 100) -> list[dict]:
 @contextlib.contextmanager
 def logged(provider: str, method: str, path: str, body: Any, model: str | None = None) -> Iterator[dict]:
     """Record one provider call made inside the block. Yields a dict the
-    caller can fill in: "status" (HTTP status) and "flags" (headers worth
-    keeping). An exception leaving the block is recorded as the error and
-    gets the shown body as its `request` attribute."""
+    caller fills in: "status" (HTTP status), "flags" (headers worth keeping)
+    and "response" (see response_of / chat_reply) — set it before raising on
+    an error response, so the log shows what the provider said. An exception
+    leaving the block is recorded as the error and gets the entry as its
+    `log_entry` attribute."""
     shown = redact(body)
-    _last.request = shown
-    outcome: dict[str, Any] = {"status": None, "flags": None}
+    outcome: dict[str, Any] = {"status": None, "flags": None, "response": None}
+    _last.entry = {"request": shown, "response": None}
     start = time.monotonic()
 
-    def done(error: str | None = None, status: int | None = None) -> None:
-        record(
+    def done(error: str | None = None, status: int | None = None) -> dict:
+        entry = record(
             provider,
             method,
             path,
@@ -130,7 +184,10 @@ def logged(provider: str, method: str, path: str, body: Any, model: str | None =
             seconds=time.monotonic() - start,
             flags=outcome["flags"],
             model=model,
+            response=outcome["response"],
         )
+        _last.entry = entry
+        return entry
 
     try:
         yield outcome
@@ -138,20 +195,20 @@ def logged(provider: str, method: str, path: str, body: Any, model: str | None =
         done("stopped by the app")
         raise
     except Exception as e:
-        done(str(e), getattr(e, "status", None))
+        entry = done(str(e), getattr(e, "status", None))
         with contextlib.suppress(AttributeError):
-            e.request = shown
+            e.log_entry = entry
         raise
     done()
 
 
-def take_last() -> Any:
-    """The body of the latest logged call on this thread (then forgets it)."""
-    request = getattr(_last, "request", None)
-    _last.request = None
-    return request
+def take_last() -> dict | None:
+    """The latest logged call on this thread, as {"request", "response"} (then forgets it)."""
+    entry = getattr(_last, "entry", None)
+    _last.entry = None
+    return {"request": entry["request"], "response": entry.get("response")} if entry else None
 
 
 def forget_last() -> None:
-    """Call before a generation, so take_last() can't return an older call's body."""
-    _last.request = None
+    """Call before a generation, so take_last() can't return an older call."""
+    _last.entry = None

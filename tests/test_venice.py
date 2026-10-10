@@ -458,7 +458,10 @@ class TestImages:
         assert "content policy" in entry["error"]
         assert entry["request"]["prompt"] == "a fox" and entry["request"]["safe_mode"] is False
         assert entry["request"]["images"] == ["data:image/png;base64,… (0 KB)"]
-        assert e.value.request == entry["request"]
+        assert entry["response"] == {
+            "error": "Your prompt violates the content policy of Venice.ai or the model provider"
+        }
+        assert e.value.log_entry == entry
 
     def test_failed_card_keeps_the_request_and_the_log_is_readable(self, client, conv, chat, venice):
         v, fake = venice
@@ -471,12 +474,15 @@ class TestImages:
         )
         item = ev[-1]["message"]["media"][0]
         assert item["status"] == "error" and item["request"]["model"] == "seedream-v5-pro"
+        assert item["response"] == {"error": "Your prompt violates the content policy"}
         log = client.get("/api/chat/request-log").json()["entries"]
-        assert log[0]["request"] == item["request"] and log[0]["status"] == 422
+        assert log[0]["request"] == item["request"] and log[0]["response"] == item["response"]
+        assert log[0]["status"] == 422
 
     def test_done_card_keeps_the_request_outside_params(self, client, conv, chat, venice):
         v, fake = venice
-        fake.routes["/image/generate"] = httpx.Response(200, json={"images": [base64.b64encode(_png_bytes()).decode()]})
+        big = base64.b64encode(_png_bytes() + b"\0" * 4096).decode()
+        fake.routes["/image/generate"] = httpx.Response(200, json={"id": "gen-1", "images": [big]})
         ev = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages",
@@ -485,6 +491,7 @@ class TestImages:
         )
         item = ev[-1]["message"]["media"][0]
         assert item["request"]["prompt"] == "a fox" and "request" not in item["params"]
+        assert item["response"]["id"] == "gen-1" and item["response"]["images"][0].endswith("KB of base64)")
 
 
 class TestVideo:
@@ -585,6 +592,22 @@ class TestText:
         assert body["stream_options"] == {"include_usage": True} and body["tools"][0]["function"]["name"] == "f"
         assert chunks[0]["choices"][0]["delta"]["content"] == "Hi"
         assert chunks[1]["usage"]["cost"] == pytest.approx(1000 * 1e-6 + 500 * 4e-6)
+
+    def test_chat_reply_is_logged_with_its_text_and_tool_calls(self, venice):
+        from web import request_log
+
+        v, fake = venice
+        call = {"index": 0, "function": {"name": "generate_image", "arguments": '{"prompt": "a fox"}'}}
+        fake.routes["/chat/completions"] = self._sse(
+            {"choices": [{"delta": {"content": "Here "}}]},
+            {"choices": [{"delta": {"content": "you go", "tool_calls": [call]}, "finish_reason": "tool_calls"}]},
+        )
+        list(v.stream_chat("venice/llama-big", [{"role": "user", "content": "draw a fox"}]))
+        entry = request_log.recent()[0]
+        assert entry["path"] == "/chat/completions" and entry["status"] == 200
+        assert entry["response"]["content"] == "Here you go"
+        assert entry["response"]["tool_calls"] == [{"name": "generate_image", "arguments": '{"prompt": "a fox"}'}]
+        assert entry["response"]["finish_reason"] == "tool_calls"
 
     def test_reported_cost_object_wins(self, venice):
         v, fake = venice

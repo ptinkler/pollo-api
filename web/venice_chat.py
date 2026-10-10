@@ -140,13 +140,15 @@ def _request(
     if not log:
         return _send(method, path, timeout, waiting_for, **kw)
     with request_log.logged("venice", method, path, kw.get("json")) as outcome:
-        resp = _send(method, path, timeout, waiting_for, **kw)
+        resp = _send(method, path, timeout, waiting_for, check=False, **kw)
         outcome["status"] = resp.status_code
         outcome["flags"] = {k: v for k, v in resp.headers.items() if k.startswith("x-venice-is-")}
+        outcome["response"] = request_log.response_of(resp)
+        _raise_for_response(resp)
     return resp
 
 
-def _send(method: str, path: str, timeout, waiting_for: str, **kw) -> httpx.Response:
+def _send(method: str, path: str, timeout, waiting_for: str, check: bool = True, **kw) -> httpx.Response:
     start = time.monotonic()
     try:
         resp = _client.request(method, f"{VENICE_BASE}{path}", headers=_headers(), timeout=timeout, **kw)
@@ -157,7 +159,8 @@ def _send(method: str, path: str, timeout, waiting_for: str, **kw) -> httpx.Resp
         ) from e
     except httpx.TimeoutException as e:
         raise VeniceError(f"Venice didn't answer in time ({type(e).__name__})", 504) from e
-    _raise_for_response(resp)
+    if check:  # else the caller checks, after logging the response
+        _raise_for_response(resp)
     return resp
 
 
@@ -543,8 +546,10 @@ def stream_chat(
             outcome["status"] = resp.status_code
             if resp.status_code >= 400:
                 resp.read()
+                outcome["response"] = request_log.response_of(resp)
             _raise_for_response(resp)
-            for chunk in sse.chat_chunks(resp.iter_lines(), _stream_error, max_seconds, should_stop):
+            chunks = sse.chat_chunks(resp.iter_lines(), _stream_error, max_seconds, should_stop)
+            for chunk in request_log.chat_reply(chunks, outcome):
                 usage = chunk.get("usage")
                 if usage:
                     chunk["usage"] = {**usage, "cost": _chat_cost(model_id, usage, chunk.get("cost"))}

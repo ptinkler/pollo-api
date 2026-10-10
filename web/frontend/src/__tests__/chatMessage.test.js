@@ -439,6 +439,7 @@ describe('ChatMessage request view', () => {
               prompt: 'a fox',
               model: 'venice/seedream-v5-pro',
               request,
+              response: { error: 'Your prompt violates the content policy' },
             },
           ],
         },
@@ -448,6 +449,7 @@ describe('ChatMessage request view', () => {
     const dialog = document.querySelector('.req-dialog')
     expect(dialog.textContent).toContain('"model": "seedream-v5-pro-edit"')
     expect(dialog.textContent).toContain('Venice: blocked')
+    expect(dialog.textContent).toContain('"error": "Your prompt violates the content policy"')
     w.unmount()
   })
 

@@ -5,7 +5,7 @@ import { useCopy } from '../composables/useClipboard'
 
 // The provider request log (web/request_log.py): every call to Venice,
 // OpenRouter and Pollo — chat replies, images, videos — with the exact
-// body sent (images cut short) and what came back.
+// body sent and what came back (images cut short).
 const showToast = inject('showToast', () => {})
 const { copiedKey, copy } = useCopy()
 
@@ -48,9 +48,9 @@ onMounted(load)
       <div>
         <h1>Request log</h1>
         <p class="sub">
-          What was sent to Venice, OpenRouter and Pollo — chat replies, images and videos — newest first. Images in a
-          request are shown as their type and size. The server keeps this in <code>logs/requests.jsonl</code> in its
-          data folder.
+          What was sent to Venice, OpenRouter and Pollo — chat replies, images and videos — and what came back, newest
+          first. Click one to see both. Images are shown as their type and size. The server keeps this in
+          <code>logs/requests.jsonl</code> in its data folder.
         </p>
       </div>
       <label class="failed-only"><input v-model="failedOnly" type="checkbox" /> Failures only</label>
@@ -77,7 +77,11 @@ onMounted(load)
         <button class="btn btn-secondary small" @click="copy(json(e), key(e, i))">
           {{ copiedKey === key(e, i) ? '✓ Copied' : '⧉ Copy JSON' }}
         </button>
+        <h4>Sent</h4>
         <pre>{{ json(e.request) }}</pre>
+        <h4>Response</h4>
+        <pre v-if="e.response != null">{{ typeof e.response === 'string' ? e.response : json(e.response) }}</pre>
+        <p v-else class="sub">Nothing recorded (the connection failed, or the provider sent no body).</p>
       </div>
     </div>
   </div>
@@ -203,6 +207,15 @@ onMounted(load)
 
 .detail {
   padding: 0 12px 12px;
+}
+
+.detail h4 {
+  margin-top: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .detail pre {

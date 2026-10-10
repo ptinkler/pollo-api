@@ -2504,7 +2504,9 @@ class TestOpenRouterImageStream:
         monkeypatch.setattr(chat.openrouter._client, "stream", lambda *a, **k: self._Stream(lines))
         request_log.forget_last()
         chat.openrouter.generate_image("x/img", "a fox", input_images=["data:image/png;base64," + "A" * 4096])
-        refs = request_log.take_last()["input_references"]
+        last = request_log.take_last()
+        assert last["response"] == {"images": ["image/png"], "cost": None}
+        refs = last["request"]["input_references"]
         assert refs == [{"type": "image_url", "image_url": {"url": "data:image/png;base64,… (3 KB)"}}]
 
     def test_event_name_alone_identifies_the_final_image(self, chat, monkeypatch):

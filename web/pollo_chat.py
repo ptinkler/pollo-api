@@ -286,6 +286,7 @@ def _submit_logged(generator, outcome: dict) -> str:
         # image-to-video-only model with no image) — nothing was sent
         raise PolloError(f"Pollo: {e}") from e
     outcome["status"] = resp.status_code
+    outcome["response"] = request_log.response_of(resp)
     try:
         body = resp.json()
     except ValueError:

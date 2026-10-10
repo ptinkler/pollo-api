@@ -262,8 +262,10 @@ def stream_chat(
         outcome["status"] = resp.status_code
         if resp.status_code >= 400:
             resp.read()
+            outcome["response"] = request_log.response_of(resp)
             _raise_for_response(resp)
-        yield from sse.chat_chunks(resp.iter_lines(), OpenRouterError, max_seconds, should_stop)
+        chunks = sse.chat_chunks(resp.iter_lines(), OpenRouterError, max_seconds, should_stop)
+        yield from request_log.chat_reply(chunks, outcome)
 
 
 # ── Image ───────────────────────────────────────────────────────────
@@ -302,11 +304,15 @@ def generate_image(
         outcome["status"] = resp.status_code
         if resp.status_code >= 400:
             resp.read()
+            outcome["response"] = request_log.response_of(resp)
             _raise_for_response(resp)
         if "text/event-stream" not in resp.headers.get("content-type", ""):
             resp.read()  # a provider that doesn't stream answers with plain JSON
+            outcome["response"] = request_log.response_of(resp)
             return _images_from_json(resp.json())
-        return _images_from_stream(resp.iter_lines())
+        images, cost = _images_from_stream(resp.iter_lines())
+        outcome["response"] = {"images": [t for _, t in images], "cost": cost}
+        return images, cost
 
 
 def _images_from_json(data: dict) -> tuple[list[tuple[bytes, str]], float | None]:
@@ -372,6 +378,7 @@ def generate_image_chat(
                 f"{OPENROUTER_BASE}/chat/completions", headers=_headers(), json=body, timeout=IMAGE_TIMEOUT
             )
         outcome["status"] = resp.status_code
+        outcome["response"] = request_log.response_of(resp)
         _raise_for_response(resp)
     data = resp.json()
     message = (data.get("choices") or [{}])[0].get("message") or {}
@@ -424,6 +431,7 @@ def submit_video(
         with _connection_guard("video job to start"):
             resp = _client.post(f"{OPENROUTER_BASE}/videos", headers=_headers(), json=body, timeout=IMAGE_TIMEOUT)
         outcome["status"] = resp.status_code
+        outcome["response"] = request_log.response_of(resp)
         _raise_for_response(resp)
     return resp.json()
 
