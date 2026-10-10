@@ -60,8 +60,18 @@ function onKeydown(e) {
   }
 }
 
+// Some browsers put a pasted screenshot only in the clipboard's items, not its files
+function pastedFiles(data) {
+  const files = [...(data?.files || [])]
+  if (files.length) return files
+  return [...(data?.items || [])]
+    .filter(i => i.kind === 'file')
+    .map(i => i.getAsFile())
+    .filter(Boolean)
+}
+
 function onPaste(e) {
-  const files = [...(e.clipboardData?.files || [])]
+  const files = pastedFiles(e.clipboardData)
   if (files.some(f => f.type.startsWith('image/'))) {
     e.preventDefault()
     emit('files', files)

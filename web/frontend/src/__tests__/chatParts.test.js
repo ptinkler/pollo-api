@@ -28,6 +28,17 @@ describe('ChatComposer', () => {
     expect(w.emitted('files')).toEqual([[[img]]])
   })
 
+  it('takes a pasted screenshot that is only in the clipboard items', async () => {
+    const w = mountComposer()
+    const img = new File(['x'], 'image.png', { type: 'image/png' })
+    const items = [
+      { kind: 'string', getAsFile: () => null },
+      { kind: 'file', getAsFile: () => img },
+    ]
+    await w.find('textarea').trigger('paste', { clipboardData: { files: [], items } })
+    expect(w.emitted('files')).toEqual([[[img]]])
+  })
+
   it('shows a stop button while sending, and what goes with the message', () => {
     const w = mountComposer({ sending: true, characterNames: ['Linh'], pinnedCount: 2 })
     expect(w.find('.send.stop').exists()).toBe(true)
@@ -90,5 +101,18 @@ describe('useChatAttachments', () => {
     expect(a.addChatImage('extra.png')).toBe(false)
     expect(showToast).toHaveBeenCalledWith(`Up to ${MAX_ATTACHMENTS} attachments per message`, 'error')
     expect(a.files.value).toHaveLength(MAX_ATTACHMENTS)
+  })
+
+  it('uploads pasted, dropped or picked images to this chat', async () => {
+    const calls = []
+    globalThis.fetch = vi.fn(async (url, opts) => {
+      calls.push([String(url), opts?.method])
+      return { ok: true, status: 200, json: async () => ({ file: 'up_1.png' }) }
+    })
+    URL.createObjectURL = vi.fn(() => 'blob:x')
+    const a = useChatAttachments({ convId: ref('c1'), ensureConversation: async () => 'c1', showToast: vi.fn() })
+    a.addFiles([new File(['x'], 'a.png', { type: 'image/png' })])
+    await vi.waitFor(() => expect(a.files.value).toEqual(['up_1.png']))
+    expect(calls).toEqual([['/api/chat/conversations/c1/attachments', 'POST']])
   })
 })

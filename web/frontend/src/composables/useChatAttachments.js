@@ -55,7 +55,13 @@ export function useChatAttachments({ convId, ensureConversation, showToast }) {
   // Files from the device (picked, pasted or dropped); only images are taken
   function addFiles(list) {
     const images = [...list].filter(f => f.type.startsWith('image/'))
-    if (images.length) attachEach(images, f => URL.createObjectURL(f), uploadChatAttachment)
+    if (images.length) {
+      attachEach(
+        images,
+        f => URL.createObjectURL(f),
+        (f, id) => uploadChatAttachment(id, f),
+      )
+    }
   }
 
   // Items from the media library, copied into the chat
