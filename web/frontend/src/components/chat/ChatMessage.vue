@@ -7,6 +7,7 @@ import { useCopy } from '../../composables/useClipboard'
 import { shortModel, fmtCost } from '../../utils/format'
 import ModelPicker from './ModelPicker.vue'
 import ForkList from './ForkList.vue'
+import RequestDialog from './RequestDialog.vue'
 
 const props = defineProps({
   message: { type: Object, required: true },
@@ -189,6 +190,8 @@ function onEditKeydown(e) {
 }
 
 const { copiedKey, copy } = useCopy()
+// The media item whose provider request is open (RequestDialog)
+const requestItem = ref(null)
 </script>
 
 <template>
@@ -424,6 +427,14 @@ const { copiedKey, copy } = useCopy()
               >
                 {{ copiedKey === item.id ? '✓ Copied' : '⧉ Prompt' }}
               </button>
+              <button
+                v-if="item.request"
+                class="caption-btn"
+                title="Show exactly what was sent to the provider"
+                @click="requestItem = item"
+              >
+                { } Request
+              </button>
             </div>
           </div>
         </div>
@@ -505,6 +516,12 @@ const { copiedKey, copy } = useCopy()
         </div>
       </template>
     </div>
+    <RequestDialog
+      v-if="requestItem"
+      :request="requestItem.request"
+      :error="requestItem.status === 'error' ? requestItem.error : ''"
+      @close="requestItem = null"
+    />
   </div>
 </template>
 

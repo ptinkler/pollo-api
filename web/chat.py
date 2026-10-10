@@ -16,7 +16,8 @@ Media item shape (stored in ChatMessage.media_json, sent to the frontend):
       "file": "img_….png" | None,    # under <data>/chat/<conversation_id>/
       "pinned": optional bool,        # user pinned this image: sent as a reference with every new image
       "prompt", "model", "job_id", "error", "cost": optional,
-      "credits": optional             # Pollo images bill in credits, not dollars
+      "credits": optional,            # Pollo images bill in credits, not dollars
+      "request": optional             # the body sent to the provider, images cut short (web/request_log.py)
     }
 
 Characters (web/characters.py): only characters the user attached to the
@@ -68,7 +69,7 @@ from pydantic import BaseModel, Field
 from img2vid.common import config
 from img2vid.common.metadata import get_db, iso
 
-from . import characters, openrouter, pollo_chat, venice_chat
+from . import characters, openrouter, pollo_chat, request_log, venice_chat
 from .auth import verify_api_key
 from .uploads import is_blank_image, read_image_upload, safe_filename
 
@@ -795,6 +796,13 @@ def api_chat_media(conv_id: str, filename: str):
     return FileResponse(path, headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
 
+@router.get("/request-log")
+def api_request_log(limit: int = 100):
+    """The latest provider requests (Venice image/video calls): what was sent
+    and what came back, newest first. See web/request_log.py."""
+    return {"entries": request_log.recent(max(1, min(limit, 1000)))}
+
+
 @router.get("/library")
 def api_chat_library():
     """Every generated image/video across chats, newest first. `attached`
@@ -1450,10 +1458,17 @@ class Turn:
             raise
         if cost:
             self.cost += float(cost)
+        sent, request = _take_request(sent)
         for i, name in enumerate(names):
             if i == 0:
                 self._update_media(
-                    item, status="done", file=name, cost=cost, credits=credits, params={**params, **sent}
+                    item,
+                    status="done",
+                    file=name,
+                    cost=cost,
+                    credits=credits,
+                    params={**params, **sent},
+                    request=request,
                 )
             else:
                 self._add_media(_saved_media("image", "generated", name, prompt=prompt, model=self.s.image_model))
@@ -1491,7 +1506,9 @@ class Turn:
             self._update_media(item, **_failure_fields(e))
             raise
         # Pollo reports what it was actually sent, defaults included
-        self._update_media(item, job_id=job["id"], params={**params, **job.get("params", {})})
+        self._update_media(
+            item, job_id=job["id"], params={**params, **job.get("params", {})}, request=job.get("request")
+        )
         start_video_poller(self.conv_id, self.message_id, item["id"], job["id"])
 
     def _video_inputs(self, first_frame: str | None, last_frame: str | None, attached: list[str], chars: list) -> dict:
@@ -1879,7 +1896,22 @@ def _is_moderation_error(e: openrouter.OpenRouterError) -> bool:
 
 
 def _failure_fields(e: openrouter.OpenRouterError) -> dict[str, Any]:
-    return {"status": "error", "error": str(e), "moderated": _is_moderation_error(e)}
+    """A failed media item's fields. Called right after the generation call,
+    on its thread: the request it sent comes from the error, or — when the
+    call itself worked but the result didn't (a Pollo task that failed, a
+    black image) — from the request log."""
+    fields = {"status": "error", "error": str(e), "moderated": _is_moderation_error(e)}
+    request = getattr(e, "request", None) or request_log.take_last()
+    if request is not None:
+        fields["request"] = request
+    return fields
+
+
+def _take_request(sent: dict) -> tuple[dict, dict | None]:
+    """(the settings sent, minus the provider request body; that body) — the
+    body is kept on the media item for the UI's "Request" view, not in params."""
+    sent = dict(sent)
+    return sent, sent.pop("request", None)
 
 
 BLACK_IMAGE_ERROR = (
@@ -1900,6 +1932,7 @@ def _run_image_generation(
     refs = [p for p in (_ref_file(conv_id, f) for f in params.get("refs") or []) if p.is_file()]
     if context is None:
         prompt = characters.with_characters(prompt, _param_characters(params))
+    request_log.forget_last()
     credits, sent = None, {}
     if venice_chat.is_venice(model):
         images, cost, sent = venice_chat.generate_image(
@@ -1931,10 +1964,17 @@ def _run_image_generation(
         name = f"img_{uuid.uuid4().hex[:12]}{IMAGE_EXTS.get(media_type, '.png')}"
         (conv_dir / name).write_bytes(data)
         names.append(name)
-    return names, cost, credits, sent
+    return names, cost, credits, {**sent, "request": request_log.take_last()}
 
 
 def _submit_video_generation(conv_id: str, model: str, prompt: str, params: dict[str, Any]) -> dict:
+    """Start a video job on the model's provider. Returns the job plus
+    "request": the body sent (from the request log)."""
+    request_log.forget_last()
+    return {**_submit_video(conv_id, model, prompt, params), "request": request_log.take_last()}
+
+
+def _submit_video(conv_id: str, model: str, prompt: str, params: dict[str, Any]) -> dict:
     frame = _ref_file(conv_id, params["first_frame"]) if params.get("first_frame") else None
     prompt = characters.with_characters(prompt, _param_characters(params))
     if venice_chat.is_venice(model):
@@ -2061,6 +2101,7 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
                 )
             params["context"] = context is not None
             names, cost, credits, sent = _run_image_generation(conv_id, model, item["prompt"], params, context)
+            sent, request = _take_request(sent)
             db.update_chat_media_item(
                 message_id,
                 media_id,
@@ -2069,6 +2110,7 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
                 cost=cost,
                 credits=credits,
                 params={**params, **sent},
+                request=request,
             )
             for extra in names[1:]:
                 db.append_chat_media_item(
@@ -2082,7 +2124,11 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
             )
             job = _submit_video_generation(conv_id, model, item["prompt"], params)
             db.update_chat_media_item(
-                message_id, media_id, job_id=job["id"], params={**params, **job.get("params", {})}
+                message_id,
+                media_id,
+                job_id=job["id"],
+                params={**params, **job.get("params", {})},
+                request=job.get("request"),
             )
             start_video_poller(conv_id, message_id, media_id, job["id"])
     except openrouter.OpenRouterError as e:

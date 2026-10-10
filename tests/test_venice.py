@@ -441,6 +441,51 @@ class TestImages:
         )
         assert ev[-1]["message"]["media"][0]["status"] == "done"
 
+    def test_requests_are_logged_with_images_cut_short(self, venice, tmp_path):
+        from web import request_log
+
+        v, fake = venice
+        ref = tmp_path / "r.png"
+        ref.write_bytes(_png_bytes())
+        fake.routes["/image/multi-edit"] = httpx.Response(
+            422, json={"error": "Your prompt violates the content policy of Venice.ai or the model provider"}
+        )
+        with pytest.raises(v.VeniceError) as e:
+            v.generate_image("venice/seedream-v5-pro", "a fox", ref_paths=[ref])
+        [entry] = request_log.recent()
+        assert entry["provider"] == "venice" and entry["path"] == "/image/multi-edit"
+        assert entry["model"] == "seedream-v5-pro-edit" and entry["status"] == 422
+        assert "content policy" in entry["error"]
+        assert entry["request"]["prompt"] == "a fox" and entry["request"]["safe_mode"] is False
+        assert entry["request"]["images"] == ["data:image/png;base64,… (0 KB)"]
+        assert e.value.request == entry["request"]
+
+    def test_failed_card_keeps_the_request_and_the_log_is_readable(self, client, conv, chat, venice):
+        v, fake = venice
+        fake.routes["/image/generate"] = httpx.Response(422, json={"error": "Your prompt violates the content policy"})
+        ev = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "a fox", **SETTINGS, "mode": "image", "image_model": "venice/seedream-v5-pro"},
+            )
+        )
+        item = ev[-1]["message"]["media"][0]
+        assert item["status"] == "error" and item["request"]["model"] == "seedream-v5-pro"
+        log = client.get("/api/chat/request-log").json()["entries"]
+        assert log[0]["request"] == item["request"] and log[0]["status"] == 422
+
+    def test_done_card_keeps_the_request_outside_params(self, client, conv, chat, venice):
+        v, fake = venice
+        fake.routes["/image/generate"] = httpx.Response(200, json={"images": [base64.b64encode(_png_bytes()).decode()]})
+        ev = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "a fox", **SETTINGS, "mode": "image", "image_model": "venice/seedream-v5-pro"},
+            )
+        )
+        item = ev[-1]["message"]["media"][0]
+        assert item["request"]["prompt"] == "a fox" and "request" not in item["params"]
+
 
 class TestVideo:
     def _frame(self, tmp_path):

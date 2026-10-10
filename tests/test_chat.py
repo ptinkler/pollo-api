@@ -2480,6 +2480,33 @@ class TestOpenRouterImageStream:
         assert sent["stream"] is True
         assert images == [(_png_bytes(), "image/png")] and cost == 0.03
 
+    def test_logs_the_request_and_the_card_keeps_it(self, client, conv, chat, monkeypatch):
+        from web import request_log
+
+        lines = ["event: error", "data: " + json.dumps({"error": {"message": "flagged by moderation"}}), ""]
+        monkeypatch.setattr(chat.openrouter._client, "stream", lambda *a, **k: self._Stream(lines))
+        ev = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "a fox", **SETTINGS, "mode": "image"},
+            )
+        )
+        item = ev[-1]["message"]["media"][0]
+        [entry] = [e for e in request_log.recent() if e["path"] == "/images"]
+        assert entry["provider"] == "openrouter" and entry["model"] == "i/model" and entry["status"] == 200
+        assert "flagged" in entry["error"]
+        assert item["request"] == entry["request"] and item["request"]["prompt"] == "a fox"
+
+    def test_reference_images_are_cut_short_in_the_log(self, chat, monkeypatch):
+        from web import request_log
+
+        lines = ["event: image_generation.completed", "data: " + json.dumps({"b64_json": self._b64()}), ""]
+        monkeypatch.setattr(chat.openrouter._client, "stream", lambda *a, **k: self._Stream(lines))
+        request_log.forget_last()
+        chat.openrouter.generate_image("x/img", "a fox", input_images=["data:image/png;base64," + "A" * 4096])
+        refs = request_log.take_last()["input_references"]
+        assert refs == [{"type": "image_url", "image_url": {"url": "data:image/png;base64,… (3 KB)"}}]
+
     def test_event_name_alone_identifies_the_final_image(self, chat, monkeypatch):
         lines = ["event: image_generation.completed", "data: " + json.dumps({"b64_json": self._b64()}), ""]
         monkeypatch.setattr(chat.openrouter._client, "stream", lambda *a, **k: self._Stream(lines))
@@ -2933,3 +2960,29 @@ class TestTitles:
     def test_clean_title_rejects_rambling(self, chat):
         assert chat._clean_title("x" * 100) is None
         assert chat._clean_title("   ") is None
+
+
+class TestPolloRequestLog:
+    def test_submit_is_logged_with_its_payload(self, chat):
+        from web import request_log
+
+        class Resp:
+            status_code = 200
+
+            def json(self):
+                return {"data": {"taskId": "t-9"}}
+
+        class Gen:
+            model_url = "https://pollo.ai/api/platform/generation/bytedance/seedance-2-0"
+
+            def get_payload(self):
+                return {"input": {"prompt": "waves", "image": "https://host/x.png"}}
+
+            def send_request(self):
+                return Resp()
+
+        assert chat.pollo_chat._submit(Gen()) == "t-9"
+        entry = request_log.recent()[0]
+        assert entry["provider"] == "pollo" and entry["model"] == "seedance-2-0" and entry["status"] == 200
+        assert entry["path"] == "/api/platform/generation/bytedance/seedance-2-0"
+        assert entry["request"] == {"input": {"prompt": "waves", "image": "https://host/x.png"}}

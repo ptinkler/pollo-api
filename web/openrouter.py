@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 
-from . import sse
+from . import request_log, sse
 
 # Overridable so a local fake can stand in during manual testing
 OPENROUTER_BASE = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
@@ -253,9 +253,13 @@ def stream_chat(
     if session_id:
         body["session_id"] = session_id
 
-    with _client.stream(
-        "POST", f"{OPENROUTER_BASE}/chat/completions", headers=_headers(), json=body, timeout=CHAT_TIMEOUT
-    ) as resp:
+    with (
+        request_log.logged("openrouter", "POST", "/chat/completions", body) as outcome,
+        _client.stream(
+            "POST", f"{OPENROUTER_BASE}/chat/completions", headers=_headers(), json=body, timeout=CHAT_TIMEOUT
+        ) as resp,
+    ):
+        outcome["status"] = resp.status_code
         if resp.status_code >= 400:
             resp.read()
             _raise_for_response(resp)
@@ -289,11 +293,13 @@ def generate_image(
     # OpenRouter (TCP keepalive didn't help). Only the final image is kept.
     body["stream"] = True
     with (
+        request_log.logged("openrouter", "POST", "/images", body) as outcome,
         _connection_guard("image"),
         _client.stream(
             "POST", f"{OPENROUTER_BASE}/images", headers=_headers(), json=body, timeout=IMAGE_TIMEOUT
         ) as resp,
     ):
+        outcome["status"] = resp.status_code
         if resp.status_code >= 400:
             resp.read()
             _raise_for_response(resp)
@@ -360,9 +366,13 @@ def generate_image_chat(
         body["image_config"] = {"aspect_ratio": aspect_ratio}
     if session_id:
         body["session_id"] = session_id
-    with _connection_guard("image"):
-        resp = _client.post(f"{OPENROUTER_BASE}/chat/completions", headers=_headers(), json=body, timeout=IMAGE_TIMEOUT)
-    _raise_for_response(resp)
+    with request_log.logged("openrouter", "POST", "/chat/completions", body) as outcome:
+        with _connection_guard("image"):
+            resp = _client.post(
+                f"{OPENROUTER_BASE}/chat/completions", headers=_headers(), json=body, timeout=IMAGE_TIMEOUT
+            )
+        outcome["status"] = resp.status_code
+        _raise_for_response(resp)
     data = resp.json()
     message = (data.get("choices") or [{}])[0].get("message") or {}
     images = []
@@ -410,9 +420,11 @@ def submit_video(
     if session_id:
         body["session_id"] = session_id
 
-    with _connection_guard("video job to start"):
-        resp = _client.post(f"{OPENROUTER_BASE}/videos", headers=_headers(), json=body, timeout=IMAGE_TIMEOUT)
-    _raise_for_response(resp)
+    with request_log.logged("openrouter", "POST", "/videos", body) as outcome:
+        with _connection_guard("video job to start"):
+            resp = _client.post(f"{OPENROUTER_BASE}/videos", headers=_headers(), json=body, timeout=IMAGE_TIMEOUT)
+        outcome["status"] = resp.status_code
+        _raise_for_response(resp)
     return resp.json()
 
 

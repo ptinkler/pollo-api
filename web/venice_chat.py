@@ -37,7 +37,7 @@ from typing import Any
 
 import httpx
 
-from . import sse
+from . import request_log, sse
 from .openrouter import CHAT_TIMEOUT, IMAGE_TIMEOUT, OpenRouterError, _keepalive_socket_options
 
 VENICE_BASE = os.getenv("VENICE_BASE_URL", "https://api.venice.ai/api/v1").rstrip("/")
@@ -133,7 +133,20 @@ def _raise_for_response(resp: httpx.Response) -> None:
     raise VeniceError(f"Venice: {message or f'HTTP {resp.status_code}'}", resp.status_code)
 
 
-def _request(method: str, path: str, *, timeout=DEFAULT_TIMEOUT, waiting_for: str = "response", **kw) -> httpx.Response:
+def _request(
+    method: str, path: str, *, timeout=DEFAULT_TIMEOUT, waiting_for: str = "response", log: bool = False, **kw
+) -> httpx.Response:
+    """One Venice call. `log`: record it in the request log (web/request_log.py)."""
+    if not log:
+        return _send(method, path, timeout, waiting_for, **kw)
+    with request_log.logged("venice", method, path, kw.get("json")) as outcome:
+        resp = _send(method, path, timeout, waiting_for, **kw)
+        outcome["status"] = resp.status_code
+        outcome["flags"] = {k: v for k, v in resp.headers.items() if k.startswith("x-venice-is-")}
+    return resp
+
+
+def _send(method: str, path: str, timeout, waiting_for: str, **kw) -> httpx.Response:
     start = time.monotonic()
     try:
         resp = _client.request(method, f"{VENICE_BASE}{path}", headers=_headers(), timeout=timeout, **kw)
@@ -521,9 +534,13 @@ def stream_chat(
         body["tools"] = tools
     start = time.monotonic()
     try:
-        with _client.stream(
-            "POST", f"{VENICE_BASE}/chat/completions", headers=_headers(), json=body, timeout=CHAT_TIMEOUT
-        ) as resp:
+        with (
+            request_log.logged("venice", "POST", "/chat/completions", body) as outcome,
+            _client.stream(
+                "POST", f"{VENICE_BASE}/chat/completions", headers=_headers(), json=body, timeout=CHAT_TIMEOUT
+            ) as resp,
+        ):
+            outcome["status"] = resp.status_code
             if resp.status_code >= 400:
                 resp.read()
             _raise_for_response(resp)
@@ -605,7 +622,7 @@ def _edit_image(info: dict, prompt: str, refs: list[Path], size: dict) -> tuple[
         "images": [_data_url(p) for p in refs],
         **size,
     }
-    resp = _request("POST", "/image/multi-edit", json=body, timeout=IMAGE_TIMEOUT, waiting_for="image")
+    resp = _request("POST", "/image/multi-edit", json=body, timeout=IMAGE_TIMEOUT, waiting_for="image", log=True)
     _check_violation(resp)
     media_type = (resp.headers.get("content-type") or "image/png").split(";")[0].strip()
     if not media_type.startswith("image/"):
@@ -623,7 +640,7 @@ def _new_image(info: dict, prompt: str, size: dict) -> tuple[list[tuple[bytes, s
         "format": "png",
         **size,
     }
-    resp = _request("POST", "/image/generate", json=body, timeout=IMAGE_TIMEOUT, waiting_for="image")
+    resp = _request("POST", "/image/generate", json=body, timeout=IMAGE_TIMEOUT, waiting_for="image", log=True)
     _check_violation(resp)
     images = [(base64.b64decode(b64), "image/png") for b64 in resp.json().get("images") or [] if b64]
     if not images:
@@ -681,7 +698,9 @@ def submit_video(
         body["audio"] = bool(generate_audio)
 
     quote = _video_quote(body)
-    data = _request("POST", "/video/queue", json=body, timeout=IMAGE_TIMEOUT, waiting_for="video job to start").json()
+    data = _request(
+        "POST", "/video/queue", json=body, timeout=IMAGE_TIMEOUT, waiting_for="video job to start", log=True
+    ).json()
     if not data.get("queue_id"):
         raise VeniceError("Venice didn't return a job id")
     job_id = f"{JOB_PREFIX}{model}:{data['queue_id']}"

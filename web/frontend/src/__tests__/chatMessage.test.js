@@ -415,3 +415,57 @@ describe('ChatMessage refs sent', () => {
     expect(all.find('.media-caption').text()).toContain('🔗 2 refs')
   })
 })
+
+describe('ChatMessage request view', () => {
+  it('shows what a card sent to the provider', async () => {
+    const request = { model: 'seedream-v5-pro-edit', prompt: 'a fox', images: ['data:image/png;base64,… (90 KB)'] }
+    const w = mount(ChatMessage, {
+      attachTo: document.body,
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+      props: {
+        convId: 'c1',
+        message: {
+          id: 3,
+          role: 'assistant',
+          content: '',
+          status: 'done',
+          media: [
+            {
+              id: 'm',
+              kind: 'image',
+              source: 'generated',
+              status: 'error',
+              error: 'Venice: blocked',
+              prompt: 'a fox',
+              model: 'venice/seedream-v5-pro',
+              request,
+            },
+          ],
+        },
+      },
+    })
+    await w.find('button[title="Show exactly what was sent to the provider"]').trigger('click')
+    const dialog = document.querySelector('.req-dialog')
+    expect(dialog.textContent).toContain('"model": "seedream-v5-pro-edit"')
+    expect(dialog.textContent).toContain('Venice: blocked')
+    w.unmount()
+  })
+
+  it('has no request button for media without one', () => {
+    const w = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        message: {
+          id: 4,
+          role: 'assistant',
+          content: '',
+          status: 'done',
+          media: [
+            { id: 'n', kind: 'image', source: 'generated', status: 'done', file: 'x.png', prompt: 'p', model: 'a/b' },
+          ],
+        },
+      },
+    })
+    expect(w.find('button[title="Show exactly what was sent to the provider"]').exists()).toBe(false)
+  })
+})

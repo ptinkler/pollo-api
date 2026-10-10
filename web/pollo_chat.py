@@ -20,6 +20,7 @@ import os
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import requests
 from PIL import Image
@@ -34,7 +35,7 @@ from img2vid.pollo.pollo_img2vid import (
     get_video_generator,
 )
 
-from . import image_hosts
+from . import image_hosts, request_log
 from .openrouter import OpenRouterError
 from .pollo_models import MODEL_INFO
 
@@ -263,12 +264,28 @@ def download_video(job_id: str, dest: Path, index: int = 0) -> None:
 
 
 def _submit(generator) -> str:
+    path = urlsplit(getattr(generator, "model_url", None) or "").path
+    model = path.rstrip("/").rsplit("/", 1)[-1] or None
+    with request_log.logged("pollo", "POST", path, _payload(generator), model=model) as outcome:
+        return _submit_logged(generator, outcome)
+
+
+def _payload(generator) -> Any:
+    """What the generator will send (None if it refuses to build one)."""
+    try:
+        return generator.get_payload()
+    except Exception:  # noqa: BLE001 — send_request reports the real problem
+        return None
+
+
+def _submit_logged(generator, outcome: dict) -> str:
     try:
         resp = generator.send_request()
     except (ConnectionError, ValueError) as e:
         # ValueError: the generator refused the request (e.g. an
         # image-to-video-only model with no image) — nothing was sent
         raise PolloError(f"Pollo: {e}") from e
+    outcome["status"] = resp.status_code
     try:
         body = resp.json()
     except ValueError:

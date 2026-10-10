@@ -1,4 +1,5 @@
 <script setup>
+import { RouterLink } from 'vue-router'
 import { ref, onMounted, computed } from 'vue'
 import {
   fetchUsage,
@@ -105,6 +106,9 @@ onMounted(loadUsage)
   <div class="usage-view">
     <header class="usage-header">
       <h1>Credit Usage</h1>
+      <RouterLink :to="{ name: 'request-log' }" class="log-link" title="What was sent to Venice, OpenRouter and Pollo"
+        >{ } Request log</RouterLink
+      >
       <div class="period-selector">
         <button v-for="d in [7, 30, 90]" :key="d" :class="{ active: days === d }" @click="changePeriod(d)">
           {{ d }}d
@@ -604,5 +608,15 @@ onMounted(loadUsage)
   .model-row {
     grid-template-columns: 1fr;
   }
+}
+.log-link {
+  margin-right: auto;
+  margin-left: 12px;
+  font-size: 0.82rem;
+  color: var(--text2);
+}
+
+.log-link:hover {
+  color: var(--text);
 }
 </style>

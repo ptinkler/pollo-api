@@ -6,6 +6,7 @@ import CharactersView from '../views/CharactersView.vue'
 import MediaView from '../views/MediaView.vue'
 // Lazy: chat pulls in the markdown renderer, which the video pages don't need
 const ChatView = () => import('../views/ChatView.vue')
+const RequestLogView = () => import('../views/RequestLogView.vue')
 
 // Empty component for child routes - ProjectView handles tab rendering via v-show
 const EmptyRouteComponent = { render: () => null }
@@ -22,6 +23,12 @@ const routes = [
     name: 'usage',
     component: UsageView,
     meta: { title: 'Credit Usage — Pollo' },
+  },
+  {
+    path: '/requests',
+    name: 'request-log',
+    component: RequestLogView,
+    meta: { title: 'Request log — Pollo' },
   },
   {
     path: '/media',
