@@ -50,15 +50,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 }
 
 .lightbox img {
+  /* Shrinks to whatever the caption and actions leave, so nothing is pushed off-screen. */
+  flex: 0 1 auto;
+  min-height: 0;
   max-width: 100%;
-  max-height: calc(100vh - 120px);
+  max-height: 100%;
   object-fit: contain;
   border-radius: 8px;
   cursor: default;
 }
 
 .lightbox-actions {
+  flex-shrink: 0;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 8px;
 }
 
@@ -74,7 +80,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 }
 
 .lightbox-caption {
+  flex-shrink: 0;
   max-width: 720px;
+  max-height: 25vh;
+  overflow-y: auto;
+  margin: 0;
   color: var(--text2);
   font-size: 0.85rem;
   text-align: center;
