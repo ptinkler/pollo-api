@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { takeFiles } from '../../utils/files'
 
 // The message box: attachments, what goes with the message (characters,
@@ -10,6 +10,8 @@ const props = defineProps({
   attachments: { type: Array, required: true }, // from useChatAttachments
   characterNames: { type: Array, default: () => [] }, // attached characters in use
   pinnedCount: { type: Number, default: 0 },
+  // The next image's reference images (ChatView's refTray), or null for none
+  refs: { type: Object, default: null },
   sending: { type: Boolean, default: false },
   canSend: { type: Boolean, default: false },
   dragging: { type: Boolean, default: false },
@@ -23,9 +25,49 @@ const emit = defineEmits([
   'cycle-mode',
   'show-sidebar',
   'unpin-all',
+  'toggle-ref',
+  'reset-refs',
 ])
 
 const textarea = ref(null)
+const trayOpen = ref(false)
+// The left-out references the user was last warned about (a send goes ahead once they've seen them)
+const warnedAbout = ref('')
+
+const leftOut = computed(() => props.refs?.dropped ?? [])
+const refsTitle = computed(() => {
+  const r = props.refs
+  if (!r) return ''
+  const of = r.max ? `${r.sent} of the ${r.max} this image model takes` : `${r.sent}`
+  return leftOut.value.length
+    ? `${leftOut.value.length} reference image${leftOut.value.length !== 1 ? 's' : ''} won't fit — click to choose`
+    : `Reference images: ${of} — click to choose`
+})
+
+watch(
+  () => props.refs,
+  r => {
+    if (!r) trayOpen.value = false
+  },
+)
+
+// Sending with references that won't fit: show them first, once
+function trySend() {
+  const sig = leftOut.value.join('|')
+  if (sig && sig !== warnedAbout.value && !props.sending && props.canSend) {
+    warnedAbout.value = sig
+    trayOpen.value = true
+    return
+  }
+  emit('send')
+}
+
+const STATE_TITLES = {
+  sent: 'Sent — click to leave it out',
+  dropped: "Won't fit the image model — click to send it instead of a later one",
+  off: 'Left out — click to send it',
+  capped: 'Over the image slider — click to send it',
+}
 
 const placeholder = computed(
   () =>
@@ -56,7 +98,7 @@ function focus({ end = false } = {}) {
 function onKeydown(e) {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault()
-    emit('send')
+    trySend()
   }
 }
 
@@ -92,6 +134,42 @@ defineExpose({ focus, autosize })
         </div>
       </div>
 
+      <div v-if="refs && trayOpen" class="ref-tray">
+        <div class="ref-head">
+          <span :class="{ warn: leftOut.length }">
+            <template v-if="leftOut.length">
+              ⚠ {{ leftOut.length }} won't fit — {{ refs.max }} max for this image model. Pick which go, or send again
+              to send these {{ refs.sent }}.
+            </template>
+            <template v-else>Sending {{ refs.sent }}{{ refs.max ? ` of ${refs.max} max` : '' }}.</template>
+            <template v-if="refs.guess"> In Auto mode the chat model picks the characters in each picture.</template>
+          </span>
+          <button
+            v-if="refs.customised"
+            class="ref-link"
+            title="Back to the automatic picks"
+            @click="emit('reset-refs')"
+          >
+            Reset
+          </button>
+          <button class="ctx-x" title="Close" @click="trayOpen = false">✕</button>
+        </div>
+        <div v-for="g in refs.groups" :key="g.label" class="ref-group">
+          <span class="ref-label">{{ g.label }}</span>
+          <button
+            v-for="it in g.items"
+            :key="it.ref"
+            class="ref"
+            :class="[it.state, { forced: it.forced }]"
+            :title="STATE_TITLES[it.state]"
+            @click="emit('toggle-ref', it)"
+          >
+            <img :src="it.url" alt="" loading="lazy" />
+            <span class="ref-badge">{{ it.state === 'sent' ? it.order : it.state === 'off' ? '✕' : '–' }}</span>
+          </button>
+        </div>
+      </div>
+
       <div class="composer-row">
         <label class="icon-btn" title="Attach images (or paste / drop)">
           📎
@@ -123,6 +201,15 @@ defineExpose({ focus, autosize })
           📌 {{ pinnedCount }}
           <button class="ctx-x" title="Unpin all" @click="emit('unpin-all')">✕</button>
         </span>
+        <button
+          v-if="refs"
+          class="ctx-chip refs"
+          :class="{ warn: leftOut.length, open: trayOpen }"
+          :title="refsTitle"
+          @click="trayOpen = !trayOpen"
+        >
+          {{ leftOut.length ? '⚠' : '🖼' }} {{ refs.sent }}{{ refs.max ? `/${refs.max}` : '' }}
+        </button>
         <textarea
           ref="textarea"
           v-model="draft"
@@ -133,7 +220,7 @@ defineExpose({ focus, autosize })
           @paste="onPaste"
         ></textarea>
         <button v-if="sending" class="send stop" title="Stop" @click="emit('stop')">■</button>
-        <button v-else class="send" :disabled="!canSend" title="Send (Enter)" @click="emit('send')">↑</button>
+        <button v-else class="send" :disabled="!canSend" title="Send (Enter)" @click="trySend">↑</button>
       </div>
     </div>
   </div>
@@ -168,6 +255,128 @@ defineExpose({ focus, autosize })
   flex-shrink: 0;
   cursor: default;
   padding-right: 4px;
+}
+
+.ctx-chip.refs {
+  flex-shrink: 0;
+}
+
+.ctx-chip.open {
+  border-color: var(--accent);
+}
+
+.ctx-chip.warn,
+.ref-head .warn {
+  color: var(--yellow);
+}
+
+.ctx-chip.warn {
+  border-color: var(--yellow);
+}
+
+/* The next image's reference images */
+.ref-tray {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 4px 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+.ref-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--text2);
+  line-height: 1.4;
+}
+
+.ref-head > span {
+  flex: 1;
+}
+
+.ref-link {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.ref-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.ref-label {
+  width: 72px;
+  font-size: 0.7rem;
+  color: var(--text2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ref {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 8px;
+  border: 2px solid var(--accent);
+  background: var(--surface);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.ref img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ref.forced {
+  border-color: var(--green);
+}
+
+.ref.dropped,
+.ref.capped {
+  border: 2px dashed var(--yellow);
+}
+
+.ref.dropped img,
+.ref.capped img {
+  opacity: 0.45;
+}
+
+.ref.off {
+  border-color: var(--border);
+}
+
+.ref.off img {
+  opacity: 0.2;
+  filter: grayscale(1);
+}
+
+.ref-badge {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 0.6rem;
+  line-height: 16px;
+  text-align: center;
 }
 
 .ctx-names {

@@ -29,15 +29,17 @@ const showToast = inject('showToast', () => {})
 
 const name = ref('')
 const description = ref('')
-const kept = ref([]) // existing image filenames, main first
-const pending = ref([]) // images to add on save
+// The images in order, main first: saved ones { file } and ones to add on save
+// ({ kind, preview, … } as in `seed`, or { kind: 'file', file: File })
+const images = ref([])
+const dragFrom = ref(null) // index of the image being dragged
 const saving = ref(false)
 const pickerOpen = ref(false)
 const nameInput = ref(null)
 let keySeq = 0
 
 const isNew = computed(() => !props.character)
-const total = computed(() => kept.value.length + pending.value.length)
+const total = computed(() => images.value.length)
 
 watch(
   () => props.open,
@@ -45,8 +47,10 @@ watch(
     if (!open) return
     name.value = props.character?.name ?? ''
     description.value = props.character?.description ?? ''
-    kept.value = [...(props.character?.images ?? [])]
-    pending.value = props.seed.map(s => ({ ...s, key: ++keySeq }))
+    images.value = [
+      ...(props.character?.images ?? []).map(f => ({ kind: 'saved', saved: f, key: f })),
+      ...props.seed.map(s => ({ ...s, key: ++keySeq })),
+    ]
     nextTick(() => nameInput.value?.focus())
   },
 )
@@ -54,23 +58,40 @@ watch(
 function addFiles(files) {
   for (const file of [...files].filter(f => f.type.startsWith('image/'))) {
     if (total.value >= MAX_IMAGES) return showToast(`Up to ${MAX_IMAGES} images per character`, 'error')
-    pending.value.push({ kind: 'file', file, preview: URL.createObjectURL(file), key: ++keySeq })
+    images.value.push({ kind: 'file', file, preview: URL.createObjectURL(file), key: ++keySeq })
   }
 }
 
 function addFromLibrary(items) {
   for (const i of items.slice(0, MAX_IMAGES - total.value)) {
-    pending.value.push({ kind: 'media', mediaId: i.id, preview: i.thumb_url || i.url, key: ++keySeq })
+    images.value.push({ kind: 'media', mediaId: i.id, preview: i.thumb_url || i.url, key: ++keySeq })
   }
 }
 
-function removePending(p) {
-  if (p.kind === 'file') URL.revokeObjectURL(p.preview)
-  pending.value = pending.value.filter(x => x !== p)
+const imageUrl = img => (img.kind === 'saved' ? characterImageUrl(props.character.id, img.saved) : img.preview)
+
+function removeImage(img) {
+  if (img.kind === 'file') URL.revokeObjectURL(img.preview)
+  images.value = images.value.filter(x => x !== img)
 }
 
-function makeMain(file) {
-  kept.value = [file, ...kept.value.filter(f => f !== file)]
+function moveImage(from, to) {
+  if (from === to || from == null) return
+  const list = [...images.value]
+  list.splice(to, 0, ...list.splice(from, 1))
+  images.value = list
+}
+
+// Drag a thumbnail onto another to put it there (images dropped from outside are added)
+function onDragStart(e, i) {
+  dragFrom.value = i
+  e.dataTransfer.effectAllowed = 'move'
+}
+
+function onDropOn(e, i) {
+  if (dragFrom.value == null) return addFiles(e.dataTransfer?.files || [])
+  moveImage(dragFrom.value, i)
+  dragFrom.value = null
 }
 
 function addImage(id, p) {
@@ -85,10 +106,17 @@ async function save() {
   saving.value = true
   try {
     const fields = { name: name.value.trim(), description: description.value.trim() }
+    const saved = images.value.filter(img => img.kind === 'saved').map(img => img.saved)
     let c = isNew.value
       ? await createCharacter({ ...fields, conversation_id: props.conversationId })
-      : await updateCharacter(props.character.id, { ...fields, images: kept.value })
-    for (const p of pending.value) c = await addImage(c.id, p)
+      : await updateCharacter(props.character.id, { ...fields, images: saved })
+    // New images are added at the end; then put everything in the order shown
+    const order = []
+    for (const img of images.value) {
+      if (img.kind !== 'saved') c = await addImage(c.id, img)
+      order.push(img.kind === 'saved' ? img.saved : c.images[c.images.length - 1])
+    }
+    if (order.join('/') !== c.images.join('/')) c = await updateCharacter(c.id, { images: order })
     emit('saved', c)
     emit('close')
   } catch (e) {
@@ -132,7 +160,8 @@ async function remove() {
         </div>
         <p class="sub">
           The description is added to prompts and the images go to the model as references, so the character looks the
-          same every time. The first image is the main one.
+          same every time. Drag the images into order: the first is the main one, and when an image model takes fewer
+          images than there are, each character's first ones go before the rest.
         </p>
 
         <label for="char-name">Name</label>
@@ -149,15 +178,25 @@ async function remove() {
           >Images <span class="count">{{ total }}/{{ MAX_IMAGES }}</span></label
         >
         <div class="images" @dragover.prevent @drop.prevent="addFiles($event.dataTransfer?.files || [])">
-          <div v-for="(f, i) in kept" :key="f" class="img" :class="{ main: i === 0 }">
-            <img :src="characterImageUrl(character.id, f)" alt="" />
+          <div
+            v-for="(img, i) in images"
+            :key="img.key"
+            class="img"
+            :class="{ main: i === 0, pending: img.kind !== 'saved', dragging: dragFrom === i }"
+            draggable="true"
+            title="Drag to reorder"
+            @dragstart="onDragStart($event, i)"
+            @dragend="dragFrom = null"
+            @dragover.prevent
+            @drop.prevent.stop="onDropOn($event, i)"
+          >
+            <img :src="imageUrl(img)" alt="" draggable="false" />
             <span v-if="i === 0" class="main-tag">main</span>
-            <button v-else class="img-btn star" title="Make this the main image" @click="makeMain(f)">★</button>
-            <button class="img-btn x-btn" title="Remove" @click="kept = kept.filter(k => k !== f)">✕</button>
-          </div>
-          <div v-for="p in pending" :key="p.key" class="img pending">
-            <img :src="p.preview" alt="" />
-            <button class="img-btn x-btn" title="Remove" @click="removePending(p)">✕</button>
+            <span v-else class="pos-tag">{{ i + 1 }}</span>
+            <button v-if="i > 0" class="img-btn star" title="Make this the main image" @click="moveImage(i, 0)">
+              ★
+            </button>
+            <button class="img-btn x-btn" title="Remove" @click="removeImage(img)">✕</button>
           </div>
           <template v-if="total < MAX_IMAGES">
             <label class="img add" title="Upload from this computer (or drop images here)">
@@ -330,6 +369,14 @@ textarea {
   border-color: var(--accent);
 }
 
+.img[draggable='true'] {
+  cursor: grab;
+}
+
+.img.dragging {
+  opacity: 0.4;
+}
+
 .img img {
   width: 100%;
   height: 100%;
@@ -368,6 +415,17 @@ textarea {
   padding: 1px 6px;
   border-radius: 6px;
   background: var(--accent);
+  color: #fff;
+}
+
+.pos-tag {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  font-size: 0.62rem;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.65);
   color: #fff;
 }
 

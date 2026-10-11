@@ -239,6 +239,13 @@ class TurnOptions(BaseModel):
     generate_audio: bool | None = None
 
 
+class RefChoices(BaseModel):
+    """The composer's reference picks: chat files or "char:" refs."""
+
+    on: list[str] = []  # sent ahead of the automatic picks
+    off: list[str] = []  # never sent
+
+
 class TurnSettings(BaseModel):
     mode: str = "auto"  # auto | text | image | video
     history_limit: int | None = Field(default=None, ge=1)  # past messages sent to the chat model; None = all
@@ -250,6 +257,7 @@ class TurnSettings(BaseModel):
     # the chat model's choice (Auto), else the media model's default.
     image_options: TurnOptions = TurnOptions()
     video_options: TurnOptions = TurnOptions()
+    ref_choices: RefChoices = RefChoices()
 
 
 class SendMessage(TurnSettings):
@@ -968,7 +976,7 @@ def _require_idle(conv_id: str) -> None:
         raise HTTPException(409, "Wait for the current reply to finish (or stop it) first")
 
 
-_REMEMBERED_SETTINGS = {"mode", "history_limit", "image_limit", "image_options", "video_options"}
+_REMEMBERED_SETTINGS = {"mode", "history_limit", "image_limit", "image_options", "video_options", "ref_choices"}
 
 
 def _remember_settings(conv, settings: TurnSettings) -> None:
@@ -1096,10 +1104,18 @@ class Turn:
         if not prompt:
             raise openrouter.OpenRouterError("Image mode needs a text prompt")
         chars = self.characters  # every attached character
+        dropped: list[str] = []
         refs = [m["file"] for m in (user.media if user else []) if m["kind"] == "image" and m.get("file")]
         if self._accepts_refs():
-            refs = _with_character_refs(refs + self._pinned_images(), chars, self.s.image_limit, after=len(refs))
-        self._generate_image(prompt, self.s.image_options.aspect_ratio, refs, chars=chars)
+            refs, dropped = _plan_refs(
+                refs + self._pinned_images(),
+                chars,
+                self.s.image_limit,
+                after=len(refs),
+                max_refs=self._max_refs(),
+                choices=self.s.ref_choices,
+            )
+        self._generate_image(prompt, self.s.image_options.aspect_ratio, refs, chars=chars, dropped=dropped)
 
     def _direct_video(self) -> None:
         user = self._last_user()
@@ -1250,15 +1266,17 @@ class Turn:
     def _image_tool(self, prompt: str, args: dict, source: str | None, chars: list) -> dict:
         # A setting picked in the composer beats the model's guess
         ratio = self.s.image_options.aspect_ratio or args.get("aspect_ratio")
-        refs = self._image_refs(args, source, chars)
+        refs, dropped = self._image_refs(args, source, chars)
         ref_args = {k: args[k] for k in ("source_image", "keep_consistent", "characters") if k in args}
-        self._generate_image(prompt, ratio, refs, ref_args, chars)
+        self._generate_image(prompt, ratio, refs, ref_args, chars, dropped)
         result: dict[str, Any] = {"ok": True, "result": IMAGE_TOOL_RESULT}
         if chars:
             result["characters"] = [c.name for c in chars]
         pinned = self._pinned_images()
         if refs:
             result["reference_images"] = len(refs)
+            if dropped:
+                result["references_left_out"] = f"{len(dropped)} (the image model takes at most {len(refs)})"
             if set(refs) & set(pinned):
                 result["pinned_by_user"] = len(set(refs) & set(pinned))
         elif (ref_args or pinned) and not self._accepts_refs():
@@ -1384,22 +1402,27 @@ class Turn:
         info = _model_info("image", self.s.image_model)
         return not info or "image" in (info.get("input_modalities") or [])
 
-    def _image_refs(self, args: dict, source: str | None, chars: list) -> list[str]:
-        """Reference images for generate_image: the edit source (source_image),
+    def _max_refs(self) -> int | None:
+        """How many reference images the image model takes (None = unknown)."""
+        return (_model_info("image", self.s.image_model) or {}).get("max_refs")
+
+    def _image_refs(self, args: dict, source: str | None, chars: list) -> tuple[list[str], list[str]]:
+        """Reference images for generate_image, and those that didn't fit
+        (see _plan_refs for the priority): the edit source (source_image),
         the images of the characters it named, the images the user pinned,
         and the most recent images if the model asked (keep_consistent).
-        That order is also the priority when a model takes fewer images than
-        that (Venice's edit models): recent picks go first, then pins.
         Pins are the user's choice; the app never adds references on its own."""
         if not self._accepts_refs():
-            return []  # this image model can't take references
+            return [], []  # this image model can't take references
         lead = [source] if source else []
         pinned = self._pinned_images()
         recent = []
         if args.get("keep_consistent") is True:
             recent = [f for f in self._latest_images(CONSISTENCY_REFS) if f not in pinned and f not in lead]
         chat_refs = _dedupe(lead + pinned + recent[: max(CONSISTENCY_REFS - len(lead), 0)])
-        return _with_character_refs(chat_refs, chars, self.s.image_limit, after=len(lead))
+        return _plan_refs(
+            chat_refs, chars, self.s.image_limit, after=len(lead), max_refs=self._max_refs(), choices=self.s.ref_choices
+        )
 
     # ― generation ―
     def _add_media(self, item: dict) -> None:
@@ -1419,11 +1442,14 @@ class Turn:
         ref_files: list[str],
         ref_args: dict | None = None,
         chars: list | None = None,
+        dropped: list[str] | None = None,
     ) -> None:
         if not self.s.image_model:
             raise openrouter.OpenRouterError("No image model selected")
         # Params are stored on the item so a failed image can be retried as-is
         params = {"aspect_ratio": aspect_ratio, "resolution": self.s.image_options.resolution, "refs": ref_files}
+        if dropped:
+            params["refs_dropped"] = dropped  # more than the image model takes
         if ref_args:
             params["ref_args"] = ref_args  # the model's own reference choices, replayed in history
         if chars:
@@ -1519,7 +1545,9 @@ class Turn:
         out: dict[str, Any] = {}
         if info.get("reference_images") or info.get("family") == "motion":
             own = _dedupe([*attached, *([first_frame] if first_frame else []), *self._pinned_images()])
-            out["refs"] = _with_character_refs(own, chars, None, after=len(attached) or (1 if first_frame else 0))
+            out["refs"], _ = _plan_refs(
+                own, chars, None, after=len(attached) or (1 if first_frame else 0), choices=self.s.ref_choices
+            )
         if last_frame and "last_frame" in (info.get("frame_images") or []):
             out["last_frame"] = last_frame
         if info.get("video_input"):
@@ -1658,15 +1686,35 @@ def _characters_note(attached: list) -> str:
     return "\n\n".join(parts)
 
 
-def _with_character_refs(
-    chat_refs: list[str], chars: list, image_limit: int | None, after: int | None = None
-) -> list[str]:
-    """Chat images (up to `image_limit`, None = all) plus every image of the
-    characters in the picture, which aren't capped. The character images go
-    after the first `after` chat images (default: all of them)."""
-    chat_refs = _dedupe(chat_refs)[:image_limit]
-    split = len(chat_refs) if after is None else min(after, len(chat_refs))
-    return chat_refs[:split] + characters.reference_refs(chars) + chat_refs[split:]
+def _plan_refs(
+    chat_refs: list[str],
+    chars: list,
+    image_limit: int | None,
+    after: int | None = None,
+    max_refs: int | None = None,
+    choices: RefChoices | None = None,
+) -> tuple[list[str], list[str]]:
+    """The reference images to send, and those left out because the model
+    takes fewer (`max_refs`, None = unknown). Chat images are capped at
+    `image_limit` (None = all); character images aren't.
+
+    They're sent in priority order, so a model that trims the list itself
+    keeps the important ones too: the first `after` chat images (attachments,
+    the edit source), the ones the user switched on in the composer, each
+    character's main image, the other chat images (pins, recent), then the
+    characters' other images. Images the user switched off never go."""
+    on, off = (choices.on, set(choices.off)) if choices else ([], set())
+    kept = [r for r in _dedupe(chat_refs) if r not in off]
+    lead = kept if after is None else [r for r in _dedupe(chat_refs[:after]) if r not in off]
+    chat_refs = kept[:image_limit]
+    split = min(len(lead), len(chat_refs))
+    every = characters.reference_refs(chars, skip=off)
+    mains = characters.reference_refs(chars, per_character=1, skip=off)
+    candidates = set(kept) | set(every)  # a switched-on chat image goes even over the slider
+    ordered = _dedupe(chat_refs[:split] + [r for r in on if r in candidates] + mains + chat_refs[split:] + every)
+    if max_refs is None:
+        return ordered, []
+    return ordered[:max_refs], ordered[max_refs:]
 
 
 def _param_characters(params: dict) -> list:

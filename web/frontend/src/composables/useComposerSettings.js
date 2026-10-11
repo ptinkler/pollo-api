@@ -76,6 +76,9 @@ export function useComposerSettings(models) {
     generate_audio: true,
     ...prefs.videoOpts,
   })
+  // Reference images switched on (sent first) or off (never sent) in the
+  // composer: chat filenames or "char:<id>/<file>". Per chat, not per browser.
+  const refChoices = reactive({ on: [], off: [] })
 
   watch(
     [() => ({ ...selected }), mode, memoryIndex, imageIndex, () => ({ ...imageOpts }), () => ({ ...videoOpts })],
@@ -146,6 +149,7 @@ export function useComposerSettings(models) {
       if (conv[`${kind}_model`]) selected[kind] = conv[`${kind}_model`]
     }
     const st = conv.settings
+    setRefChoices(st?.ref_choices)
     if (!st) return
     if (MODES.some(m => m.id === st.mode)) mode.value = st.mode
     setStep(memoryIndex, MEMORY_STEPS, st.history_limit)
@@ -153,6 +157,11 @@ export function useComposerSettings(models) {
     Object.assign(imageOpts, optionsOrUnset(st.image_options, ['aspect_ratio', 'resolution']))
     Object.assign(videoOpts, optionsOrUnset(st.video_options, ['aspect_ratio', 'resolution', 'duration']))
     if (st.video_options?.generate_audio != null) videoOpts.generate_audio = st.video_options.generate_audio
+  }
+
+  function setRefChoices(choices) {
+    refChoices.on = [...(choices?.on || [])]
+    refChoices.off = [...(choices?.off || [])]
   }
 
   // The settings a turn is sent with (retries and edits too: they run in the mode selected now)
@@ -171,6 +180,7 @@ export function useComposerSettings(models) {
         duration: videoOpts.duration ? Number(videoOpts.duration) : null,
         generate_audio: videoInfo.value?.generate_audio ? videoOpts.generate_audio : null,
       },
+      ref_choices: { on: [...refChoices.on], off: [...refChoices.off] },
     }
   }
 
@@ -186,6 +196,8 @@ export function useComposerSettings(models) {
     imageLimit,
     imageOpts,
     videoOpts,
+    refChoices,
+    setRefChoices,
     textInfo,
     imageInfo,
     videoInfo,

@@ -219,8 +219,8 @@ class TestInChat:
         ]
         assert "Linh:" in got["prompt"] and "- Bao" in got["prompt"]
 
-    def test_character_images_come_before_pins_and_recent_picks(self, client, conv, chat, db, monkeypatch):
-        """The priority when a model takes fewer images than that (Venice edit models keep the first N)."""
+    def test_main_character_images_come_before_pins_and_recent_picks(self, client, conv, chat, db, monkeypatch):
+        """The priority when a model takes fewer images than that (see TestReferenceCaps)."""
         linh = _make(client)
         self._attach(client, conv, linh)
         (chat._conv_dir(conv["id"]) / "g.png").write_bytes(_png_bytes())
@@ -632,6 +632,71 @@ class TestReferenceCaps:
             )
         )
         assert len(ev[-1]["message"]["media"][0]["params"]["refs"]) == 8
+
+    def _pins(self, chat, db, conv, n):
+        db.add_chat_message(conv["id"], "user", "pics")
+        for i in range(n):
+            (chat._conv_dir(conv["id"]) / f"p{i}.png").write_bytes(_png_bytes())
+        db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "ok",
+            media=[
+                {
+                    "id": f"p{i}",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "done",
+                    "file": f"p{i}.png",
+                    "prompt": "x",
+                    "pinned": True,
+                }
+                for i in range(n)
+            ],
+        )
+
+    def _send_image(self, client, conv, chat, monkeypatch, max_refs, **settings):
+        real = chat._model_info
+        monkeypatch.setattr(
+            chat,
+            "_model_info",
+            lambda kind, mid: (
+                {"input_modalities": ["text", "image"], "max_refs": max_refs} if kind == "image" else real(kind, mid)
+            ),
+        )
+        monkeypatch.setattr(
+            chat.openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
+        )
+        ev = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "go", **SETTINGS, "mode": "image", **settings},
+            )
+        )
+        return ev[-1]["message"]["media"][0]["params"]
+
+    def test_a_model_maximum_keeps_room_for_chat_images(self, client, conv, chat, db, monkeypatch):
+        """Each character's main image first, then pins, then the characters' other images."""
+        a, b = _make(client, name="A", images=3), _make(client, name="B", images=3)
+        client.patch(f"/api/chat/conversations/{conv['id']}", json={"character_ids": [a["id"], b["id"]]})
+        self._pins(chat, db, conv, 2)
+        params = self._send_image(client, conv, chat, monkeypatch, max_refs=6)
+        ref = lambda c, i: f"char:{c['id']}/{c['images'][i]}"  # noqa: E731
+        assert params["refs"] == [ref(a, 0), ref(b, 0), "p0.png", "p1.png", ref(a, 1), ref(b, 1)]
+        assert params["refs_dropped"] == [ref(a, 2), ref(b, 2)]
+
+    def test_composer_picks_switch_references_on_and_off(self, client, conv, chat, db, monkeypatch):
+        a = _make(client, name="A", images=3)
+        client.patch(f"/api/chat/conversations/{conv['id']}", json={"character_ids": [a["id"]]})
+        self._pins(chat, db, conv, 2)
+        ref = lambda i: f"char:{a['id']}/{a['images'][i]}"  # noqa: E731
+        choices = {"on": [ref(2), "not-a-candidate.png"], "off": [ref(0), "p1.png"]}
+        params = self._send_image(client, conv, chat, monkeypatch, max_refs=2, ref_choices=choices)
+        # The forced one goes first, then the (new) main image; switched-off ones never go
+        assert params["refs"] == [ref(2), ref(1)]
+        assert params["refs_dropped"] == ["p0.png"]
+        settings = client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["settings"]
+        assert settings["ref_choices"] == choices  # remembered with the chat
 
     @patch("web.api.threading.Thread")
     def test_generate_sends_every_character_image(self, thread, client, db, tmp_path, monkeypatch):

@@ -263,7 +263,9 @@ def _build_catalogue() -> dict[str, Any]:
                 "conversational": False,
                 "_generate": m["id"],
                 "_edit": edit_id,
-                "_max_refs": ((edits[edit_id].get("model_spec") or {}).get("constraints") or {}).get("maxInputImages")
+                # Reference images its edit twin takes (one when Venice doesn't say)
+                "max_refs": ((edits[edit_id].get("model_spec") or {}).get("constraints") or {}).get("maxInputImages")
+                or 1
                 if edit_id
                 else None,
                 "price": _price_tag(
@@ -299,7 +301,7 @@ def _build_catalogue() -> dict[str, Any]:
                 "conversational": False,
                 "_generate": None,
                 "_edit": edit_id,
-                "_max_refs": c.get("maxInputImages"),
+                "max_refs": c.get("maxInputImages") or 1,
                 "price": _price_tag(
                     _image_price(spec.get("pricing") or {}, "inpaint", None, c.get("defaultResolution")),
                     c.get("defaultResolution"),
@@ -611,7 +613,7 @@ def generate_image(
     sent: dict[str, Any] = {"aspect_ratio": aspect_ratio, "resolution": resolution}
     refs = [p for p in ref_paths or [] if p.is_file()]
     if refs and info["_edit"]:
-        refs = refs[: info.get("_max_refs") or 1]
+        refs = refs[: info.get("max_refs") or 1]
         images, cost = _edit_image(info, prompt, refs, size)
         return images, cost, {**sent, "refs_used": len(refs)}
     if not info["_generate"]:

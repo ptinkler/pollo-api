@@ -32,6 +32,7 @@ import {
   sendChatMessage,
   switchChatBranch,
 } from '../composables/useChat'
+import { characterImageUrl } from '../composables/useCharacters'
 import { useChatAttachments } from '../composables/useChatAttachments'
 import { upsert, useChatCharacters } from '../composables/useChatCharacters'
 import { useChatInstructions } from '../composables/useChatInstructions'
@@ -41,6 +42,7 @@ import { IMAGE_STEPS, MEMORY_STEPS, MODES, useComposerSettings } from '../compos
 import { provideFolded } from '../composables/useFolded'
 import { useMessagePolling } from '../composables/useMessagePolling'
 import { shortModel } from '../utils/format'
+import { charRef, planRefs } from '../utils/refPlan'
 
 const route = useRoute()
 const router = useRouter()
@@ -70,6 +72,8 @@ const {
   imageLimit,
   imageOpts,
   videoOpts,
+  refChoices,
+  setRefChoices,
   textInfo,
   imageInfo,
   videoInfo,
@@ -176,6 +180,67 @@ const pinned = computed(() =>
   ),
 )
 
+// ── Reference images ─────────────────────────────────────────────────
+// What the next image goes with, in the composer's tray: attachments (Image
+// mode), pins and the attached characters' images, checked against how many
+// the image model takes. In Auto mode the chat model decides which characters
+// are in a picture and may add the image it edits, so it's a best guess there.
+const refTray = computed(() => {
+  if (!['auto', 'image'].includes(mode.value) || !selected.image) return null
+  if (imageInfo.value && !takesImages(imageInfo.value)) return null
+  const pinnedFiles = messages.value.flatMap(m =>
+    (m.media || [])
+      .filter(i => i.pinned && i.kind === 'image' && (i.status || 'done') === 'done' && i.file)
+      .map(i => i.file),
+  )
+  const attached = mode.value === 'image' ? attachments.value.filter(a => a.file) : []
+  const chars = characterSupport.value.ok ? attachedCharacters.value.filter(c => c.images?.length) : []
+  if (!attached.length && !pinnedFiles.length && !chars.length) return null
+  const plan = planRefs({
+    lead: attached.map(a => a.file),
+    chat: pinnedFiles,
+    characters: chars,
+    imageLimit: imageLimit.value,
+    maxRefs: imageInfo.value?.max_refs ?? null,
+    choices: refChoices,
+  })
+  const item = (ref, url) => {
+    const order = plan.sent.indexOf(ref)
+    const state =
+      order !== -1 ? 'sent' : plan.dropped.includes(ref) ? 'dropped' : plan.off.includes(ref) ? 'off' : 'capped'
+    return { ref, url, state, order: order + 1, forced: refChoices.on.includes(ref) }
+  }
+  const groups = [
+    attached.length && { label: 'Attached', items: attached.map(a => item(a.file, a.preview)) },
+    pinnedFiles.length && {
+      label: 'Pinned',
+      items: [...new Set(pinnedFiles)].map(f => item(f, chatMediaUrl(convId.value, f))),
+    },
+    ...chars.map(c => ({
+      label: c.name,
+      items: c.images.map(f => item(charRef(c.id, f), characterImageUrl(c.id, f))),
+    })),
+  ].filter(Boolean)
+  return {
+    groups,
+    max: imageInfo.value?.max_refs ?? null,
+    sent: plan.sent.length,
+    dropped: plan.dropped,
+    customised: refChoices.on.length + refChoices.off.length > 0,
+    guess: mode.value === 'auto',
+  }
+})
+
+// Click a thumbnail: one being sent is switched off, any other is switched on
+// (sent ahead of the automatic picks)
+function toggleRef({ ref, state }) {
+  const on = refChoices.on.filter(r => r !== ref)
+  const off = refChoices.off.filter(r => r !== ref)
+  if (state === 'sent') off.push(ref)
+  else on.push(ref)
+  setRefChoices({ on, off })
+}
+
 const lastAssistantId = computed(() => {
   const last = messages.value[messages.value.length - 1]
   return last?.role === 'assistant' ? last.id : null
@@ -262,6 +327,7 @@ async function loadConversation(id) {
     messages.value = []
     instructionId.value = defaultInstructionId()
     characterIds.value = []
+    setRefChoices(null)
     return
   }
   loadingConv.value = true
@@ -906,6 +972,7 @@ onBeforeUnmount(() => {
         :attachments="attachments"
         :character-names="characterSupport.ok ? attachedCharacters.map(c => c.name) : []"
         :pinned-count="pinned.length"
+        :refs="refTray"
         :sending="sending"
         :can-send="!!canSend"
         :dragging="dragging"
@@ -917,6 +984,8 @@ onBeforeUnmount(() => {
         @cycle-mode="cycleMode"
         @show-sidebar="sidebarOpen = true"
         @unpin-all="unpinAll"
+        @toggle-ref="toggleRef"
+        @reset-refs="setRefChoices(null)"
       />
     </section>
 

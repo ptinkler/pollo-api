@@ -177,16 +177,20 @@ def with_characters(prompt: str, chars: list) -> str:
     return f"{prompt}\n\n{block}" if block else prompt
 
 
-def reference_refs(chars: list, limit: int | None = None) -> list[str]:
-    """The characters' "char:" image refs (up to `limit`, None = all): each
+def reference_refs(chars: list, limit: int | None = None, per_character: int | None = None, skip=()) -> list[str]:
+    """The characters' "char:" image refs (up to `limit`, None = all; up to
+    `per_character` of each, None = all; never those in `skip`): each
     character's first image, then their second, and so on — so every
     character gets in before any gets two."""
     refs: list[str] = []
-    for i in range(MAX_IMAGES):
+    files = {
+        c.id: [f for f in c.images if (char_dir(c.id) / f).is_file() and image_ref(c.id, f) not in skip] for c in chars
+    }
+    rounds = MAX_IMAGES if per_character is None else min(per_character, MAX_IMAGES)
+    for i in range(rounds):
         for c in chars:
-            files = c.images
-            if i < len(files) and (char_dir(c.id) / files[i]).is_file():
-                refs.append(image_ref(c.id, files[i]))
+            if i < len(files[c.id]):
+                refs.append(image_ref(c.id, files[c.id][i]))
                 if limit is not None and len(refs) >= limit:
                     return refs
     return refs

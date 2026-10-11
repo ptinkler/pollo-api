@@ -92,6 +92,7 @@ def list_image_models() -> list[dict[str, Any]]:
             "id": PREFIX + key,
             "name": f"Pollo: {meta.get('label') or key}",
             "input_modalities": ["text", "image"] if getattr(cls, "ACCEPTS_IMAGES", True) else ["text"],
+            "max_refs": getattr(cls, "MAX_IMAGES", 0) or None,  # reference images it takes (None = unknown)
             "aspect_ratios": list(cls.VALID_RATIOS) or None,
             "resolutions": list(cls.VALID_RESOLUTIONS) or None,
             "created": None,
