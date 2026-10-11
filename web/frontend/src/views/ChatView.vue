@@ -185,7 +185,7 @@ const pinned = computed(() =>
 // mode), pins and the attached characters' images, checked against how many
 // the image model takes. In Auto mode the chat model decides which characters
 // are in a picture and may add the image it edits, so it's a best guess there.
-const refTray = computed(() => {
+function refTrayInputs() {
   if (!['auto', 'image'].includes(mode.value) || !selected.image) return null
   if (imageInfo.value && !takesImages(imageInfo.value)) return null
   const pinnedFiles = messages.value.flatMap(m =>
@@ -196,6 +196,19 @@ const refTray = computed(() => {
   const attached = mode.value === 'image' ? attachments.value.filter(a => a.file) : []
   const chars = characterSupport.value.ok ? attachedCharacters.value.filter(c => c.images?.length) : []
   if (!attached.length && !pinnedFiles.length && !chars.length) return null
+  return { pinnedFiles, attached, chars }
+}
+
+function refState(plan, ref) {
+  if (plan.sent.includes(ref)) return 'sent'
+  if (plan.dropped.includes(ref)) return 'dropped'
+  return plan.off.includes(ref) ? 'off' : 'capped'
+}
+
+const refTray = computed(() => {
+  const inputs = refTrayInputs()
+  if (!inputs) return null
+  const { pinnedFiles, attached, chars } = inputs
   const plan = planRefs({
     lead: attached.map(a => a.file),
     chat: pinnedFiles,
@@ -204,12 +217,13 @@ const refTray = computed(() => {
     maxRefs: imageInfo.value?.max_refs ?? null,
     choices: refChoices,
   })
-  const item = (ref, url) => {
-    const order = plan.sent.indexOf(ref)
-    const state =
-      order !== -1 ? 'sent' : plan.dropped.includes(ref) ? 'dropped' : plan.off.includes(ref) ? 'off' : 'capped'
-    return { ref, url, state, order: order + 1, forced: refChoices.on.includes(ref) }
-  }
+  const item = (ref, url) => ({
+    ref,
+    url,
+    state: refState(plan, ref),
+    order: plan.sent.indexOf(ref) + 1,
+    forced: refChoices.on.includes(ref),
+  })
   const groups = [
     attached.length && { label: 'Attached', items: attached.map(a => item(a.file, a.preview)) },
     pinnedFiles.length && {
