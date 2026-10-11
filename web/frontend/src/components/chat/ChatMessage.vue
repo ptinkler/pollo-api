@@ -3,6 +3,7 @@ import { computed, ref, nextTick, inject, onMounted, onBeforeUnmount } from 'vue
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { chatMediaUrl } from '../../composables/useChat'
+import { characterImageUrl } from '../../composables/useCharacters'
 import { useCopy } from '../../composables/useClipboard'
 import { shortModel, fmtCost } from '../../utils/format'
 import ModelPicker from './ModelPicker.vue'
@@ -110,10 +111,22 @@ function refsLabel(p) {
 }
 function refsTitle(p) {
   const used = p.refs_used
-  const list = p.refs.join(', ')
   return used != null && used < p.refs.length
-    ? `The model takes ${used} image${used === 1 ? '' : 's'}, so only the first ${used} of these were sent: ${list}`
-    : `Based on earlier image(s): ${list}`
+    ? `The model takes ${used} image${used === 1 ? '' : 's'}, so only the first ${used} of these were sent:`
+    : 'Based on these images:'
+}
+// A ref is a chat file or a character image ("char:<id>/<file>")
+function refUrl(r) {
+  const m = /^char:(\d+)\/(.+)$/.exec(r)
+  return m ? characterImageUrl(m[1], m[2]) : chatMediaUrl(props.convId, r)
+}
+
+// Hovering "🔗 4 refs" shows the reference images. Teleported and fixed so
+// the caption's overflow clipping doesn't cut it off.
+const refsPeek = ref(null) // { params, x, y }
+function showRefs(e, params) {
+  const r = e.currentTarget.getBoundingClientRect()
+  refsPeek.value = { params, x: r.left, y: r.top }
 }
 
 function url(item) {
@@ -416,7 +429,14 @@ const requestItem = ref(null)
                 ><template v-if="item.params?.context">
                   · <span title="The image model was given the conversation">💬 context</span></template
                 ><template v-if="item.params?.refs?.length">
-                  · <span :title="refsTitle(item.params)">🔗 {{ refsLabel(item.params) }}</span></template
+                  ·
+                  <span
+                    class="caption-refs"
+                    title=""
+                    @mouseenter="showRefs($event, item.params)"
+                    @mouseleave="refsPeek = null"
+                    >🔗 {{ refsLabel(item.params) }}</span
+                  ></template
                 >
               </span>
               <button
@@ -523,6 +543,20 @@ const requestItem = ref(null)
       :error="requestItem.status === 'error' ? requestItem.error : ''"
       @close="requestItem = null"
     />
+    <Teleport to="body">
+      <div v-if="refsPeek" class="refs-peek" :style="{ left: `${refsPeek.x}px`, top: `${refsPeek.y}px` }">
+        <div class="refs-peek-title">{{ refsTitle(refsPeek.params) }}</div>
+        <div class="refs-peek-grid">
+          <img
+            v-for="(r, i) in refsPeek.params.refs"
+            :key="r"
+            :src="refUrl(r)"
+            :alt="r"
+            :class="{ unused: refsPeek.params.refs_used != null && i >= refsPeek.params.refs_used }"
+          />
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -958,6 +992,47 @@ const requestItem = ref(null)
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.caption-refs {
+  cursor: default;
+}
+
+.refs-peek {
+  position: fixed;
+  z-index: 1000;
+  transform: translateY(calc(-100% - 6px));
+  max-width: 340px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  font-size: 0.72rem;
+  color: var(--text2);
+  pointer-events: none;
+}
+
+.refs-peek-title {
+  margin-bottom: 6px;
+}
+
+.refs-peek-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.refs-peek-grid img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--surface2);
+}
+
+.refs-peek-grid img.unused {
+  opacity: 0.35;
 }
 
 .caption-btn {

@@ -414,6 +414,24 @@ describe('ChatMessage refs sent', () => {
     })
     expect(all.find('.media-caption').text()).toContain('🔗 2 refs')
   })
+
+  it('shows thumbnails of the refs on hover, dimming the ones not sent', async () => {
+    const item = { ...image, params: { refs: ['a.png', 'char:7/b.png'], refs_used: 1 } }
+    const w = mount(ChatMessage, {
+      attachTo: document.body,
+      props: { convId: 'c1', message: { id: 11, role: 'assistant', content: '', status: 'done', media: [item] } },
+    })
+    await w.find('.caption-refs').trigger('mouseenter')
+    const imgs = document.querySelectorAll('.refs-peek img')
+    expect([...imgs].map(i => i.getAttribute('src'))).toEqual([
+      '/api/chat/media/c1/a.png',
+      '/api/characters/7/images/b.png',
+    ])
+    expect([...imgs].map(i => i.classList.contains('unused'))).toEqual([false, true])
+    await w.find('.caption-refs').trigger('mouseleave')
+    expect(document.querySelector('.refs-peek')).toBeNull()
+    w.unmount()
+  })
 })
 
 describe('ChatMessage request view', () => {
