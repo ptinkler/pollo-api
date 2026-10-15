@@ -29,6 +29,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Query", "f
 "web/api.py" = ["E402"]
 # Fixtures imported from another test module are redefined as test parameters
 "tests/test_characters.py" = ["F811"]
+"tests/test_chatgpt_import.py" = ["F811"]
 "tests/test_media.py" = ["F811"]
 "tests/test_venice.py" = ["F811"]
 

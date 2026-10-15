@@ -8,6 +8,7 @@ import ChatComposer from '../components/chat/ChatComposer.vue'
 import ChatMessage from '../components/chat/ChatMessage.vue'
 import ChatWelcome from '../components/chat/ChatWelcome.vue'
 import ConversationList from '../components/chat/ConversationList.vue'
+import ImportChatsModal from '../components/chat/ImportChatsModal.vue'
 import InstructionPicker from '../components/chat/InstructionPicker.vue'
 import InstructionsDialog from '../components/chat/InstructionsDialog.vue'
 import SpacesDialog from '../components/chat/SpacesDialog.vue'
@@ -307,7 +308,13 @@ const instructionsUnused = computed(
 
 // ── Spaces & defaults ─────────────────────────────────────────────────
 const spacesOpen = ref(false)
+const importOpen = ref(false)
 const { globalSettings, spaces, spaceById, loadDefaults, setCurrentSpace } = useChatDefaults()
+// An import may have added chats and made the ChatGPT space
+function onImported() {
+  chatList.load()
+  loadDefaults()
+}
 // Where the next new (blank) chat will be filed; read when it's created
 const pendingSpaceId = ref(null)
 
@@ -976,6 +983,7 @@ onBeforeUnmount(() => {
         @new-in-space="newChat"
         @move="moveConversation"
         @manage-spaces="spacesOpen = true"
+        @import="importOpen = true"
       />
 
       <div class="side-bottom">
@@ -1105,6 +1113,9 @@ onBeforeUnmount(() => {
       @close="spacesOpen = false"
       @changed="onSpacesChanged"
     />
+
+    <!-- Imports land in the ChatGPT space, which the first one creates -->
+    <ImportChatsModal :visible="importOpen" @close="importOpen = false" @imported="onImported" />
 
     <MediaLightbox
       :item="lightbox"

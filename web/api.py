@@ -47,6 +47,7 @@ from . import characters, image_hosts, media, vpn
 from .auth import get_api_keys, is_auth_enabled, verify_api_key
 from .chat import router as chat_router
 from .chat import startup_resume_chat
+from .chatgpt_import import router as chatgpt_import_router
 from .uploads import image_media_type, read_image_upload, safe_filename
 
 
@@ -2485,6 +2486,7 @@ def startup_resume_jobs():
 # ── Chat mode (OpenRouter) — see web/chat.py ─────────────────────────
 # Must be registered before the SPA catch-all below.
 app.include_router(chat_router)
+app.include_router(chatgpt_import_router)
 app.include_router(characters.router)
 app.include_router(media.router)
 app.include_router(vpn.router)

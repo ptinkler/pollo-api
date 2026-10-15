@@ -7,12 +7,13 @@ import { dateGroups } from '../../composables/useChatList'
 // The sidebar's chats: a Spaces section of collapsible space folders on top
 // (like ChatGPT's Projects), then a Chats section of the loose/unfiled chats
 // grouped by date (like Recents). Search replaces both with flat results.
+// `import` opens the ChatGPT importer (its chats land in a "ChatGPT" space).
 const props = defineProps({
   list: { type: Object, required: true },
   spaces: { type: Array, default: () => [] },
   activeId: { type: String, default: null },
 })
-const emit = defineEmits(['open', 'rename', 'remove', 'new-in-space', 'move', 'manage-spaces'])
+const emit = defineEmits(['open', 'rename', 'remove', 'new-in-space', 'move', 'manage-spaces', 'import'])
 
 const { isFolded, toggleFold } = useFolded()
 const moveMenuFor = ref(null) // conversation id whose "move" menu is open
@@ -75,7 +76,10 @@ function move(conv, spaceId) {
       <!-- Spaces (collapsible folders) -->
       <FoldHeading id="spaces" class="section-heading" title="Spaces" :summary="spaces.length">
         <template #actions>
-          <button class="mini-btn" title="Create and edit spaces" @click="emit('manage-spaces')">Manage</button>
+          <span class="heading-btns">
+            <button class="mini-btn" title="Import chats from a ChatGPT export" @click="emit('import')">Import</button>
+            <button class="mini-btn" title="Create and edit spaces" @click="emit('manage-spaces')">Manage</button>
+          </span>
         </template>
       </FoldHeading>
       <div v-show="!isFolded('spaces')" class="conv-list spaces-list">
@@ -274,6 +278,11 @@ function move(conv, spaceId) {
   color: var(--text2);
   padding: 2px 10px 6px 26px;
   opacity: 0.7;
+}
+
+.heading-btns {
+  display: flex;
+  gap: 4px;
 }
 
 .mini-btn {

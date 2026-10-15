@@ -53,6 +53,21 @@ export const fetchSettings = () => apiGet('/api/chat/settings')
 export const updateSettings = data => apiPut('/api/chat/settings', data)
 
 export const patchConversation = (id, data) => apiPatch(`/api/chat/conversations/${enc(id)}`, data)
+
+// ChatGPT exports in the server's imports folder, and the last import's progress: { folder, files, job }
+export const fetchChatGptImport = () => apiGet('/api/chat/import/chatgpt')
+// Start importing one of them in the background (only what's new since the last import)
+export const startChatGptImport = file => apiPost('/api/chat/import/chatgpt', { file })
+// Uploading an export into that folder, in chunks: start → { id, chunk_size }, then each chunk at its
+// offset → { received }, and the last also → { file }
+export const startChatGptUpload = (name, size) => apiPost('/api/chat/import/chatgpt/uploads', { name, size })
+export function sendChatGptUploadChunk(id, offset, blob) {
+  const form = new FormData()
+  form.append('offset', String(offset))
+  form.append('chunk', blob, 'chunk')
+  return apiPost(`/api/chat/import/chatgpt/uploads/${enc(id)}`, form)
+}
+export const cancelChatGptUpload = id => apiDelete(`/api/chat/import/chatgpt/uploads/${enc(id)}`)
 export const uploadChatAttachment = (convId, file) =>
   apiUpload(`/api/chat/conversations/${enc(convId)}/attachments`, file)
 
