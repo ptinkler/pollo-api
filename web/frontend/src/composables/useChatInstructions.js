@@ -1,49 +1,97 @@
 import { computed, ref } from 'vue'
 import { fetchInstructions, patchConversation } from './useChat'
 
-// Saved custom instructions, and the one attached to the open chat (or to
-// the next new one: the default, until another is picked)
+// Saved instruction snippets and groups, and the ones attached to the open
+// chat (or to the next new one: the defaults, until the user changes them).
+// A chat holds any number of snippets and groups; both are flattened and
+// de-duped server-side into what the model is sent (see _conversation_instructions).
 export function useChatInstructions({ convId, conversation, showToast }) {
-  const instructions = ref([])
-  const instructionId = ref(null)
-  const attachedInstruction = computed(() => instructions.value.find(i => i.id === instructionId.value))
-  const defaultInstructionId = () => instructions.value.find(i => i.is_default)?.id ?? null
+  const instructions = ref([]) // all saved snippets
+  const groups = ref([]) // all saved groups
+  const instructionIds = ref([]) // snippets attached to this chat
+  const groupIds = ref([]) // groups attached to this chat
+
+  const attachedInstructions = computed(() =>
+    instructionIds.value.map(id => instructions.value.find(i => i.id === id)).filter(Boolean),
+  )
+  const attachedGroups = computed(() => groupIds.value.map(id => groups.value.find(g => g.id === id)).filter(Boolean))
+  // Groups first, then individual snippets — what the sidebar summary shows
+  const attachmentSummary = computed(() =>
+    [...attachedGroups.value.map(g => g.name), ...attachedInstructions.value.map(i => i.name)].join(', '),
+  )
+
+  // The one default — a snippet or a group — attached to brand-new chats
+  const defaultAttachment = () => ({
+    ids: instructions.value.filter(i => i.is_default).map(i => i.id),
+    groupIds: groups.value.filter(g => g.is_default).map(g => g.id),
+  })
 
   async function loadInstructions() {
     try {
-      instructions.value = (await fetchInstructions()).instructions
-      if (!convId.value) instructionId.value = defaultInstructionId()
+      const data = await fetchInstructions()
+      instructions.value = data.instructions
+      groups.value = data.groups || []
+      if (!convId.value) {
+        const d = defaultAttachment()
+        instructionIds.value = d.ids
+        groupIds.value = d.groupIds
+      }
     } catch {
       /* 401 handled by auth prompt */
     }
   }
 
-  // Picking from the sidebar: saved on the chat right away (new chats get it on creation)
-  async function setInstruction(id) {
-    instructionId.value = id
-    if (!convId.value) return
+  async function patch(fields) {
+    if (!convId.value) return // new chats get them on creation
     try {
-      const updated = await patchConversation(convId.value, { instruction_id: id })
-      if (conversation.value) conversation.value.instruction_id = updated.instruction_id
+      await patchConversation(convId.value, fields)
+      if (conversation.value) Object.assign(conversation.value, fields)
     } catch (e) {
-      showToast(`Couldn't attach instructions: ${e.message}`, 'error')
+      showToast(`Couldn't update instructions: ${e.message}`, 'error')
     }
   }
 
-  async function onInstructionsChanged({ saved, deleted }) {
+  function setInstructions(ids) {
+    instructionIds.value = ids
+    patch({ instruction_ids: ids })
+  }
+
+  function setGroups(ids) {
+    groupIds.value = ids
+    patch({ instruction_group_ids: ids })
+  }
+
+  // The chat model saved and attached a snippet (create_instruction tool)
+  function onInstructionUsed(item, ids) {
+    if (item) {
+      const i = instructions.value.findIndex(x => x.id === item.id)
+      if (i === -1) instructions.value.push(item)
+      else instructions.value.splice(i, 1, item)
+    }
+    instructionIds.value = ids
+  }
+
+  // The management dialog created/edited/deleted snippets or groups
+  async function onInstructionsChanged() {
     await loadInstructions()
-    if (deleted && instructionId.value === deleted) instructionId.value = null
-    // Saving from the dialog attaches it here if nothing was attached yet
-    if (saved && instructionId.value == null) setInstruction(saved.id)
+    // Drop anything that no longer exists from this chat's attachments
+    instructionIds.value = instructionIds.value.filter(id => instructions.value.some(i => i.id === id))
+    groupIds.value = groupIds.value.filter(id => groups.value.some(g => g.id === id))
   }
 
   return {
     instructions,
-    instructionId,
-    attachedInstruction,
-    defaultInstructionId,
+    groups,
+    instructionIds,
+    groupIds,
+    attachedInstructions,
+    attachedGroups,
+    attachmentSummary,
+    defaultAttachment,
     loadInstructions,
-    setInstruction,
+    setInstructions,
+    setGroups,
+    onInstructionUsed,
     onInstructionsChanged,
   }
 }

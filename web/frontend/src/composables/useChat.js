@@ -33,11 +33,14 @@ export const deleteChatExchange = messageId => apiDelete(`/api/chat/messages/${m
 // What that would also remove: { other_versions, other_messages }
 export const fetchDeleteInfo = messageId => apiGet(`/api/chat/messages/${messageId}/delete-info`)
 
-// Custom instructions (saved, attachable per chat)
+// Custom instructions: snippets, and groups that bundle them (attachable per chat)
 export const fetchInstructions = () => apiGet('/api/chat/instructions')
 export const createInstruction = data => apiPost('/api/chat/instructions', data)
 export const updateInstruction = (id, data) => apiPut(`/api/chat/instructions/${id}`, data)
 export const deleteInstruction = id => apiDelete(`/api/chat/instructions/${id}`)
+export const createInstructionGroup = data => apiPost('/api/chat/instruction-groups', data)
+export const updateInstructionGroup = (id, data) => apiPut(`/api/chat/instruction-groups/${id}`, data)
+export const deleteInstructionGroup = id => apiDelete(`/api/chat/instruction-groups/${id}`)
 
 export const patchConversation = (id, data) => apiPatch(`/api/chat/conversations/${enc(id)}`, data)
 export const uploadChatAttachment = (convId, file) =>

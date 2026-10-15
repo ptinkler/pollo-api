@@ -231,7 +231,12 @@ class TestTurns:
                 json={"content": "a story about a cat, with a picture", "mode": "auto", **SETTINGS},
             )
         )
-        assert [t["function"]["name"] for t in calls[0][1]] == ["generate_image", "create_character", "generate_video"]
+        assert [t["function"]["name"] for t in calls[0][1]] == [
+            "generate_image",
+            "create_character",
+            "generate_video",
+            "create_instruction",
+        ]
         assert len(calls) == 1  # reply written + image made → complete
         assert img_args["model"] == "i/model" and img_args["prompt"] == "a cat"
         assert img_args["aspect_ratio"] == "16:9"
@@ -243,6 +248,64 @@ class TestTurns:
         assert done["cost"] == pytest.approx(0.043)  # LLM round + image
         path = chat._chat_root() / conv["id"] / done["media"][0]["file"]
         assert path.read_bytes() == _png_bytes()
+
+    def test_model_can_create_and_attach_an_instruction(self, client, conv, chat, monkeypatch, db):
+        rounds = iter(
+            [
+                _tool_chunks(
+                    "create_instruction",
+                    {"name": "Pirate", "content": "You are a pirate. Always talk like one."},
+                    text="Aye, saving that.",
+                ),
+                _text_chunks("Arr, done!"),
+            ]
+        )
+        monkeypatch.setattr(
+            chat.openrouter, "stream_chat", lambda m, msgs, tools=None, session_id=None, **kw: next(rounds)
+        )
+
+        ev = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "always talk like a pirate from now on", "mode": "auto", **SETTINGS},
+            )
+        )
+
+        saved = db.list_instructions()
+        assert [i.name for i in saved] == ["Pirate"]
+        assert saved[0].content == "You are a pirate. Always talk like one."
+        # Attached to the chat, and the UI was told so the sidebar updates live
+        assert db.get_conversation(conv["id"]).instruction_ids == [saved[0].id]
+        attach = next(e for e in ev if e["type"] == "instructions")
+        assert attach["instruction_ids"] == [saved[0].id]
+        assert attach["instruction"]["name"] == "Pirate"
+        # The model still wrote its reply after saving
+        assert ev[-1]["message"]["content"] == "Aye, saving that.\n\nArr, done!"
+
+    def test_create_instruction_rejects_a_duplicate_name(self, client, conv, chat, monkeypatch, db):
+        db.save_instruction(name="Pirate", content="existing")
+        rounds = iter(
+            [
+                _tool_chunks("create_instruction", {"name": "pirate", "content": "You are a pirate."}),
+                _text_chunks("I couldn't save that."),
+            ]
+        )
+        calls = []
+        monkeypatch.setattr(
+            chat.openrouter,
+            "stream_chat",
+            lambda m, msgs, tools=None, session_id=None, **kw: (calls.append(msgs), next(rounds))[1],
+        )
+
+        client.post(
+            f"/api/chat/conversations/{conv['id']}/messages",
+            json={"content": "save a pirate instruction", "mode": "auto", **SETTINGS},
+        )
+
+        # Only the original instruction exists; the model got an error result back
+        assert len(db.list_instructions()) == 1
+        result = json.loads(calls[1][-1]["content"])
+        assert not result["ok"] and "already an instruction" in result["error"]
 
     def test_failed_tool_gets_follow_up_round(self, client, conv, chat, monkeypatch):
         rounds = iter(
@@ -1823,44 +1886,93 @@ class TestCustomInstructions:
         assert [i["name"] for i in client.get("/api/chat/instructions").json()["instructions"]] == ["Terse"]
         assert client.post("/api/chat/instructions", json={"name": "", "content": "x"}).status_code == 422
 
-    def test_default_attaches_to_new_chats_unless_overridden(self, client):
+    def test_group_crud_and_shared_single_default(self, client):
+        a = client.post("/api/chat/instructions", json={"name": "Tone", "content": "Be warm."}).json()
+        b = client.post(
+            "/api/chat/instructions", json={"name": "Format", "content": "Use markdown.", "is_default": True}
+        ).json()
+        g = client.post(
+            "/api/chat/instruction-groups",
+            json={"name": "Starter", "snippet_ids": [a["id"], b["id"]], "is_default": True},
+        ).json()
+        data = client.get("/api/chat/instructions").json()
+        assert [x["name"] for x in data["groups"]] == ["Starter"]
+        assert data["groups"][0]["snippet_ids"] == [a["id"], b["id"]]
+        # The group is now the one default — it cleared the snippet's default
+        assert data["groups"][0]["is_default"]
+        assert not next(i for i in data["instructions"] if i["id"] == b["id"])["is_default"]
+        # Unknown member snippet is rejected
+        assert (
+            client.post("/api/chat/instruction-groups", json={"name": "Bad", "snippet_ids": [9999]}).status_code == 400
+        )
+        assert client.delete(f"/api/chat/instruction-groups/{g['id']}").status_code == 200
+        assert client.get("/api/chat/instructions").json()["groups"] == []
+
+    def test_deleting_a_snippet_removes_it_from_groups_and_chats(self, client, conv):
+        a = client.post("/api/chat/instructions", json={"name": "A", "content": "x"}).json()
+        b = client.post("/api/chat/instructions", json={"name": "B", "content": "y"}).json()
+        g = client.post("/api/chat/instruction-groups", json={"name": "G", "snippet_ids": [a["id"], b["id"]]}).json()
+        client.patch(
+            f"/api/chat/conversations/{conv['id']}",
+            json={"instruction_ids": [a["id"]], "instruction_group_ids": [g["id"]]},
+        )
+        client.delete(f"/api/chat/instructions/{a['id']}")
+        assert client.get("/api/chat/instructions").json()["groups"][0]["snippet_ids"] == [b["id"]]
+        gone = client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]
+        assert gone["instruction_ids"] == [] and gone["instruction_group_ids"] == [g["id"]]
+
+    def test_default_snippet_or_group_attaches_to_new_chats_unless_overridden(self, client):
         d = client.post("/api/chat/instructions", json={"name": "D", "content": "x", "is_default": True}).json()
-        assert client.post("/api/chat/conversations", json={}).json()["instruction_id"] == d["id"]
-        assert client.post("/api/chat/conversations", json={"instruction_id": None}).json()["instruction_id"] is None
-        assert client.post("/api/chat/conversations", json={"instruction_id": 999}).status_code == 400
+        assert client.post("/api/chat/conversations", json={}).json()["instruction_ids"] == [d["id"]]
+        # Explicit empty lists override the default
+        empty = client.post("/api/chat/conversations", json={"instruction_ids": []}).json()
+        assert empty["instruction_ids"] == [] and empty["instruction_group_ids"] == []
+        assert client.post("/api/chat/conversations", json={"instruction_ids": [999]}).status_code == 400
+        # A default group attaches by group, not by expanding its snippets
+        g = client.post(
+            "/api/chat/instruction-groups", json={"name": "G", "snippet_ids": [d["id"]], "is_default": True}
+        ).json()
+        made = client.post("/api/chat/conversations", json={}).json()
+        assert made["instruction_group_ids"] == [g["id"]] and made["instruction_ids"] == []
 
     def test_attach_and_detach_on_existing_chat(self, client, conv):
         i = client.post("/api/chat/instructions", json={"name": "I", "content": "x"}).json()
+        assert client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_ids": [i["id"]]}).json()[
+            "instruction_ids"
+        ] == [i["id"]]
         assert (
-            client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_id": i["id"]}).json()[
-                "instruction_id"
+            client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_ids": []}).json()[
+                "instruction_ids"
             ]
-            == i["id"]
-        )
-        assert (
-            client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_id": None}).json()[
-                "instruction_id"
-            ]
-            is None
+            == []
         )
 
     def test_deleting_an_instruction_detaches_it(self, client, conv):
         i = client.post("/api/chat/instructions", json={"name": "I", "content": "x"}).json()
-        client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_id": i["id"]})
+        client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_ids": [i["id"]]})
         client.delete(f"/api/chat/instructions/{i['id']}")
-        assert client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["instruction_id"] is None
+        assert client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["instruction_ids"] == []
 
-    def test_sent_verbatim_as_second_system_message(self, client, conv, chat, monkeypatch):
-        i = client.post("/api/chat/instructions", json={"name": "I", "content": "Always answer in French."}).json()
-        client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_id": i["id"]})
+    def test_flattened_snippets_and_groups_sent_deduped_as_one_system_message(self, client, conv, chat, monkeypatch):
+        tone = client.post("/api/chat/instructions", json={"name": "Tone", "content": "Be warm."}).json()
+        fmt = client.post("/api/chat/instructions", json={"name": "Fmt", "content": "Use markdown."}).json()
+        lang = client.post("/api/chat/instructions", json={"name": "Lang", "content": "In French."}).json()
+        g = client.post(
+            "/api/chat/instruction-groups", json={"name": "G", "snippet_ids": [tone["id"], fmt["id"]]}
+        ).json()
+        # tone is attached both via the group and individually: sent once
+        client.patch(
+            f"/api/chat/conversations/{conv['id']}",
+            json={"instruction_group_ids": [g["id"]], "instruction_ids": [tone["id"], lang["id"]]},
+        )
         seen = {}
         monkeypatch.setattr(
             chat.openrouter,
             "stream_chat",
-            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("Bonjour"))[1],
+            lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1],
         )
         _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", **SETTINGS}))
-        assert seen["msgs"][1] == {"role": "system", "content": "Always answer in French."}
+        assert seen["msgs"][1] == {"role": "system", "content": "Be warm.\n\nUse markdown.\n\nIn French."}
         assert seen["msgs"][2]["role"] == "user"
 
     def test_not_sent_when_none_attached(self, client, conv, chat, monkeypatch):
@@ -1883,7 +1995,7 @@ class TestCustomInstructions:
             },
         )
         i = client.post("/api/chat/instructions", json={"name": "I", "content": "Watercolour style only."}).json()
-        client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_id": i["id"]})
+        client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_ids": [i["id"]]})
         got = {}
         monkeypatch.setattr(
             chat.openrouter,

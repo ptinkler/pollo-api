@@ -188,8 +188,15 @@ class ChatConversation(Base):
     text_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     image_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     video_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    # Saved custom instructions attached to this chat (ChatInstruction.id)
+    # Legacy single attachment (superseded by instruction_ids_json; kept so old
+    # rows migrate and the column isn't dropped out from under existing data)
     instruction_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Instruction snippets attached individually (ChatInstruction.id list, JSON)
+    instruction_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Instruction groups attached (ChatInstructionGroup.id list, JSON); each
+    # contributes all its snippets. Groups + individual snippets are flattened
+    # and de-duped into the instructions sent to the model (see web/chat.py).
+    instruction_group_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # The last message of the branch being shown (messages form a tree: an
     # edit or retry adds a sibling instead of deleting what came after)
     current_leaf_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -225,7 +232,8 @@ class ChatConversation(Base):
             "text_model": self.text_model,
             "image_model": self.image_model,
             "video_model": self.video_model,
-            "instruction_id": self.instruction_id,
+            "instruction_ids": self.instruction_ids,
+            "instruction_group_ids": self.instruction_group_ids,
             "current_leaf_id": self.current_leaf_id,
             "character_ids": self.character_ids,
             "forked_from_id": self.forked_from_id,
@@ -257,6 +265,28 @@ class ChatConversation(Base):
     @character_ids.setter
     def character_ids(self, ids: list[int] | None) -> None:
         self.character_ids_json = json.dumps(list(dict.fromkeys(ids or [])))
+
+    @property
+    def instruction_ids(self) -> list[int]:
+        try:
+            return json.loads(self.instruction_ids_json) if self.instruction_ids_json else []
+        except json.JSONDecodeError:
+            return []
+
+    @instruction_ids.setter
+    def instruction_ids(self, ids: list[int] | None) -> None:
+        self.instruction_ids_json = json.dumps(list(dict.fromkeys(ids or [])))
+
+    @property
+    def instruction_group_ids(self) -> list[int]:
+        try:
+            return json.loads(self.instruction_group_ids_json) if self.instruction_group_ids_json else []
+        except json.JSONDecodeError:
+            return []
+
+    @instruction_group_ids.setter
+    def instruction_group_ids(self, ids: list[int] | None) -> None:
+        self.instruction_group_ids_json = json.dumps(list(dict.fromkeys(ids or [])))
 
 
 class Character(Base):
@@ -314,6 +344,42 @@ class ChatInstruction(Base):
             "id": self.id,
             "name": self.name,
             "content": self.content,
+            "is_default": self.is_default,
+            "created_at": iso(self.created_at),
+            "updated_at": iso(self.updated_at),
+        }
+
+
+class ChatInstructionGroup(Base):
+    """A named bundle of instruction snippets (ChatInstruction). Attaching a
+    group to a chat contributes all its snippets; a snippet may be in several
+    groups and is sent only once. Only one thing — a snippet or a group — can
+    be the default attached to new chats."""
+
+    __tablename__ = "chat_instruction_groups"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    snippet_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)  # attached to new chats
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    @property
+    def snippet_ids(self) -> list[int]:
+        try:
+            return json.loads(self.snippet_ids_json) if self.snippet_ids_json else []
+        except json.JSONDecodeError:
+            return []
+
+    @snippet_ids.setter
+    def snippet_ids(self, ids: list[int] | None) -> None:
+        self.snippet_ids_json = json.dumps(list(dict.fromkeys(ids or [])))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "snippet_ids": self.snippet_ids,
             "is_default": self.is_default,
             "created_at": iso(self.created_at),
             "updated_at": iso(self.updated_at),
@@ -442,6 +508,8 @@ class MetadataDB:
     _LATE_COLUMNS = {
         "chat_conversations": {
             "instruction_id": "INTEGER",
+            "instruction_ids_json": "TEXT",
+            "instruction_group_ids_json": "TEXT",
             "current_leaf_id": "INTEGER",
             "character_ids_json": "TEXT",
             "forked_from_id": "VARCHAR(50)",
@@ -460,6 +528,10 @@ class MetadataDB:
         "WHERE p.conversation_id = chat_messages.conversation_id AND p.id < chat_messages.id)",
         "current_leaf_id": "UPDATE chat_conversations SET current_leaf_id = (SELECT MAX(m.id) "
         "FROM chat_messages m WHERE m.conversation_id = chat_conversations.id)",
+        # Carry the old single attachment into the new list (instruction_id is
+        # added just above, so the column exists even on older databases)
+        "instruction_ids_json": "UPDATE chat_conversations SET instruction_ids_json = '[' || instruction_id || ']' "
+        "WHERE instruction_id IS NOT NULL AND instruction_ids_json IS NULL",
     }
 
     def _add_missing_columns(self) -> None:
@@ -956,6 +1028,17 @@ class MetadataDB:
                 session.expunge(item)
             return item
 
+    def get_instructions(self, ids: list[int]) -> list[ChatInstruction]:
+        """Snippets for the given ids, in that order; unknown ids drop out."""
+        if not ids:
+            return []
+        with self._session() as session:
+            by_id = {i.id: i for i in session.query(ChatInstruction).filter(ChatInstruction.id.in_(ids))}
+            items = [by_id[i] for i in ids if i in by_id]
+            for i in items:
+                session.expunge(i)
+            return items
+
     def get_default_instruction(self) -> ChatInstruction | None:
         with self._session() as session:
             item = session.query(ChatInstruction).filter(ChatInstruction.is_default.is_(True)).first()
@@ -963,8 +1046,19 @@ class MetadataDB:
                 session.expunge(item)
             return item
 
+    @staticmethod
+    def _clear_defaults(session, keep: tuple[type, int] | None = None) -> None:
+        """Unset is_default on every snippet and group, except `keep` (model, id).
+        Only one thing — a snippet or a group — is ever the default."""
+        for model in (ChatInstruction, ChatInstructionGroup):
+            q = session.query(model)
+            if keep and keep[0] is model:
+                q = q.filter(model.id != keep[1])
+            q.update({model.is_default: False})
+
     def save_instruction(self, instruction_id: int | None = None, **fields) -> ChatInstruction | None:
-        """Create (id None) or update an instruction. Only one can be the default."""
+        """Create (id None) or update a snippet. Making it the default clears any
+        other default, snippet or group."""
         with self._session() as session:
             if instruction_id is None:
                 item = ChatInstruction(**fields)
@@ -978,22 +1072,94 @@ class MetadataDB:
                 item.updated_at = datetime.now()
             if fields.get("is_default"):
                 session.flush()
-                session.query(ChatInstruction).filter(ChatInstruction.id != item.id).update(
-                    {ChatInstruction.is_default: False}
-                )
+                self._clear_defaults(session, keep=(ChatInstruction, item.id))
             session.commit()
             session.refresh(item)
             session.expunge(item)
             return item
 
+    @staticmethod
+    def _detach_id(session, model, json_column, list_attr: str, target_id: int) -> None:
+        """Remove target_id from the JSON id-list (`list_attr`) of every row
+        whose `json_column` text mentions it (exact check after the LIKE)."""
+        for row in session.query(model).filter(json_column.like(f"%{target_id}%")).all():
+            ids = getattr(row, list_attr)
+            if target_id in ids:
+                setattr(row, list_attr, [i for i in ids if i != target_id])
+
     def delete_instruction(self, instruction_id: int) -> bool:
-        """Delete an instruction and detach it from any chats using it."""
+        """Delete a snippet and remove it from any chats and groups using it."""
         with self._session() as session:
             item = session.get(ChatInstruction, instruction_id)
             if not item:
                 return False
-            session.query(ChatConversation).filter(ChatConversation.instruction_id == instruction_id).update(
-                {ChatConversation.instruction_id: None}
+            self._detach_id(
+                session, ChatConversation, ChatConversation.instruction_ids_json, "instruction_ids", instruction_id
+            )
+            self._detach_id(
+                session, ChatInstructionGroup, ChatInstructionGroup.snippet_ids_json, "snippet_ids", instruction_id
+            )
+            session.delete(item)
+            session.commit()
+            return True
+
+    # ── Instruction group methods ────────────────────────────────────
+
+    def list_instruction_groups(self) -> list[ChatInstructionGroup]:
+        with self._session() as session:
+            items = session.query(ChatInstructionGroup).order_by(ChatInstructionGroup.name).all()
+            for i in items:
+                session.expunge(i)
+            return items
+
+    def get_instruction_group(self, group_id: int) -> ChatInstructionGroup | None:
+        with self._session() as session:
+            item = session.get(ChatInstructionGroup, group_id)
+            if item:
+                session.expunge(item)
+            return item
+
+    def get_default_instruction_group(self) -> ChatInstructionGroup | None:
+        with self._session() as session:
+            item = session.query(ChatInstructionGroup).filter(ChatInstructionGroup.is_default.is_(True)).first()
+            if item:
+                session.expunge(item)
+            return item
+
+    def save_instruction_group(self, group_id: int | None = None, **fields) -> ChatInstructionGroup | None:
+        """Create (id None) or update a group. Making it the default clears any
+        other default, group or snippet."""
+        with self._session() as session:
+            if group_id is None:
+                item = ChatInstructionGroup(**fields)
+                session.add(item)
+            else:
+                item = session.get(ChatInstructionGroup, group_id)
+                if not item:
+                    return None
+                for key, value in fields.items():
+                    setattr(item, key, value)
+                item.updated_at = datetime.now()
+            if fields.get("is_default"):
+                session.flush()
+                self._clear_defaults(session, keep=(ChatInstructionGroup, item.id))
+            session.commit()
+            session.refresh(item)
+            session.expunge(item)
+            return item
+
+    def delete_instruction_group(self, group_id: int) -> bool:
+        """Delete a group and detach it from any chats using it (its snippets stay)."""
+        with self._session() as session:
+            item = session.get(ChatInstructionGroup, group_id)
+            if not item:
+                return False
+            self._detach_id(
+                session,
+                ChatConversation,
+                ChatConversation.instruction_group_ids_json,
+                "instruction_group_ids",
+                group_id,
             )
             session.delete(item)
             session.commit()

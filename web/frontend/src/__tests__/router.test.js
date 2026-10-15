@@ -63,7 +63,7 @@ describe('ChatView balances', () => {
             : String(url).includes('/models')
               ? { text: [], image: [], video: [], errors: {} }
               : String(url).includes('/instructions')
-                ? { instructions: [] }
+                ? { instructions: [], groups: [] }
                 : String(url).includes('/conversations')
                   ? { conversations: [] }
                   : { configured: true },
@@ -96,7 +96,7 @@ describe('ChatView sidebar sections', () => {
         String(url).includes('/models')
           ? { text: [], image: [], video: [], errors: {} }
           : String(url).includes('/instructions')
-            ? { instructions: [] }
+            ? { instructions: [], groups: [] }
             : String(url).includes('/conversations')
               ? { conversations: [] }
               : { configured: true },
@@ -145,7 +145,8 @@ describe('ChatView chat list and per-chat state', () => {
     image_model: null,
     video_model: null,
     character_ids: [],
-    instruction_id: null,
+    instruction_ids: [],
+    instruction_group_ids: [],
     settings: {
       mode: 'image',
       history_limit: 10,
@@ -171,7 +172,7 @@ describe('ChatView chat list and per-chat state', () => {
           url.includes('/models')
             ? { text: [], image: [], video: [], errors: {} }
             : url.includes('/instructions')
-              ? { instructions: [] }
+              ? { instructions: [], groups: [] }
               : url.includes('/conversations?q=')
                 ? { conversations: [{ ...convs[3], snippet: '…a fox appears…' }], more: false }
                 : url.includes('/conversations/b') && opts?.method === 'PATCH'

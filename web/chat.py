@@ -175,6 +175,34 @@ TOOLS_CREATE_CHARACTER = {
     },
 }
 
+TOOLS_CREATE_INSTRUCTION = {
+    "type": "function",
+    "function": {
+        "name": "create_instruction",
+        "description": "Save a reusable instruction snippet and attach it to this chat, so it is sent to you "
+        "verbatim as a system instruction on every future reply here (and the user can group it or attach it "
+        "to other chats). Use it when the user asks you to remember how they want you to behave — a tone, a "
+        "format, a persona, standing do's and don'ts — or to save the way you're working now as a preset. "
+        "Write the content compact and self-contained, as direct instructions to yourself ('You are…', "
+        "'Always…', 'Never…'), not as a summary of the conversation. It is added alongside whatever is already "
+        "attached and takes effect from your next reply.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "A short name for the preset, e.g. 'Picture-book storyteller'.",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "The instruction text, written to be sent to you word for word.",
+                },
+            },
+            "required": ["name", "content"],
+        },
+    },
+}
+
 TOOLS_VIDEO = {
     "type": "function",
     "function": {
@@ -212,7 +240,9 @@ class ConversationCreate(BaseModel):
     text_model: str | None = None
     image_model: str | None = None
     video_model: str | None = None
-    instruction_id: int | None = None  # omitted = the default instruction, if one is set
+    # Snippets and groups attached to the chat; omit both to get the default
+    instruction_ids: list[int] = []
+    instruction_group_ids: list[int] = []
     character_ids: list[int] = []
 
 
@@ -221,7 +251,8 @@ class ConversationUpdate(BaseModel):
     text_model: str | None = None
     image_model: str | None = None
     video_model: str | None = None
-    instruction_id: int | None = None  # explicit null detaches
+    instruction_ids: list[int] | None = None  # explicit [] detaches all snippets
+    instruction_group_ids: list[int] | None = None  # explicit [] detaches all groups
     character_ids: list[int] | None = None
     pinned: bool | None = None
 
@@ -229,6 +260,12 @@ class ConversationUpdate(BaseModel):
 class InstructionIn(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     content: str = Field(default="", max_length=20000)
+    is_default: bool = False
+
+
+class InstructionGroupIn(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    snippet_ids: list[int] = []
     is_default: bool = False
 
 
@@ -512,35 +549,56 @@ def _snippet(text: str, q: str) -> str:
 @router.post("/conversations")
 def api_create_conversation(data: ConversationCreate):
     db = get_db()
-    if "instruction_id" in data.model_fields_set:
-        instruction_id = _require_instruction(data.instruction_id)
+    if {"instruction_ids", "instruction_group_ids"} & data.model_fields_set:
+        instruction_ids = _require_instructions(data.instruction_ids)
+        instruction_group_ids = _require_instruction_groups(data.instruction_group_ids)
     else:
-        default = db.get_default_instruction()
-        instruction_id = default.id if default else None
+        instruction_ids, instruction_group_ids = _default_attachment(db)
     characters.require(data.character_ids, db)
     conv = db.create_conversation(
         title=(data.title or DEFAULT_TITLE).strip()[:255] or DEFAULT_TITLE,
         text_model=data.text_model,
         image_model=data.image_model,
         video_model=data.video_model,
-        instruction_id=instruction_id,
+        instruction_ids=instruction_ids,
+        instruction_group_ids=instruction_group_ids,
         character_ids=data.character_ids,
     )
     return conv.to_dict()
 
 
-def _require_instruction(instruction_id: int | None) -> int | None:
-    if instruction_id is not None and not get_db().get_instruction(instruction_id):
-        raise HTTPException(400, "Instruction not found")
-    return instruction_id
+def _require_instructions(ids: list[int]) -> list[int]:
+    db = get_db()
+    for i in ids:
+        if not db.get_instruction(i):
+            raise HTTPException(400, f"Instruction {i} not found")
+    return list(dict.fromkeys(ids))
 
 
-# ── Routes: custom instructions ─────────────────────────────────────
+def _require_instruction_groups(ids: list[int]) -> list[int]:
+    db = get_db()
+    for i in ids:
+        if not db.get_instruction_group(i):
+            raise HTTPException(400, f"Instruction group {i} not found")
+    return list(dict.fromkeys(ids))
+
+
+def _default_attachment(db) -> tuple[list[int], list[int]]:
+    """The one default — a snippet or a group — attached to new chats, if set."""
+    snippet = db.get_default_instruction()
+    group = db.get_default_instruction_group()
+    return ([snippet.id] if snippet else []), ([group.id] if group else [])
+
+
+# ── Routes: instruction snippets & groups ───────────────────────────
 
 
 @router.get("/instructions")
 def api_list_instructions():
-    return {"instructions": [i.to_dict() for i in get_db().list_instructions()]}
+    return {
+        "instructions": [i.to_dict() for i in get_db().list_instructions()],
+        "groups": [g.to_dict() for g in get_db().list_instruction_groups()],
+    }
 
 
 @router.post("/instructions")
@@ -563,6 +621,37 @@ def api_delete_instruction(instruction_id: int):
     if not get_db().delete_instruction(instruction_id):
         raise HTTPException(404, "Instruction not found")
     return {"deleted": instruction_id}
+
+
+@router.post("/instruction-groups")
+def api_create_instruction_group(data: InstructionGroupIn):
+    return (
+        get_db()
+        .save_instruction_group(
+            name=data.name.strip(), snippet_ids=_require_instructions(data.snippet_ids), is_default=data.is_default
+        )
+        .to_dict()
+    )
+
+
+@router.put("/instruction-groups/{group_id}")
+def api_update_instruction_group(group_id: int, data: InstructionGroupIn):
+    item = get_db().save_instruction_group(
+        group_id,
+        name=data.name.strip(),
+        snippet_ids=_require_instructions(data.snippet_ids),
+        is_default=data.is_default,
+    )
+    if not item:
+        raise HTTPException(404, "Instruction group not found")
+    return item.to_dict()
+
+
+@router.delete("/instruction-groups/{group_id}")
+def api_delete_instruction_group(group_id: int):
+    if not get_db().delete_instruction_group(group_id):
+        raise HTTPException(404, "Instruction group not found")
+    return {"deleted": group_id}
 
 
 @router.get("/conversations/{conv_id}")
@@ -649,7 +738,8 @@ def api_fork_conversation(conv_id: str, data: ForkConversation):
         text_model=conv.text_model,
         image_model=conv.image_model,
         video_model=conv.video_model,
-        instruction_id=conv.instruction_id,
+        instruction_ids=conv.instruction_ids,
+        instruction_group_ids=conv.instruction_group_ids,
         settings=conv.settings,
         forked_from_id=conv_id,
         forked_from_message_id=at.id,
@@ -761,8 +851,10 @@ class _Fork:
 def api_update_conversation(conv_id: str, data: ConversationUpdate):
     _require_conv(conv_id)
     fields = data.model_dump(exclude_unset=True)
-    if "instruction_id" in fields:
-        _require_instruction(fields["instruction_id"])
+    if "instruction_ids" in fields:
+        fields["instruction_ids"] = _require_instructions(fields["instruction_ids"] or [])
+    if "instruction_group_ids" in fields:
+        fields["instruction_group_ids"] = _require_instruction_groups(fields["instruction_group_ids"] or [])
     if "title" in fields:
         fields["title"] = (fields["title"] or "").strip()[:255] or DEFAULT_TITLE
     if "character_ids" in fields:
@@ -1165,8 +1257,9 @@ class Turn:
             # another model on the failed card (no automatic re-attempt)
             if any(r.get("moderated") for r in results):
                 return
-            # Saving a character makes nothing to show — carry on (usually to draw them)
-            made_media = any(c["function"]["name"] != "create_character" for c in tool_calls)
+            # Saving a character or an instruction makes nothing to show — carry on
+            no_media = ("create_character", "create_instruction")
+            made_media = any(c["function"]["name"] not in no_media for c in tool_calls)
             if made_media and all(r.get("ok") for r in results):
                 # The media was made. If the model also wrote its reply, the
                 # reply is complete — asking it to continue just makes it
@@ -1185,6 +1278,7 @@ class Turn:
             tools.insert(0, _with_character_arg(TOOLS_IMAGE, names))
         if self.s.video_model:
             tools.append(_with_character_arg(TOOLS_VIDEO, names))
+        tools.append(TOOLS_CREATE_INSTRUCTION)  # needs no media model: applies to the chat model itself
         return tools
 
     def _stream_round(self, messages: list[dict], tools: list[dict] | None) -> tuple[str, list[dict]]:
@@ -1247,6 +1341,8 @@ class Turn:
             return {"ok": False, "error": "Arguments were not valid JSON"}
         if name == "create_character":
             return self._create_character(args)
+        if name == "create_instruction":
+            return self._create_instruction(args)
         if name not in ("generate_image", "generate_video"):
             return {"ok": False, "error": f"Unknown tool {name}"}
         prompt = str(args.get("prompt") or "").strip()
@@ -1377,6 +1473,31 @@ class Turn:
             "ok": True,
             "result": f"Character {name} saved with {len(files)} reference image(s) and attached "
             f"to this chat. Name them in generate_image's `characters` to use them.",
+        }
+
+    def _create_instruction(self, args: dict) -> dict:
+        """Save a reusable instruction snippet and attach it to this chat — the
+        instruction counterpart of _create_character. It's added alongside any
+        snippets and groups already attached, and takes effect from the next
+        reply (this turn's system prompt is already built)."""
+        name = str(args.get("name") or "").strip()[:255]
+        content = str(args.get("content") or "").strip()[:20000]
+        if not name:
+            return {"ok": False, "error": "name is required"}
+        if not content:
+            return {"ok": False, "error": "content is required"}
+        existing = next((i for i in self.db.list_instructions() if i.name.strip().lower() == name.lower()), None)
+        if existing:
+            return {"ok": False, "error": f"There's already an instruction called {name}; pick another name."}
+        item = self.db.save_instruction(name=name, content=content)
+        conv = self.db.get_conversation(self.conv_id)
+        ids = [*(conv.instruction_ids if conv else []), item.id]
+        self.db.update_conversation(self.conv_id, instruction_ids=ids)
+        self.emit({"type": "instructions", "instruction_ids": ids, "instruction": item.to_dict()})
+        return {
+            "ok": True,
+            "result": f"Instruction “{name}” saved and attached to this chat; it applies from your next reply. "
+            f"The user can edit it, group it, or attach it to other chats from the Instructions panel.",
         }
 
     def _characters_usable(self) -> bool:
@@ -1869,13 +1990,22 @@ def _image_context(
 
 
 def _conversation_instructions(conv_id: str) -> str | None:
-    """The custom instructions attached to a chat, if any (user's text, verbatim)."""
+    """The instructions attached to a chat, flattened for the model (user's text,
+    verbatim): every snippet from the attached groups (in group order), then the
+    individually attached snippets — each sent once — joined by blank lines.
+    None when nothing with content is attached."""
     db = get_db()
     conv = db.get_conversation(conv_id)
-    if not conv or not conv.instruction_id:
+    if not conv:
         return None
-    item = db.get_instruction(conv.instruction_id)
-    return item.content if item and item.content.strip() else None
+    snippet_ids: list[int] = []
+    for group in (db.get_instruction_group(gid) for gid in conv.instruction_group_ids):
+        if group:
+            snippet_ids += group.snippet_ids
+    snippet_ids += conv.instruction_ids
+    snippet_ids = list(dict.fromkeys(snippet_ids))  # a snippet in several groups is sent once
+    parts = [s.content.strip() for s in db.get_instructions(snippet_ids) if s.content.strip()]
+    return "\n\n".join(parts) or None
 
 
 def _is_conversational(image_model: str | None) -> bool:

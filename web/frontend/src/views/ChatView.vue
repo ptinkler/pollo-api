@@ -8,6 +8,7 @@ import ChatComposer from '../components/chat/ChatComposer.vue'
 import ChatMessage from '../components/chat/ChatMessage.vue'
 import ChatWelcome from '../components/chat/ChatWelcome.vue'
 import ConversationList from '../components/chat/ConversationList.vue'
+import InstructionPicker from '../components/chat/InstructionPicker.vue'
 import InstructionsDialog from '../components/chat/InstructionsDialog.vue'
 import MediaLightbox from '../components/chat/MediaLightbox.vue'
 import ModelPicker from '../components/chat/ModelPicker.vue'
@@ -284,11 +285,17 @@ async function loadModels(refresh = false) {
 const instructionsOpen = ref(false)
 const {
   instructions,
-  instructionId,
-  attachedInstruction,
-  defaultInstructionId,
+  groups: instructionGroups,
+  instructionIds,
+  groupIds: instructionGroupIds,
+  attachedInstructions,
+  attachedGroups,
+  attachmentSummary,
+  defaultAttachment,
   loadInstructions,
-  setInstruction,
+  setInstructions,
+  setGroups,
+  onInstructionUsed,
   onInstructionsChanged,
 } = useChatInstructions({ convId, conversation, showToast })
 // Video models and non-conversational image models don't take instructions
@@ -339,7 +346,9 @@ async function loadConversation(id) {
   if (!id) {
     conversation.value = null
     messages.value = []
-    instructionId.value = defaultInstructionId()
+    const d = defaultAttachment()
+    instructionIds.value = d.ids
+    instructionGroupIds.value = d.groupIds
     characterIds.value = []
     setRefChoices(null)
     return
@@ -350,7 +359,8 @@ async function loadConversation(id) {
     const c = data.conversation
     conversation.value = c
     messages.value = data.messages
-    instructionId.value = c.instruction_id ?? null
+    instructionIds.value = c.instruction_ids || []
+    instructionGroupIds.value = c.instruction_group_ids || []
     characterIds.value = c.character_ids || []
     applyChat(c)
     document.title = `${c.title} — Chat`
@@ -381,7 +391,8 @@ async function ensureConversation() {
     text_model: selected.text || null,
     image_model: selected.image || null,
     video_model: selected.video || null,
-    instruction_id: instructionId.value, // explicit, so "None" sticks
+    instruction_ids: instructionIds.value, // explicit, so "None" sticks
+    instruction_group_ids: instructionGroupIds.value,
     character_ids: characterIds.value,
   })
   conversation.value = conv
@@ -485,6 +496,9 @@ const TURN_EVENTS = {
   },
   characters(ev) {
     onCharactersUsed(ev.characters, ev.character_ids)
+  },
+  instructions(ev) {
+    onInstructionUsed(ev.instruction, ev.instruction_ids)
   },
   title(ev) {
     if (conversation.value) conversation.value.title = ev.title
@@ -762,24 +776,22 @@ onBeforeUnmount(() => {
           <p class="mode-hint">{{ currentMode.hint }}</p>
         </SidebarSection>
 
-        <SidebarSection id="instructions" title="Instructions" :summary="attachedInstruction?.name || 'None'">
+        <SidebarSection id="instructions" title="Instructions" :summary="attachmentSummary || 'None'">
           <template #actions>
-            <button class="mini-btn" title="Create and edit saved instructions" @click="instructionsOpen = true">
+            <button class="mini-btn" title="Create and edit snippets and groups" @click="instructionsOpen = true">
               Manage
             </button>
           </template>
-          <select
-            class="instruction-select"
-            :value="instructionId ?? ''"
-            aria-label="Custom instructions for this chat"
-            @change="setInstruction($event.target.value === '' ? null : Number($event.target.value))"
-          >
-            <option value="">None</option>
-            <option v-for="i in instructions" :key="i.id" :value="i.id">
-              {{ i.name }}{{ i.is_default ? ' (default)' : '' }}
-            </option>
-          </select>
-          <p v-if="attachedInstruction && instructionsUnused" class="mode-hint">
+          <InstructionPicker
+            :instructions="instructions"
+            :groups="instructionGroups"
+            :snippet-ids="instructionIds"
+            :group-ids="instructionGroupIds"
+            @update:snippet-ids="setInstructions"
+            @update:group-ids="setGroups"
+            @manage="instructionsOpen = true"
+          />
+          <p v-if="(attachedInstructions.length || attachedGroups.length) && instructionsUnused" class="mode-hint">
             {{ mode === 'video' ? 'Video models' : 'This image model' }} can't take instructions; they apply in Auto and
             Chat modes.
           </p>
@@ -1024,7 +1036,7 @@ onBeforeUnmount(() => {
     <InstructionsDialog
       :open="instructionsOpen"
       :instructions="instructions"
-      :select-id="instructionId"
+      :groups="instructionGroups"
       @close="instructionsOpen = false"
       @changed="onInstructionsChanged"
     />
@@ -1203,13 +1215,6 @@ onBeforeUnmount(() => {
   background: rgba(108, 92, 231, 0.2);
   border-color: var(--accent);
   color: var(--text);
-}
-
-.instruction-select {
-  width: 100%;
-  padding: 6px 8px;
-  font-size: 0.82rem;
-  border-radius: 8px;
 }
 
 .memory-slider {
