@@ -49,7 +49,7 @@ const spendTitle = computed(() => {
     >
       Venice <b>{{ fmtUsd(balances.venice) }}</b
       ><template v-if="balances.veniceCredits != null">
-        + <b>{{ fmtPlanCredits(balances.veniceCredits) }}</b> plan credits</template
+        / <b>{{ fmtPlanCredits(balances.veniceCredits) }}</b></template
       >
     </span>
     <RouterLink to="/usage" class="balance pollo" title="Pollo credits remaining (Pollo images/videos) — open Usage">
