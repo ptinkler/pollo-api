@@ -1081,6 +1081,7 @@ onBeforeUnmount(() => {
       :character="charEditor.character"
       :conversation-id="charEditor.conversationId"
       :seed="charEditor.seed"
+      show-defaults
       @close="charEditor.open = false"
       @saved="onCharacterSaved"
       @deleted="onCharacterDeleted"

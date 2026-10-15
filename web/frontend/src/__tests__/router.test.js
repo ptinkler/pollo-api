@@ -325,12 +325,12 @@ describe('ChatView spaces in the chat list', () => {
     return w
   }
 
-  it('groups chats under their space with an Unfiled section', async () => {
+  it('lists spaces as folders above the loose chats', async () => {
     const w = await mountView()
-    expect(w.findAll('.space-name').map(e => e.text())).toEqual(['Fantasy novel', 'Unfiled'])
+    // Named spaces are folders in the Spaces section; loose chats go under Chats
+    expect(w.findAll('.space-name').map(e => e.text())).toEqual(['Fantasy novel'])
     const titles = w.findAll('.conv-title').map(e => e.text())
-    expect(titles).toContain('Dragon lair')
-    expect(titles).toContain('Quick test')
-    w.unmount()
+    expect(titles).toContain('Dragon lair') // inside the space folder
+    expect(titles).toContain('Quick test') // in the Chats (unfiled) section
   })
 })

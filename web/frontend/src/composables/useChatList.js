@@ -7,7 +7,7 @@ import { deleteConversation, fetchConversations, patchConversation } from './use
 const DAY_MS = 24 * 60 * 60 * 1000
 const SEARCH_DELAY_MS = 250
 
-function dateGroups(conversations) {
+export function dateGroups(conversations) {
   const now = new Date()
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
   const groups = [

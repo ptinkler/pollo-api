@@ -2144,13 +2144,20 @@ class TestChatSpaces:
         conv = client.post("/api/chat/conversations", json={"space_id": sp["id"], "instruction_ids": []}).json()
         assert conv["space_id"] == sp["id"] and conv["instruction_ids"] == []
 
-    def test_space_character_defaults_seed_new_chats_and_drop_stale(self, client, db):
+    def test_space_character_defaults_seed_new_chats(self, client, db):
         c1 = db.create_character("Alice")
-        c2 = db.create_character("Bob")
-        sp = client.post("/api/chat/spaces", json={"name": "Novel", "default_character_ids": [c1.id, c2.id]}).json()
-        db.delete_character(c2.id)  # now stale in the space defaults
+        sp = client.post("/api/chat/spaces", json={"name": "Novel", "default_character_ids": [c1.id]}).json()
         conv = client.post("/api/chat/conversations", json={"space_id": sp["id"]}).json()
         assert conv["character_ids"] == [c1.id]
+
+    def test_deleting_a_character_clears_it_from_global_and_space_defaults(self, client, db):
+        c1 = db.create_character("Alice")
+        client.put("/api/chat/settings", json={"default_character_ids": [c1.id]})
+        sp = client.post("/api/chat/spaces", json={"name": "Novel", "default_character_ids": [c1.id]}).json()
+        assert sp["default_character_ids"] == [c1.id]
+        db.delete_character(c1.id)  # symmetric with snippet/group deletion
+        assert client.get("/api/chat/settings").json()["default_character_ids"] == []
+        assert client.get("/api/chat/spaces").json()["spaces"][0]["default_character_ids"] == []
 
     def test_move_chat_between_spaces_and_unfiled(self, client, conv):
         sp = client.post("/api/chat/spaces", json={"name": "Novel"}).json()

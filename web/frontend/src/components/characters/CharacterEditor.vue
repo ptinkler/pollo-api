@@ -24,6 +24,8 @@ const props = defineProps({
   // Images to start a new character with: { kind: 'chat', conversationId, file, preview },
   // { kind: 'generation', project, filename, preview } or { kind: 'media', mediaId, preview }
   seed: { type: Array, default: () => [] },
+  // Show the "add to chat defaults" toggles (chat view only)
+  showDefaults: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close', 'saved', 'deleted'])
 const showToast = inject('showToast', () => {})
@@ -231,7 +233,7 @@ async function remove() {
           @close="pickerOpen = false"
         />
 
-        <DefaultToggles kind="character" :item-id="character?.id ?? null" />
+        <DefaultToggles v-if="showDefaults" kind="character" :item-id="character?.id ?? null" />
 
         <div class="actions">
           <button v-if="character" class="btn btn-danger" @click="remove">Delete</button>

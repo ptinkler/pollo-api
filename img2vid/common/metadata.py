@@ -1413,10 +1413,21 @@ class MetadataDB:
             return char
 
     def delete_character(self, character_id: int) -> bool:
+        """Delete a character and remove it from any chats and from the global
+        and space default buckets using it (symmetric with delete_instruction)."""
         with self._session() as session:
             char = session.get(Character, character_id)
             if not char:
                 return False
+            self._detach_id(
+                session, ChatConversation, ChatConversation.character_ids_json, "character_ids", character_id
+            )
+            self._detach_id(
+                session, ChatSpace, ChatSpace.default_character_ids_json, "default_character_ids", character_id
+            )
+            self._detach_id(
+                session, ChatSettings, ChatSettings.default_character_ids_json, "default_character_ids", character_id
+            )
             session.delete(char)
             session.commit()
             return True

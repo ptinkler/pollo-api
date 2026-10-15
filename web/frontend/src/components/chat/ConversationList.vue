@@ -2,9 +2,11 @@
 import { computed, ref } from 'vue'
 import FoldHeading from './FoldHeading.vue'
 import { useFolded } from '../../composables/useFolded'
+import { dateGroups } from '../../composables/useChatList'
 
-// The sidebar's chat list (state and actions from useChatList): search, then
-// chats grouped by space (collapsible) when spaces exist, else by date.
+// The sidebar's chats: a Spaces section of collapsible space folders on top
+// (like ChatGPT's Projects), then a Chats section of the loose/unfiled chats
+// grouped by date (like Recents). Search replaces both with flat results.
 const props = defineProps({
   list: { type: Object, required: true },
   spaces: { type: Array, default: () => [] },
@@ -15,20 +17,13 @@ const emit = defineEmits(['open', 'rename', 'remove', 'new-in-space', 'move', 'm
 const { isFolded, toggleFold } = useFolded()
 const moveMenuFor = ref(null) // conversation id whose "move" menu is open
 
-// Chats grouped by space (space first in list order, then Unfiled), or null to
-// fall back to the date groups when there are no spaces / while searching.
-const spaceSections = computed(() => {
-  if (props.list.searchResults || !props.spaces.length) return null
-  const byId = new Map(props.spaces.map(s => [s.id, { key: `space:${s.id}`, space: s, items: [] }]))
-  const unfiled = { key: 'space:unfiled', space: null, items: [] }
-  for (const c of props.list.conversations) {
-    const bucket = (c.space_id != null && byId.get(c.space_id)) || unfiled
-    bucket.items.push(c)
-  }
-  const sections = props.spaces.map(s => byId.get(s.id))
-  if (unfiled.items.length) sections.push(unfiled)
-  return sections
-})
+const searching = computed(() => !!props.list.searchResults)
+
+// Chats in each space (space list order), and the loose ones grouped by date
+const spaceFolders = computed(() =>
+  props.spaces.map(s => ({ space: s, items: props.list.conversations.filter(c => c.space_id === s.id) })),
+)
+const unfiledGroups = computed(() => dateGroups(props.list.conversations.filter(c => c.space_id == null)))
 
 function toggleMove(id) {
   moveMenuFor.value = moveMenuFor.value === id ? null : id
@@ -41,35 +36,108 @@ function move(conv, spaceId) {
 </script>
 
 <template>
-  <FoldHeading id="chats" class="chats-heading" title="Chats" :summary="list.conversations.length">
-    <template #actions>
-      <button class="mini-btn" title="Create and edit spaces" @click="emit('manage-spaces')">Spaces</button>
-    </template>
-  </FoldHeading>
-  <div v-show="!isFolded('chats')" class="conv-search">
-    <input
-      :value="list.search"
-      type="search"
-      placeholder="Search chats"
-      aria-label="Search chats"
-      @input="list.setSearch($event.target.value)"
-    />
-  </div>
-  <div v-show="!isFolded('chats')" class="conv-list">
-    <!-- Grouped by space -->
-    <template v-if="spaceSections">
-      <template v-for="s in spaceSections" :key="s.key">
-        <div class="space-head">
-          <button class="space-toggle" @click="toggleFold(s.key)">
-            <span class="caret" :class="{ folded: isFolded(s.key) }">▾</span>
-            <span class="space-name">{{ s.space ? s.space.name : 'Unfiled' }}</span>
-            <span class="space-count">{{ s.items.length }}</span>
+  <div class="conv-root">
+    <div class="conv-search">
+      <input
+        :value="list.search"
+        type="search"
+        placeholder="Search chats"
+        aria-label="Search chats"
+        @input="list.setSearch($event.target.value)"
+      />
+    </div>
+
+    <!-- Search: flat results across every chat -->
+    <div v-if="searching" class="conv-list">
+      <div
+        v-for="c in list.searchResults"
+        :key="c.id"
+        class="conv-item"
+        :class="{ active: c.id === activeId }"
+        @click="emit('open', c.id)"
+      >
+        <span class="conv-text">
+          <span class="conv-title">{{ c.title }}</span>
+          <span v-if="c.snippet" class="conv-snippet">{{ c.snippet }}</span>
+        </span>
+        <span class="conv-actions" @click.stop>
+          <button :class="{ on: c.pinned }" :title="c.pinned ? 'Unpin' : 'Pin to the top'" @click="list.togglePin(c)">
+            📌
           </button>
-          <button class="space-add" title="New chat here" @click="emit('new-in-space', s.space?.id ?? null)">＋</button>
-        </div>
-        <template v-if="!isFolded(s.key)">
+          <button title="Rename" @click="emit('rename', c)">✎</button>
+          <button title="Delete" @click="emit('remove', c)">🗑</button>
+        </span>
+      </div>
+      <p v-if="!list.searchResults.length" class="conv-empty">No chats match</p>
+    </div>
+
+    <template v-else>
+      <!-- Spaces (collapsible folders) -->
+      <FoldHeading id="spaces" class="section-heading" title="Spaces" :summary="spaces.length">
+        <template #actions>
+          <button class="mini-btn" title="Create and edit spaces" @click="emit('manage-spaces')">Manage</button>
+        </template>
+      </FoldHeading>
+      <div v-show="!isFolded('spaces')" class="conv-list spaces-list">
+        <template v-for="f in spaceFolders" :key="f.space.id">
+          <div class="space-head">
+            <button class="space-toggle" @click="toggleFold(`space:${f.space.id}`)">
+              <span class="caret" :class="{ folded: isFolded(`space:${f.space.id}`) }">▾</span>
+              <span class="folder">🗂</span>
+              <span class="space-name">{{ f.space.name }}</span>
+              <span class="space-count">{{ f.items.length }}</span>
+            </button>
+            <button class="space-add" title="New chat here" @click="emit('new-in-space', f.space.id)">＋</button>
+          </div>
+          <template v-if="!isFolded(`space:${f.space.id}`)">
+            <div
+              v-for="c in f.items"
+              :key="c.id"
+              class="conv-item nested"
+              :class="{ active: c.id === activeId }"
+              @click="emit('open', c.id)"
+            >
+              <span class="conv-text">
+                <span class="conv-title"
+                  ><span v-if="c.forked_from_id" class="conv-fork" title="Branched off another chat">⑂ </span
+                  >{{ c.title }}</span
+                >
+              </span>
+              <span class="conv-actions" @click.stop>
+                <button :class="{ on: c.pinned }" :title="c.pinned ? 'Unpin' : 'Pin'" @click="list.togglePin(c)">
+                  📌
+                </button>
+                <span class="move-wrap">
+                  <button title="Move to space" @click="toggleMove(c.id)">🗂</button>
+                  <div v-if="moveMenuFor === c.id" class="move-menu">
+                    <button v-for="sp in spaces" :key="sp.id" :disabled="sp.id === c.space_id" @click="move(c, sp.id)">
+                      {{ sp.name }}
+                    </button>
+                    <button :disabled="c.space_id == null" @click="move(c, null)">Chats (no space)</button>
+                  </div>
+                </span>
+                <button title="Rename" @click="emit('rename', c)">✎</button>
+                <button title="Delete" @click="emit('remove', c)">🗑</button>
+              </span>
+            </div>
+            <p v-if="!f.items.length" class="space-empty">No chats yet</p>
+          </template>
+        </template>
+        <p v-if="!spaces.length" class="space-empty">No spaces yet — use Manage to add one.</p>
+      </div>
+
+      <!-- Chats (loose / unfiled, by date) -->
+      <FoldHeading
+        id="chats"
+        class="section-heading"
+        title="Chats"
+        :summary="unfiledGroups.reduce((n, g) => n + g.items.length, 0)"
+      />
+      <div v-show="!isFolded('chats')" class="conv-list chats-list">
+        <template v-for="g in unfiledGroups" :key="g.label">
+          <div class="conv-group">{{ g.label }}</div>
           <div
-            v-for="c in s.items"
+            v-for="c in g.items"
             :key="c.id"
             class="conv-item"
             :class="{ active: c.id === activeId }"
@@ -80,7 +148,6 @@ function move(conv, spaceId) {
                 ><span v-if="c.forked_from_id" class="conv-fork" title="Branched off another chat">⑂ </span
                 >{{ c.title }}</span
               >
-              <span v-if="c.snippet" class="conv-snippet">{{ c.snippet }}</span>
             </span>
             <span class="conv-actions" @click.stop>
               <button
@@ -90,97 +157,57 @@ function move(conv, spaceId) {
               >
                 📌
               </button>
-              <span class="move-wrap">
-                <button title="Move to space" @click="toggleMove(c.id)">📁</button>
+              <span v-if="spaces.length" class="move-wrap">
+                <button title="Move to space" @click="toggleMove(c.id)">🗂</button>
                 <div v-if="moveMenuFor === c.id" class="move-menu">
-                  <button v-for="sp in spaces" :key="sp.id" :disabled="sp.id === c.space_id" @click="move(c, sp.id)">
-                    {{ sp.name }}
-                  </button>
-                  <button :disabled="c.space_id == null" @click="move(c, null)">Unfiled</button>
+                  <button v-for="sp in spaces" :key="sp.id" @click="move(c, sp.id)">{{ sp.name }}</button>
                 </div>
               </span>
               <button title="Rename" @click="emit('rename', c)">✎</button>
               <button title="Delete" @click="emit('remove', c)">🗑</button>
             </span>
           </div>
-          <p v-if="!s.items.length" class="space-empty">No chats yet</p>
         </template>
-      </template>
+        <p v-if="!unfiledGroups.length" class="conv-empty">No chats yet</p>
+        <p v-if="list.more" class="conv-empty">Older chats aren't listed. Search to find them.</p>
+      </div>
     </template>
-
-    <!-- No spaces (or searching): the original date groups / flat results -->
-    <template v-else>
-      <template v-for="g in list.groups" :key="g.label || 'results'">
-        <div v-if="g.label" class="conv-group">{{ g.label }}</div>
-        <div
-          v-for="c in g.items"
-          :key="c.id"
-          class="conv-item"
-          :class="{ active: c.id === activeId }"
-          @click="emit('open', c.id)"
-        >
-          <span class="conv-text">
-            <span class="conv-title"
-              ><span v-if="c.forked_from_id" class="conv-fork" title="Branched off another chat">⑂ </span
-              >{{ c.title }}</span
-            >
-            <span v-if="c.snippet" class="conv-snippet">{{ c.snippet }}</span>
-          </span>
-          <span class="conv-actions" @click.stop>
-            <button :class="{ on: c.pinned }" :title="c.pinned ? 'Unpin' : 'Pin to the top'" @click="list.togglePin(c)">
-              📌
-            </button>
-            <span v-if="spaces.length" class="move-wrap">
-              <button title="Move to space" @click="toggleMove(c.id)">📁</button>
-              <div v-if="moveMenuFor === c.id" class="move-menu">
-                <button v-for="sp in spaces" :key="sp.id" @click="move(c, sp.id)">{{ sp.name }}</button>
-              </div>
-            </span>
-            <button title="Rename" @click="emit('rename', c)">✎</button>
-            <button title="Delete" @click="emit('remove', c)">🗑</button>
-          </span>
-        </div>
-      </template>
-    </template>
-
-    <p v-if="list.searchResults && !list.searchResults.length" class="conv-empty">No chats match</p>
-    <p v-else-if="!list.searchResults && !list.conversations.length" class="conv-empty">No chats yet</p>
-    <p v-if="!list.searchResults && list.more" class="conv-empty">Older chats aren't listed. Search to find them.</p>
   </div>
 </template>
 
 <style scoped>
-.chats-heading {
-  padding: 16px 14px 4px;
+.conv-root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
-.mini-btn {
-  background: none;
-  border: none;
-  color: var(--text2);
-  cursor: pointer;
-  border-radius: 6px;
-  padding: 2px 6px;
-  font-size: 0.75rem;
-}
-
-.mini-btn:hover {
-  background: var(--surface2);
-  color: var(--text);
+.section-heading {
+  padding: 14px 14px 2px;
+  flex: 0 0 auto;
 }
 
 .conv-list {
-  flex: 1 0 140px;
-  min-height: 140px;
   overflow-y: auto;
-  padding: 0 8px 8px;
+  padding: 0 8px 4px;
+  flex: 0 0 auto;
+}
+
+.spaces-list {
+  max-height: 40vh;
+}
+
+.chats-list {
+  flex: 1 1 auto;
+  min-height: 80px;
 }
 
 .space-head {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 8px 6px 2px;
+  padding: 3px 4px 1px;
 }
 
 .space-toggle {
@@ -191,11 +218,9 @@ function move(conv, spaceId) {
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--text2);
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 2px 4px;
+  color: var(--text);
+  font-size: 0.85rem;
+  padding: 4px 4px;
   min-width: 0;
 }
 
@@ -206,20 +231,27 @@ function move(conv, spaceId) {
 .caret {
   transition: transform 0.15s;
   font-size: 0.7rem;
+  color: var(--text2);
 }
 
 .caret.folded {
   transform: rotate(-90deg);
 }
 
+.folder {
+  font-size: 0.85rem;
+}
+
 .space-name {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .space-count {
-  opacity: 0.6;
+  color: var(--text2);
+  font-size: 0.78rem;
 }
 
 .space-add {
@@ -240,8 +272,23 @@ function move(conv, spaceId) {
 .space-empty {
   font-size: 0.75rem;
   color: var(--text2);
-  padding: 2px 16px 6px;
+  padding: 2px 10px 6px 26px;
   opacity: 0.7;
+}
+
+.mini-btn {
+  background: none;
+  border: none;
+  color: var(--text2);
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 0.75rem;
+}
+
+.mini-btn:hover {
+  background: var(--surface2);
+  color: var(--text);
 }
 
 .conv-item {
@@ -253,6 +300,14 @@ function move(conv, spaceId) {
   cursor: pointer;
   font-size: 0.85rem;
   color: var(--text2);
+}
+
+.conv-item.nested {
+  margin-left: 16px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
 }
 
 .conv-item:hover {
@@ -297,11 +352,11 @@ function move(conv, spaceId) {
   letter-spacing: 0.6px;
   color: var(--text2);
   opacity: 0.7;
-  padding: 10px 10px 3px;
+  padding: 8px 10px 3px;
 }
 
 .conv-search {
-  padding: 2px 12px 6px;
+  padding: 8px 12px 6px;
 }
 
 .conv-search input {
