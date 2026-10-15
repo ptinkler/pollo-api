@@ -12,6 +12,7 @@ const props = defineProps({
 
 const fmtUsd = v => (v == null ? '—' : `$${v.toFixed(2)}`)
 const fmtCredits = v => (v == null ? '—' : Math.round(v).toLocaleString())
+const fmtPlanCredits = v => (v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(2))
 const joinAmounts = (usd, credits, creditsLabel) =>
   [usd ? fmtCost(usd) : '', credits ? `${credits.toLocaleString()} ${creditsLabel}` : ''].filter(Boolean).join(' + ')
 
@@ -37,8 +38,19 @@ const spendTitle = computed(() => {
     >
       OpenRouter <b>{{ fmtUsd(balances.openrouter) }}</b>
     </span>
-    <span v-if="providers.venice" class="balance venice" title="Venice balance in USD (Venice text, images and videos)">
-      Venice <b>{{ fmtUsd(balances.venice) }}</b>
+    <span
+      v-if="providers.venice"
+      class="balance venice"
+      :title="`Venice (text, images and videos): USD balance${
+        balances.veniceCredits != null
+          ? `, and ${balances.veniceCredits} of your plan's bundled credits left — spent before the USD balance`
+          : ''
+      }`"
+    >
+      Venice <b>{{ fmtUsd(balances.venice) }}</b
+      ><template v-if="balances.veniceCredits != null">
+        + <b>{{ fmtPlanCredits(balances.veniceCredits) }}</b> plan credits</template
+      >
     </span>
     <RouterLink to="/usage" class="balance pollo" title="Pollo credits remaining (Pollo images/videos) — open Usage">
       Pollo <b>{{ fmtCredits(balances.pollo) }}</b>

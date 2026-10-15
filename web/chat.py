@@ -503,10 +503,10 @@ def api_chat_credits():
 
 @router.get("/venice-balance")
 def api_venice_balance():
-    """Venice balance (USD) for the chat header."""
+    """Venice balance for the chat header: USD, and the plan's bundled credits."""
     if not venice_chat.is_configured():
         raise HTTPException(503, "VENICE_API_KEY is not set on the server")
-    return {"usd": venice_chat.get_balance()}
+    return {"usd": venice_chat.get_balance(), "credits": venice_chat.get_plan_credits()}
 
 
 @router.get("/models")

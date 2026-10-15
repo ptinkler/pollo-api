@@ -515,6 +515,19 @@ def get_balance() -> float | None:
     return _balance["usd"]
 
 
+def get_plan_credits() -> float | None:
+    """What's left of the plan's bundled credits (BUNDLED_CREDITS, which
+    Venice spends after DIEM and before USD). Unlike /billing/balance, the
+    rate limits endpoint gives them to inference keys too."""
+    try:
+        data = _request("GET", "/api_keys/rate_limits").json()
+    except VeniceError:
+        return None
+    balances = (data.get("data") or data).get("balances") or {}
+    value = balances.get("BUNDLED_CREDITS")
+    return float(value) if value is not None else None
+
+
 # ── Text ────────────────────────────────────────────────────────────
 
 

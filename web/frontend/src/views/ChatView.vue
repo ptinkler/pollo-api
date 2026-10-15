@@ -11,7 +11,7 @@ import ConversationList from '../components/chat/ConversationList.vue'
 import ImportChatsModal from '../components/chat/ImportChatsModal.vue'
 import InstructionPicker from '../components/chat/InstructionPicker.vue'
 import InstructionsDialog from '../components/chat/InstructionsDialog.vue'
-import SpacesDialog from '../components/chat/SpacesDialog.vue'
+import SpaceSettingsDialog from '../components/chat/SpaceSettingsDialog.vue'
 import MediaLightbox from '../components/chat/MediaLightbox.vue'
 import ModelPicker from '../components/chat/ModelPicker.vue'
 import SidebarSection from '../components/chat/SidebarSection.vue'
@@ -307,7 +307,7 @@ const instructionsUnused = computed(
 )
 
 // ── Spaces & defaults ─────────────────────────────────────────────────
-const spacesOpen = ref(false)
+const spaceSettings = ref(null) // the space, 'new' or 'global' whose settings are open
 const importOpen = ref(false)
 const { globalSettings, spaces, spaceById, loadDefaults, setCurrentSpace } = useChatDefaults()
 // An import may have added chats and made the ChatGPT space
@@ -475,8 +475,10 @@ async function moveConversation({ conv, spaceId }) {
   }
 }
 
-function onSpacesChanged() {
+// Saved or created (the space or global defaults) or, with null, a space deleted
+function onSpacesChanged(saved) {
   loadDefaults()
+  if (saved === null) chatList.load() // its chats moved to Chats
 }
 
 // Chat creations live in Media, with everything else (filtered to chats)
@@ -982,7 +984,8 @@ onBeforeUnmount(() => {
         @remove="removeConversation"
         @new-in-space="newChat"
         @move="moveConversation"
-        @manage-spaces="spacesOpen = true"
+        @space-settings="spaceSettings = $event"
+        @spaces-changed="loadDefaults"
         @import="importOpen = true"
       />
 
@@ -1103,14 +1106,13 @@ onBeforeUnmount(() => {
       @changed="onInstructionsChanged"
     />
 
-    <SpacesDialog
-      :open="spacesOpen"
-      :spaces="spaces"
+    <SpaceSettingsDialog
+      :target="spaceSettings"
       :global-settings="globalSettings"
       :characters="characters"
       :instructions="instructions"
       :groups="instructionGroups"
-      @close="spacesOpen = false"
+      @close="spaceSettings = null"
       @changed="onSpacesChanged"
     />
 
@@ -1136,42 +1138,9 @@ onBeforeUnmount(() => {
   background: var(--bg);
 }
 
-/* Slim scrollbars that only show while hovering the pane */
-
-.side-controls,
-.conv-list,
-.chat-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-}
-
-.side-controls:hover,
-.conv-list:hover,
-.chat-scroll:hover {
-  scrollbar-color: #3a3a3a transparent;
-}
-
-.side-controls::-webkit-scrollbar,
-.conv-list::-webkit-scrollbar,
-.chat-scroll::-webkit-scrollbar {
-  width: 6px;
-}
-
-.side-controls::-webkit-scrollbar-thumb,
-.conv-list::-webkit-scrollbar-thumb,
-.chat-scroll::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 3px;
-}
-
-.side-controls:hover::-webkit-scrollbar-thumb,
-.conv-list:hover::-webkit-scrollbar-thumb,
-.chat-scroll:hover::-webkit-scrollbar-thumb {
-  background: #3a3a3a;
-}
-
 /* ── Sidebar ─────────────────────────── */
 
+/* One scrollbar for the whole sidebar: its sections just grow */
 .chat-sidebar {
   width: 280px;
   flex-shrink: 0;
@@ -1180,6 +1149,12 @@ onBeforeUnmount(() => {
   background: #141414;
   border-right: 1px solid #222;
   min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.chat-sidebar > * {
+  flex-shrink: 0;
 }
 
 .side-top {
@@ -1225,11 +1200,6 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  /* When the window is short the settings scroll, leaving room for the chats */
-  flex: 0 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
 }
 
 .library-link {
@@ -1369,7 +1339,10 @@ onBeforeUnmount(() => {
 }
 
 .side-bottom {
-  margin-top: auto; /* stays at the bottom when the chat list is folded */
+  margin-top: auto; /* at the bottom when the chat list is short */
+  position: sticky; /* and in view when it's long */
+  bottom: 0;
+  background: #141414;
   padding: 8px 12px 12px;
   border-top: 1px solid #222;
 }

@@ -304,7 +304,7 @@ describe('ChatView spaces in the chat list', () => {
                 : url.includes('/spaces')
                   ? { spaces }
                   : url.includes('/conversations')
-                    ? { conversations: convs, more: false }
+                    ? { conversations: convs.map(c => ({ ...c })), more: false } // copies: moves change them
                     : url.includes('/characters')
                       ? { characters: [] }
                       : { configured: true },
@@ -332,5 +332,75 @@ describe('ChatView spaces in the chat list', () => {
     const titles = w.findAll('.conv-title').map(e => e.text())
     expect(titles).toContain('Dragon lair') // inside the space folder
     expect(titles).toContain('Quick test') // in the Chats (unfiled) section
+  })
+
+  // The PATCHes sent to a chat: [{ id, body }]
+  const patches = () =>
+    globalThis.fetch.mock.calls
+      .filter(([, opts]) => opts?.method === 'PATCH')
+      .map(([url, opts]) => ({ id: String(url).split('/').pop(), body: JSON.parse(opts.body) }))
+  const item = (w, title) => w.findAll('.conv-item').find(e => e.find('.conv-title').text() === title)
+  const spaceTitles = w => w.findAll('.conv-item.nested .conv-title').map(e => e.text())
+
+  it('moves a chat with Move to…', async () => {
+    const w = await mountView()
+    await item(w, 'Quick test').find('button[title="Move to…"]').trigger('click')
+    const dialog = document.body.querySelector('[aria-label="Move chat"]')
+    expect(dialog.textContent).toContain('Move “Quick test”')
+    const target = [...dialog.querySelectorAll('.target')].find(b => b.textContent.includes('Fantasy novel'))
+    target.click()
+    await flushChat()
+    expect(patches()).toEqual([{ id: 'u', body: { space_id: 1 } }])
+    expect(spaceTitles(w)).toContain('Quick test')
+    expect(document.body.querySelector('[aria-label="Move chat"]')).toBeNull() // closes once picked
+    w.unmount()
+  })
+
+  it('moves a chat by dragging it onto a space or onto Chats', async () => {
+    const w = await mountView()
+    const dataTransfer = { setData: () => {}, effectAllowed: '', dropEffect: '' }
+    await item(w, 'Quick test').trigger('dragstart', { dataTransfer })
+    const space = w.findAll('.drop-zone')[0]
+    await space.trigger('dragover', { dataTransfer })
+    expect(space.classes()).toContain('drop-over')
+    await space.trigger('drop', { dataTransfer })
+    await flushChat()
+    expect(patches()).toEqual([{ id: 'u', body: { space_id: 1 } }])
+    expect(spaceTitles(w)).toEqual(['Dragon lair', 'Quick test'])
+
+    await item(w, 'Dragon lair').trigger('dragstart', { dataTransfer })
+    await w.findAll('.drop-zone').at(-1).trigger('drop', { dataTransfer }) // the Chats section
+    await flushChat()
+    expect(patches().at(-1)).toEqual({ id: 'a', body: { space_id: null } })
+    expect(spaceTitles(w)).toEqual(['Quick test'])
+    w.unmount()
+  })
+
+  it("opens a space's settings from its cog, and saving closes them", async () => {
+    const w = await mountView()
+    await w.find('.space-head button[title="Space settings"]').trigger('click')
+    const dialog = () => document.body.querySelector('.dialog[role="dialog"]')
+    expect(dialog().getAttribute('aria-label')).toBe('“Fantasy novel” settings')
+    const name = dialog().querySelector('#space-name')
+    name.value = 'Fantasy saga'
+    name.dispatchEvent(new Event('input'))
+    await flushChat()
+    dialog().querySelector('form .btn-primary, .btn-primary').click()
+    await flushChat()
+    const put = globalThis.fetch.mock.calls.find(
+      ([url, opts]) => opts?.method === 'PUT' && String(url).endsWith('/spaces/1'),
+    )
+    expect(JSON.parse(put[1].body).name).toBe('Fantasy saga')
+    expect(dialog()).toBeNull()
+    w.unmount()
+  })
+
+  it('opens the defaults for every chat from the Chats cog', async () => {
+    const w = await mountView()
+    await w.find('button[title="Defaults for every new chat"]').trigger('click')
+    const dialog = document.body.querySelector('.dialog[role="dialog"]')
+    expect(dialog.getAttribute('aria-label')).toBe('Defaults for every chat')
+    expect(dialog.querySelector('#space-name')).toBeNull()
+    w.unmount()
   })
 })

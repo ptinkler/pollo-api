@@ -3,10 +3,10 @@ import { fetchOpenRouterCredits, fetchVeniceBalance } from './useChat'
 import { useSessionCredits } from './useSessionCredits'
 
 // What's left to spend with each provider the chat uses: OpenRouter and
-// Venice in dollars, Pollo in credits. `providers`: which keys the server has.
+// Venice in dollars (plus Venice's plan credits), Pollo in credits. `providers`: which keys the server has.
 export function useChatBalances(providers) {
   const { creditsRemaining, refreshBalance: refreshPollo } = useSessionCredits()
-  const balances = reactive({ openrouter: null, venice: null, pollo: creditsRemaining })
+  const balances = reactive({ openrouter: null, venice: null, veniceCredits: null, pollo: creditsRemaining })
 
   async function refresh() {
     refreshPollo(true)
@@ -19,7 +19,9 @@ export function useChatBalances(providers) {
     }
     if (providers.venice) {
       try {
-        balances.venice = (await fetchVeniceBalance()).usd
+        const { usd, credits } = await fetchVeniceBalance()
+        balances.venice = usd
+        balances.veniceCredits = credits
       } catch {
         /* shown as — */
       }

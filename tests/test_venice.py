@@ -659,7 +659,18 @@ def test_balance_falls_back_to_the_response_header(client, venice):
     v, fake = venice
     fake.routes["/billing/balance"] = httpx.Response(401, json={"error": "Admin API key required"})
     fake.routes["/api_keys/rate_limits"] = httpx.Response(200, json={}, headers={"x-venice-balance-usd": "7.25"})
-    assert client.get("/api/chat/venice-balance").json() == {"usd": 7.25}
+    assert client.get("/api/chat/venice-balance").json() == {"usd": 7.25, "credits": None}
+
+
+def test_balance_includes_the_plans_bundled_credits(client, venice):
+    v, fake = venice
+    fake.routes["/billing/balance"] = httpx.Response(401, json={"error": "Admin API key required"})
+    fake.routes["/api_keys/rate_limits"] = httpx.Response(
+        200,
+        json={"data": {"balances": {"USD": 0, "DIEM": 0, "BUNDLED_CREDITS": 4.7635423}}},
+        headers={"x-venice-balance-usd": "0.76"},
+    )
+    assert client.get("/api/chat/venice-balance").json() == {"usd": 0.76, "credits": 4.7635423}
 
 
 class TestVideoFamiliesInChat:

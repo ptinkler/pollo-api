@@ -1,22 +1,35 @@
 <script setup>
 import { computed, ref } from 'vue'
 import FoldHeading from './FoldHeading.vue'
+import MoveChatDialog from './MoveChatDialog.vue'
 import { useFolded } from '../../composables/useFolded'
 import { dateGroups } from '../../composables/useChatList'
 
 // The sidebar's chats: a Spaces section of collapsible space folders on top
 // (like ChatGPT's Projects), then a Chats section of the loose/unfiled chats
 // grouped by date (like Recents). Search replaces both with flat results.
-// `import` opens the ChatGPT importer (its chats land in a "ChatGPT" space).
+// Chats move by dragging them onto a space or onto Chats, or with "Move to…".
+// The sections grow with their chats; the sidebar around them scrolls.
 const props = defineProps({
   list: { type: Object, required: true },
   spaces: { type: Array, default: () => [] },
   activeId: { type: String, default: null },
 })
-const emit = defineEmits(['open', 'rename', 'remove', 'new-in-space', 'move', 'manage-spaces', 'import'])
+const emit = defineEmits([
+  'open',
+  'rename',
+  'remove',
+  'new-in-space',
+  'move',
+  'space-settings', // a space, 'new' or 'global'
+  'spaces-changed',
+  'import',
+])
 
 const { isFolded, toggleFold } = useFolded()
-const moveMenuFor = ref(null) // conversation id whose "move" menu is open
+const moving = ref(null) // the chat whose "Move to…" dialog is open
+const dragged = ref(null) // the chat being dragged
+const dropOver = ref(undefined) // the drop target under it: a space id, null (Chats) or undefined
 
 const searching = computed(() => !!props.list.searchResults)
 
@@ -26,125 +39,174 @@ const spaceFolders = computed(() =>
 )
 const unfiledGroups = computed(() => dateGroups(props.list.conversations.filter(c => c.space_id == null)))
 
-function toggleMove(id) {
-  moveMenuFor.value = moveMenuFor.value === id ? null : id
-}
-
-function move(conv, spaceId) {
-  moveMenuFor.value = null
+function moveTo(conv, spaceId) {
   if ((conv.space_id ?? null) !== spaceId) emit('move', { conv, spaceId })
 }
+
+// ── Dragging chats between spaces ──
+function onDragStart(e, conv) {
+  dragged.value = conv
+  e.dataTransfer.effectAllowed = 'move'
+  e.dataTransfer.setData('text/plain', conv.title) // Firefox won't drag without data
+}
+
+function onDragEnd() {
+  dragged.value = null
+  dropOver.value = undefined
+}
+
+function onDragOver(e, spaceId) {
+  if (!dragged.value) return
+  e.preventDefault()
+  e.dataTransfer.dropEffect = (dragged.value.space_id ?? null) === spaceId ? 'none' : 'move'
+  dropOver.value = spaceId
+}
+
+function onDragLeave(e, spaceId) {
+  if (dropOver.value === spaceId && !e.currentTarget.contains(e.relatedTarget)) dropOver.value = undefined
+}
+
+function onDrop(spaceId) {
+  const conv = dragged.value
+  onDragEnd()
+  if (conv) moveTo(conv, spaceId)
+}
+
+const dropHandlers = spaceId => ({
+  dragover: e => onDragOver(e, spaceId),
+  dragleave: e => onDragLeave(e, spaceId),
+  drop: e => {
+    e.preventDefault()
+    onDrop(spaceId)
+  },
+})
 </script>
 
 <template>
-  <div class="conv-root">
-    <div class="conv-search">
-      <input
-        :value="list.search"
-        type="search"
-        placeholder="Search chats"
-        aria-label="Search chats"
-        @input="list.setSearch($event.target.value)"
-      />
-    </div>
+  <div class="conv-search">
+    <input
+      :value="list.search"
+      type="search"
+      placeholder="Search chats"
+      aria-label="Search chats"
+      @input="list.setSearch($event.target.value)"
+    />
+  </div>
 
-    <!-- Search: flat results across every chat -->
-    <div v-if="searching" class="conv-list">
+  <!-- Search: flat results across every chat -->
+  <div v-if="searching" class="conv-list">
+    <div
+      v-for="c in list.searchResults"
+      :key="c.id"
+      class="conv-item"
+      :class="{ active: c.id === activeId }"
+      @click="emit('open', c.id)"
+    >
+      <span class="conv-text">
+        <span class="conv-title">{{ c.title }}</span>
+        <span v-if="c.snippet" class="conv-snippet">{{ c.snippet }}</span>
+      </span>
+      <span class="conv-actions" @click.stop>
+        <button :class="{ on: c.pinned }" :title="c.pinned ? 'Unpin' : 'Pin to the top'" @click="list.togglePin(c)">
+          📌
+        </button>
+        <button title="Move to…" @click="moving = c">↪</button>
+        <button title="Rename" @click="emit('rename', c)">✎</button>
+        <button title="Delete" @click="emit('remove', c)">🗑</button>
+      </span>
+    </div>
+    <p v-if="!list.searchResults.length" class="conv-empty">No chats match</p>
+  </div>
+
+  <template v-else>
+    <!-- Spaces (collapsible folders) -->
+    <FoldHeading id="spaces" class="section-heading" title="Spaces" :summary="spaces.length">
+      <template #actions>
+        <span class="heading-btns">
+          <button class="mini-btn" title="Import chats from a ChatGPT export" @click="emit('import')">Import</button>
+          <button class="mini-btn" title="New space" @click="emit('space-settings', 'new')">＋ New</button>
+        </span>
+      </template>
+    </FoldHeading>
+    <div v-show="!isFolded('spaces')" class="conv-list">
       <div
-        v-for="c in list.searchResults"
-        :key="c.id"
-        class="conv-item"
-        :class="{ active: c.id === activeId }"
-        @click="emit('open', c.id)"
+        v-for="f in spaceFolders"
+        :key="f.space.id"
+        class="drop-zone"
+        :class="{ 'drop-over': dropOver === f.space.id && dragged?.space_id !== f.space.id }"
+        v-on="dropHandlers(f.space.id)"
       >
-        <span class="conv-text">
-          <span class="conv-title">{{ c.title }}</span>
-          <span v-if="c.snippet" class="conv-snippet">{{ c.snippet }}</span>
-        </span>
-        <span class="conv-actions" @click.stop>
-          <button :class="{ on: c.pinned }" :title="c.pinned ? 'Unpin' : 'Pin to the top'" @click="list.togglePin(c)">
-            📌
+        <div class="space-head">
+          <button class="space-toggle" @click="toggleFold(`space:${f.space.id}`)">
+            <span class="caret" :class="{ folded: isFolded(`space:${f.space.id}`) }">▾</span>
+            <span class="folder">🗂</span>
+            <span class="space-name">{{ f.space.name }}</span>
+            <span class="space-count">{{ f.items.length }}</span>
           </button>
-          <button title="Rename" @click="emit('rename', c)">✎</button>
-          <button title="Delete" @click="emit('remove', c)">🗑</button>
-        </span>
+          <button class="space-btn" title="Space settings" @click="emit('space-settings', f.space)">⚙</button>
+          <button class="space-add" title="New chat here" @click="emit('new-in-space', f.space.id)">＋</button>
+        </div>
+        <template v-if="!isFolded(`space:${f.space.id}`)">
+          <div
+            v-for="c in f.items"
+            :key="c.id"
+            class="conv-item nested"
+            :class="{ active: c.id === activeId, dragging: dragged?.id === c.id }"
+            draggable="true"
+            @dragstart="onDragStart($event, c)"
+            @dragend="onDragEnd"
+            @click="emit('open', c.id)"
+          >
+            <span class="conv-text">
+              <span class="conv-title"
+                ><span v-if="c.forked_from_id" class="conv-fork" title="Branched off another chat">⑂ </span
+                >{{ c.title }}</span
+              >
+            </span>
+            <span class="conv-actions" @click.stop>
+              <button :class="{ on: c.pinned }" :title="c.pinned ? 'Unpin' : 'Pin'" @click="list.togglePin(c)">
+                📌
+              </button>
+              <button title="Move to…" @click="moving = c">↪</button>
+              <button title="Rename" @click="emit('rename', c)">✎</button>
+              <button title="Delete" @click="emit('remove', c)">🗑</button>
+            </span>
+          </div>
+          <p v-if="!f.items.length" class="space-empty">No chats yet. Drag one here.</p>
+        </template>
       </div>
-      <p v-if="!list.searchResults.length" class="conv-empty">No chats match</p>
+      <p v-if="!spaces.length" class="space-empty">No spaces yet. Use ＋ New to add one.</p>
     </div>
 
-    <template v-else>
-      <!-- Spaces (collapsible folders) -->
-      <FoldHeading id="spaces" class="section-heading" title="Spaces" :summary="spaces.length">
-        <template #actions>
-          <span class="heading-btns">
-            <button class="mini-btn" title="Import chats from a ChatGPT export" @click="emit('import')">Import</button>
-            <button class="mini-btn" title="Create and edit spaces" @click="emit('manage-spaces')">Manage</button>
-          </span>
-        </template>
-      </FoldHeading>
-      <div v-show="!isFolded('spaces')" class="conv-list spaces-list">
-        <template v-for="f in spaceFolders" :key="f.space.id">
-          <div class="space-head">
-            <button class="space-toggle" @click="toggleFold(`space:${f.space.id}`)">
-              <span class="caret" :class="{ folded: isFolded(`space:${f.space.id}`) }">▾</span>
-              <span class="folder">🗂</span>
-              <span class="space-name">{{ f.space.name }}</span>
-              <span class="space-count">{{ f.items.length }}</span>
-            </button>
-            <button class="space-add" title="New chat here" @click="emit('new-in-space', f.space.id)">＋</button>
-          </div>
-          <template v-if="!isFolded(`space:${f.space.id}`)">
-            <div
-              v-for="c in f.items"
-              :key="c.id"
-              class="conv-item nested"
-              :class="{ active: c.id === activeId }"
-              @click="emit('open', c.id)"
-            >
-              <span class="conv-text">
-                <span class="conv-title"
-                  ><span v-if="c.forked_from_id" class="conv-fork" title="Branched off another chat">⑂ </span
-                  >{{ c.title }}</span
-                >
-              </span>
-              <span class="conv-actions" @click.stop>
-                <button :class="{ on: c.pinned }" :title="c.pinned ? 'Unpin' : 'Pin'" @click="list.togglePin(c)">
-                  📌
-                </button>
-                <span class="move-wrap">
-                  <button title="Move to space" @click="toggleMove(c.id)">🗂</button>
-                  <div v-if="moveMenuFor === c.id" class="move-menu">
-                    <button v-for="sp in spaces" :key="sp.id" :disabled="sp.id === c.space_id" @click="move(c, sp.id)">
-                      {{ sp.name }}
-                    </button>
-                    <button :disabled="c.space_id == null" @click="move(c, null)">Chats (no space)</button>
-                  </div>
-                </span>
-                <button title="Rename" @click="emit('rename', c)">✎</button>
-                <button title="Delete" @click="emit('remove', c)">🗑</button>
-              </span>
-            </div>
-            <p v-if="!f.items.length" class="space-empty">No chats yet</p>
-          </template>
-        </template>
-        <p v-if="!spaces.length" class="space-empty">No spaces yet — use Manage to add one.</p>
-      </div>
-
-      <!-- Chats (loose / unfiled, by date) -->
+    <!-- Chats (loose / unfiled, by date) -->
+    <div
+      class="drop-zone"
+      :class="{ 'drop-over': dropOver === null && dragged?.space_id != null }"
+      v-on="dropHandlers(null)"
+    >
       <FoldHeading
         id="chats"
         class="section-heading"
         title="Chats"
         :summary="unfiledGroups.reduce((n, g) => n + g.items.length, 0)"
-      />
-      <div v-show="!isFolded('chats')" class="conv-list chats-list">
+      >
+        <template #actions>
+          <button class="mini-btn" title="Defaults for every new chat" @click="emit('space-settings', 'global')">
+            ⚙
+          </button>
+        </template>
+      </FoldHeading>
+      <div v-show="!isFolded('chats')" class="conv-list">
         <template v-for="g in unfiledGroups" :key="g.label">
           <div class="conv-group">{{ g.label }}</div>
           <div
             v-for="c in g.items"
             :key="c.id"
             class="conv-item"
-            :class="{ active: c.id === activeId }"
+            :class="{ active: c.id === activeId, dragging: dragged?.id === c.id }"
+            draggable="true"
+            @dragstart="onDragStart($event, c)"
+            @dragend="onDragEnd"
             @click="emit('open', c.id)"
           >
             <span class="conv-text">
@@ -161,12 +223,7 @@ function move(conv, spaceId) {
               >
                 📌
               </button>
-              <span v-if="spaces.length" class="move-wrap">
-                <button title="Move to space" @click="toggleMove(c.id)">🗂</button>
-                <div v-if="moveMenuFor === c.id" class="move-menu">
-                  <button v-for="sp in spaces" :key="sp.id" @click="move(c, sp.id)">{{ sp.name }}</button>
-                </div>
-              </span>
+              <button title="Move to…" @click="moving = c">↪</button>
               <button title="Rename" @click="emit('rename', c)">✎</button>
               <button title="Delete" @click="emit('remove', c)">🗑</button>
             </span>
@@ -175,36 +232,63 @@ function move(conv, spaceId) {
         <p v-if="!unfiledGroups.length" class="conv-empty">No chats yet</p>
         <p v-if="list.more" class="conv-empty">Older chats aren't listed. Search to find them.</p>
       </div>
-    </template>
-  </div>
+    </div>
+  </template>
+
+  <MoveChatDialog
+    :conv="moving"
+    :spaces="spaces"
+    @close="moving = null"
+    @move="moveTo(moving, $event)"
+    @space-created="emit('spaces-changed')"
+  />
 </template>
 
 <style scoped>
-.conv-root {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
 .section-heading {
   padding: 14px 14px 2px;
-  flex: 0 0 auto;
 }
 
 .conv-list {
-  overflow-y: auto;
   padding: 0 8px 4px;
-  flex: 0 0 auto;
 }
 
-.spaces-list {
-  max-height: 40vh;
+/* A drop target while a chat is dragged over it */
+.drop-zone {
+  border-radius: 8px;
+  transition:
+    background 0.1s,
+    box-shadow 0.1s;
 }
 
-.chats-list {
-  flex: 1 1 auto;
-  min-height: 80px;
+.drop-zone.drop-over {
+  background: rgba(108, 92, 231, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(108, 92, 231, 0.55);
+}
+
+.conv-item.dragging {
+  opacity: 0.45;
+}
+
+.space-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text2);
+  font-size: 0.85rem;
+  padding: 2px 5px;
+  border-radius: 4px;
+  opacity: 0;
+}
+
+.space-head:hover .space-btn,
+.space-btn:focus-visible {
+  opacity: 1;
+}
+
+.space-btn:hover {
+  background: var(--surface2);
+  color: var(--text);
 }
 
 .space-head {
@@ -226,6 +310,7 @@ function move(conv, spaceId) {
   font-size: 0.85rem;
   padding: 4px 4px;
   min-width: 0;
+  text-align: left;
 }
 
 .space-toggle:hover {
@@ -412,42 +497,6 @@ function move(conv, spaceId) {
 
 .conv-item:hover:has(.conv-actions .on) .conv-actions button:not(.on) {
   display: inline-block;
-}
-
-.move-wrap {
-  position: relative;
-  display: inline-flex;
-}
-
-.move-menu {
-  position: absolute;
-  z-index: 60;
-  top: calc(100% + 2px);
-  right: 0;
-  min-width: 140px;
-  max-height: 220px;
-  overflow-y: auto;
-  padding: 4px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.move-menu button {
-  text-align: left;
-  padding: 5px 8px;
-  font-size: 0.8rem;
-  border-radius: 6px;
-  color: var(--text);
-}
-
-.move-menu button:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 
 .conv-empty {
