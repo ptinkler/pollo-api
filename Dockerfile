@@ -1,5 +1,5 @@
 # ── Stage 1: Build the Vue frontend ──────────────────────────────────
-FROM public.ecr.aws/docker/library/node:24-alpine AS frontend-builder
+FROM mirror.gcr.io/library/node:24-alpine AS frontend-builder
 
 WORKDIR /build
 COPY web/frontend/package.json web/frontend/package-lock.json* ./
@@ -8,7 +8,7 @@ COPY web/frontend/ ./
 RUN npm run build
 
 # ── Stage 2: Python API runtime ─────────────────────────────────────
-FROM public.ecr.aws/docker/library/python:3.13-slim
+FROM mirror.gcr.io/library/python:3.13-slim
 
 # System deps for opencv (cv2)
 RUN apt-get update && \
