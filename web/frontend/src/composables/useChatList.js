@@ -85,6 +85,10 @@ export function useChatList(showToast) {
     for (const c of copies(id)) c.title = title
   }
 
+  function setSpace(id, spaceId) {
+    for (const c of copies(id)) c.space_id = spaceId
+  }
+
   async function togglePin(c) {
     try {
       const { pinned } = await patchConversation(c.id, { pinned: !c.pinned })
@@ -138,6 +142,7 @@ export function useChatList(showToast) {
     add,
     bump,
     setTitle,
+    setSpace,
     togglePin,
     rename,
     remove,

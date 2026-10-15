@@ -240,7 +240,8 @@ class ConversationCreate(BaseModel):
     text_model: str | None = None
     image_model: str | None = None
     video_model: str | None = None
-    # Snippets and groups attached to the chat; omit both to get the default
+    space_id: int | None = None  # the chat's space (null = unfiled)
+    # Attachments; omit a field to seed it from the space (or global defaults)
     instruction_ids: list[int] = []
     instruction_group_ids: list[int] = []
     character_ids: list[int] = []
@@ -251,6 +252,7 @@ class ConversationUpdate(BaseModel):
     text_model: str | None = None
     image_model: str | None = None
     video_model: str | None = None
+    space_id: int | None = None  # explicit null moves the chat to Unfiled
     instruction_ids: list[int] | None = None  # explicit [] detaches all snippets
     instruction_group_ids: list[int] | None = None  # explicit [] detaches all groups
     character_ids: list[int] | None = None
@@ -267,6 +269,13 @@ class InstructionGroupIn(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     snippet_ids: list[int] = []
     is_default: bool = False
+
+
+class SpaceIn(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    default_character_ids: list[int] = []
+    default_instruction_ids: list[int] = []
+    default_instruction_group_ids: list[int] = []
 
 
 class TurnOptions(BaseModel):
@@ -549,20 +558,39 @@ def _snippet(text: str, q: str) -> str:
 @router.post("/conversations")
 def api_create_conversation(data: ConversationCreate):
     db = get_db()
-    if {"instruction_ids", "instruction_group_ids"} & data.model_fields_set:
+    fields_set = data.model_fields_set
+    space = _require_space(data.space_id) if data.space_id is not None else None
+
+    # Instructions: explicit lists win; else the space's defaults; else the
+    # global "add by default" flags.
+    if {"instruction_ids", "instruction_group_ids"} & fields_set:
         instruction_ids = _require_instructions(data.instruction_ids)
         instruction_group_ids = _require_instruction_groups(data.instruction_group_ids)
+    elif space:
+        instruction_ids = [s.id for s in db.get_instructions(space.default_instruction_ids)]
+        instruction_group_ids = [g.id for g in _existing_groups(space.default_instruction_group_ids)]
     else:
         instruction_ids, instruction_group_ids = _default_attachment(db)
-    characters.require(data.character_ids, db)
+
+    # Characters: explicit list wins; else the space's defaults (stale ids
+    # filtered out); else none. There is no global character default.
+    if "character_ids" in fields_set:
+        characters.require(data.character_ids, db)
+        character_ids = data.character_ids
+    elif space:
+        character_ids = [c.id for c in characters.load(space.default_character_ids, db)]
+    else:
+        character_ids = []
+
     conv = db.create_conversation(
         title=(data.title or DEFAULT_TITLE).strip()[:255] or DEFAULT_TITLE,
         text_model=data.text_model,
         image_model=data.image_model,
         video_model=data.video_model,
+        space_id=space.id if space else None,
         instruction_ids=instruction_ids,
         instruction_group_ids=instruction_group_ids,
-        character_ids=data.character_ids,
+        character_ids=character_ids,
     )
     return conv.to_dict()
 
@@ -583,11 +611,25 @@ def _require_instruction_groups(ids: list[int]) -> list[int]:
     return list(dict.fromkeys(ids))
 
 
+def _existing_groups(ids: list[int]) -> list:
+    """The groups among `ids` that still exist, in order (stale ids dropped)."""
+    db = get_db()
+    return [g for g in (db.get_instruction_group(i) for i in ids) if g]
+
+
+def _require_space(space_id: int):
+    space = get_db().get_space(space_id)
+    if not space:
+        raise HTTPException(400, "Space not found")
+    return space
+
+
 def _default_attachment(db) -> tuple[list[int], list[int]]:
-    """The one default — a snippet or a group — attached to new chats, if set."""
-    snippet = db.get_default_instruction()
-    group = db.get_default_instruction_group()
-    return ([snippet.id] if snippet else []), ([group.id] if group else [])
+    """Snippets and groups flagged "add by default", attached to new chats."""
+    return (
+        [s.id for s in db.get_default_instructions()],
+        [g.id for g in db.get_default_instruction_groups()],
+    )
 
 
 # ── Routes: instruction snippets & groups ───────────────────────────
@@ -652,6 +694,49 @@ def api_delete_instruction_group(group_id: int):
     if not get_db().delete_instruction_group(group_id):
         raise HTTPException(404, "Instruction group not found")
     return {"deleted": group_id}
+
+
+# ── Routes: spaces ──────────────────────────────────────────────────
+
+
+def _space_fields(data: SpaceIn) -> dict:
+    """Validated space fields; unknown default ids are rejected."""
+    return {
+        "name": data.name.strip(),
+        "default_character_ids": _require_characters(data.default_character_ids),
+        "default_instruction_ids": _require_instructions(data.default_instruction_ids),
+        "default_instruction_group_ids": _require_instruction_groups(data.default_instruction_group_ids),
+    }
+
+
+def _require_characters(ids: list[int]) -> list[int]:
+    characters.require(ids, get_db())
+    return list(dict.fromkeys(ids))
+
+
+@router.get("/spaces")
+def api_list_spaces():
+    return {"spaces": [s.to_dict() for s in get_db().list_spaces()]}
+
+
+@router.post("/spaces")
+def api_create_space(data: SpaceIn):
+    return get_db().save_space(**_space_fields(data)).to_dict()
+
+
+@router.put("/spaces/{space_id}")
+def api_update_space(space_id: int, data: SpaceIn):
+    item = get_db().save_space(space_id, **_space_fields(data))
+    if not item:
+        raise HTTPException(404, "Space not found")
+    return item.to_dict()
+
+
+@router.delete("/spaces/{space_id}")
+def api_delete_space(space_id: int):
+    if not get_db().delete_space(space_id):
+        raise HTTPException(404, "Space not found")
+    return {"deleted": space_id}
 
 
 @router.get("/conversations/{conv_id}")
@@ -738,6 +823,7 @@ def api_fork_conversation(conv_id: str, data: ForkConversation):
         text_model=conv.text_model,
         image_model=conv.image_model,
         video_model=conv.video_model,
+        space_id=conv.space_id,
         instruction_ids=conv.instruction_ids,
         instruction_group_ids=conv.instruction_group_ids,
         settings=conv.settings,
@@ -855,6 +941,8 @@ def api_update_conversation(conv_id: str, data: ConversationUpdate):
         fields["instruction_ids"] = _require_instructions(fields["instruction_ids"] or [])
     if "instruction_group_ids" in fields:
         fields["instruction_group_ids"] = _require_instruction_groups(fields["instruction_group_ids"] or [])
+    if fields.get("space_id") is not None:
+        _require_space(fields["space_id"])
     if "title" in fields:
         fields["title"] = (fields["title"] or "").strip()[:255] or DEFAULT_TITLE
     if "character_ids" in fields:

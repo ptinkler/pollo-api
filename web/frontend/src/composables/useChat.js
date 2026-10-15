@@ -42,6 +42,12 @@ export const createInstructionGroup = data => apiPost('/api/chat/instruction-gro
 export const updateInstructionGroup = (id, data) => apiPut(`/api/chat/instruction-groups/${id}`, data)
 export const deleteInstructionGroup = id => apiDelete(`/api/chat/instruction-groups/${id}`)
 
+// Spaces: chat-only groupings with their own default characters/instructions
+export const fetchSpaces = () => apiGet('/api/chat/spaces')
+export const createSpace = data => apiPost('/api/chat/spaces', data)
+export const updateSpace = (id, data) => apiPut(`/api/chat/spaces/${id}`, data)
+export const deleteSpace = id => apiDelete(`/api/chat/spaces/${id}`)
+
 export const patchConversation = (id, data) => apiPatch(`/api/chat/conversations/${enc(id)}`, data)
 export const uploadChatAttachment = (convId, file) =>
   apiUpload(`/api/chat/conversations/${enc(convId)}/attachments`, file)

@@ -190,8 +190,8 @@ function close() {
         </div>
         <p class="sub">
           Snippets are small reusable instructions; a group bundles complementary snippets. Attach any number of
-          snippets and groups to a chat — all of them are sent to the chat model word for word. One snippet or group can
-          be the default, attached to every new chat.
+          snippets and groups to a chat — all of them are sent to the chat model word for word. Flag any of them "add to
+          new chats by default".
         </p>
 
         <div class="tabs">
@@ -240,7 +240,7 @@ function close() {
               maxlength="20000"
               placeholder="A single idea — a tone, a format, a rule. Keep snippets small so they combine cleanly."
             ></textarea>
-            <label class="check"> <input v-model="isDefault" type="checkbox" /> Default for new chats </label>
+            <label class="check"> <input v-model="isDefault" type="checkbox" /> Add to new chats by default </label>
             <div class="actions">
               <button v-if="editingId != null" class="btn btn-danger" @click="remove">Delete</button>
               <span class="spacer"></span>
@@ -271,7 +271,9 @@ function close() {
             <p v-if="groupSnippetIds.length" class="members-summary">
               Sends: {{ groupSnippetIds.map(snippetName).join(', ') }}
             </p>
-            <label class="check"> <input v-model="groupIsDefault" type="checkbox" /> Default for new chats </label>
+            <label class="check">
+              <input v-model="groupIsDefault" type="checkbox" /> Add to new chats by default
+            </label>
             <div class="actions">
               <button v-if="groupEditingId != null" class="btn btn-danger" @click="remove">Delete</button>
               <span class="spacer"></span>

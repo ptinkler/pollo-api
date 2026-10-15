@@ -31,11 +31,8 @@ export function useChatInstructions({ convId, conversation, showToast }) {
       const data = await fetchInstructions()
       instructions.value = data.instructions
       groups.value = data.groups || []
-      if (!convId.value) {
-        const d = defaultAttachment()
-        instructionIds.value = d.ids
-        groupIds.value = d.groupIds
-      }
+      // ChatView owns new-chat seeding (it also knows the pending space), so
+      // loading the catalogue never changes what's attached here.
     } catch {
       /* 401 handled by auth prompt */
     }

@@ -64,9 +64,11 @@ describe('ChatView balances', () => {
               ? { text: [], image: [], video: [], errors: {} }
               : String(url).includes('/instructions')
                 ? { instructions: [], groups: [] }
-                : String(url).includes('/conversations')
-                  ? { conversations: [] }
-                  : { configured: true },
+                : String(url).includes('/spaces')
+                  ? { spaces: [] }
+                  : String(url).includes('/conversations')
+                    ? { conversations: [] }
+                    : { configured: true },
     }))
     const ChatView = (await import('../views/ChatView.vue')).default
     const r = createChatRouter({
@@ -97,9 +99,11 @@ describe('ChatView sidebar sections', () => {
           ? { text: [], image: [], video: [], errors: {} }
           : String(url).includes('/instructions')
             ? { instructions: [], groups: [] }
-            : String(url).includes('/conversations')
-              ? { conversations: [] }
-              : { configured: true },
+            : String(url).includes('/spaces')
+              ? { spaces: [] }
+              : String(url).includes('/conversations')
+                ? { conversations: [] }
+                : { configured: true },
     }))
     const ChatView = (await import('../views/ChatView.vue')).default
     const mountView = async () => {
@@ -147,6 +151,7 @@ describe('ChatView chat list and per-chat state', () => {
     character_ids: [],
     instruction_ids: [],
     instruction_group_ids: [],
+    space_id: null,
     settings: {
       mode: 'image',
       history_limit: 10,
@@ -182,11 +187,13 @@ describe('ChatView chat list and per-chat state', () => {
                         conversation,
                         messages: [{ id: 1, role: 'user', content: 'hi', status: 'done', media: [], siblings: [1] }],
                       }
-                    : url.includes('/conversations')
-                      ? { conversations: convs, more: true }
-                      : url.includes('/characters')
-                        ? { characters: [] }
-                        : { configured: true },
+                    : String(url).includes('/spaces')
+                      ? { spaces: [] }
+                      : url.includes('/conversations')
+                        ? { conversations: convs, more: true }
+                        : url.includes('/characters')
+                          ? { characters: [] }
+                          : { configured: true },
       }
     })
     const ChatView = (await import('../views/ChatView.vue')).default
@@ -255,6 +262,67 @@ describe('ChatView chat list and per-chat state', () => {
     const chip = w.find('.balance.spend')
     expect(chip.text()).toBe('This chat $0.42 + 300 cr')
     expect(chip.attributes('title')).toContain('$0.40 of it was spent before it was branched')
+    w.unmount()
+  })
+})
+
+describe('ChatView spaces in the chat list', () => {
+  const spaces = [
+    {
+      id: 1,
+      name: 'Fantasy novel',
+      default_character_ids: [],
+      default_instruction_ids: [],
+      default_instruction_group_ids: [],
+    },
+  ]
+  const convs = [
+    { id: 'a', title: 'Dragon lair', pinned: false, space_id: 1, updated_at: new Date().toISOString() },
+    { id: 'u', title: 'Quick test', pinned: false, space_id: null, updated_at: new Date().toISOString() },
+  ]
+
+  async function mountView(path = '/chat') {
+    localStorage.removeItem('chat.folded')
+    globalThis.fetch = vi.fn(async url => {
+      url = String(url)
+      return {
+        ok: true,
+        status: 200,
+        json: async () =>
+          url.includes('/models')
+            ? { text: [], image: [], video: [], errors: {} }
+            : url.includes('/instructions')
+              ? { instructions: [], groups: [] }
+              : url.includes('/spaces')
+                ? { spaces }
+                : url.includes('/conversations')
+                  ? { conversations: convs, more: false }
+                  : url.includes('/characters')
+                    ? { characters: [] }
+                    : { configured: true },
+      }
+    })
+    const ChatView = (await import('../views/ChatView.vue')).default
+    const r = createChatRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/chat', name: 'chat', component: ChatView },
+        { path: '/chat/c/:id', name: 'chat-conversation', component: ChatView },
+      ],
+    })
+    r.push(path)
+    await r.isReady()
+    const w = mountChat({ template: '<router-view />' }, { global: { plugins: [r] }, attachTo: document.body })
+    await flushChat()
+    return w
+  }
+
+  it('groups chats under their space with an Unfiled section', async () => {
+    const w = await mountView()
+    expect(w.findAll('.space-name').map(e => e.text())).toEqual(['Fantasy novel', 'Unfiled'])
+    const titles = w.findAll('.conv-title').map(e => e.text())
+    expect(titles).toContain('Dragon lair')
+    expect(titles).toContain('Quick test')
     w.unmount()
   })
 })

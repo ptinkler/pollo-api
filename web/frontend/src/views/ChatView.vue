@@ -10,6 +10,7 @@ import ChatWelcome from '../components/chat/ChatWelcome.vue'
 import ConversationList from '../components/chat/ConversationList.vue'
 import InstructionPicker from '../components/chat/InstructionPicker.vue'
 import InstructionsDialog from '../components/chat/InstructionsDialog.vue'
+import SpacesDialog from '../components/chat/SpacesDialog.vue'
 import MediaLightbox from '../components/chat/MediaLightbox.vue'
 import ModelPicker from '../components/chat/ModelPicker.vue'
 import SidebarSection from '../components/chat/SidebarSection.vue'
@@ -27,6 +28,7 @@ import {
   fetchConversationSpend,
   fetchDeleteInfo,
   forkConversation,
+  patchConversation,
   pinChatMedia,
   regenerateChatMedia,
   retryChatMessage,
@@ -37,6 +39,7 @@ import { characterImageUrl } from '../composables/useCharacters'
 import { useChatAttachments } from '../composables/useChatAttachments'
 import { upsert, useChatCharacters } from '../composables/useChatCharacters'
 import { useChatInstructions } from '../composables/useChatInstructions'
+import { useChatSpaces } from '../composables/useChatSpaces'
 import { useChatBalances } from '../composables/useChatBalances'
 import { useChatList } from '../composables/useChatList'
 import { IMAGE_STEPS, MEMORY_STEPS, MODES, useComposerSettings } from '../composables/useComposerSettings'
@@ -303,6 +306,29 @@ const instructionsUnused = computed(
   () => mode.value === 'video' || (mode.value === 'image' && !imageInfo.value?.conversational),
 )
 
+// ── Spaces ────────────────────────────────────────────────────────────
+const spacesOpen = ref(false)
+const { spaces, loadSpaces, spaceById } = useChatSpaces({ showToast })
+// Where the next new (blank) chat will be filed; read when it's created
+const pendingSpaceId = ref(null)
+
+// Seed the blank chat's attachments: a space's defaults (stale ids dropped),
+// or the global "add by default" instructions when outside any space.
+function seedAttachments(spaceId) {
+  const space = spaceId == null ? null : spaceById(spaceId)
+  if (space) {
+    const has = (list, id) => list.value.some(x => x.id === id)
+    instructionIds.value = space.default_instruction_ids.filter(id => has(instructions, id))
+    instructionGroupIds.value = space.default_instruction_group_ids.filter(id => has(instructionGroups, id))
+    characterIds.value = space.default_character_ids.filter(id => has(characters, id))
+  } else {
+    const d = defaultAttachment()
+    instructionIds.value = d.ids
+    instructionGroupIds.value = d.groupIds
+    characterIds.value = []
+  }
+}
+
 // ── Characters ───────────────────────────────────────────────────────
 const {
   characters,
@@ -346,10 +372,7 @@ async function loadConversation(id) {
   if (!id) {
     conversation.value = null
     messages.value = []
-    const d = defaultAttachment()
-    instructionIds.value = d.ids
-    instructionGroupIds.value = d.groupIds
-    characterIds.value = []
+    seedAttachments(pendingSpaceId.value)
     setRefChoices(null)
     return
   }
@@ -391,6 +414,7 @@ async function ensureConversation() {
     text_model: selected.text || null,
     image_model: selected.image || null,
     video_model: selected.video || null,
+    space_id: pendingSpaceId.value,
     instruction_ids: instructionIds.value, // explicit, so "None" sticks
     instruction_group_ids: instructionGroupIds.value,
     character_ids: characterIds.value,
@@ -407,10 +431,14 @@ function openConversation(id) {
   router.push({ name: 'chat-conversation', params: { id } })
 }
 
-function newChat() {
+// `spaceId` (a number) files the new chat in that space; null = unfiled
+function newChat(spaceId = null) {
   sidebarOpen.value = false
-  // From a conversation *or* the Library — anywhere but the blank chat itself
+  pendingSpaceId.value = typeof spaceId === 'number' ? spaceId : null
+  // From a conversation *or* the Library — anywhere but the blank chat itself.
+  // When already on the blank chat the convId watch won't fire, so re-seed here.
   if (route.name !== 'chat') router.push({ name: 'chat' })
+  else seedAttachments(pendingSpaceId.value)
   draft.value = ''
   composer.value?.focus()
 }
@@ -422,6 +450,20 @@ async function renameConversation(c) {
 
 async function removeConversation(c) {
   if ((await chatList.remove(c)) && c.id === convId.value) router.push({ name: 'chat' })
+}
+
+async function moveConversation({ conv, spaceId }) {
+  try {
+    await patchConversation(conv.id, { space_id: spaceId })
+    chatList.setSpace(conv.id, spaceId)
+    if (conversation.value?.id === conv.id) conversation.value.space_id = spaceId
+  } catch (e) {
+    showToast(`Couldn't move chat: ${e.message}`, 'error')
+  }
+}
+
+function onSpacesChanged() {
+  loadSpaces()
 }
 
 // Chat creations live in Media, with everything else (filtered to chats)
@@ -718,7 +760,8 @@ onMounted(async () => {
     /* 401 handled by auth prompt */
   }
   chatList.load()
-  loadInstructions()
+  // Await the catalogues so a blank chat can seed its default attachments
+  await Promise.all([loadInstructions(), loadSpaces()])
   loadConversation(convId.value)
   if (configured.value) loadModels()
   else modelsLoading.value = false
@@ -738,7 +781,7 @@ onBeforeUnmount(() => {
     <aside class="chat-sidebar">
       <div class="side-top">
         <RouterLink to="/" class="home-link" title="Back to Pollo">← Pollo</RouterLink>
-        <button class="new-chat" title="New chat" @click="newChat">＋ New chat</button>
+        <button class="new-chat" title="New chat" @click="newChat()">＋ New chat</button>
       </div>
 
       <div class="side-controls">
@@ -919,10 +962,14 @@ onBeforeUnmount(() => {
 
       <ConversationList
         :list="chatList"
+        :spaces="spaces"
         :active-id="convId"
         @open="openConversation"
         @rename="renameConversation"
         @remove="removeConversation"
+        @new-in-space="newChat"
+        @move="moveConversation"
+        @manage-spaces="spacesOpen = true"
       />
 
       <div class="side-bottom">
@@ -1039,6 +1086,16 @@ onBeforeUnmount(() => {
       :groups="instructionGroups"
       @close="instructionsOpen = false"
       @changed="onInstructionsChanged"
+    />
+
+    <SpacesDialog
+      :open="spacesOpen"
+      :spaces="spaces"
+      :characters="characters"
+      :instructions="instructions"
+      :groups="instructionGroups"
+      @close="spacesOpen = false"
+      @changed="onSpacesChanged"
     />
 
     <MediaLightbox

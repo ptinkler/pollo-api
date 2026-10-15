@@ -197,6 +197,10 @@ class ChatConversation(Base):
     # contributes all its snippets. Groups + individual snippets are flattened
     # and de-duped into the instructions sent to the model (see web/chat.py).
     instruction_group_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The space this chat belongs to (ChatSpace.id); null = unfiled. A space is
+    # a chat-only grouping that seeds new chats with its default characters and
+    # instructions — unrelated to generation Projects.
+    space_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     # The last message of the branch being shown (messages form a tree: an
     # edit or retry adds a sibling instead of deleting what came after)
     current_leaf_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -234,6 +238,7 @@ class ChatConversation(Base):
             "video_model": self.video_model,
             "instruction_ids": self.instruction_ids,
             "instruction_group_ids": self.instruction_group_ids,
+            "space_id": self.space_id,
             "current_leaf_id": self.current_leaf_id,
             "character_ids": self.character_ids,
             "forked_from_id": self.forked_from_id,
@@ -353,8 +358,8 @@ class ChatInstruction(Base):
 class ChatInstructionGroup(Base):
     """A named bundle of instruction snippets (ChatInstruction). Attaching a
     group to a chat contributes all its snippets; a snippet may be in several
-    groups and is sent only once. Only one thing — a snippet or a group — can
-    be the default attached to new chats."""
+    groups and is sent only once. Any number of snippets and groups can be
+    flagged is_default ("add by default") to attach to new chats."""
 
     __tablename__ = "chat_instruction_groups"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -381,6 +386,63 @@ class ChatInstructionGroup(Base):
             "name": self.name,
             "snippet_ids": self.snippet_ids,
             "is_default": self.is_default,
+            "created_at": iso(self.created_at),
+            "updated_at": iso(self.updated_at),
+        }
+
+
+class ChatSpace(Base):
+    """A chat-only grouping of conversations. Each space seeds new chats created
+    in it with its own default characters and instruction snippets/groups. It is
+    unrelated to the generation-side Project."""
+
+    __tablename__ = "chat_spaces"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    default_character_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    default_instruction_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    default_instruction_group_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    @staticmethod
+    def _ids(raw: str | None) -> list[int]:
+        try:
+            return json.loads(raw) if raw else []
+        except json.JSONDecodeError:
+            return []
+
+    @property
+    def default_character_ids(self) -> list[int]:
+        return self._ids(self.default_character_ids_json)
+
+    @default_character_ids.setter
+    def default_character_ids(self, ids: list[int] | None) -> None:
+        self.default_character_ids_json = json.dumps(list(dict.fromkeys(ids or [])))
+
+    @property
+    def default_instruction_ids(self) -> list[int]:
+        return self._ids(self.default_instruction_ids_json)
+
+    @default_instruction_ids.setter
+    def default_instruction_ids(self, ids: list[int] | None) -> None:
+        self.default_instruction_ids_json = json.dumps(list(dict.fromkeys(ids or [])))
+
+    @property
+    def default_instruction_group_ids(self) -> list[int]:
+        return self._ids(self.default_instruction_group_ids_json)
+
+    @default_instruction_group_ids.setter
+    def default_instruction_group_ids(self, ids: list[int] | None) -> None:
+        self.default_instruction_group_ids_json = json.dumps(list(dict.fromkeys(ids or [])))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "default_character_ids": self.default_character_ids,
+            "default_instruction_ids": self.default_instruction_ids,
+            "default_instruction_group_ids": self.default_instruction_group_ids,
             "created_at": iso(self.created_at),
             "updated_at": iso(self.updated_at),
         }
@@ -510,6 +572,7 @@ class MetadataDB:
             "instruction_id": "INTEGER",
             "instruction_ids_json": "TEXT",
             "instruction_group_ids_json": "TEXT",
+            "space_id": "INTEGER",
             "current_leaf_id": "INTEGER",
             "character_ids_json": "TEXT",
             "forked_from_id": "VARCHAR(50)",
@@ -1039,26 +1102,22 @@ class MetadataDB:
                 session.expunge(i)
             return items
 
-    def get_default_instruction(self) -> ChatInstruction | None:
+    def get_default_instructions(self) -> list[ChatInstruction]:
+        """Every snippet flagged "add by default" (is_default)."""
         with self._session() as session:
-            item = session.query(ChatInstruction).filter(ChatInstruction.is_default.is_(True)).first()
-            if item:
-                session.expunge(item)
-            return item
-
-    @staticmethod
-    def _clear_defaults(session, keep: tuple[type, int] | None = None) -> None:
-        """Unset is_default on every snippet and group, except `keep` (model, id).
-        Only one thing — a snippet or a group — is ever the default."""
-        for model in (ChatInstruction, ChatInstructionGroup):
-            q = session.query(model)
-            if keep and keep[0] is model:
-                q = q.filter(model.id != keep[1])
-            q.update({model.is_default: False})
+            items = (
+                session.query(ChatInstruction)
+                .filter(ChatInstruction.is_default.is_(True))
+                .order_by(ChatInstruction.name)
+                .all()
+            )
+            for i in items:
+                session.expunge(i)
+            return items
 
     def save_instruction(self, instruction_id: int | None = None, **fields) -> ChatInstruction | None:
-        """Create (id None) or update a snippet. Making it the default clears any
-        other default, snippet or group."""
+        """Create (id None) or update a snippet. Any number may be flagged
+        is_default ("add by default")."""
         with self._session() as session:
             if instruction_id is None:
                 item = ChatInstruction(**fields)
@@ -1070,9 +1129,6 @@ class MetadataDB:
                 for key, value in fields.items():
                     setattr(item, key, value)
                 item.updated_at = datetime.now()
-            if fields.get("is_default"):
-                session.flush()
-                self._clear_defaults(session, keep=(ChatInstruction, item.id))
             session.commit()
             session.refresh(item)
             session.expunge(item)
@@ -1099,6 +1155,9 @@ class MetadataDB:
             self._detach_id(
                 session, ChatInstructionGroup, ChatInstructionGroup.snippet_ids_json, "snippet_ids", instruction_id
             )
+            self._detach_id(
+                session, ChatSpace, ChatSpace.default_instruction_ids_json, "default_instruction_ids", instruction_id
+            )
             session.delete(item)
             session.commit()
             return True
@@ -1119,16 +1178,22 @@ class MetadataDB:
                 session.expunge(item)
             return item
 
-    def get_default_instruction_group(self) -> ChatInstructionGroup | None:
+    def get_default_instruction_groups(self) -> list[ChatInstructionGroup]:
+        """Every group flagged "add by default" (is_default)."""
         with self._session() as session:
-            item = session.query(ChatInstructionGroup).filter(ChatInstructionGroup.is_default.is_(True)).first()
-            if item:
-                session.expunge(item)
-            return item
+            items = (
+                session.query(ChatInstructionGroup)
+                .filter(ChatInstructionGroup.is_default.is_(True))
+                .order_by(ChatInstructionGroup.name)
+                .all()
+            )
+            for i in items:
+                session.expunge(i)
+            return items
 
     def save_instruction_group(self, group_id: int | None = None, **fields) -> ChatInstructionGroup | None:
-        """Create (id None) or update a group. Making it the default clears any
-        other default, group or snippet."""
+        """Create (id None) or update a group. Any number may be flagged
+        is_default ("add by default")."""
         with self._session() as session:
             if group_id is None:
                 item = ChatInstructionGroup(**fields)
@@ -1140,9 +1205,6 @@ class MetadataDB:
                 for key, value in fields.items():
                     setattr(item, key, value)
                 item.updated_at = datetime.now()
-            if fields.get("is_default"):
-                session.flush()
-                self._clear_defaults(session, keep=(ChatInstructionGroup, item.id))
             session.commit()
             session.refresh(item)
             session.expunge(item)
@@ -1160,6 +1222,59 @@ class MetadataDB:
                 ChatConversation.instruction_group_ids_json,
                 "instruction_group_ids",
                 group_id,
+            )
+            self._detach_id(
+                session,
+                ChatSpace,
+                ChatSpace.default_instruction_group_ids_json,
+                "default_instruction_group_ids",
+                group_id,
+            )
+            session.delete(item)
+            session.commit()
+            return True
+
+    # ── Chat space methods ───────────────────────────────────────────
+
+    def list_spaces(self) -> list[ChatSpace]:
+        with self._session() as session:
+            items = session.query(ChatSpace).order_by(ChatSpace.name).all()
+            for i in items:
+                session.expunge(i)
+            return items
+
+    def get_space(self, space_id: int) -> ChatSpace | None:
+        with self._session() as session:
+            item = session.get(ChatSpace, space_id)
+            if item:
+                session.expunge(item)
+            return item
+
+    def save_space(self, space_id: int | None = None, **fields) -> ChatSpace | None:
+        with self._session() as session:
+            if space_id is None:
+                item = ChatSpace(**fields)
+                session.add(item)
+            else:
+                item = session.get(ChatSpace, space_id)
+                if not item:
+                    return None
+                for key, value in fields.items():
+                    setattr(item, key, value)
+                item.updated_at = datetime.now()
+            session.commit()
+            session.refresh(item)
+            session.expunge(item)
+            return item
+
+    def delete_space(self, space_id: int) -> bool:
+        """Delete a space; its chats become unfiled (space_id null), not deleted."""
+        with self._session() as session:
+            item = session.get(ChatSpace, space_id)
+            if not item:
+                return False
+            session.query(ChatConversation).filter(ChatConversation.space_id == space_id).update(
+                {ChatConversation.space_id: None}
             )
             session.delete(item)
             session.commit()

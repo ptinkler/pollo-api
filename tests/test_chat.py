@@ -1871,7 +1871,7 @@ def test_attribution_is_generic_and_hidden(chat, monkeypatch):
 
 
 class TestCustomInstructions:
-    def test_crud_and_single_default(self, client):
+    def test_crud_and_multiple_defaults(self, client):
         a = client.post(
             "/api/chat/instructions", json={"name": "Terse", "content": "Be brief.", "is_default": True}
         ).json()
@@ -1879,14 +1879,14 @@ class TestCustomInstructions:
             "/api/chat/instructions", json={"name": "Story", "content": "Write vividly.", "is_default": True}
         ).json()
         items = {i["name"]: i for i in client.get("/api/chat/instructions").json()["instructions"]}
-        assert items["Story"]["is_default"] and not items["Terse"]["is_default"]  # only one default
+        assert items["Story"]["is_default"] and items["Terse"]["is_default"]  # any number may be flagged
         r = client.put(f"/api/chat/instructions/{a['id']}", json={"name": "Terse", "content": "Very brief."})
         assert r.json()["content"] == "Very brief."
         assert client.delete(f"/api/chat/instructions/{b['id']}").status_code == 200
         assert [i["name"] for i in client.get("/api/chat/instructions").json()["instructions"]] == ["Terse"]
         assert client.post("/api/chat/instructions", json={"name": "", "content": "x"}).status_code == 422
 
-    def test_group_crud_and_shared_single_default(self, client):
+    def test_group_crud_and_multiple_defaults(self, client):
         a = client.post("/api/chat/instructions", json={"name": "Tone", "content": "Be warm."}).json()
         b = client.post(
             "/api/chat/instructions", json={"name": "Format", "content": "Use markdown.", "is_default": True}
@@ -1898,9 +1898,9 @@ class TestCustomInstructions:
         data = client.get("/api/chat/instructions").json()
         assert [x["name"] for x in data["groups"]] == ["Starter"]
         assert data["groups"][0]["snippet_ids"] == [a["id"], b["id"]]
-        # The group is now the one default — it cleared the snippet's default
+        # A snippet and a group can both be flagged "add by default" at once
         assert data["groups"][0]["is_default"]
-        assert not next(i for i in data["instructions"] if i["id"] == b["id"])["is_default"]
+        assert next(i for i in data["instructions"] if i["id"] == b["id"])["is_default"]
         # Unknown member snippet is rejected
         assert (
             client.post("/api/chat/instruction-groups", json={"name": "Bad", "snippet_ids": [9999]}).status_code == 400
@@ -1921,19 +1921,24 @@ class TestCustomInstructions:
         gone = client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]
         assert gone["instruction_ids"] == [] and gone["instruction_group_ids"] == [g["id"]]
 
-    def test_default_snippet_or_group_attaches_to_new_chats_unless_overridden(self, client):
+    def test_flagged_snippets_and_groups_attach_to_new_chats_unless_overridden(self, client):
         d = client.post("/api/chat/instructions", json={"name": "D", "content": "x", "is_default": True}).json()
-        assert client.post("/api/chat/conversations", json={}).json()["instruction_ids"] == [d["id"]]
-        # Explicit empty lists override the default
+        e = client.post("/api/chat/instructions", json={"name": "E", "content": "y", "is_default": True}).json()
+        # Every flagged snippet attaches (more than one is allowed)
+        assert sorted(client.post("/api/chat/conversations", json={}).json()["instruction_ids"]) == sorted(
+            [d["id"], e["id"]]
+        )
+        # Explicit empty lists override the defaults
         empty = client.post("/api/chat/conversations", json={"instruction_ids": []}).json()
         assert empty["instruction_ids"] == [] and empty["instruction_group_ids"] == []
         assert client.post("/api/chat/conversations", json={"instruction_ids": [999]}).status_code == 400
-        # A default group attaches by group, not by expanding its snippets
+        # A flagged group attaches by group (not expanded), alongside flagged snippets
         g = client.post(
             "/api/chat/instruction-groups", json={"name": "G", "snippet_ids": [d["id"]], "is_default": True}
         ).json()
         made = client.post("/api/chat/conversations", json={}).json()
-        assert made["instruction_group_ids"] == [g["id"]] and made["instruction_ids"] == []
+        assert made["instruction_group_ids"] == [g["id"]]
+        assert sorted(made["instruction_ids"]) == sorted([d["id"], e["id"]])
 
     def test_attach_and_detach_on_existing_chat(self, client, conv):
         i = client.post("/api/chat/instructions", json={"name": "I", "content": "x"}).json()
@@ -2060,6 +2065,77 @@ class TestCustomInstructions:
         db = MetadataDB(db_path=path)
         conv = db.create_conversation(instruction_id=None)
         assert db.get_conversation(conv.id).instruction_id is None
+
+
+class TestChatSpaces:
+    def test_crud(self, client):
+        s = client.post("/api/chat/instructions", json={"name": "Tone", "content": "Be warm."}).json()
+        g = client.post("/api/chat/instruction-groups", json={"name": "G", "snippet_ids": [s["id"]]}).json()
+        sp = client.post(
+            "/api/chat/spaces",
+            json={"name": "Novel", "default_instruction_ids": [s["id"]], "default_instruction_group_ids": [g["id"]]},
+        ).json()
+        assert sp["name"] == "Novel" and sp["default_instruction_ids"] == [s["id"]]
+        assert [x["name"] for x in client.get("/api/chat/spaces").json()["spaces"]] == ["Novel"]
+        upd = client.put(f"/api/chat/spaces/{sp['id']}", json={"name": "Renamed"}).json()
+        assert upd["name"] == "Renamed" and upd["default_instruction_ids"] == []
+        assert client.delete(f"/api/chat/spaces/{sp['id']}").status_code == 200
+        assert client.get("/api/chat/spaces").json()["spaces"] == []
+        assert (
+            client.post("/api/chat/spaces", json={"name": "Bad", "default_instruction_ids": [999]}).status_code == 400
+        )
+
+    def test_new_chat_in_space_seeds_its_defaults_not_the_global_ones(self, client):
+        s = client.post("/api/chat/instructions", json={"name": "Tone", "content": "Be warm."}).json()
+        g = client.post("/api/chat/instruction-groups", json={"name": "G", "snippet_ids": [s["id"]]}).json()
+        glob = client.post("/api/chat/instructions", json={"name": "Glob", "content": "x", "is_default": True}).json()
+        sp = client.post(
+            "/api/chat/spaces",
+            json={"name": "Novel", "default_instruction_ids": [s["id"]], "default_instruction_group_ids": [g["id"]]},
+        ).json()
+        conv = client.post("/api/chat/conversations", json={"space_id": sp["id"]}).json()
+        assert conv["space_id"] == sp["id"]
+        assert conv["instruction_ids"] == [s["id"]] and conv["instruction_group_ids"] == [g["id"]]
+        assert glob["id"] not in conv["instruction_ids"]  # global default stays out of a space chat
+
+    def test_new_chat_without_space_uses_global_defaults(self, client):
+        glob = client.post("/api/chat/instructions", json={"name": "Glob", "content": "x", "is_default": True}).json()
+        conv = client.post("/api/chat/conversations", json={}).json()
+        assert conv["space_id"] is None and conv["instruction_ids"] == [glob["id"]]
+
+    def test_explicit_attachments_override_space_defaults(self, client):
+        s = client.post("/api/chat/instructions", json={"name": "Tone", "content": "Be warm."}).json()
+        sp = client.post("/api/chat/spaces", json={"name": "Novel", "default_instruction_ids": [s["id"]]}).json()
+        conv = client.post("/api/chat/conversations", json={"space_id": sp["id"], "instruction_ids": []}).json()
+        assert conv["space_id"] == sp["id"] and conv["instruction_ids"] == []
+
+    def test_space_character_defaults_seed_new_chats_and_drop_stale(self, client, db):
+        c1 = db.create_character("Alice")
+        c2 = db.create_character("Bob")
+        sp = client.post("/api/chat/spaces", json={"name": "Novel", "default_character_ids": [c1.id, c2.id]}).json()
+        db.delete_character(c2.id)  # now stale in the space defaults
+        conv = client.post("/api/chat/conversations", json={"space_id": sp["id"]}).json()
+        assert conv["character_ids"] == [c1.id]
+
+    def test_move_chat_between_spaces_and_unfiled(self, client, conv):
+        sp = client.post("/api/chat/spaces", json={"name": "Novel"}).json()
+        moved = client.patch(f"/api/chat/conversations/{conv['id']}", json={"space_id": sp["id"]}).json()
+        assert moved["space_id"] == sp["id"]
+        back = client.patch(f"/api/chat/conversations/{conv['id']}", json={"space_id": None}).json()
+        assert back["space_id"] is None
+        assert client.patch(f"/api/chat/conversations/{conv['id']}", json={"space_id": 999}).status_code == 400
+
+    def test_deleting_space_unfiles_its_chats(self, client):
+        sp = client.post("/api/chat/spaces", json={"name": "Novel"}).json()
+        conv = client.post("/api/chat/conversations", json={"space_id": sp["id"]}).json()
+        client.delete(f"/api/chat/spaces/{sp['id']}")
+        assert client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["space_id"] is None
+
+    def test_deleting_a_snippet_clears_it_from_space_defaults(self, client):
+        s = client.post("/api/chat/instructions", json={"name": "Tone", "content": "x"}).json()
+        client.post("/api/chat/spaces", json={"name": "Novel", "default_instruction_ids": [s["id"]]})
+        client.delete(f"/api/chat/instructions/{s['id']}")
+        assert client.get("/api/chat/spaces").json()["spaces"][0]["default_instruction_ids"] == []
 
 
 class TestPolloImageModels:
