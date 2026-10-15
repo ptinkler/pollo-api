@@ -8,6 +8,7 @@ import {
   updateInstructionGroup,
   deleteInstructionGroup,
 } from '../../composables/useChat'
+import DefaultToggles from './DefaultToggles.vue'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -25,45 +26,36 @@ const nameInput = ref(null)
 const editingId = ref(null) // null = new
 const name = ref('')
 const content = ref('')
-const isDefault = ref(false)
 
 const snippetDirty = computed(() => {
   const cur = props.instructions.find(i => i.id === editingId.value)
   if (!cur) return !!(name.value.trim() || content.value.trim())
-  return cur.name !== name.value || cur.content !== content.value || cur.is_default !== isDefault.value
+  return cur.name !== name.value || cur.content !== content.value
 })
 
 function loadSnippet(item) {
   editingId.value = item?.id ?? null
   name.value = item?.name ?? ''
   content.value = item?.content ?? ''
-  isDefault.value = item?.is_default ?? false
 }
 
 // ── Group editor ─────────────────────────────────────────────────────
 const groupEditingId = ref(null)
 const groupName = ref('')
 const groupSnippetIds = ref([])
-const groupIsDefault = ref(false)
 
 const groupDirty = computed(() => {
   const cur = props.groups.find(g => g.id === groupEditingId.value)
   const ids = [...groupSnippetIds.value].sort()
   if (!cur) return !!(groupName.value.trim() || ids.length)
   const was = [...(cur.snippet_ids || [])].sort()
-  return (
-    cur.name !== groupName.value ||
-    cur.is_default !== groupIsDefault.value ||
-    ids.length !== was.length ||
-    ids.some((x, i) => x !== was[i])
-  )
+  return cur.name !== groupName.value || ids.length !== was.length || ids.some((x, i) => x !== was[i])
 })
 
 function loadGroup(item) {
   groupEditingId.value = item?.id ?? null
   groupName.value = item?.name ?? ''
   groupSnippetIds.value = [...(item?.snippet_ids || [])]
-  groupIsDefault.value = item?.is_default ?? false
 }
 
 function toggleMember(id) {
@@ -126,17 +118,13 @@ async function save() {
   saving.value = true
   try {
     if (isSnippet) {
-      const data = { name: name.value.trim(), content: content.value, is_default: isDefault.value }
+      const data = { name: name.value.trim(), content: content.value }
       const saved =
         editingId.value == null ? await createInstruction(data) : await updateInstruction(editingId.value, data)
       emit('changed')
       loadSnippet(saved)
     } else {
-      const data = {
-        name: groupName.value.trim(),
-        snippet_ids: groupSnippetIds.value,
-        is_default: groupIsDefault.value,
-      }
+      const data = { name: groupName.value.trim(), snippet_ids: groupSnippetIds.value }
       const saved =
         groupEditingId.value == null
           ? await createInstructionGroup(data)
@@ -211,7 +199,6 @@ function close() {
                 @click="pick(i)"
               >
                 <span class="item-name">{{ i.name }}</span>
-                <span v-if="i.is_default" class="tag" title="Attached to new chats">default</span>
               </button>
               <p v-if="!instructions.length" class="empty">None saved yet</p>
             </template>
@@ -224,7 +211,6 @@ function close() {
                 @click="pick(g)"
               >
                 <span class="item-name">📦 {{ g.name }}</span>
-                <span v-if="g.is_default" class="tag" title="Attached to new chats">default</span>
               </button>
               <p v-if="!groups.length" class="empty">No groups yet</p>
             </template>
@@ -240,7 +226,7 @@ function close() {
               maxlength="20000"
               placeholder="A single idea — a tone, a format, a rule. Keep snippets small so they combine cleanly."
             ></textarea>
-            <label class="check"> <input v-model="isDefault" type="checkbox" /> Add to new chats by default </label>
+            <DefaultToggles kind="instruction" :item-id="editingId" />
             <div class="actions">
               <button v-if="editingId != null" class="btn btn-danger" @click="remove">Delete</button>
               <span class="spacer"></span>
@@ -271,9 +257,7 @@ function close() {
             <p v-if="groupSnippetIds.length" class="members-summary">
               Sends: {{ groupSnippetIds.map(snippetName).join(', ') }}
             </p>
-            <label class="check">
-              <input v-model="groupIsDefault" type="checkbox" /> Add to new chats by default
-            </label>
+            <DefaultToggles kind="instruction_group" :item-id="groupEditingId" />
             <div class="actions">
               <button v-if="groupEditingId != null" class="btn btn-danger" @click="remove">Delete</button>
               <span class="spacer"></span>

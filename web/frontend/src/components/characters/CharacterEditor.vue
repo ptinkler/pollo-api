@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, inject } from 'vue'
 import MediaPicker from '../media/MediaPicker.vue'
+import DefaultToggles from '../chat/DefaultToggles.vue'
 import { importMedia } from '../../composables/useMedia'
 import {
   createCharacter,
@@ -229,6 +230,8 @@ async function remove() {
           @pick="addFromLibrary"
           @close="pickerOpen = false"
         />
+
+        <DefaultToggles kind="character" :item-id="character?.id ?? null" />
 
         <div class="actions">
           <button v-if="character" class="btn btn-danger" @click="remove">Delete</button>

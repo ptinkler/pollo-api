@@ -62,13 +62,15 @@ describe('ChatView balances', () => {
             ? { availableCredits: 12345, totalCredits: 20000 }
             : String(url).includes('/models')
               ? { text: [], image: [], video: [], errors: {} }
-              : String(url).includes('/instructions')
-                ? { instructions: [], groups: [] }
-                : String(url).includes('/spaces')
-                  ? { spaces: [] }
-                  : String(url).includes('/conversations')
-                    ? { conversations: [] }
-                    : { configured: true },
+              : String(url).includes('/settings')
+                ? { default_character_ids: [], default_instruction_ids: [], default_instruction_group_ids: [] }
+                : String(url).includes('/instructions')
+                  ? { instructions: [], groups: [] }
+                  : String(url).includes('/spaces')
+                    ? { spaces: [] }
+                    : String(url).includes('/conversations')
+                      ? { conversations: [] }
+                      : { configured: true },
     }))
     const ChatView = (await import('../views/ChatView.vue')).default
     const r = createChatRouter({
@@ -97,13 +99,15 @@ describe('ChatView sidebar sections', () => {
       json: async () =>
         String(url).includes('/models')
           ? { text: [], image: [], video: [], errors: {} }
-          : String(url).includes('/instructions')
-            ? { instructions: [], groups: [] }
-            : String(url).includes('/spaces')
-              ? { spaces: [] }
-              : String(url).includes('/conversations')
-                ? { conversations: [] }
-                : { configured: true },
+          : String(url).includes('/settings')
+            ? { default_character_ids: [], default_instruction_ids: [], default_instruction_group_ids: [] }
+            : String(url).includes('/instructions')
+              ? { instructions: [], groups: [] }
+              : String(url).includes('/spaces')
+                ? { spaces: [] }
+                : String(url).includes('/conversations')
+                  ? { conversations: [] }
+                  : { configured: true },
     }))
     const ChatView = (await import('../views/ChatView.vue')).default
     const mountView = async () => {
@@ -176,24 +180,26 @@ describe('ChatView chat list and per-chat state', () => {
         json: async () =>
           url.includes('/models')
             ? { text: [], image: [], video: [], errors: {} }
-            : url.includes('/instructions')
-              ? { instructions: [], groups: [] }
-              : url.includes('/conversations?q=')
-                ? { conversations: [{ ...convs[3], snippet: '…a fox appears…' }], more: false }
-                : url.includes('/conversations/b') && opts?.method === 'PATCH'
-                  ? { ...convs[2], pinned: true }
-                  : url.includes('/conversations/b')
-                    ? {
-                        conversation,
-                        messages: [{ id: 1, role: 'user', content: 'hi', status: 'done', media: [], siblings: [1] }],
-                      }
-                    : String(url).includes('/spaces')
-                      ? { spaces: [] }
-                      : url.includes('/conversations')
-                        ? { conversations: convs, more: true }
-                        : url.includes('/characters')
-                          ? { characters: [] }
-                          : { configured: true },
+            : url.includes('/settings')
+              ? { default_character_ids: [], default_instruction_ids: [], default_instruction_group_ids: [] }
+              : url.includes('/instructions')
+                ? { instructions: [], groups: [] }
+                : url.includes('/conversations?q=')
+                  ? { conversations: [{ ...convs[3], snippet: '…a fox appears…' }], more: false }
+                  : url.includes('/conversations/b') && opts?.method === 'PATCH'
+                    ? { ...convs[2], pinned: true }
+                    : url.includes('/conversations/b')
+                      ? {
+                          conversation,
+                          messages: [{ id: 1, role: 'user', content: 'hi', status: 'done', media: [], siblings: [1] }],
+                        }
+                      : String(url).includes('/spaces')
+                        ? { spaces: [] }
+                        : url.includes('/conversations')
+                          ? { conversations: convs, more: true }
+                          : url.includes('/characters')
+                            ? { characters: [] }
+                            : { configured: true },
       }
     })
     const ChatView = (await import('../views/ChatView.vue')).default
@@ -291,15 +297,17 @@ describe('ChatView spaces in the chat list', () => {
         json: async () =>
           url.includes('/models')
             ? { text: [], image: [], video: [], errors: {} }
-            : url.includes('/instructions')
-              ? { instructions: [], groups: [] }
-              : url.includes('/spaces')
-                ? { spaces }
-                : url.includes('/conversations')
-                  ? { conversations: convs, more: false }
-                  : url.includes('/characters')
-                    ? { characters: [] }
-                    : { configured: true },
+            : url.includes('/settings')
+              ? { default_character_ids: [], default_instruction_ids: [], default_instruction_group_ids: [] }
+              : url.includes('/instructions')
+                ? { instructions: [], groups: [] }
+                : url.includes('/spaces')
+                  ? { spaces }
+                  : url.includes('/conversations')
+                    ? { conversations: convs, more: false }
+                    : url.includes('/characters')
+                      ? { characters: [] }
+                      : { configured: true },
       }
     })
     const ChatView = (await import('../views/ChatView.vue')).default

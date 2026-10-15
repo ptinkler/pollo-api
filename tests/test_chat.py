@@ -694,6 +694,39 @@ def test_alembic_migration_creates_chat_tables(tmp_path):
     command.upgrade(cfg_for(fresh), "head")
 
 
+def test_old_is_default_flags_seed_the_global_settings_bucket(tmp_path):
+    """Opening a database that still carries the old per-item is_default flag
+    moves those ids into the global settings bucket, once."""
+    import sqlalchemy as sa
+
+    path = tmp_path / "old.db"
+    eng = sa.create_engine(f"sqlite:///{path}")
+    with eng.begin() as c:  # pre-settings schema: instructions/groups carry is_default
+        c.execute(
+            sa.text(
+                "CREATE TABLE chat_instructions (id INTEGER PRIMARY KEY, name VARCHAR(255), content TEXT, "
+                "is_default BOOLEAN, created_at DATETIME, updated_at DATETIME)"
+            )
+        )
+        c.execute(
+            sa.text(
+                "CREATE TABLE chat_instruction_groups (id INTEGER PRIMARY KEY, name VARCHAR(255), "
+                "snippet_ids_json TEXT, is_default BOOLEAN, created_at DATETIME, updated_at DATETIME)"
+            )
+        )
+        c.execute(
+            sa.text("INSERT INTO chat_instructions (id, name, content, is_default) VALUES (1,'A','x',1),(2,'B','y',0)")
+        )
+        c.execute(sa.text("INSERT INTO chat_instruction_groups (id, name, is_default) VALUES (5,'G',1)"))
+    eng.dispose()
+
+    db = MetadataDB(db_path=path)
+    settings = db.get_settings()
+    assert settings.default_instruction_ids == [1]  # only the flagged snippet
+    assert settings.default_instruction_group_ids == [5]
+    assert settings.default_character_ids == []
+
+
 class TestOpenRouterErrors:
     def _resp(self, status, body):
         import httpx
@@ -1871,37 +1904,25 @@ def test_attribution_is_generic_and_hidden(chat, monkeypatch):
 
 
 class TestCustomInstructions:
-    def test_crud_and_multiple_defaults(self, client):
-        a = client.post(
-            "/api/chat/instructions", json={"name": "Terse", "content": "Be brief.", "is_default": True}
-        ).json()
-        b = client.post(
-            "/api/chat/instructions", json={"name": "Story", "content": "Write vividly.", "is_default": True}
-        ).json()
-        items = {i["name"]: i for i in client.get("/api/chat/instructions").json()["instructions"]}
-        assert items["Story"]["is_default"] and items["Terse"]["is_default"]  # any number may be flagged
+    def test_snippet_crud(self, client):
+        a = client.post("/api/chat/instructions", json={"name": "Terse", "content": "Be brief."}).json()
+        b = client.post("/api/chat/instructions", json={"name": "Story", "content": "Write vividly."}).json()
+        assert {i["name"] for i in client.get("/api/chat/instructions").json()["instructions"]} == {"Terse", "Story"}
         r = client.put(f"/api/chat/instructions/{a['id']}", json={"name": "Terse", "content": "Very brief."})
         assert r.json()["content"] == "Very brief."
         assert client.delete(f"/api/chat/instructions/{b['id']}").status_code == 200
         assert [i["name"] for i in client.get("/api/chat/instructions").json()["instructions"]] == ["Terse"]
         assert client.post("/api/chat/instructions", json={"name": "", "content": "x"}).status_code == 422
 
-    def test_group_crud_and_multiple_defaults(self, client):
+    def test_group_crud(self, client):
         a = client.post("/api/chat/instructions", json={"name": "Tone", "content": "Be warm."}).json()
-        b = client.post(
-            "/api/chat/instructions", json={"name": "Format", "content": "Use markdown.", "is_default": True}
-        ).json()
+        b = client.post("/api/chat/instructions", json={"name": "Format", "content": "Use markdown."}).json()
         g = client.post(
-            "/api/chat/instruction-groups",
-            json={"name": "Starter", "snippet_ids": [a["id"], b["id"]], "is_default": True},
+            "/api/chat/instruction-groups", json={"name": "Starter", "snippet_ids": [a["id"], b["id"]]}
         ).json()
         data = client.get("/api/chat/instructions").json()
         assert [x["name"] for x in data["groups"]] == ["Starter"]
         assert data["groups"][0]["snippet_ids"] == [a["id"], b["id"]]
-        # A snippet and a group can both be flagged "add by default" at once
-        assert data["groups"][0]["is_default"]
-        assert next(i for i in data["instructions"] if i["id"] == b["id"])["is_default"]
-        # Unknown member snippet is rejected
         assert (
             client.post("/api/chat/instruction-groups", json={"name": "Bad", "snippet_ids": [9999]}).status_code == 400
         )
@@ -1921,24 +1942,35 @@ class TestCustomInstructions:
         gone = client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]
         assert gone["instruction_ids"] == [] and gone["instruction_group_ids"] == [g["id"]]
 
-    def test_flagged_snippets_and_groups_attach_to_new_chats_unless_overridden(self, client):
-        d = client.post("/api/chat/instructions", json={"name": "D", "content": "x", "is_default": True}).json()
-        e = client.post("/api/chat/instructions", json={"name": "E", "content": "y", "is_default": True}).json()
-        # Every flagged snippet attaches (more than one is allowed)
-        assert sorted(client.post("/api/chat/conversations", json={}).json()["instruction_ids"]) == sorted(
-            [d["id"], e["id"]]
+    def test_global_defaults_attach_to_new_chats_unless_overridden(self, client):
+        d = client.post("/api/chat/instructions", json={"name": "D", "content": "x"}).json()
+        e = client.post("/api/chat/instructions", json={"name": "E", "content": "y"}).json()
+        g = client.post("/api/chat/instruction-groups", json={"name": "G", "snippet_ids": [d["id"]]}).json()
+        client.put(
+            "/api/chat/settings",
+            json={"default_instruction_ids": [d["id"], e["id"]], "default_instruction_group_ids": [g["id"]]},
         )
+        made = client.post("/api/chat/conversations", json={}).json()
+        assert sorted(made["instruction_ids"]) == sorted([d["id"], e["id"]])
+        assert made["instruction_group_ids"] == [g["id"]]
         # Explicit empty lists override the defaults
         empty = client.post("/api/chat/conversations", json={"instruction_ids": []}).json()
         assert empty["instruction_ids"] == [] and empty["instruction_group_ids"] == []
         assert client.post("/api/chat/conversations", json={"instruction_ids": [999]}).status_code == 400
-        # A flagged group attaches by group (not expanded), alongside flagged snippets
-        g = client.post(
-            "/api/chat/instruction-groups", json={"name": "G", "snippet_ids": [d["id"]], "is_default": True}
-        ).json()
-        made = client.post("/api/chat/conversations", json={}).json()
-        assert made["instruction_group_ids"] == [g["id"]]
-        assert sorted(made["instruction_ids"]) == sorted([d["id"], e["id"]])
+
+    def test_global_settings_crud_and_validation(self, client):
+        s = client.post("/api/chat/instructions", json={"name": "S", "content": "x"}).json()
+        assert client.get("/api/chat/settings").json() == {
+            "default_character_ids": [],
+            "default_instruction_ids": [],
+            "default_instruction_group_ids": [],
+        }
+        updated = client.put("/api/chat/settings", json={"default_instruction_ids": [s["id"]]}).json()
+        assert updated["default_instruction_ids"] == [s["id"]]
+        assert client.put("/api/chat/settings", json={"default_instruction_ids": [999]}).status_code == 400
+        # Deleting the snippet clears it from the global bucket
+        client.delete(f"/api/chat/instructions/{s['id']}")
+        assert client.get("/api/chat/settings").json()["default_instruction_ids"] == []
 
     def test_attach_and_detach_on_existing_chat(self, client, conv):
         i = client.post("/api/chat/instructions", json={"name": "I", "content": "x"}).json()
@@ -2085,21 +2117,24 @@ class TestChatSpaces:
             client.post("/api/chat/spaces", json={"name": "Bad", "default_instruction_ids": [999]}).status_code == 400
         )
 
-    def test_new_chat_in_space_seeds_its_defaults_not_the_global_ones(self, client):
-        s = client.post("/api/chat/instructions", json={"name": "Tone", "content": "Be warm."}).json()
-        g = client.post("/api/chat/instruction-groups", json={"name": "G", "snippet_ids": [s["id"]]}).json()
-        glob = client.post("/api/chat/instructions", json={"name": "Glob", "content": "x", "is_default": True}).json()
+    def test_new_chat_in_space_stacks_global_and_space_defaults_deduped(self, client):
+        shared = client.post("/api/chat/instructions", json={"name": "Shared", "content": "both."}).json()
+        spaceonly = client.post("/api/chat/instructions", json={"name": "SpaceOnly", "content": "Be warm."}).json()
+        glob = client.post("/api/chat/instructions", json={"name": "Glob", "content": "x"}).json()
+        # Global defaults: glob + shared. Space defaults: shared + spaceonly.
+        client.put("/api/chat/settings", json={"default_instruction_ids": [glob["id"], shared["id"]]})
         sp = client.post(
             "/api/chat/spaces",
-            json={"name": "Novel", "default_instruction_ids": [s["id"]], "default_instruction_group_ids": [g["id"]]},
+            json={"name": "Novel", "default_instruction_ids": [shared["id"], spaceonly["id"]]},
         ).json()
         conv = client.post("/api/chat/conversations", json={"space_id": sp["id"]}).json()
         assert conv["space_id"] == sp["id"]
-        assert conv["instruction_ids"] == [s["id"]] and conv["instruction_group_ids"] == [g["id"]]
-        assert glob["id"] not in conv["instruction_ids"]  # global default stays out of a space chat
+        # Global first, then the space's own, each snippet once (shared de-duped)
+        assert conv["instruction_ids"] == [glob["id"], shared["id"], spaceonly["id"]]
 
-    def test_new_chat_without_space_uses_global_defaults(self, client):
-        glob = client.post("/api/chat/instructions", json={"name": "Glob", "content": "x", "is_default": True}).json()
+    def test_new_chat_without_space_uses_only_global_defaults(self, client):
+        glob = client.post("/api/chat/instructions", json={"name": "Glob", "content": "x"}).json()
+        client.put("/api/chat/settings", json={"default_instruction_ids": [glob["id"]]})
         conv = client.post("/api/chat/conversations", json={}).json()
         assert conv["space_id"] is None and conv["instruction_ids"] == [glob["id"]]
 

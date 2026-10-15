@@ -48,6 +48,10 @@ export const createSpace = data => apiPost('/api/chat/spaces', data)
 export const updateSpace = (id, data) => apiPut(`/api/chat/spaces/${id}`, data)
 export const deleteSpace = id => apiDelete(`/api/chat/spaces/${id}`)
 
+// Global defaults bucket (characters + instructions added to every new chat)
+export const fetchSettings = () => apiGet('/api/chat/settings')
+export const updateSettings = data => apiPut('/api/chat/settings', data)
+
 export const patchConversation = (id, data) => apiPatch(`/api/chat/conversations/${enc(id)}`, data)
 export const uploadChatAttachment = (convId, file) =>
   apiUpload(`/api/chat/conversations/${enc(convId)}/attachments`, file)

@@ -68,16 +68,15 @@ describe('CharacterEditor', () => {
     dialog.querySelector('.btn-primary').click()
     await flushPromises()
 
-    expect(requests[0]).toEqual([
+    // The editor's "add to defaults" toggles fetch settings/spaces on open, so
+    // assert on the character-creation POSTs specifically.
+    const posts = requests.filter(r => r[0] === 'POST')
+    expect(posts[0]).toEqual([
       'POST',
       '/api/characters',
       { name: 'Linh', description: 'red scarf', conversation_id: 'c1' },
     ])
-    expect(requests[1]).toEqual([
-      'POST',
-      '/api/characters/7/images/from-chat',
-      { conversation_id: 'c1', file: 'g.png' },
-    ])
+    expect(posts[1]).toEqual(['POST', '/api/characters/7/images/from-chat', { conversation_id: 'c1', file: 'g.png' }])
     expect(w.emitted('saved')[0][0].images).toEqual(['img_x.png'])
     w.unmount()
   })

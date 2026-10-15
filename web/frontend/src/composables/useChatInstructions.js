@@ -20,12 +20,6 @@ export function useChatInstructions({ convId, conversation, showToast }) {
     [...attachedGroups.value.map(g => g.name), ...attachedInstructions.value.map(i => i.name)].join(', '),
   )
 
-  // The one default — a snippet or a group — attached to brand-new chats
-  const defaultAttachment = () => ({
-    ids: instructions.value.filter(i => i.is_default).map(i => i.id),
-    groupIds: groups.value.filter(g => g.is_default).map(g => g.id),
-  })
-
   async function loadInstructions() {
     try {
       const data = await fetchInstructions()
@@ -84,7 +78,6 @@ export function useChatInstructions({ convId, conversation, showToast }) {
     attachedInstructions,
     attachedGroups,
     attachmentSummary,
-    defaultAttachment,
     loadInstructions,
     setInstructions,
     setGroups,

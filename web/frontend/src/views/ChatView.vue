@@ -39,7 +39,7 @@ import { characterImageUrl } from '../composables/useCharacters'
 import { useChatAttachments } from '../composables/useChatAttachments'
 import { upsert, useChatCharacters } from '../composables/useChatCharacters'
 import { useChatInstructions } from '../composables/useChatInstructions'
-import { useChatSpaces } from '../composables/useChatSpaces'
+import { useChatDefaults } from '../composables/useChatDefaults'
 import { useChatBalances } from '../composables/useChatBalances'
 import { useChatList } from '../composables/useChatList'
 import { IMAGE_STEPS, MEMORY_STEPS, MODES, useComposerSettings } from '../composables/useComposerSettings'
@@ -294,7 +294,6 @@ const {
   attachedInstructions,
   attachedGroups,
   attachmentSummary,
-  defaultAttachment,
   loadInstructions,
   setInstructions,
   setGroups,
@@ -306,28 +305,35 @@ const instructionsUnused = computed(
   () => mode.value === 'video' || (mode.value === 'image' && !imageInfo.value?.conversational),
 )
 
-// ── Spaces ────────────────────────────────────────────────────────────
+// ── Spaces & defaults ─────────────────────────────────────────────────
 const spacesOpen = ref(false)
-const { spaces, loadSpaces, spaceById } = useChatSpaces({ showToast })
+const { globalSettings, spaces, spaceById, loadDefaults, setCurrentSpace } = useChatDefaults()
 // Where the next new (blank) chat will be filed; read when it's created
 const pendingSpaceId = ref(null)
 
-// Seed the blank chat's attachments: a space's defaults (stale ids dropped),
-// or the global "add by default" instructions when outside any space.
+// Seed the blank chat's attachments the way the server would: global defaults
+// plus the space's own (stacked, de-duped), with stale ids dropped.
 function seedAttachments(spaceId) {
   const space = spaceId == null ? null : spaceById(spaceId)
-  if (space) {
-    const has = (list, id) => list.value.some(x => x.id === id)
-    instructionIds.value = space.default_instruction_ids.filter(id => has(instructions, id))
-    instructionGroupIds.value = space.default_instruction_group_ids.filter(id => has(instructionGroups, id))
-    characterIds.value = space.default_character_ids.filter(id => has(characters, id))
-  } else {
-    const d = defaultAttachment()
-    instructionIds.value = d.ids
-    instructionGroupIds.value = d.groupIds
-    characterIds.value = []
+  const has = (list, id) => list.value.some(x => x.id === id)
+  const seed = kind => {
+    const field = `default_${kind}_ids`
+    const ids = [...globalSettings.value[field], ...(space ? space[field] : [])]
+    return [...new Set(ids)]
   }
+  instructionIds.value = seed('instruction').filter(id => has(instructions, id))
+  instructionGroupIds.value = seed('instruction_group').filter(id => has(instructionGroups, id))
+  characterIds.value = seed('character').filter(id => has(characters, id))
 }
+
+// Tell the shared defaults store which space is in context (for the add-to
+// toggles in the character/instruction editors)
+watch(
+  () => conversation.value?.space_id ?? pendingSpaceId.value ?? null,
+  id => setCurrentSpace(id),
+  { immediate: true },
+)
+onBeforeUnmount(() => setCurrentSpace(null))
 
 // ── Characters ───────────────────────────────────────────────────────
 const {
@@ -463,7 +469,7 @@ async function moveConversation({ conv, spaceId }) {
 }
 
 function onSpacesChanged() {
-  loadSpaces()
+  loadDefaults()
 }
 
 // Chat creations live in Media, with everything else (filtered to chats)
@@ -761,7 +767,7 @@ onMounted(async () => {
   }
   chatList.load()
   // Await the catalogues so a blank chat can seed its default attachments
-  await Promise.all([loadInstructions(), loadSpaces()])
+  await Promise.all([loadInstructions(), loadDefaults()])
   loadConversation(convId.value)
   if (configured.value) loadModels()
   else modelsLoading.value = false
@@ -1091,6 +1097,7 @@ onBeforeUnmount(() => {
     <SpacesDialog
       :open="spacesOpen"
       :spaces="spaces"
+      :global-settings="globalSettings"
       :characters="characters"
       :instructions="instructions"
       :groups="instructionGroups"

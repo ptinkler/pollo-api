@@ -262,20 +262,22 @@ class ConversationUpdate(BaseModel):
 class InstructionIn(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     content: str = Field(default="", max_length=20000)
-    is_default: bool = False
 
 
 class InstructionGroupIn(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     snippet_ids: list[int] = []
-    is_default: bool = False
 
 
-class SpaceIn(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
+# Global defaults and a space's defaults share this shape (three id-lists)
+class DefaultsIn(BaseModel):
     default_character_ids: list[int] = []
     default_instruction_ids: list[int] = []
     default_instruction_group_ids: list[int] = []
+
+
+class SpaceIn(DefaultsIn):
+    name: str = Field(min_length=1, max_length=255)
 
 
 class TurnOptions(BaseModel):
@@ -560,27 +562,26 @@ def api_create_conversation(data: ConversationCreate):
     db = get_db()
     fields_set = data.model_fields_set
     space = _require_space(data.space_id) if data.space_id is not None else None
+    glob = db.get_settings()
 
-    # Instructions: explicit lists win; else the space's defaults; else the
-    # global "add by default" flags.
+    # Defaults stack: global settings first, then the space's own (de-duped),
+    # with stale ids dropped. An explicit list in the request overrides that kind.
+    def default_ids(attr: str, exist):
+        ids = getattr(glob, attr) + (getattr(space, attr) if space else [])
+        return [x.id for x in exist(list(dict.fromkeys(ids)))]
+
     if {"instruction_ids", "instruction_group_ids"} & fields_set:
         instruction_ids = _require_instructions(data.instruction_ids)
         instruction_group_ids = _require_instruction_groups(data.instruction_group_ids)
-    elif space:
-        instruction_ids = [s.id for s in db.get_instructions(space.default_instruction_ids)]
-        instruction_group_ids = [g.id for g in _existing_groups(space.default_instruction_group_ids)]
     else:
-        instruction_ids, instruction_group_ids = _default_attachment(db)
+        instruction_ids = default_ids("default_instruction_ids", db.get_instructions)
+        instruction_group_ids = default_ids("default_instruction_group_ids", _existing_groups)
 
-    # Characters: explicit list wins; else the space's defaults (stale ids
-    # filtered out); else none. There is no global character default.
     if "character_ids" in fields_set:
         characters.require(data.character_ids, db)
         character_ids = data.character_ids
-    elif space:
-        character_ids = [c.id for c in characters.load(space.default_character_ids, db)]
     else:
-        character_ids = []
+        character_ids = default_ids("default_character_ids", lambda ids: characters.load(ids, db))
 
     conv = db.create_conversation(
         title=(data.title or DEFAULT_TITLE).strip()[:255] or DEFAULT_TITLE,
@@ -624,12 +625,31 @@ def _require_space(space_id: int):
     return space
 
 
-def _default_attachment(db) -> tuple[list[int], list[int]]:
-    """Snippets and groups flagged "add by default", attached to new chats."""
-    return (
-        [s.id for s in db.get_default_instructions()],
-        [g.id for g in db.get_default_instruction_groups()],
-    )
+def _require_characters(ids: list[int]) -> list[int]:
+    characters.require(ids, get_db())
+    return list(dict.fromkeys(ids))
+
+
+def _defaults_fields(data: DefaultsIn) -> dict:
+    """Validated default id-lists for a settings bucket (global or a space)."""
+    return {
+        "default_character_ids": _require_characters(data.default_character_ids),
+        "default_instruction_ids": _require_instructions(data.default_instruction_ids),
+        "default_instruction_group_ids": _require_instruction_groups(data.default_instruction_group_ids),
+    }
+
+
+# ── Routes: global settings ─────────────────────────────────────────
+
+
+@router.get("/settings")
+def api_get_settings():
+    return get_db().get_settings().to_dict()
+
+
+@router.put("/settings")
+def api_update_settings(data: DefaultsIn):
+    return get_db().save_settings(**_defaults_fields(data)).to_dict()
 
 
 # ── Routes: instruction snippets & groups ───────────────────────────
@@ -645,14 +665,12 @@ def api_list_instructions():
 
 @router.post("/instructions")
 def api_create_instruction(data: InstructionIn):
-    return get_db().save_instruction(name=data.name.strip(), content=data.content, is_default=data.is_default).to_dict()
+    return get_db().save_instruction(name=data.name.strip(), content=data.content).to_dict()
 
 
 @router.put("/instructions/{instruction_id}")
 def api_update_instruction(instruction_id: int, data: InstructionIn):
-    item = get_db().save_instruction(
-        instruction_id, name=data.name.strip(), content=data.content, is_default=data.is_default
-    )
+    item = get_db().save_instruction(instruction_id, name=data.name.strip(), content=data.content)
     if not item:
         raise HTTPException(404, "Instruction not found")
     return item.to_dict()
@@ -669,9 +687,7 @@ def api_delete_instruction(instruction_id: int):
 def api_create_instruction_group(data: InstructionGroupIn):
     return (
         get_db()
-        .save_instruction_group(
-            name=data.name.strip(), snippet_ids=_require_instructions(data.snippet_ids), is_default=data.is_default
-        )
+        .save_instruction_group(name=data.name.strip(), snippet_ids=_require_instructions(data.snippet_ids))
         .to_dict()
     )
 
@@ -679,10 +695,7 @@ def api_create_instruction_group(data: InstructionGroupIn):
 @router.put("/instruction-groups/{group_id}")
 def api_update_instruction_group(group_id: int, data: InstructionGroupIn):
     item = get_db().save_instruction_group(
-        group_id,
-        name=data.name.strip(),
-        snippet_ids=_require_instructions(data.snippet_ids),
-        is_default=data.is_default,
+        group_id, name=data.name.strip(), snippet_ids=_require_instructions(data.snippet_ids)
     )
     if not item:
         raise HTTPException(404, "Instruction group not found")
@@ -699,21 +712,6 @@ def api_delete_instruction_group(group_id: int):
 # ── Routes: spaces ──────────────────────────────────────────────────
 
 
-def _space_fields(data: SpaceIn) -> dict:
-    """Validated space fields; unknown default ids are rejected."""
-    return {
-        "name": data.name.strip(),
-        "default_character_ids": _require_characters(data.default_character_ids),
-        "default_instruction_ids": _require_instructions(data.default_instruction_ids),
-        "default_instruction_group_ids": _require_instruction_groups(data.default_instruction_group_ids),
-    }
-
-
-def _require_characters(ids: list[int]) -> list[int]:
-    characters.require(ids, get_db())
-    return list(dict.fromkeys(ids))
-
-
 @router.get("/spaces")
 def api_list_spaces():
     return {"spaces": [s.to_dict() for s in get_db().list_spaces()]}
@@ -721,12 +719,12 @@ def api_list_spaces():
 
 @router.post("/spaces")
 def api_create_space(data: SpaceIn):
-    return get_db().save_space(**_space_fields(data)).to_dict()
+    return get_db().save_space(name=data.name.strip(), **_defaults_fields(data)).to_dict()
 
 
 @router.put("/spaces/{space_id}")
 def api_update_space(space_id: int, data: SpaceIn):
-    item = get_db().save_space(space_id, **_space_fields(data))
+    item = get_db().save_space(space_id, name=data.name.strip(), **_defaults_fields(data))
     if not item:
         raise HTTPException(404, "Space not found")
     return item.to_dict()
