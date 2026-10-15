@@ -9,95 +9,87 @@ import {
   deleteInstructionGroup,
 } from '../../composables/useChat'
 import DefaultToggles from './DefaultToggles.vue'
+import { instructionColor } from '../../utils/format'
 
+// Create and edit instruction snippets and groups (a group bundles snippets).
+// One searchable list of both; `focus` opens on a given one.
 const props = defineProps({
   open: { type: Boolean, default: false },
   instructions: { type: Array, default: () => [] }, // snippets
   groups: { type: Array, default: () => [] },
+  focus: { type: Object, default: null }, // { kind: 'snippet' | 'group', id } to open on
 })
 const emit = defineEmits(['close', 'changed'])
 const showToast = inject('showToast', () => {})
 
-const tab = ref('snippets') // 'snippets' | 'groups'
-const saving = ref(false)
-const nameInput = ref(null)
-
-// ── Snippet editor ───────────────────────────────────────────────────
+const query = ref('')
+const kind = ref('snippet') // what's being edited: 'snippet' | 'group'
 const editingId = ref(null) // null = new
 const name = ref('')
-const content = ref('')
+const content = ref('') // snippet
+const memberIds = ref([]) // group
+const memberQuery = ref('')
+const saving = ref(false)
+const nameInput = ref(null)
+const toggles = ref(null) // the "Default for" pills, saved along with the rest
+const defaultsDirty = ref(false)
 
-const snippetDirty = computed(() => {
-  const cur = props.instructions.find(i => i.id === editingId.value)
-  if (!cur) return !!(name.value.trim() || content.value.trim())
-  return cur.name !== name.value || cur.content !== content.value
+const isGroup = computed(() => kind.value === 'group')
+const current = computed(() => (isGroup.value ? props.groups : props.instructions).find(x => x.id === editingId.value))
+
+// ── The list ─────────────────────────────────────────────────────────
+const matches = item => item.name.toLowerCase().includes(query.value.trim().toLowerCase())
+const shownGroups = computed(() => props.groups.filter(matches))
+const shownSnippets = computed(() => props.instructions.filter(matches))
+const isActive = (k, item) => kind.value === k && editingId.value === item.id
+
+// ── Group members ────────────────────────────────────────────────────
+const snippetById = computed(() => new Map(props.instructions.map(s => [s.id, s])))
+const members = computed(() => memberIds.value.map(id => snippetById.value.get(id)).filter(Boolean))
+const addable = computed(() => {
+  const q = memberQuery.value.trim().toLowerCase()
+  return props.instructions.filter(s => !memberIds.value.includes(s.id) && s.name.toLowerCase().includes(q))
 })
 
-function loadSnippet(item) {
+function addMember(s) {
+  memberIds.value = [...memberIds.value, s.id]
+  memberQuery.value = ''
+}
+
+function removeMember(s) {
+  memberIds.value = memberIds.value.filter(id => id !== s.id)
+}
+
+// ── Editing ──────────────────────────────────────────────────────────
+const sameIds = (a, b) => a.length === b.length && a.every(x => b.includes(x))
+const dirty = computed(() => {
+  const cur = current.value
+  if (!cur) return !!(name.value.trim() || content.value.trim() || memberIds.value.length)
+  if (cur.name !== name.value) return true
+  return isGroup.value ? !sameIds(memberIds.value, cur.snippet_ids || []) : cur.content !== content.value
+})
+
+function load(k, item) {
+  kind.value = k
   editingId.value = item?.id ?? null
   name.value = item?.name ?? ''
   content.value = item?.content ?? ''
+  memberIds.value = [...(item?.snippet_ids || [])]
+  memberQuery.value = ''
 }
-
-// ── Group editor ─────────────────────────────────────────────────────
-const groupEditingId = ref(null)
-const groupName = ref('')
-const groupSnippetIds = ref([])
-
-const groupDirty = computed(() => {
-  const cur = props.groups.find(g => g.id === groupEditingId.value)
-  const ids = [...groupSnippetIds.value].sort()
-  if (!cur) return !!(groupName.value.trim() || ids.length)
-  const was = [...(cur.snippet_ids || [])].sort()
-  return cur.name !== groupName.value || ids.length !== was.length || ids.some((x, i) => x !== was[i])
-})
-
-function loadGroup(item) {
-  groupEditingId.value = item?.id ?? null
-  groupName.value = item?.name ?? ''
-  groupSnippetIds.value = [...(item?.snippet_ids || [])]
-}
-
-function toggleMember(id) {
-  groupSnippetIds.value = groupSnippetIds.value.includes(id)
-    ? groupSnippetIds.value.filter(x => x !== id)
-    : [...groupSnippetIds.value, id]
-}
-
-const snippetName = id => props.instructions.find(s => s.id === id)?.name ?? '(deleted)'
-
-// ── Shared ───────────────────────────────────────────────────────────
-const dirty = computed(() => (tab.value === 'snippets' ? snippetDirty.value : groupDirty.value))
 
 function confirmDiscard() {
-  return !dirty.value || confirm('Discard unsaved changes?')
+  return !(dirty.value || defaultsDirty.value) || confirm('Discard unsaved changes?')
 }
 
-function resetTab(which) {
-  if (which === 'snippets') loadSnippet(props.instructions[0] || null)
-  else loadGroup(props.groups[0] || null)
+function pick(k, item) {
+  if (isActive(k, item) || !confirmDiscard()) return
+  load(k, item)
 }
 
-function switchTab(which) {
-  if (which === tab.value || !confirmDiscard()) return
-  tab.value = which
-  resetTab(which)
-}
-
-function pick(item) {
-  if (tab.value === 'snippets') {
-    if (item?.id === editingId.value || !confirmDiscard()) return
-    loadSnippet(item)
-  } else {
-    if (item?.id === groupEditingId.value || !confirmDiscard()) return
-    loadGroup(item)
-  }
-}
-
-function startNew() {
+function startNew(k) {
   if (!confirmDiscard()) return
-  if (tab.value === 'snippets') loadSnippet(null)
-  else loadGroup(null)
+  load(k, null)
   nextTick(() => nameInput.value?.focus())
 }
 
@@ -105,33 +97,31 @@ watch(
   () => props.open,
   open => {
     if (!open) return
-    tab.value = 'snippets'
-    resetTab('snippets')
-    if (!props.instructions.length) nextTick(() => nameInput.value?.focus())
+    query.value = ''
+    const f = props.focus
+    const item = f && (f.kind === 'group' ? props.groups : props.instructions).find(x => x.id === f.id)
+    if (item) load(f.kind, item)
+    else if (props.instructions.length) load('snippet', props.instructions[0])
+    else startNew('snippet')
   },
 )
 
 async function save() {
-  const isSnippet = tab.value === 'snippets'
-  const label = isSnippet ? name.value : groupName.value
-  if (!label.trim()) return showToast(`Give the ${isSnippet ? 'snippet' : 'group'} a name`, 'error')
+  if (!name.value.trim()) return
   saving.value = true
   try {
-    if (isSnippet) {
-      const data = { name: name.value.trim(), content: content.value }
-      const saved =
-        editingId.value == null ? await createInstruction(data) : await updateInstruction(editingId.value, data)
-      emit('changed')
-      loadSnippet(saved)
+    const id = editingId.value
+    let saved
+    if (isGroup.value) {
+      const data = { name: name.value.trim(), snippet_ids: memberIds.value }
+      saved = id == null ? await createInstructionGroup(data) : await updateInstructionGroup(id, data)
     } else {
-      const data = { name: groupName.value.trim(), snippet_ids: groupSnippetIds.value }
-      const saved =
-        groupEditingId.value == null
-          ? await createInstructionGroup(data)
-          : await updateInstructionGroup(groupEditingId.value, data)
-      emit('changed')
-      loadGroup(saved)
+      const data = { name: name.value.trim(), content: content.value }
+      saved = id == null ? await createInstruction(data) : await updateInstruction(id, data)
     }
+    await toggles.value?.commit(saved.id)
+    emit('changed')
+    load(kind.value, saved)
   } catch (e) {
     showToast(`Save failed: ${e.message}`, 'error')
   } finally {
@@ -140,26 +130,16 @@ async function save() {
 }
 
 async function remove() {
-  if (tab.value === 'snippets') {
-    if (editingId.value == null) return loadSnippet(null)
-    if (!confirm(`Delete “${name.value}”? It's removed from any chats and groups using it.`)) return
-    try {
-      await deleteInstruction(editingId.value)
-      emit('changed')
-      loadSnippet(null)
-    } catch (e) {
-      showToast(`Delete failed: ${e.message}`, 'error')
-    }
-  } else {
-    if (groupEditingId.value == null) return loadGroup(null)
-    if (!confirm(`Delete group “${groupName.value}”? Its snippets are kept; chats using it are detached.`)) return
-    try {
-      await deleteInstructionGroup(groupEditingId.value)
-      emit('changed')
-      loadGroup(null)
-    } catch (e) {
-      showToast(`Delete failed: ${e.message}`, 'error')
-    }
+  const what = isGroup.value
+    ? `the group “${name.value}”? Its snippets are kept.`
+    : `“${name.value}”? It's also taken out of chats and groups.`
+  if (!confirm(`Delete ${what}`)) return
+  try {
+    await (isGroup.value ? deleteInstructionGroup : deleteInstruction)(editingId.value)
+    emit('changed')
+    load(kind.value, null)
+  } catch (e) {
+    showToast(`Delete failed: ${e.message}`, 'error')
   }
 }
 
@@ -171,102 +151,116 @@ function close() {
 <template>
   <Teleport to="body">
     <div v-if="open" class="backdrop" @click.self="close" @keydown.esc="close">
-      <div class="dialog" role="dialog" aria-label="Custom instructions">
+      <div class="dialog" role="dialog" aria-label="Instructions">
         <div class="head">
-          <h3>Custom instructions</h3>
+          <h3>Instructions</h3>
           <button class="x" title="Close" @click="close">✕</button>
-        </div>
-        <p class="sub">
-          Snippets are small reusable instructions; a group bundles complementary snippets. Attach any number of
-          snippets and groups to a chat — all of them are sent to the chat model word for word. Flag any of them "add to
-          new chats by default".
-        </p>
-
-        <div class="tabs">
-          <button :class="{ on: tab === 'snippets' }" @click="switchTab('snippets')">Snippets</button>
-          <button :class="{ on: tab === 'groups' }" @click="switchTab('groups')">Groups</button>
         </div>
 
         <div class="body">
           <aside class="list">
-            <button class="new" @click="startNew">＋ New {{ tab === 'snippets' ? 'snippet' : 'group' }}</button>
-            <template v-if="tab === 'snippets'">
-              <button
-                v-for="i in instructions"
-                :key="i.id"
-                class="item"
-                :class="{ active: i.id === editingId }"
-                @click="pick(i)"
-              >
-                <span class="item-name">{{ i.name }}</span>
-              </button>
-              <p v-if="!instructions.length" class="empty">None saved yet</p>
-            </template>
-            <template v-else>
-              <button
-                v-for="g in groups"
-                :key="g.id"
-                class="item"
-                :class="{ active: g.id === groupEditingId }"
-                @click="pick(g)"
-              >
-                <span class="item-name">📦 {{ g.name }}</span>
-              </button>
-              <p v-if="!groups.length" class="empty">No groups yet</p>
-            </template>
+            <input v-model="query" type="search" class="search" placeholder="Search" aria-label="Search instructions" />
+            <div class="new-row">
+              <button class="new" @click="startNew('snippet')">＋ Snippet</button>
+              <button class="new" @click="startNew('group')">＋ Group</button>
+            </div>
+            <div class="items">
+              <template v-if="shownGroups.length">
+                <p class="list-head">Groups</p>
+                <button
+                  v-for="g in shownGroups"
+                  :key="`g${g.id}`"
+                  class="item"
+                  :class="{ active: isActive('group', g) }"
+                  @click="pick('group', g)"
+                >
+                  <span class="item-name">📦 {{ g.name }}</span>
+                  <span class="count">{{ g.snippet_ids?.length || 0 }}</span>
+                </button>
+              </template>
+              <template v-if="shownSnippets.length">
+                <p class="list-head">Snippets</p>
+                <button
+                  v-for="s in shownSnippets"
+                  :key="`s${s.id}`"
+                  class="item"
+                  :class="{ active: isActive('snippet', s) }"
+                  :title="s.content"
+                  @click="pick('snippet', s)"
+                >
+                  <span class="dot" :style="{ background: instructionColor(s.name) }"></span>
+                  <span class="item-name">{{ s.name }}</span>
+                </button>
+              </template>
+              <p v-if="!shownGroups.length && !shownSnippets.length" class="empty">
+                {{ query ? 'Nothing matches' : 'None yet' }}
+              </p>
+            </div>
           </aside>
 
-          <section v-if="tab === 'snippets'" class="editor">
-            <label for="ins-name">Name</label>
-            <input id="ins-name" ref="nameInput" v-model="name" maxlength="255" placeholder="e.g. Terse tone" />
-            <label for="ins-content">Instructions</label>
+          <form class="editor" @submit.prevent="save">
+            <p class="editing">
+              {{ editingId == null ? `New ${isGroup ? 'group' : 'snippet'}` : isGroup ? 'Group' : 'Snippet' }}
+            </p>
+            <input
+              ref="nameInput"
+              v-model="name"
+              class="name"
+              maxlength="255"
+              :placeholder="isGroup ? 'Group name' : 'Name, e.g. Terse tone'"
+              aria-label="Name"
+            />
+
             <textarea
-              id="ins-content"
+              v-if="!isGroup"
               v-model="content"
               maxlength="20000"
-              placeholder="A single idea — a tone, a format, a rule. Keep snippets small so they combine cleanly."
+              placeholder="What the chat model should do — a tone, a format, a rule."
+              aria-label="Instructions"
             ></textarea>
-            <DefaultToggles kind="instruction" :item-id="editingId" />
-            <div class="actions">
-              <button v-if="editingId != null" class="btn btn-danger" @click="remove">Delete</button>
-              <span class="spacer"></span>
-              <button class="btn btn-secondary" @click="close">Close</button>
-              <button class="btn btn-primary" :disabled="saving || !snippetDirty || !name.trim()" @click="save">
-                {{ editingId == null ? 'Save' : 'Save changes' }}
-              </button>
-            </div>
-          </section>
 
-          <section v-else class="editor">
-            <label for="grp-name">Name</label>
-            <input
-              id="grp-name"
-              ref="nameInput"
-              v-model="groupName"
-              maxlength="255"
-              placeholder="e.g. Support replies"
+            <template v-else>
+              <div class="members">
+                <span v-for="s in members" :key="s.id" class="chip" :title="s.name">
+                  <span class="dot" :style="{ background: instructionColor(s.name) }"></span>
+                  <span class="chip-name">{{ s.name }}</span>
+                  <button type="button" class="chip-x" :title="`Remove ${s.name}`" @click="removeMember(s)">✕</button>
+                </span>
+                <span v-if="!members.length" class="empty">No snippets yet</span>
+              </div>
+              <div class="adder">
+                <input
+                  v-model="memberQuery"
+                  type="search"
+                  placeholder="Add a snippet…"
+                  aria-label="Add a snippet"
+                  @keydown.enter.prevent="addable[0] && addMember(addable[0])"
+                />
+                <div v-if="memberQuery.trim()" class="adder-menu">
+                  <button v-for="s in addable" :key="s.id" type="button" class="item" @click="addMember(s)">
+                    <span class="item-name">{{ s.name }}</span>
+                  </button>
+                  <p v-if="!addable.length" class="empty">No other snippets match</p>
+                </div>
+              </div>
+            </template>
+
+            <DefaultToggles
+              ref="toggles"
+              v-model:dirty="defaultsDirty"
+              :kind="isGroup ? 'instruction_group' : 'instruction'"
+              :item-id="editingId"
             />
-            <label>Snippets in this group</label>
-            <div class="members">
-              <label v-for="s in instructions" :key="s.id" class="member">
-                <input type="checkbox" :checked="groupSnippetIds.includes(s.id)" @change="toggleMember(s.id)" />
-                {{ s.name }}
-              </label>
-              <p v-if="!instructions.length" class="empty">Create snippets first, then group them here.</p>
-            </div>
-            <p v-if="groupSnippetIds.length" class="members-summary">
-              Sends: {{ groupSnippetIds.map(snippetName).join(', ') }}
-            </p>
-            <DefaultToggles kind="instruction_group" :item-id="groupEditingId" />
+
             <div class="actions">
-              <button v-if="groupEditingId != null" class="btn btn-danger" @click="remove">Delete</button>
+              <button v-if="editingId != null" type="button" class="btn btn-danger" @click="remove">Delete</button>
               <span class="spacer"></span>
-              <button class="btn btn-secondary" @click="close">Close</button>
-              <button class="btn btn-primary" :disabled="saving || !groupDirty || !groupName.trim()" @click="save">
-                {{ groupEditingId == null ? 'Save' : 'Save changes' }}
+              <button type="button" class="btn btn-secondary" @click="close">Close</button>
+              <button class="btn btn-primary" :disabled="saving || !(dirty || defaultsDirty) || !name.trim()">
+                {{ editingId == null ? 'Create' : 'Save' }}
               </button>
             </div>
-          </section>
+          </form>
         </div>
       </div>
     </div>
@@ -286,23 +280,24 @@ function close() {
 
 .dialog {
   width: min(820px, 100%);
-  max-height: calc(100vh - 32px);
+  height: min(620px, calc(100vh - 32px));
   display: flex;
   flex-direction: column;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 14px;
-  padding: 18px 20px;
+  padding: 16px 20px 18px;
 }
 
 .head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  margin-bottom: 12px;
 }
 
 .head h3 {
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: 600;
 }
 
@@ -321,70 +316,72 @@ function close() {
   color: var(--text);
 }
 
-.sub {
-  font-size: 0.8rem;
-  color: var(--text2);
-  margin: 6px 0 12px;
-  line-height: 1.45;
-}
-
-.tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 12px;
-}
-
-.tabs button {
-  padding: 6px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: none;
-  color: var(--text2);
-  cursor: pointer;
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-
-.tabs button.on {
-  background: rgba(108, 92, 231, 0.18);
-  color: var(--text);
-  border-color: var(--accent);
-}
-
 .body {
   display: grid;
-  grid-template-columns: 200px 1fr;
-  gap: 16px;
+  grid-template-columns: 230px 1fr;
+  gap: 18px;
   min-height: 0;
   flex: 1;
 }
 
+/* ── List ── */
 .list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  overflow-y: auto;
+  gap: 8px;
+  min-height: 0;
   border-right: 1px solid var(--border);
-  padding-right: 12px;
+  padding-right: 14px;
+}
+
+.search {
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
+.new-row {
+  display: flex;
+  gap: 6px;
 }
 
 .new {
-  padding: 7px 10px;
+  flex: 1;
+  padding: 6px 8px;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--surface2);
   color: var(--text);
   cursor: pointer;
   font-weight: 600;
-  font-size: 0.82rem;
-  margin-bottom: 4px;
+  font-size: 0.8rem;
+}
+
+.new:hover {
+  border-color: var(--text2);
+}
+
+.items {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.list-head {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text2);
+  padding: 8px 8px 3px;
 }
 
 .item {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 10px;
+  padding: 6px 8px;
   border-radius: 8px;
   border: none;
   background: none;
@@ -411,79 +408,133 @@ function close() {
   white-space: nowrap;
 }
 
-.tag {
-  font-size: 0.65rem;
-  padding: 1px 6px;
-  border-radius: 6px;
-  background: var(--surface2);
-  color: var(--accent2);
+.dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.count {
+  font-size: 0.72rem;
+  color: var(--text2);
 }
 
 .empty {
   font-size: 0.8rem;
   color: var(--text2);
-  padding: 8px 4px;
+  padding: 6px 8px;
 }
 
+/* ── Editor ── */
 .editor {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
   min-width: 0;
+  min-height: 0;
+}
+
+.editing {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text2);
+}
+
+.name {
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
 }
 
 .editor textarea {
-  min-height: 220px;
   flex: 1;
-  resize: vertical;
+  min-height: 160px;
+  resize: none;
+  padding: 10px;
+  border-radius: 8px;
+  line-height: 1.5;
 }
 
 .members {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 240px;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-content: flex-start;
+  max-height: 40%;
   overflow-y: auto;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 240px;
+  gap: 6px;
+  padding: 3px 4px 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface2);
+  font-size: 0.8rem;
+}
+
+.chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-x {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text2);
+  cursor: pointer;
+  font-size: 0.7rem;
+  padding: 2px 5px;
+  border-radius: 999px;
+}
+
+.chip-x:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.adder {
+  position: relative;
+}
+
+.adder input {
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
+.adder-menu {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 6px 8px;
-}
-
-.member {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 2px;
-  font-size: 0.85rem;
-  color: var(--text);
-  cursor: pointer;
-  text-transform: none;
-  letter-spacing: 0;
-}
-
-.members-summary {
-  font-size: 0.75rem;
-  color: var(--text2);
-  line-height: 1.4;
-}
-
-.check {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  text-transform: none;
-  letter-spacing: 0;
-  font-size: 0.82rem;
-  color: var(--text);
-  margin-top: 4px;
-  cursor: pointer;
+  flex-direction: column;
 }
 
 .actions {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: auto;
+  padding-top: 6px;
 }
 
 .actions .btn {
@@ -495,15 +546,20 @@ function close() {
 }
 
 @media (max-width: 640px) {
+  .dialog {
+    height: calc(100vh - 32px);
+  }
+
   .body {
     grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
   }
 
   .list {
     border-right: none;
     border-bottom: 1px solid var(--border);
     padding: 0 0 10px;
-    max-height: 140px;
+    max-height: 200px;
   }
 }
 </style>

@@ -287,7 +287,7 @@ describe('ChatView spaces in the chat list', () => {
     { id: 'u', title: 'Quick test', pinned: false, space_id: null, updated_at: new Date().toISOString() },
   ]
 
-  async function mountView(path = '/chat') {
+  async function mountView(path = '/chat', instructions = []) {
     localStorage.removeItem('chat.folded')
     globalThis.fetch = vi.fn(async url => {
       url = String(url)
@@ -300,7 +300,7 @@ describe('ChatView spaces in the chat list', () => {
             : url.includes('/settings')
               ? { default_character_ids: [], default_instruction_ids: [], default_instruction_group_ids: [] }
               : url.includes('/instructions')
-                ? { instructions: [], groups: [] }
+                ? { instructions, groups: [] }
                 : url.includes('/spaces')
                   ? { spaces }
                   : url.includes('/conversations')
@@ -401,6 +401,34 @@ describe('ChatView spaces in the chat list', () => {
     const dialog = document.body.querySelector('.dialog[role="dialog"]')
     expect(dialog.getAttribute('aria-label')).toBe('Defaults for every chat')
     expect(dialog.querySelector('#space-name')).toBeNull()
+    w.unmount()
+  })
+
+  it("a blank chat follows the defaults, keeping what's been attached by hand", async () => {
+    const snippets = [
+      { id: 1, name: 'Terse tone', content: '' },
+      { id: 2, name: 'No emoji', content: '' },
+      { id: 3, name: 'British spelling', content: '' },
+    ]
+    const w = await mountView('/chat', snippets)
+    const chips = () => w.findAll('.ins-picker .chip-main').map(c => c.text())
+    const { useChatDefaults } = await import('../composables/useChatDefaults')
+    const { globalSettings } = useChatDefaults()
+    const EMPTY = { default_character_ids: [], default_instruction_ids: [], default_instruction_group_ids: [] }
+
+    globalSettings.value = { ...EMPTY, default_instruction_ids: [1] }
+    await flushChat()
+    expect(chips()).toEqual(['Terse tone'])
+    // Attached by hand, then the default swapped for another
+    await w.find('.ins-picker .add').trigger('click')
+    await w
+      .findAll('.ins-picker .menu .item')
+      .find(i => i.text() === 'British spelling')
+      .trigger('click')
+    globalSettings.value = { ...EMPTY, default_instruction_ids: [2] }
+    await flushChat()
+    expect(chips()).toEqual(['British spelling', 'No emoji'])
+    globalSettings.value = { ...EMPTY }
     w.unmount()
   })
 })

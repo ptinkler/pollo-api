@@ -104,6 +104,8 @@ function addImage(id, p) {
   return uploadCharacterImage(id, p.file)
 }
 
+const toggles = ref(null) // the "Default for" pills, saved along with the rest
+
 async function save() {
   if (!name.value.trim()) return showToast('Give the character a name', 'error')
   saving.value = true
@@ -120,6 +122,7 @@ async function save() {
       order.push(img.kind === 'saved' ? img.saved : c.images[c.images.length - 1])
     }
     if (order.join('/') !== c.images.join('/')) c = await updateCharacter(c.id, { images: order })
+    await toggles.value?.commit(c.id)
     emit('saved', c)
     emit('close')
   } catch (e) {
@@ -233,7 +236,7 @@ async function remove() {
           @close="pickerOpen = false"
         />
 
-        <DefaultToggles v-if="showDefaults" kind="character" :item-id="character?.id ?? null" />
+        <DefaultToggles v-if="showDefaults" ref="toggles" kind="character" :item-id="character?.id ?? null" />
 
         <div class="actions">
           <button v-if="character" class="btn btn-danger" @click="remove">Delete</button>

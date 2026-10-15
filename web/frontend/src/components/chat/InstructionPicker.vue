@@ -1,9 +1,11 @@
 <script setup>
-import { ref, computed, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
+import { instructionColor } from '../../utils/format'
 
 // Attached instruction groups and snippets as chips, plus a menu to attach
 // more. Editing, creating and grouping happen in InstructionsDialog; this
-// only attaches/detaches and emits 'manage' to open that dialog.
+// only attaches/detaches, and emits 'edit' ({ kind, id }: a chip was
+// clicked) or 'manage' to open that dialog.
 const props = defineProps({
   instructions: { type: Array, default: () => [] }, // all saved snippets
   groups: { type: Array, default: () => [] }, // all saved groups
@@ -11,17 +13,25 @@ const props = defineProps({
   groupIds: { type: Array, default: () => [] }, // attached group ids
   manageable: { type: Boolean, default: true }, // show the "Manage & create…" item
 })
-const emit = defineEmits(['update:snippetIds', 'update:groupIds', 'manage'])
+const emit = defineEmits(['update:snippetIds', 'update:groupIds', 'manage', 'edit'])
+
+const SEARCH_FROM = 8 // the menu gets a search box once there's this much to pick from
 
 const open = ref(false)
 const root = ref(null)
+const query = ref('')
+const searchInput = ref(null)
 
 const snippetById = computed(() => new Map(props.instructions.map(s => [s.id, s])))
 const groupById = computed(() => new Map(props.groups.map(g => [g.id, g])))
 const attachedGroups = computed(() => props.groupIds.map(id => groupById.value.get(id)).filter(Boolean))
 const attachedSnippets = computed(() => props.snippetIds.map(id => snippetById.value.get(id)).filter(Boolean))
-const availableGroups = computed(() => props.groups.filter(g => !props.groupIds.includes(g.id)))
-const availableSnippets = computed(() => props.instructions.filter(s => !props.snippetIds.includes(s.id)))
+const matches = item => item.name.toLowerCase().includes(query.value.trim().toLowerCase())
+const unattachedGroups = computed(() => props.groups.filter(g => !props.groupIds.includes(g.id)))
+const unattachedSnippets = computed(() => props.instructions.filter(s => !props.snippetIds.includes(s.id)))
+const searchable = computed(() => unattachedGroups.value.length + unattachedSnippets.value.length >= SEARCH_FROM)
+const availableGroups = computed(() => unattachedGroups.value.filter(matches))
+const availableSnippets = computed(() => unattachedSnippets.value.filter(matches))
 const nothingToAdd = computed(() => !availableGroups.value.length && !availableSnippets.value.length)
 
 function groupTitle(g) {
@@ -57,10 +67,13 @@ function onDocClick(e) {
   if (root.value && !root.value.contains(e.target)) close()
 }
 
-function toggle() {
+async function toggle() {
   if (open.value) return close()
   open.value = true
+  query.value = ''
   document.addEventListener('mousedown', onDocClick)
+  await nextTick()
+  searchInput.value?.focus()
 }
 
 function close() {
@@ -79,12 +92,17 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
 <template>
   <div ref="root" class="ins-picker">
     <div class="chips">
-      <span v-for="g in attachedGroups" :key="`g${g.id}`" class="chip group" :title="groupTitle(g)">
-        <span class="chip-main">📦 {{ g.name }}</span>
+      <span v-for="g in attachedGroups" :key="`g${g.id}`" class="chip group" :title="`${g.name} · ${groupTitle(g)}`">
+        <button class="chip-main" @click="emit('edit', { kind: 'group', id: g.id })">
+          <span class="chip-name">📦 {{ g.name }}</span>
+        </button>
         <button class="chip-x" :title="`Detach ${g.name}`" @click="detachGroup(g)">✕</button>
       </span>
-      <span v-for="s in attachedSnippets" :key="`s${s.id}`" class="chip" :title="s.content || s.name">
-        <span class="chip-main">{{ s.name }}</span>
+      <span v-for="s in attachedSnippets" :key="`s${s.id}`" class="chip" :title="s.name">
+        <button class="chip-main" @click="emit('edit', { kind: 'snippet', id: s.id })">
+          <span class="dot" :style="{ background: instructionColor(s.name) }"></span>
+          <span class="chip-name">{{ s.name }}</span>
+        </button>
         <button class="chip-x" :title="`Detach ${s.name}`" @click="detachSnippet(s)">✕</button>
       </span>
       <button class="add" @click="toggle">
@@ -93,19 +111,32 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
     </div>
 
     <div v-if="open" class="menu">
+      <input
+        v-if="searchable"
+        ref="searchInput"
+        v-model="query"
+        type="search"
+        class="menu-search"
+        placeholder="Search"
+        aria-label="Search instructions"
+        @keydown.esc="close"
+      />
       <p v-if="availableGroups.length" class="menu-head">Groups</p>
       <button v-for="g in availableGroups" :key="`g${g.id}`" class="item" @click="attachGroup(g)">
         <span class="item-name">📦 {{ g.name }}</span>
         <span class="tag">{{ g.snippet_ids?.length || 0 }}</span>
       </button>
       <p v-if="availableSnippets.length" class="menu-head">Snippets</p>
-      <button v-for="s in availableSnippets" :key="`s${s.id}`" class="item" @click="attachSnippet(s)">
+      <button v-for="s in availableSnippets" :key="`s${s.id}`" class="item" :title="s.name" @click="attachSnippet(s)">
+        <span class="dot" :style="{ background: instructionColor(s.name) }"></span>
         <span class="item-name">{{ s.name }}</span>
       </button>
       <p v-if="nothingToAdd" class="empty">
-        {{ instructions.length || groups.length ? 'All attached' : 'None saved yet' }}
+        {{
+          query.trim() ? 'Nothing matches' : instructions.length || groups.length ? 'All attached' : 'None saved yet'
+        }}
       </p>
-      <button v-if="manageable" class="item create" @click="manage">⚙ Manage &amp; create…</button>
+      <button v-if="manageable" class="item create" @click="manage">＋ New or edit…</button>
     </div>
   </div>
 </template>
@@ -124,11 +155,25 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
 .chip {
   display: inline-flex;
   align-items: center;
+  max-width: 170px; /* long names are cut short; the full name is in the tooltip */
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface2);
   font-size: 0.8rem;
   overflow: hidden;
+}
+
+.chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
 }
 
 .chip.group {
@@ -138,12 +183,30 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
 .chip-main {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  min-width: 0;
+  gap: 6px;
   padding: 3px 4px 3px 10px;
   color: var(--text);
+  background: none;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chip-main:hover {
+  text-decoration: underline;
+}
+
+.menu-search {
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  font-size: 0.82rem;
 }
 
 .chip-x {
+  flex-shrink: 0;
   background: none;
   border: none;
   color: var(--text2);

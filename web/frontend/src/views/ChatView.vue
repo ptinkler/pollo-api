@@ -287,6 +287,12 @@ async function loadModels(refresh = false) {
 
 // ── Custom instructions ──────────────────────────────────────────────
 const instructionsOpen = ref(false)
+const instructionsFocus = ref(null) // { kind, id } to open the dialog on
+
+function openInstructions(focus = null) {
+  instructionsFocus.value = focus
+  instructionsOpen.value = true
+}
 const {
   instructions,
   groups: instructionGroups,
@@ -332,6 +338,32 @@ function seedAttachments(spaceId) {
   instructionGroupIds.value = seed('instruction_group').filter(id => has(instructionGroups, id))
   characterIds.value = seed('character').filter(id => has(characters, id))
 }
+
+// The blank chat follows changes to the defaults while it waits to be sent:
+// what's added to them is attached and what's taken out is detached, leaving
+// anything attached or removed by hand as it is. (A chat that exists keeps
+// its own attachments: defaults only seed new chats.)
+const blankDefaults = computed(() => {
+  const space = pendingSpaceId.value == null ? null : spaceById(pendingSpaceId.value)
+  const ids = field => [...new Set([...globalSettings.value[field], ...(space ? space[field] : [])])]
+  return {
+    instruction: ids('default_instruction_ids'),
+    group: ids('default_instruction_group_ids'),
+    character: ids('default_character_ids'),
+  }
+})
+watch(blankDefaults, (now, was) => {
+  if (convId.value) return
+  const follow = (attached, kind) => {
+    const removed = was[kind].filter(id => !now[kind].includes(id))
+    const added = now[kind].filter(id => !was[kind].includes(id))
+    const kept = attached.value.filter(id => !removed.includes(id))
+    attached.value = [...kept, ...added.filter(id => !kept.includes(id))]
+  }
+  follow(instructionIds, 'instruction')
+  follow(instructionGroupIds, 'group')
+  follow(characterIds, 'character')
+})
 
 // Tell the shared defaults store which space is in context (for the add-to
 // toggles in the character/instruction editors)
@@ -836,7 +868,7 @@ onBeforeUnmount(() => {
 
         <SidebarSection id="instructions" title="Instructions" :summary="attachmentSummary || 'None'">
           <template #actions>
-            <button class="mini-btn" title="Create and edit snippets and groups" @click="instructionsOpen = true">
+            <button class="mini-btn" title="Create and edit snippets and groups" @click="openInstructions()">
               Manage
             </button>
           </template>
@@ -847,7 +879,8 @@ onBeforeUnmount(() => {
             :group-ids="instructionGroupIds"
             @update:snippet-ids="setInstructions"
             @update:group-ids="setGroups"
-            @manage="instructionsOpen = true"
+            @manage="openInstructions()"
+            @edit="openInstructions"
           />
           <p v-if="(attachedInstructions.length || attachedGroups.length) && instructionsUnused" class="mode-hint">
             {{ mode === 'video' ? 'Video models' : 'This image model' }} can't take instructions; they apply in Auto and
@@ -1100,6 +1133,7 @@ onBeforeUnmount(() => {
 
     <InstructionsDialog
       :open="instructionsOpen"
+      :focus="instructionsFocus"
       :instructions="instructions"
       :groups="instructionGroups"
       @close="instructionsOpen = false"

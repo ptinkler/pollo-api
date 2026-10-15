@@ -1,68 +1,116 @@
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useChatDefaults } from '../../composables/useChatDefaults'
 
-// "Add to defaults" toggles for the item being managed: always a global one,
-// plus a space one when a chat in a space is currently in context. Reads and
-// writes the shared settings buckets directly.
+// "Default for" pills on the item being edited: all new chats, and — when a
+// chat in a space is in context — new chats in that space. Part of the
+// editor's form: picks are kept here (`dirty` reports them) until the editor
+// saves and calls `commit(id)` with the saved item's id, so they work for new
+// items too.
 const props = defineProps({
   kind: { type: String, required: true }, // 'character' | 'instruction' | 'instruction_group'
-  itemId: { type: Number, default: null }, // null = unsaved (toggles disabled)
+  itemId: { type: Number, default: null }, // null = not saved yet
 })
+const emit = defineEmits(['update:dirty'])
 
 const { currentSpace, inGlobal, inSpace, toggleGlobal, toggleSpace, ensureLoaded } = useChatDefaults()
-onMounted(ensureLoaded)
-const onGlobal = computed(() => props.itemId != null && inGlobal(props.kind, props.itemId))
-const onSpace = computed(() => props.itemId != null && inSpace(props.kind, props.itemId))
+const saved = computed(() => ({
+  global: props.itemId != null && inGlobal(props.kind, props.itemId),
+  space: props.itemId != null && inSpace(props.kind, props.itemId),
+}))
+const global = ref(false)
+const space = ref(false)
+const dirty = computed(
+  () => global.value !== saved.value.global || (!!currentSpace.value && space.value !== saved.value.space),
+)
+
+function reset() {
+  global.value = saved.value.global
+  space.value = saved.value.space
+}
+
+onMounted(async () => {
+  await ensureLoaded()
+  reset()
+})
+watch(() => [props.kind, props.itemId, currentSpace.value?.id], reset)
+watch(dirty, d => emit('update:dirty', d), { immediate: true })
+
+// Write the picks for the saved item (the id it was saved under)
+async function commit(id) {
+  if (global.value !== inGlobal(props.kind, id)) await toggleGlobal(props.kind, id)
+  if (currentSpace.value && space.value !== inSpace(props.kind, id)) await toggleSpace(props.kind, id)
+}
+
+defineExpose({ commit, dirty })
 </script>
 
 <template>
   <div class="def-toggles">
-    <label class="check" :class="{ disabled: itemId == null }">
-      <input type="checkbox" :checked="onGlobal" :disabled="itemId == null" @change="toggleGlobal(kind, itemId)" />
-      Add to global defaults <span class="hint">· all new chats</span>
-    </label>
-    <label v-if="currentSpace" class="check" :class="{ disabled: itemId == null }">
-      <input type="checkbox" :checked="onSpace" :disabled="itemId == null" @change="toggleSpace(kind, itemId)" />
-      Add to “{{ currentSpace.name }}” defaults <span class="hint">· new chats in this space</span>
-    </label>
-    <p v-if="itemId == null" class="save-first">Save it first to add it to defaults.</p>
+    <span class="label">Default for</span>
+    <button
+      type="button"
+      class="pill"
+      :class="{ on: global }"
+      :aria-pressed="global"
+      title="Add to every new chat"
+      @click="global = !global"
+    >
+      🌐 All chats
+    </button>
+    <button
+      v-if="currentSpace"
+      type="button"
+      class="pill"
+      :class="{ on: space }"
+      :aria-pressed="space"
+      :title="`Add to new chats in ${currentSpace.name}`"
+      @click="space = !space"
+    >
+      🗂 {{ currentSpace.name }}
+    </button>
   </div>
 </template>
 
 <style scoped>
 .def-toggles {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-}
-
-.check {
-  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  text-transform: none;
-  letter-spacing: 0;
-  font-size: 0.82rem;
-  color: var(--text);
+  margin-top: 6px;
+}
+
+.label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text2);
+  margin-right: 2px;
+}
+
+.pill {
+  max-width: 220px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--text2);
+  font-size: 0.78rem;
   cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.check.disabled {
-  color: var(--text2);
-  cursor: default;
+.pill:hover {
+  color: var(--text);
+  border-color: var(--text2);
 }
 
-.hint {
-  color: var(--text2);
-  font-size: 0.75rem;
-}
-
-.save-first {
-  font-size: 0.75rem;
-  color: var(--text2);
+.pill.on {
+  background: rgba(108, 92, 231, 0.22);
+  border-color: var(--accent);
+  color: var(--text);
 }
 </style>
