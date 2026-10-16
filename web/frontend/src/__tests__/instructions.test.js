@@ -66,13 +66,16 @@ describe('InstructionEditor', () => {
     const dialog = await open({ kind: 'snippet', id: 1 })
     const save = dialog.querySelector('.btn-primary')
     expect(save.disabled).toBe(true) // nothing changed yet
-    dialog.querySelector('.def-toggles .trigger').click()
+    dialog.querySelector('.def-toggles .add').click()
     await flushPromises()
     const option = name => [...dialog.querySelectorAll('.option')].find(o => o.textContent.includes(name))
     option('All chats').click()
     option('Novel').click()
     await flushPromises()
-    expect(dialog.querySelector('.trigger').textContent).toContain('All chats, Novel')
+    expect([...dialog.querySelectorAll('.def-toggles .pill-name')].map(p => p.textContent.trim())).toEqual([
+      '🌐 All chats',
+      '🗂 Novel',
+    ])
     expect(save.disabled).toBe(false) // picks alone are a change to save
     expect(calls.some(c => c[0] === 'PUT')).toBe(false) // nothing written before Save
     save.click()

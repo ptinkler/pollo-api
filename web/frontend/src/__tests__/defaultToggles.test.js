@@ -28,13 +28,14 @@ describe('DefaultToggles', () => {
     useChatDefaults().setCurrentSpace(null) // every space is offered, not just the chat's
     const w = mount(DefaultToggles, { props: { kind: 'instruction', itemId: 5 } })
     await flushPromises()
-    expect(w.find('.trigger').text()).toContain('Nowhere')
-    await w.find('.trigger').trigger('click')
+    expect(w.findAll('.pill')).toHaveLength(0)
+    await w.find('.add').trigger('click')
+    expect(w.find('.search').exists()).toBe(true) // always searchable
     expect(w.findAll('.option').map(o => o.find('.name').text())).toEqual(['All chats', 'Novel'])
     await option(w, 'Novel').trigger('click')
     await option(w, 'All chats').trigger('click')
     expect(option(w, 'Novel').attributes('aria-selected')).toBe('true')
-    expect(w.find('.trigger').text()).toContain('All chats, Novel')
+    expect(w.findAll('.pill .pill-name').map(p => p.text())).toEqual(['🌐 All chats', '🗂 Novel'])
     expect(w.emitted('update:dirty').at(-1)).toEqual([true]) // the editor's Save lights up
     expect(calls.some(c => c[0] === 'PUT')).toBe(false) // nothing written yet
 
@@ -48,19 +49,29 @@ describe('DefaultToggles', () => {
   it('clicking a ticked one unticks it', async () => {
     const w = mount(DefaultToggles, { props: { kind: 'character', itemId: 9 } })
     await flushPromises()
-    await w.find('.trigger').trigger('click')
+    await w.find('.add').trigger('click')
     await option(w, 'Novel').trigger('click')
     await option(w, 'Novel').trigger('click')
     expect(option(w, 'Novel').attributes('aria-selected')).toBe('false')
     expect(w.emitted('update:dirty').at(-1)).toEqual([false])
   })
 
-  it('searches the list once there are a lot of spaces', async () => {
+  it('a pill’s ✕ takes it off', async () => {
+    const w = mount(DefaultToggles, { props: { kind: 'instruction', itemId: 5 } })
+    await flushPromises()
+    await w.find('.add').trigger('click')
+    await option(w, 'Novel').trigger('click')
+    await w.find('.pill .pill-x').trigger('click')
+    expect(w.findAll('.pill')).toHaveLength(0)
+    expect(w.emitted('update:dirty').at(-1)).toEqual([false])
+  })
+
+  it('searches the list', async () => {
     spaces = Array.from({ length: 8 }, (_, i) => ({ id: 10 + i, name: `Space ${i}`, ...EMPTY }))
     await useChatDefaults().loadDefaults()
     const w = mount(DefaultToggles, { props: { kind: 'instruction', itemId: 5 } })
     await flushPromises()
-    await w.find('.trigger').trigger('click')
+    await w.find('.add').trigger('click')
     await w.find('.search').setValue('5')
     expect(w.findAll('.option').map(o => o.find('.name').text())).toEqual(['Space 5'])
   })
@@ -68,7 +79,7 @@ describe('DefaultToggles', () => {
   it('works for an item that is saved for the first time', async () => {
     const w = mount(DefaultToggles, { props: { kind: 'instruction_group', itemId: null } })
     await flushPromises()
-    await w.find('.trigger').trigger('click')
+    await w.find('.add').trigger('click')
     await option(w, 'All chats').trigger('click')
     await w.vm.commit(42) // the id it was created under
     await flushPromises()

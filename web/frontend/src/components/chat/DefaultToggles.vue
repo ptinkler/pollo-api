@@ -3,8 +3,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useChatDefaults } from '../../composables/useChatDefaults'
 
 // "Default for": where the item being edited applies by default — all chats
-// and/or any spaces — picked from a searchable dropdown (click to tick or
-// untick). Part of the editor's form: picks are kept here (`dirty` reports
+// and/or any spaces. Picked ones are pills (✕ removes); ＋ opens a searchable
+// dropdown of them all (click to tick or untick). Part of the editor's form: picks are kept here (`dirty` reports
 // them) until the editor saves and calls `commit(id)` with the saved item's
 // id, so they work for new items too.
 const props = defineProps({
@@ -14,7 +14,6 @@ const props = defineProps({
 const emit = defineEmits(['update:dirty'])
 
 const GLOBAL = 'global'
-const SEARCH_FROM = 6 // the list gets a search box once there are this many spaces
 
 const { spaces, membership, setMembership, ensureLoaded } = useChatDefaults()
 const picked = ref(new Set()) // GLOBAL and/or space ids
@@ -38,10 +37,7 @@ const shown = computed(() => {
   const q = query.value.trim().toLowerCase()
   return q ? options.value.filter(o => o.name.toLowerCase().includes(q)) : options.value
 })
-const summary = computed(() => {
-  const names = options.value.filter(o => picked.value.has(o.key)).map(o => o.name)
-  return names.length ? names.join(', ') : 'Nowhere'
-})
+const pills = computed(() => options.value.filter(o => picked.value.has(o.key)))
 
 function reset() {
   picked.value = new Set(saved.value)
@@ -94,21 +90,22 @@ defineExpose({ commit, dirty })
 <template>
   <div ref="root" class="def-toggles">
     <span class="label">Default for</span>
+    <span v-for="o in pills" :key="o.key" class="pill" :title="o.name">
+      <span class="pill-name">{{ o.icon }} {{ o.name }}</span>
+      <button type="button" class="pill-x" :title="`Not a default for ${o.name}`" @click="toggle(o.key)">✕</button>
+    </span>
     <div class="picker">
       <button
         type="button"
-        class="trigger"
-        :class="{ none: !picked.size }"
+        class="add"
         :aria-expanded="open"
-        :title="summary"
+        :title="pills.length ? 'Add or remove' : 'Make it a default'"
         @click="openMenu"
       >
-        <span class="summary">{{ summary }}</span>
-        <span class="caret">▾</span>
+        {{ pills.length ? '＋' : '＋ Add' }}
       </button>
       <div v-if="open" class="menu" role="listbox" aria-multiselectable="true">
         <input
-          v-if="spaces.length >= SEARCH_FROM"
           ref="searchInput"
           v-model="query"
           type="search"
@@ -116,6 +113,7 @@ defineExpose({ commit, dirty })
           placeholder="Search spaces"
           aria-label="Search spaces"
           @keydown.esc.stop="close"
+          @keydown.enter.prevent="shown[0] && toggle(shown[0].key)"
         />
         <button
           v-for="o in shown"
@@ -139,10 +137,60 @@ defineExpose({ commit, dirty })
 <style scoped>
 .def-toggles {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin-top: 6px;
   min-width: 0;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 220px;
+  gap: 2px;
+  padding: 2px 3px 2px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: rgba(108, 92, 231, 0.18);
+  font-size: 0.78rem;
+}
+
+.pill-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pill-x {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text2);
+  cursor: pointer;
+  font-size: 0.68rem;
+  padding: 2px 5px;
+  border-radius: 999px;
+}
+
+.pill-x:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.add {
+  padding: 3px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--text2);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.add:hover {
+  color: var(--text);
+  border-color: var(--text2);
 }
 
 .label {
@@ -155,42 +203,6 @@ defineExpose({ commit, dirty })
 
 .picker {
   position: relative;
-  min-width: 0;
-  flex: 1;
-}
-
-.trigger {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  max-width: 100%;
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface2);
-  color: var(--text);
-  font-size: 0.82rem;
-  cursor: pointer;
-}
-
-.trigger:hover {
-  border-color: var(--text2);
-}
-
-.trigger.none {
-  color: var(--text2);
-}
-
-.summary {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.caret {
-  flex-shrink: 0;
-  font-size: 0.7rem;
-  color: var(--text2);
 }
 
 .menu {
@@ -198,8 +210,7 @@ defineExpose({ commit, dirty })
   z-index: 20;
   bottom: calc(100% + 4px); /* opens upwards: it sits at the foot of the editors */
   left: 0;
-  width: min(300px, 100%);
-  min-width: 220px;
+  width: 260px;
   max-height: 280px;
   overflow-y: auto;
   padding: 4px;
