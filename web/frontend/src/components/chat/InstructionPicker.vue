@@ -3,7 +3,7 @@ import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
 import { instructionColor } from '../../utils/format'
 
 // Attached instruction groups and snippets as chips, plus a menu to attach
-// more. Editing, creating and grouping happen in InstructionsDialog; this
+// more. Editing and creating happen in InstructionEditor (and the Instructions page); this
 // only attaches/detaches, and emits 'edit' ({ kind, id }: a chip was
 // clicked) or 'manage' to open that dialog.
 const props = defineProps({
@@ -12,6 +12,9 @@ const props = defineProps({
   snippetIds: { type: Array, default: () => [] }, // attached snippet ids
   groupIds: { type: Array, default: () => [] }, // attached group ids
   manageable: { type: Boolean, default: true }, // show the "Manage & create…" item
+  // Attached by the chat's defaults: [{ id, from }] — shown, but changed in the defaults, not here
+  inheritedSnippets: { type: Array, default: () => [] },
+  inheritedGroups: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['update:snippetIds', 'update:groupIds', 'manage', 'edit'])
 
@@ -24,11 +27,40 @@ const searchInput = ref(null)
 
 const snippetById = computed(() => new Map(props.instructions.map(s => [s.id, s])))
 const groupById = computed(() => new Map(props.groups.map(g => [g.id, g])))
-const attachedGroups = computed(() => props.groupIds.map(id => groupById.value.get(id)).filter(Boolean))
-const attachedSnippets = computed(() => props.snippetIds.map(id => snippetById.value.get(id)).filter(Boolean))
+const inheritedGroupIds = computed(() => props.inheritedGroups.map(x => x.id))
+const inheritedSnippetIds = computed(() => props.inheritedSnippets.map(x => x.id))
+const fromDefaults = (list, byId) =>
+  list.map(x => byId.get(x.id) && { ...byId.get(x.id), from: x.from }).filter(Boolean)
+const defaultGroups = computed(() => fromDefaults(props.inheritedGroups, groupById.value))
+const defaultSnippets = computed(() => fromDefaults(props.inheritedSnippets, snippetById.value))
+const attachedGroups = computed(() =>
+  props.groupIds
+    .filter(id => !inheritedGroupIds.value.includes(id))
+    .map(id => groupById.value.get(id))
+    .filter(Boolean),
+)
+const attachedSnippets = computed(() =>
+  props.snippetIds
+    .filter(id => !inheritedSnippetIds.value.includes(id))
+    .map(id => snippetById.value.get(id))
+    .filter(Boolean),
+)
+const anyAttached = computed(
+  () =>
+    defaultGroups.value.length ||
+    defaultSnippets.value.length ||
+    attachedGroups.value.length ||
+    attachedSnippets.value.length,
+)
+const fromTitle = from => (from === 'All chats' ? 'From the defaults for all chats' : `From the ${from} defaults`)
+const fromIcon = from => (from === 'All chats' ? '🌐' : '🗂')
 const matches = item => item.name.toLowerCase().includes(query.value.trim().toLowerCase())
-const unattachedGroups = computed(() => props.groups.filter(g => !props.groupIds.includes(g.id)))
-const unattachedSnippets = computed(() => props.instructions.filter(s => !props.snippetIds.includes(s.id)))
+const unattachedGroups = computed(() =>
+  props.groups.filter(g => !props.groupIds.includes(g.id) && !inheritedGroupIds.value.includes(g.id)),
+)
+const unattachedSnippets = computed(() =>
+  props.instructions.filter(s => !props.snippetIds.includes(s.id) && !inheritedSnippetIds.value.includes(s.id)),
+)
 const searchable = computed(() => unattachedGroups.value.length + unattachedSnippets.value.length >= SEARCH_FROM)
 const availableGroups = computed(() => unattachedGroups.value.filter(matches))
 const availableSnippets = computed(() => unattachedSnippets.value.filter(matches))
@@ -92,6 +124,29 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
 <template>
   <div ref="root" class="ins-picker">
     <div class="chips">
+      <span
+        v-for="g in defaultGroups"
+        :key="`dg${g.id}`"
+        class="chip group inherited"
+        :title="`${g.name} · ${fromTitle(g.from)}`"
+      >
+        <button class="chip-main" @click="emit('edit', { kind: 'group', id: g.id })">
+          <span class="chip-name">📦 {{ g.name }}</span>
+        </button>
+        <span class="chip-src">{{ fromIcon(g.from) }}</span>
+      </span>
+      <span
+        v-for="s in defaultSnippets"
+        :key="`ds${s.id}`"
+        class="chip inherited"
+        :title="`${s.name} · ${fromTitle(s.from)}`"
+      >
+        <button class="chip-main" @click="emit('edit', { kind: 'snippet', id: s.id })">
+          <span class="dot" :style="{ background: instructionColor(s.name) }"></span>
+          <span class="chip-name">{{ s.name }}</span>
+        </button>
+        <span class="chip-src">{{ fromIcon(s.from) }}</span>
+      </span>
       <span v-for="g in attachedGroups" :key="`g${g.id}`" class="chip group" :title="`${g.name} · ${groupTitle(g)}`">
         <button class="chip-main" @click="emit('edit', { kind: 'group', id: g.id })">
           <span class="chip-name">📦 {{ g.name }}</span>
@@ -106,7 +161,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
         <button class="chip-x" :title="`Detach ${s.name}`" @click="detachSnippet(s)">✕</button>
       </span>
       <button class="add" @click="toggle">
-        {{ attachedGroups.length || attachedSnippets.length ? '＋' : '＋ Add instructions' }}
+        {{ anyAttached ? '＋' : '＋ Add instructions' }}
       </button>
     </div>
 
@@ -136,7 +191,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
           query.trim() ? 'Nothing matches' : instructions.length || groups.length ? 'All attached' : 'None saved yet'
         }}
       </p>
-      <button v-if="manageable" class="item create" @click="manage">＋ New or edit…</button>
+      <button v-if="manageable" class="item create" @click="manage">⚙ All instructions…</button>
     </div>
   </div>
 </template>
@@ -167,6 +222,18 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Attached by the chat's defaults: no ✕ — the icon says where from */
+.chip.inherited {
+  background: transparent;
+}
+
+.chip-src {
+  flex-shrink: 0;
+  padding: 0 8px 0 2px;
+  font-size: 0.7rem;
+  opacity: 0.75;
 }
 
 .dot {

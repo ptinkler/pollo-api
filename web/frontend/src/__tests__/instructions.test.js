@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import InstructionsDialog from '../components/chat/InstructionsDialog.vue'
+import InstructionEditor from '../components/chat/InstructionEditor.vue'
 import InstructionPicker from '../components/chat/InstructionPicker.vue'
+import InstructionsView from '../views/InstructionsView.vue'
+import { useChatDefaults } from '../composables/useChatDefaults'
 
 const resp = j => ({ ok: true, status: 200, json: async () => j })
 const snippets = [
@@ -11,50 +13,38 @@ const snippets = [
 ]
 const groups = [{ id: 7, name: 'House style', snippet_ids: [1] }]
 const EMPTY = { default_character_ids: [], default_instruction_ids: [], default_instruction_group_ids: [] }
+const spaces = [{ id: 4, name: 'Novel', ...EMPTY }]
 
-describe('InstructionsDialog', () => {
-  let calls, w
-  beforeEach(() => {
-    calls = []
-    globalThis.fetch = vi.fn(async (url, opts = {}) => {
-      calls.push([opts.method || 'GET', String(url), opts.body ? JSON.parse(opts.body) : null])
-      if (String(url).includes('/settings')) return resp({ ...EMPTY })
-      if (String(url).includes('/spaces')) return resp({ spaces: [] })
-      if (opts.method === 'PUT') return resp({ id: 7, ...JSON.parse(opts.body) })
-      return resp({})
-    })
+let calls
+beforeEach(() => {
+  calls = []
+  globalThis.fetch = vi.fn(async (url, opts = {}) => {
+    url = String(url)
+    calls.push([opts.method || 'GET', url, opts.body ? JSON.parse(opts.body) : null])
+    if (url.includes('/settings')) return resp(opts.method === 'PUT' ? JSON.parse(opts.body) : { ...EMPTY })
+    if (url.includes('/spaces/')) return resp({ id: 4, ...JSON.parse(opts.body) })
+    if (url.includes('/spaces')) return resp({ spaces })
+    if (url.endsWith('/instructions')) return resp({ instructions: snippets, groups })
+    if (opts.method === 'PUT') return resp({ id: Number(url.split('/').pop()), ...JSON.parse(opts.body) })
+    if (opts.method === 'POST') return resp({ id: 99, ...JSON.parse(opts.body) })
+    return resp({})
   })
+})
+
+describe('InstructionEditor', () => {
+  let w
   afterEach(() => w?.unmount())
 
-  async function open(focus) {
-    w = mount(InstructionsDialog, {
-      props: { open: false, instructions: snippets, groups, focus },
-      attachTo: document.body,
-    })
-    await w.setProps({ open: true })
+  async function open(target) {
+    w = mount(InstructionEditor, { props: { target: null, instructions: snippets, groups }, attachTo: document.body })
+    await w.setProps({ target })
     await flushPromises()
-    return document.body.querySelector('[aria-label="Instructions"]')
+    return document.body.querySelector('.dialog[role="dialog"]')
   }
 
-  it('opens on the snippet or group it was asked for', async () => {
+  it("adds snippets to a group by searching, saves the group's snippets and closes", async () => {
     const dialog = await open({ kind: 'group', id: 7 })
     expect(dialog.querySelector('input[aria-label="Name"]').value).toBe('House style')
-    expect([...dialog.querySelectorAll('.members .chip')].map(c => c.textContent.replace('✕', '').trim())).toEqual([
-      'Terse tone',
-    ])
-  })
-
-  it('searches one list of groups and snippets', async () => {
-    const dialog = await open(null)
-    const search = dialog.querySelector('input[aria-label="Search instructions"]')
-    search.value = 'brit'
-    search.dispatchEvent(new Event('input'))
-    await flushPromises()
-    expect([...dialog.querySelectorAll('.items .item')].map(i => i.textContent.trim())).toEqual(['British spelling'])
-  })
-
-  it("adds snippets to a group by searching, and saves the group's snippets", async () => {
-    const dialog = await open({ kind: 'group', id: 7 })
     const adder = dialog.querySelector('input[aria-label="Add a snippet"]')
     adder.value = 'emoji'
     adder.dispatchEvent(new Event('input'))
@@ -67,37 +57,46 @@ describe('InstructionsDialog', () => {
     await flushPromises()
     const put = calls.find(c => c[0] === 'PUT' && c[1].endsWith('/instruction-groups/7'))
     expect(put[2]).toEqual({ name: 'House style', snippet_ids: [1, 3] })
+    expect(w.emitted('close')).toHaveLength(1)
+  })
+
+  it('saves "Default for" picks with the Save button, for any space', async () => {
+    useChatDefaults().setCurrentSpace(null)
+    await useChatDefaults().loadDefaults()
+    const dialog = await open({ kind: 'snippet', id: 1 })
+    const save = dialog.querySelector('.btn-primary')
+    expect(save.disabled).toBe(true) // nothing changed yet
+    dialog.querySelector('.def-toggles .trigger').click()
+    await flushPromises()
+    const option = name => [...dialog.querySelectorAll('.option')].find(o => o.textContent.includes(name))
+    option('All chats').click()
+    option('Novel').click()
+    await flushPromises()
+    expect(dialog.querySelector('.trigger').textContent).toContain('All chats, Novel')
+    expect(save.disabled).toBe(false) // picks alone are a change to save
+    expect(calls.some(c => c[0] === 'PUT')).toBe(false) // nothing written before Save
+    save.click()
+    await flushPromises()
+    expect(calls.find(c => c[0] === 'PUT' && c[1].includes('/settings'))[2].default_instruction_ids).toEqual([1])
+    expect(calls.find(c => c[0] === 'PUT' && c[1].endsWith('/spaces/4'))[2].default_instruction_ids).toEqual([1])
   })
 })
 
-describe('InstructionsDialog defaults', () => {
-  it('saves a "Default for" pick with the Save button', async () => {
-    const calls = []
-    globalThis.fetch = vi.fn(async (url, opts = {}) => {
-      calls.push([opts.method || 'GET', String(url), opts.body ? JSON.parse(opts.body) : null])
-      if (String(url).includes('/settings')) return resp(opts.method === 'PUT' ? JSON.parse(opts.body) : { ...EMPTY })
-      if (String(url).includes('/spaces')) return resp({ spaces: [] })
-      if (opts.method === 'PUT') return resp({ id: 1, ...JSON.parse(opts.body) })
-      return resp({})
-    })
-    const { useChatDefaults } = await import('../composables/useChatDefaults')
-    useChatDefaults().setCurrentSpace(null)
-    const w = mount(InstructionsDialog, {
-      props: { open: false, instructions: snippets, groups, focus: { kind: 'snippet', id: 1 } },
-      attachTo: document.body,
-    })
-    await w.setProps({ open: true })
+describe('InstructionsView', () => {
+  it('lists groups and snippets and opens one in the editor', async () => {
+    const w = mount(InstructionsView, { attachTo: document.body })
     await flushPromises()
-    const dialog = document.body.querySelector('[aria-label="Instructions"]')
-    const save = dialog.querySelector('.btn-primary')
-    expect(save.disabled).toBe(true) // nothing changed yet
-    dialog.querySelector('.pill').click()
+    expect(w.findAll('.card h3').map(h => h.text())).toEqual([
+      '📦 House style',
+      'Terse tone',
+      'British spelling',
+      'No emoji',
+    ])
+    await w.find('.search').setValue('brit')
+    expect(w.findAll('.card h3').map(h => h.text())).toEqual(['British spelling'])
+    await w.find('.card').trigger('click')
     await flushPromises()
-    expect(save.disabled).toBe(false) // a pick alone is a change to save
-    save.click()
-    await flushPromises()
-    const put = calls.find(c => c[0] === 'PUT' && c[1].includes('/settings'))
-    expect(put[2].default_instruction_ids).toEqual([1])
+    expect(document.body.querySelector('.dialog input[aria-label="Name"]').value).toBe('British spelling')
     w.unmount()
   })
 })
@@ -113,12 +112,32 @@ describe('InstructionPicker', () => {
     expect(w.emitted('edit')).toEqual([[{ kind: 'group', id: 7 }], [{ kind: 'snippet', id: 2 }]])
   })
 
+  it('shows what the defaults attach without a ✕, and leaves it out of the add menu', async () => {
+    const w = mount(InstructionPicker, {
+      props: {
+        instructions: snippets,
+        groups,
+        snippetIds: [2],
+        groupIds: [],
+        inheritedSnippets: [{ id: 1, from: 'Novel' }],
+        inheritedGroups: [{ id: 7, from: 'All chats' }],
+      },
+    })
+    const inherited = w.findAll('.chip.inherited')
+    expect(inherited.map(c => c.find('.chip-name').text())).toEqual(['📦 House style', 'Terse tone'])
+    expect(inherited.every(c => !c.find('.chip-x').exists())).toBe(true)
+    expect(inherited[1].attributes('title')).toContain('From the Novel defaults')
+    await w.find('.add').trigger('click')
+    expect(w.findAll('.menu .item').map(i => i.text())).toEqual(['No emoji', '⚙ All instructions…'])
+    w.unmount()
+  })
+
   it('searches the add menu once there is a lot to pick from', async () => {
     const many = Array.from({ length: 10 }, (_, i) => ({ id: 100 + i, name: `Snippet ${i}`, content: '' }))
     const w = mount(InstructionPicker, { props: { instructions: many, groups: [], snippetIds: [], groupIds: [] } })
     await w.find('.add').trigger('click')
     await w.find('.menu-search').setValue('7')
-    expect(w.findAll('.menu .item').map(i => i.text())).toEqual(['Snippet 7', '＋ New or edit…'])
+    expect(w.findAll('.menu .item').map(i => i.text())).toEqual(['Snippet 7', '⚙ All instructions…'])
     w.unmount()
   })
 })

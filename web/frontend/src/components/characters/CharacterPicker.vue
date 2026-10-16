@@ -9,6 +9,8 @@ const props = defineProps({
   characters: { type: Array, default: () => [] }, // what can be attached
   allowCreate: { type: Boolean, default: true },
   createLabel: { type: String, default: '＋ New character' },
+  // Attached by the chat's defaults: [{ id, from }] — shown, but changed in the defaults, not here
+  inherited: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['update:modelValue', 'edit', 'create'])
 
@@ -16,8 +18,20 @@ const open = ref(false)
 const root = ref(null)
 
 const byId = computed(() => new Map(props.characters.map(c => [c.id, c])))
-const attached = computed(() => props.modelValue.map(id => byId.value.get(id)).filter(Boolean))
-const available = computed(() => props.characters.filter(c => !props.modelValue.includes(c.id)))
+const inheritedIds = computed(() => props.inherited.map(x => x.id))
+const fromDefaults = computed(() =>
+  props.inherited.map(x => byId.value.get(x.id) && { ...byId.value.get(x.id), from: x.from }).filter(Boolean),
+)
+const attached = computed(() =>
+  props.modelValue
+    .filter(id => !inheritedIds.value.includes(id))
+    .map(id => byId.value.get(id))
+    .filter(Boolean),
+)
+const available = computed(() =>
+  props.characters.filter(c => !props.modelValue.includes(c.id) && !inheritedIds.value.includes(c.id)),
+)
+const fromTitle = from => (from === 'All chats' ? 'From the defaults for all chats' : `From the ${from} defaults`)
 
 function attach(c) {
   emit('update:modelValue', [...props.modelValue, c.id])
@@ -58,6 +72,19 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
   <div ref="root" class="char-picker">
     <div class="chips">
       <span
+        v-for="c in fromDefaults"
+        :key="`d${c.id}`"
+        class="chip inherited"
+        :title="`${c.name} · ${fromTitle(c.from)}`"
+      >
+        <button class="chip-main" @click="emit('edit', c)">
+          <img v-if="characterAvatar(c)" :src="characterAvatar(c)" alt="" />
+          <span v-else class="avatar-blank">👤</span>
+          {{ c.name }}
+        </button>
+        <span class="chip-src">{{ c.from === 'All chats' ? '🌐' : '🗂' }}</span>
+      </span>
+      <span
         v-for="c in attached"
         :key="c.id"
         class="chip"
@@ -71,7 +98,9 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
         </button>
         <button class="chip-x" :title="`Detach ${c.name}`" @click="detach(c)">✕</button>
       </span>
-      <button class="add" @click="toggle">{{ attached.length ? '＋' : '＋ Add character' }}</button>
+      <button class="add" @click="toggle">
+        {{ attached.length || fromDefaults.length ? '＋' : '＋ Add character' }}
+      </button>
     </div>
 
     <div v-if="open" class="menu">
@@ -110,6 +139,18 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
 
 .chip.adhoc {
   border-style: dashed;
+}
+
+/* Attached by the chat's defaults: no ✕ — the icon says where from */
+.chip.inherited {
+  background: transparent;
+}
+
+.chip-src {
+  flex-shrink: 0;
+  padding: 0 8px 0 2px;
+  font-size: 0.7rem;
+  opacity: 0.75;
 }
 
 .chip-main {

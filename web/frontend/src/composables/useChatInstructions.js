@@ -5,16 +5,24 @@ import { fetchInstructions, patchConversation } from './useChat'
 // chat (or to the next new one: the defaults, until the user changes them).
 // A chat holds any number of snippets and groups; both are flattened and
 // de-duped server-side into what the model is sent (see _conversation_instructions).
-export function useChatInstructions({ convId, conversation, showToast }) {
+// `inherited`: { snippets, groups } — ids its defaults attach, on top of its own.
+export function useChatInstructions({ convId, conversation, showToast, inherited }) {
   const instructions = ref([]) // all saved snippets
   const groups = ref([]) // all saved groups
   const instructionIds = ref([]) // snippets attached to this chat
   const groupIds = ref([]) // groups attached to this chat
 
+  const withInherited = (kind, own) => [...new Set([...(inherited?.value[kind] || []), ...own])]
   const attachedInstructions = computed(() =>
-    instructionIds.value.map(id => instructions.value.find(i => i.id === id)).filter(Boolean),
+    withInherited('snippets', instructionIds.value)
+      .map(id => instructions.value.find(i => i.id === id))
+      .filter(Boolean),
   )
-  const attachedGroups = computed(() => groupIds.value.map(id => groups.value.find(g => g.id === id)).filter(Boolean))
+  const attachedGroups = computed(() =>
+    withInherited('groups', groupIds.value)
+      .map(id => groups.value.find(g => g.id === id))
+      .filter(Boolean),
+  )
   // Groups first, then individual snippets — what the sidebar summary shows
   const attachmentSummary = computed(() =>
     [...attachedGroups.value.map(g => g.name), ...attachedInstructions.value.map(i => i.name)].join(', '),

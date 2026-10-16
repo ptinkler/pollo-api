@@ -241,7 +241,7 @@ class ConversationCreate(BaseModel):
     image_model: str | None = None
     video_model: str | None = None
     space_id: int | None = None  # the chat's space (null = unfiled)
-    # Attachments; omit a field to seed it from the space (or global defaults)
+    # Attached to this chat itself; the global and space defaults apply on top
     instruction_ids: list[int] = []
     instruction_group_ids: list[int] = []
     character_ids: list[int] = []
@@ -560,28 +560,13 @@ def _snippet(text: str, q: str) -> str:
 @router.post("/conversations")
 def api_create_conversation(data: ConversationCreate):
     db = get_db()
-    fields_set = data.model_fields_set
     space = _require_space(data.space_id) if data.space_id is not None else None
-    glob = db.get_settings()
-
-    # Defaults stack: global settings first, then the space's own (de-duped),
-    # with stale ids dropped. An explicit list in the request overrides that kind.
-    def default_ids(attr: str, exist):
-        ids = getattr(glob, attr) + (getattr(space, attr) if space else [])
-        return [x.id for x in exist(list(dict.fromkeys(ids)))]
-
-    if {"instruction_ids", "instruction_group_ids"} & fields_set:
-        instruction_ids = _require_instructions(data.instruction_ids)
-        instruction_group_ids = _require_instruction_groups(data.instruction_group_ids)
-    else:
-        instruction_ids = default_ids("default_instruction_ids", db.get_instructions)
-        instruction_group_ids = default_ids("default_instruction_group_ids", _existing_groups)
-
-    if "character_ids" in fields_set:
-        characters.require(data.character_ids, db)
-        character_ids = data.character_ids
-    else:
-        character_ids = default_ids("default_character_ids", lambda ids: characters.load(ids, db))
+    # Only what's attached to this chat itself: the global and space defaults
+    # apply live on top (see _inherited), so they aren't copied in
+    instruction_ids = _require_instructions(data.instruction_ids)
+    instruction_group_ids = _require_instruction_groups(data.instruction_group_ids)
+    characters.require(data.character_ids, db)
+    character_ids = list(dict.fromkeys(data.character_ids))
 
     conv = db.create_conversation(
         title=(data.title or DEFAULT_TITLE).strip()[:255] or DEFAULT_TITLE,
@@ -612,10 +597,25 @@ def _require_instruction_groups(ids: list[int]) -> list[int]:
     return list(dict.fromkeys(ids))
 
 
-def _existing_groups(ids: list[int]) -> list:
-    """The groups among `ids` that still exist, in order (stale ids dropped)."""
+_KINDS = ("character", "instruction", "instruction_group")
+
+
+def _inherited(conv) -> dict[str, list[int]]:
+    """What a chat gets from the defaults, live: the global defaults, then its
+    space's own, de-duped, per kind ("character", "instruction",
+    "instruction_group"). Changing a default changes every chat it applies to."""
     db = get_db()
-    return [g for g in (db.get_instruction_group(i) for i in ids) if g]
+    buckets = [db.get_settings()]
+    space = db.get_space(conv.space_id) if conv and conv.space_id is not None else None
+    if space:
+        buckets.append(space)
+    return {k: list(dict.fromkeys(i for b in buckets for i in getattr(b, f"default_{k}_ids"))) for k in _KINDS}
+
+
+def _effective_ids(conv, kind: str) -> list[int]:
+    """A chat's `kind` ids in use: inherited from the defaults, then its own."""
+    own = getattr(conv, f"{kind}_ids") if conv else []
+    return list(dict.fromkeys([*_inherited(conv)[kind], *own]))
 
 
 def _require_space(space_id: int):
@@ -1236,9 +1236,9 @@ class Turn:
         self.history = _branch_to(self.db.get_chat_messages(conv_id), message_id)[:-1]
         self.instructions = _conversation_instructions(conv_id)
         conv = self.db.get_conversation(conv_id)
-        self.characters = []  # attached by the user; the only ones a turn uses
+        self.characters = []  # attached (to the chat, or by its defaults); the only ones a turn uses
         if self._characters_usable():  # attached ones stay attached, just unused, otherwise
-            self.characters = characters.load(conv.character_ids if conv else [], self.db)
+            self.characters = characters.load(_effective_ids(conv, "character"), self.db)
         self.content = ""
         self.cost = 0.0
         self.media: list[dict] = []
@@ -1521,11 +1521,14 @@ class Turn:
         if not new:
             return
         self.characters += new
-        self.db.update_conversation(self.conv_id, character_ids=[c.id for c in self.characters])
+        conv = self.db.get_conversation(self.conv_id)
+        own = conv.character_ids if conv else []
+        own = [*own, *(c.id for c in new if c.id not in own)]  # the chat's own; its defaults' stay inherited
+        self.db.update_conversation(self.conv_id, character_ids=own)
         self.emit(
             {
                 "type": "characters",
-                "character_ids": [c.id for c in self.characters],
+                "character_ids": own,
                 "characters": [c.to_dict() for c in self.characters],
             }
         )
@@ -2076,19 +2079,19 @@ def _image_context(
 
 
 def _conversation_instructions(conv_id: str) -> str | None:
-    """The instructions attached to a chat, flattened for the model (user's text,
-    verbatim): every snippet from the attached groups (in group order), then the
-    individually attached snippets — each sent once — joined by blank lines.
+    """The instructions a chat uses — its defaults' and its own — flattened for
+    the model (user's text, verbatim): every snippet from the groups (in group
+    order), then the single snippets — each sent once — joined by blank lines.
     None when nothing with content is attached."""
     db = get_db()
     conv = db.get_conversation(conv_id)
     if not conv:
         return None
     snippet_ids: list[int] = []
-    for group in (db.get_instruction_group(gid) for gid in conv.instruction_group_ids):
+    for group in (db.get_instruction_group(gid) for gid in _effective_ids(conv, "instruction_group")):
         if group:
             snippet_ids += group.snippet_ids
-    snippet_ids += conv.instruction_ids
+    snippet_ids += _effective_ids(conv, "instruction")
     snippet_ids = list(dict.fromkeys(snippet_ids))  # a snippet in several groups is sent once
     parts = [s.content.strip() for s in db.get_instructions(snippet_ids) if s.content.strip()]
     return "\n\n".join(parts) or None

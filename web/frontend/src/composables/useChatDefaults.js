@@ -1,9 +1,10 @@
 import { computed, ref } from 'vue'
 import { fetchSettings, updateSettings, fetchSpaces, updateSpace } from './useChat'
 
-// Shared, app-wide state for the two "settings buckets" that seed new chats:
-// the global defaults (every chat) and each space's own defaults (stacked on
-// top for chats in that space). A module-level singleton so the chat view and
+// Shared, app-wide state for the two "settings buckets": the global defaults
+// (every chat) and each space's own defaults (stacked on top for chats in that
+// space). They apply live — a chat uses its defaults plus what's attached to
+// it — so `inherited` is what the chat in context gets from them. A module-level singleton so the chat view and
 // the characters page read/toggle the same state.
 //
 // `kind` is one of 'character' | 'instruction' | 'instruction_group'; the
@@ -21,6 +22,19 @@ const key = kind => `default_${kind}_ids`
 export function useChatDefaults() {
   const currentSpace = computed(() => spaces.value.find(s => s.id === currentSpaceId.value) || null)
   const spaceById = id => spaces.value.find(s => s.id === id) || null
+
+  // What the chat in context gets from its defaults, per kind: [{ id, from }],
+  // `from` naming the bucket ("All chats" wins when an id is in both)
+  const inherited = computed(() => {
+    const out = {}
+    for (const kind of ['character', 'instruction', 'instruction_group']) {
+      const seen = new Map()
+      for (const id of globalSettings.value[key(kind)]) seen.set(id, 'All chats')
+      for (const id of currentSpace.value?.[key(kind)] || []) if (!seen.has(id)) seen.set(id, currentSpace.value.name)
+      out[kind] = [...seen].map(([id, from]) => ({ id, from }))
+    }
+    return out
+  })
 
   async function loadDefaults() {
     try {
@@ -73,6 +87,35 @@ export function useChatDefaults() {
     if (i !== -1) spaces.value.splice(i, 1, updated)
   }
 
+  // Where an item is a default: { global, spaceIds }
+  function membership(kind, id) {
+    return {
+      global: globalSettings.value[key(kind)].includes(id),
+      spaceIds: spaces.value.filter(s => s[key(kind)].includes(id)).map(s => s.id),
+    }
+  }
+
+  // Make an item a default exactly where `want` says ({ global, spaceIds }),
+  // writing only the buckets that change — each re-read first, as above
+  async function setMembership(kind, id, want) {
+    const latest = { ...EMPTY(), ...(await fetchSettings()) }
+    if (latest[key(kind)].includes(id) !== want.global) {
+      const ids = toggled(latest[key(kind)], id)
+      globalSettings.value = await updateSettings({ ...bucketLists(latest), [key(kind)]: ids })
+    }
+    const fresh = (await fetchSpaces()).spaces || []
+    for (const space of fresh) {
+      if (space[key(kind)].includes(id) === want.spaceIds.includes(space.id)) continue
+      const updated = await updateSpace(space.id, {
+        name: space.name,
+        ...bucketLists(space),
+        [key(kind)]: toggled(space[key(kind)], id),
+      })
+      fresh.splice(fresh.indexOf(space), 1, updated)
+    }
+    spaces.value = [...fresh]
+  }
+
   // Global ∪ current-space default ids for a kind (de-duped), for seeding
   function defaultIds(kind) {
     const ids = [...globalSettings.value[key(kind)], ...(currentSpace.value ? currentSpace.value[key(kind)] : [])]
@@ -89,12 +132,15 @@ export function useChatDefaults() {
     currentSpace,
     currentSpaceId,
     spaceById,
+    inherited,
     loadDefaults,
     ensureLoaded,
     inGlobal,
     inSpace,
     toggleGlobal,
     toggleSpace,
+    membership,
+    setMembership,
     defaultIds,
     setCurrentSpace,
   }

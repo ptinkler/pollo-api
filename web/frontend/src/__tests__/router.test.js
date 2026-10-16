@@ -404,7 +404,7 @@ describe('ChatView spaces in the chat list', () => {
     w.unmount()
   })
 
-  it("a blank chat follows the defaults, keeping what's been attached by hand", async () => {
+  it('shows the defaults live, marked as inherited, beside what the chat has itself', async () => {
     const snippets = [
       { id: 1, name: 'Terse tone', content: '' },
       { id: 2, name: 'No emoji', content: '' },
@@ -427,8 +427,56 @@ describe('ChatView spaces in the chat list', () => {
       .trigger('click')
     globalSettings.value = { ...EMPTY, default_instruction_ids: [2] }
     await flushChat()
-    expect(chips()).toEqual(['British spelling', 'No emoji'])
+    expect(chips()).toEqual(['No emoji', 'British spelling']) // the defaults' first, then the chat's own
+    expect(w.findAll('.ins-picker .chip.inherited .chip-name').map(c => c.text())).toEqual(['No emoji'])
     globalSettings.value = { ...EMPTY }
+    w.unmount()
+  })
+
+  it("an open chat in a space shows the space's defaults beside its own", async () => {
+    const snippets = [
+      { id: 1, name: 'Natural interaction', content: '' },
+      { id: 2, name: 'Chloe Description', content: '' },
+    ]
+    const groupList = [{ id: 7, name: 'Stories', snippet_ids: [1] }]
+    const space = { ...spaces[0], default_instruction_group_ids: [7] }
+    const conv = { ...convs[0], instruction_ids: [2], instruction_group_ids: [], character_ids: [] }
+    localStorage.removeItem('chat.folded')
+    globalThis.fetch = vi.fn(async url => {
+      url = String(url)
+      const json = url.includes('/models')
+        ? { text: [], image: [], video: [], errors: {} }
+        : url.includes('/settings')
+          ? { default_character_ids: [], default_instruction_ids: [], default_instruction_group_ids: [] }
+          : url.includes('/instructions')
+            ? { instructions: snippets, groups: groupList }
+            : url.includes('/spaces')
+              ? { spaces: [space] }
+              : url.includes('/conversations/a')
+                ? { conversation: conv, messages: [] }
+                : url.includes('/conversations')
+                  ? { conversations: [conv], more: false }
+                  : url.includes('/characters')
+                    ? { characters: [] }
+                    : { configured: true }
+      return { ok: true, status: 200, json: async () => json }
+    })
+    const ChatView = (await import('../views/ChatView.vue')).default
+    const r = createChatRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/chat', name: 'chat', component: ChatView },
+        { path: '/chat/c/:id', name: 'chat-conversation', component: ChatView },
+      ],
+    })
+    r.push('/chat/c/a')
+    await r.isReady()
+    const w = mountChat({ template: '<router-view />' }, { global: { plugins: [r] }, attachTo: document.body })
+    await flushChat()
+    const chips = w.findAll('.ins-picker .chip')
+    expect(chips.map(c => c.find('.chip-name').text())).toEqual(['📦 Stories', 'Chloe Description'])
+    expect(chips[0].classes()).toContain('inherited')
+    expect(chips[0].attributes('title')).toContain('From the Fantasy novel defaults')
     w.unmount()
   })
 })

@@ -3,6 +3,7 @@ import HomeView from '../views/HomeView.vue'
 import ProjectView from '../views/ProjectView.vue'
 import UsageView from '../views/UsageView.vue'
 import CharactersView from '../views/CharactersView.vue'
+import InstructionsView from '../views/InstructionsView.vue'
 import MediaView from '../views/MediaView.vue'
 // Lazy: chat pulls in the markdown renderer, which the video pages don't need
 const ChatView = () => import('../views/ChatView.vue')
@@ -41,6 +42,12 @@ const routes = [
     name: 'characters',
     component: CharactersView,
     meta: { title: 'Characters — Pollo' },
+  },
+  {
+    path: '/instructions',
+    name: 'instructions',
+    component: InstructionsView,
+    meta: { title: 'Instructions — Pollo' },
   },
   {
     path: '/chat',

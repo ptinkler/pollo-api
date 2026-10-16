@@ -33,12 +33,15 @@ function characterBlocker({ mode, selected, textInfo, imageInfo, videoInfo }) {
 // Characters for the open chat: every saved one plus the chat's own (ad
 // hoc) ones, which are attached, and the editor's state. `settings`: the
 // composer settings (mode and model picks decide whether characters are used).
-export function useChatCharacters({ convId, settings, ensureConversation, showToast }) {
+// `inheritedIds`: the ones its defaults attach, on top of its own.
+export function useChatCharacters({ convId, settings, ensureConversation, showToast, inheritedIds }) {
   const characters = ref([])
-  const characterIds = ref([]) // attached to this chat (or the next new one)
+  const characterIds = ref([]) // attached to this chat itself (or the next new one)
   const charEditor = reactive({ open: false, character: null, conversationId: null, seed: [] })
   const attachedCharacters = computed(() =>
-    characterIds.value.map(id => characters.value.find(c => c.id === id)).filter(Boolean),
+    [...new Set([...(inheritedIds?.value || []), ...characterIds.value])]
+      .map(id => characters.value.find(c => c.id === id))
+      .filter(Boolean),
   )
   const characterNames = computed(() => attachedCharacters.value.map(c => c.name).join(', '))
   // When they can't be used, attached characters stay attached but unused

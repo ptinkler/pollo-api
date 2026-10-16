@@ -257,11 +257,11 @@ class TestSpace:
         imp.run_import(story_zip)  # nothing new
         assert _space(client) is None
 
-    def test_new_chats_get_the_spaces_defaults(self, imp, client, story_zip):
+    def test_imported_chats_use_the_defaults(self, imp, client, chat, story_zip):
         snippet = client.post("/api/chat/instructions", json={"name": "Style", "content": "Be brief."}).json()
         client.put("/api/chat/settings", json={"default_instruction_ids": [snippet["id"]]})
         imp.run_import(story_zip)
-        assert _imported(client)[0]["instruction_ids"] == [snippet["id"]]
+        assert chat._conversation_instructions(_imported(client)[0]["id"]) == "Be brief."
 
     def test_a_chat_moved_out_keeps_getting_imports_where_it_is(self, imp, client, story_zip, tmp_path):
         imp.run_import(story_zip)

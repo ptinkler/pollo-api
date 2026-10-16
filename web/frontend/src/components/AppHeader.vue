@@ -20,6 +20,9 @@ const { hasKey, showKeyModal } = useAuth()
       <RouterLink to="/characters" class="nav-link" :class="{ active: route.path.startsWith('/characters') }"
         >👤<span class="nav-text"> Characters</span></RouterLink
       >
+      <RouterLink to="/instructions" class="nav-link" :class="{ active: route.path.startsWith('/instructions') }"
+        >📝<span class="nav-text"> Instructions</span></RouterLink
+      >
       <RouterLink to="/chat" class="nav-link" :class="{ active: route.path.startsWith('/chat') }"
         >💬<span class="nav-text"> Chat</span></RouterLink
       >

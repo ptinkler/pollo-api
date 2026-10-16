@@ -1942,7 +1942,7 @@ class TestCustomInstructions:
         gone = client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]
         assert gone["instruction_ids"] == [] and gone["instruction_group_ids"] == [g["id"]]
 
-    def test_global_defaults_attach_to_new_chats_unless_overridden(self, client):
+    def test_global_defaults_apply_live_to_every_chat(self, client, chat):
         d = client.post("/api/chat/instructions", json={"name": "D", "content": "x"}).json()
         e = client.post("/api/chat/instructions", json={"name": "E", "content": "y"}).json()
         g = client.post("/api/chat/instruction-groups", json={"name": "G", "snippet_ids": [d["id"]]}).json()
@@ -1951,11 +1951,12 @@ class TestCustomInstructions:
             json={"default_instruction_ids": [d["id"], e["id"]], "default_instruction_group_ids": [g["id"]]},
         )
         made = client.post("/api/chat/conversations", json={}).json()
-        assert sorted(made["instruction_ids"]) == sorted([d["id"], e["id"]])
-        assert made["instruction_group_ids"] == [g["id"]]
-        # Explicit empty lists override the defaults
-        empty = client.post("/api/chat/conversations", json={"instruction_ids": []}).json()
-        assert empty["instruction_ids"] == [] and empty["instruction_group_ids"] == []
+        # Nothing is copied in: the defaults apply on top of the chat's own (none here)
+        assert made["instruction_ids"] == [] and made["instruction_group_ids"] == []
+        assert chat._conversation_instructions(made["id"]) == "x\n\ny"  # D once, though in G too
+        # Changing the defaults changes the chat
+        client.put("/api/chat/settings", json={"default_instruction_ids": [e["id"]]})
+        assert chat._conversation_instructions(made["id"]) == "y"
         assert client.post("/api/chat/conversations", json={"instruction_ids": [999]}).status_code == 400
 
     def test_global_settings_crud_and_validation(self, client):
@@ -2117,7 +2118,7 @@ class TestChatSpaces:
             client.post("/api/chat/spaces", json={"name": "Bad", "default_instruction_ids": [999]}).status_code == 400
         )
 
-    def test_new_chat_in_space_stacks_global_and_space_defaults_deduped(self, client):
+    def test_chat_in_space_stacks_global_and_space_defaults_deduped(self, client, chat):
         shared = client.post("/api/chat/instructions", json={"name": "Shared", "content": "both."}).json()
         spaceonly = client.post("/api/chat/instructions", json={"name": "SpaceOnly", "content": "Be warm."}).json()
         glob = client.post("/api/chat/instructions", json={"name": "Glob", "content": "x"}).json()
@@ -2128,27 +2129,27 @@ class TestChatSpaces:
             json={"name": "Novel", "default_instruction_ids": [shared["id"], spaceonly["id"]]},
         ).json()
         conv = client.post("/api/chat/conversations", json={"space_id": sp["id"]}).json()
-        assert conv["space_id"] == sp["id"]
+        assert conv["space_id"] == sp["id"] and conv["instruction_ids"] == []
         # Global first, then the space's own, each snippet once (shared de-duped)
-        assert conv["instruction_ids"] == [glob["id"], shared["id"], spaceonly["id"]]
+        assert chat._conversation_instructions(conv["id"]) == "x\n\nboth.\n\nBe warm."
+        # Out of the space, only the global defaults apply
+        client.patch(f"/api/chat/conversations/{conv['id']}", json={"space_id": None})
+        assert chat._conversation_instructions(conv["id"]) == "x\n\nboth."
 
-    def test_new_chat_without_space_uses_only_global_defaults(self, client):
+    def test_chat_without_space_uses_only_global_defaults(self, client, chat, db):
         glob = client.post("/api/chat/instructions", json={"name": "Glob", "content": "x"}).json()
         client.put("/api/chat/settings", json={"default_instruction_ids": [glob["id"]]})
         conv = client.post("/api/chat/conversations", json={}).json()
-        assert conv["space_id"] is None and conv["instruction_ids"] == [glob["id"]]
+        assert conv["space_id"] is None
+        assert chat._inherited(db.get_conversation(conv["id"]))["instruction"] == [glob["id"]]
 
-    def test_explicit_attachments_override_space_defaults(self, client):
-        s = client.post("/api/chat/instructions", json={"name": "Tone", "content": "Be warm."}).json()
-        sp = client.post("/api/chat/spaces", json={"name": "Novel", "default_instruction_ids": [s["id"]]}).json()
-        conv = client.post("/api/chat/conversations", json={"space_id": sp["id"], "instruction_ids": []}).json()
-        assert conv["space_id"] == sp["id"] and conv["instruction_ids"] == []
-
-    def test_space_character_defaults_seed_new_chats(self, client, db):
+    def test_space_character_defaults_apply_to_its_chats(self, client, chat, db):
         c1 = db.create_character("Alice")
+        c2 = db.create_character("Bob")
         sp = client.post("/api/chat/spaces", json={"name": "Novel", "default_character_ids": [c1.id]}).json()
-        conv = client.post("/api/chat/conversations", json={"space_id": sp["id"]}).json()
-        assert conv["character_ids"] == [c1.id]
+        conv = client.post("/api/chat/conversations", json={"space_id": sp["id"], "character_ids": [c2.id]}).json()
+        assert conv["character_ids"] == [c2.id]  # its own
+        assert chat._effective_ids(db.get_conversation(conv["id"]), "character") == [c1.id, c2.id]
 
     def test_deleting_a_character_clears_it_from_global_and_space_defaults(self, client, db):
         c1 = db.create_character("Alice")

@@ -10,7 +10,7 @@ import ChatWelcome from '../components/chat/ChatWelcome.vue'
 import ConversationList from '../components/chat/ConversationList.vue'
 import ImportChatsModal from '../components/chat/ImportChatsModal.vue'
 import InstructionPicker from '../components/chat/InstructionPicker.vue'
-import InstructionsDialog from '../components/chat/InstructionsDialog.vue'
+import InstructionEditor from '../components/chat/InstructionEditor.vue'
 import SpaceSettingsDialog from '../components/chat/SpaceSettingsDialog.vue'
 import MediaLightbox from '../components/chat/MediaLightbox.vue'
 import ModelPicker from '../components/chat/ModelPicker.vue'
@@ -286,13 +286,18 @@ async function loadModels(refresh = false) {
 }
 
 // ── Custom instructions ──────────────────────────────────────────────
-const instructionsOpen = ref(false)
-const instructionsFocus = ref(null) // { kind, id } to open the dialog on
+// The snippet or group open in the editor ({ kind, id }); the full list is the Instructions page
+const editingInstruction = ref(null)
 
-function openInstructions(focus = null) {
-  instructionsFocus.value = focus
-  instructionsOpen.value = true
+function manageInstructions() {
+  router.push({ name: 'instructions' })
 }
+// What the chat in context gets from its defaults (global + its space's), live
+const { inherited: inheritedDefaults } = useChatDefaults()
+const inheritedInstructionIds = computed(() => ({
+  snippets: inheritedDefaults.value.instruction.map(x => x.id),
+  groups: inheritedDefaults.value.instruction_group.map(x => x.id),
+}))
 const {
   instructions,
   groups: instructionGroups,
@@ -306,7 +311,7 @@ const {
   setGroups,
   onInstructionUsed,
   onInstructionsChanged,
-} = useChatInstructions({ convId, conversation, showToast })
+} = useChatInstructions({ convId, conversation, showToast, inherited: inheritedInstructionIds })
 // Video models and non-conversational image models don't take instructions
 const instructionsUnused = computed(
   () => mode.value === 'video' || (mode.value === 'image' && !imageInfo.value?.conversational),
@@ -315,7 +320,7 @@ const instructionsUnused = computed(
 // ── Spaces & defaults ─────────────────────────────────────────────────
 const spaceSettings = ref(null) // the space, 'new' or 'global' whose settings are open
 const importOpen = ref(false)
-const { globalSettings, spaces, spaceById, loadDefaults, setCurrentSpace } = useChatDefaults()
+const { globalSettings, spaces, loadDefaults, setCurrentSpace } = useChatDefaults()
 // An import may have added chats and made the ChatGPT space
 function onImported() {
   chatList.load()
@@ -324,46 +329,13 @@ function onImported() {
 // Where the next new (blank) chat will be filed; read when it's created
 const pendingSpaceId = ref(null)
 
-// Seed the blank chat's attachments the way the server would: global defaults
-// plus the space's own (stacked, de-duped), with stale ids dropped.
-function seedAttachments(spaceId) {
-  const space = spaceId == null ? null : spaceById(spaceId)
-  const has = (list, id) => list.value.some(x => x.id === id)
-  const seed = kind => {
-    const field = `default_${kind}_ids`
-    const ids = [...globalSettings.value[field], ...(space ? space[field] : [])]
-    return [...new Set(ids)]
-  }
-  instructionIds.value = seed('instruction').filter(id => has(instructions, id))
-  instructionGroupIds.value = seed('instruction_group').filter(id => has(instructionGroups, id))
-  characterIds.value = seed('character').filter(id => has(characters, id))
+// A blank chat starts with nothing attached to it itself: its defaults
+// (global + its space's) apply on their own, live, once it's created too
+function seedAttachments() {
+  instructionIds.value = []
+  instructionGroupIds.value = []
+  characterIds.value = []
 }
-
-// The blank chat follows changes to the defaults while it waits to be sent:
-// what's added to them is attached and what's taken out is detached, leaving
-// anything attached or removed by hand as it is. (A chat that exists keeps
-// its own attachments: defaults only seed new chats.)
-const blankDefaults = computed(() => {
-  const space = pendingSpaceId.value == null ? null : spaceById(pendingSpaceId.value)
-  const ids = field => [...new Set([...globalSettings.value[field], ...(space ? space[field] : [])])]
-  return {
-    instruction: ids('default_instruction_ids'),
-    group: ids('default_instruction_group_ids'),
-    character: ids('default_character_ids'),
-  }
-})
-watch(blankDefaults, (now, was) => {
-  if (convId.value) return
-  const follow = (attached, kind) => {
-    const removed = was[kind].filter(id => !now[kind].includes(id))
-    const added = now[kind].filter(id => !was[kind].includes(id))
-    const kept = attached.value.filter(id => !removed.includes(id))
-    attached.value = [...kept, ...added.filter(id => !kept.includes(id))]
-  }
-  follow(instructionIds, 'instruction')
-  follow(instructionGroupIds, 'group')
-  follow(characterIds, 'character')
-})
 
 // Tell the shared defaults store which space is in context (for the add-to
 // toggles in the character/instruction editors)
@@ -389,7 +361,13 @@ const {
   onCharactersUsed,
   onCharacterSaved,
   onCharacterDeleted,
-} = useChatCharacters({ convId, settings, ensureConversation, showToast })
+} = useChatCharacters({
+  convId,
+  settings,
+  ensureConversation,
+  showToast,
+  inheritedIds: computed(() => inheritedDefaults.value.character.map(x => x.id)),
+})
 const CHARACTER_USE = {
   auto: 'The chat model knows them and sends their description and images when it puts one in a picture.',
   image: 'Their descriptions and images go with every image.',
@@ -417,7 +395,7 @@ async function loadConversation(id) {
   if (!id) {
     conversation.value = null
     messages.value = []
-    seedAttachments(pendingSpaceId.value)
+    seedAttachments()
     setRefChoices(null)
     return
   }
@@ -483,7 +461,7 @@ function newChat(spaceId = null) {
   // From a conversation *or* the Library — anywhere but the blank chat itself.
   // When already on the blank chat the convId watch won't fire, so re-seed here.
   if (route.name !== 'chat') router.push({ name: 'chat' })
-  else seedAttachments(pendingSpaceId.value)
+  else seedAttachments()
   draft.value = ''
   composer.value?.focus()
 }
@@ -868,19 +846,19 @@ onBeforeUnmount(() => {
 
         <SidebarSection id="instructions" title="Instructions" :summary="attachmentSummary || 'None'">
           <template #actions>
-            <button class="mini-btn" title="Create and edit snippets and groups" @click="openInstructions()">
-              Manage
-            </button>
+            <button class="mini-btn" title="All instructions" @click="manageInstructions">Manage</button>
           </template>
           <InstructionPicker
             :instructions="instructions"
             :groups="instructionGroups"
             :snippet-ids="instructionIds"
             :group-ids="instructionGroupIds"
+            :inherited-snippets="inheritedDefaults.instruction"
+            :inherited-groups="inheritedDefaults.instruction_group"
             @update:snippet-ids="setInstructions"
             @update:group-ids="setGroups"
-            @manage="openInstructions()"
-            @edit="openInstructions"
+            @manage="manageInstructions"
+            @edit="editingInstruction = $event"
           />
           <p v-if="(attachedInstructions.length || attachedGroups.length) && instructionsUnused" class="mode-hint">
             {{ mode === 'video' ? 'Video models' : 'This image model' }} can't take instructions; they apply in Auto and
@@ -903,6 +881,7 @@ onBeforeUnmount(() => {
             v-else
             :model-value="characterIds"
             :characters="characters"
+            :inherited="inheritedDefaults.character"
             create-label="＋ New character (this chat)"
             @update:model-value="setCharacters"
             @edit="editCharacter"
@@ -1131,12 +1110,11 @@ onBeforeUnmount(() => {
       @deleted="onCharacterDeleted"
     />
 
-    <InstructionsDialog
-      :open="instructionsOpen"
-      :focus="instructionsFocus"
+    <InstructionEditor
+      :target="editingInstruction"
       :instructions="instructions"
       :groups="instructionGroups"
-      @close="instructionsOpen = false"
+      @close="editingInstruction = null"
       @changed="onInstructionsChanged"
     />
 
