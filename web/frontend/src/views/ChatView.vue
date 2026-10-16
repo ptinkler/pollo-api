@@ -103,6 +103,22 @@ const sending = ref(false)
 const streamingId = ref(null)
 const composer = ref(null)
 const scroller = ref(null)
+
+// Long chats draw their latest messages; "Show earlier" adds more. (Imports
+// run to hundreds of messages, and drawing them all at once is slow.)
+const MESSAGE_WINDOW = 40
+const shownCount = ref(MESSAGE_WINDOW)
+const shownMessages = computed(() => messages.value.slice(-shownCount.value))
+const earlierCount = computed(() => Math.max(0, messages.value.length - shownCount.value))
+
+// Keeps the reader where they were while the earlier messages go in above
+async function showEarlier() {
+  const el = scroller.value
+  const fromBottom = el ? el.scrollHeight - el.scrollTop : 0
+  shownCount.value += MESSAGE_WINDOW
+  await nextTick()
+  if (el) el.scrollTop = el.scrollHeight - fromBottom
+}
 const messagesEl = ref(null)
 const dragging = ref(false)
 const sidebarOpen = ref(false)
@@ -419,6 +435,7 @@ async function refreshSpend(id) {
 
 async function loadConversation(id) {
   polling.stop()
+  shownCount.value = MESSAGE_WINDOW
   loadCharacters()
   if (!id) {
     conversation.value = null
@@ -728,8 +745,12 @@ async function switchBranch(messageId) {
 }
 
 // Carry on down a different path in a new chat, leaving this one as it is
+// A long chat's images take a moment to copy: say so, and don't start two
+let forking = false
 async function forkFrom(msg) {
-  if (sending.value) return
+  if (sending.value || forking) return
+  forking = true
+  showToast('Branching into a new chat…', 'info')
   try {
     const conv = await forkConversation(convId.value, msg.id)
     chatList.add(conv)
@@ -737,6 +758,8 @@ async function forkFrom(msg) {
     showToast('Branched into a new chat', 'success')
   } catch (e) {
     showToast(e.message, 'error')
+  } finally {
+    forking = false
   }
 }
 
@@ -1068,7 +1091,10 @@ onBeforeUnmount(() => {
         <ChatWelcome v-else-if="!messages.length" @suggest="useSuggestion" />
 
         <div v-else ref="messagesEl" class="messages">
-          <div v-if="conversation?.forked_from" class="fork-origin">
+          <button v-if="earlierCount" class="show-earlier" @click="showEarlier">
+            Show earlier messages ({{ earlierCount }})
+          </button>
+          <div v-else-if="conversation?.forked_from" class="fork-origin">
             ⑂ Branched from
             <a
               v-if="conversation.forked_from.exists"
@@ -1079,7 +1105,7 @@ onBeforeUnmount(() => {
             <span v-else>a chat that's since been deleted</span>
           </div>
           <ChatMessage
-            v-for="m in messages"
+            v-for="m in shownMessages"
             :key="m.id"
             :message="m"
             :conv-id="convId || ''"
@@ -1381,6 +1407,23 @@ onBeforeUnmount(() => {
 .fork-origin a {
   color: var(--accent);
   text-decoration: none;
+}
+
+.show-earlier {
+  align-self: center;
+  margin-bottom: 12px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text2);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.show-earlier:hover {
+  color: var(--text);
+  border-color: var(--text2);
 }
 
 .fork-origin a:hover {

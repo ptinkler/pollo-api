@@ -118,13 +118,25 @@ export function useChatList(showToast) {
   }
 
   // Whether it was deleted
+  // Chats being deleted (a big one takes a moment): their rows show it, and a second click does nothing
+  const deleting = ref(new Set())
+  const setDeleting = (id, on) => {
+    const next = new Set(deleting.value)
+    if (on) next.add(id)
+    else next.delete(id)
+    deleting.value = next
+  }
+
   async function remove(c) {
-    if (!confirm(`Delete “${c.title}” and its images/videos?`)) return false
+    if (deleting.value.has(c.id) || !confirm(`Delete “${c.title}” and its images/videos?`)) return false
+    setDeleting(c.id, true)
     try {
       await deleteConversation(c.id)
     } catch (e) {
       showToast(`Delete failed: ${e.message}`, 'error')
       return false
+    } finally {
+      setDeleting(c.id, false)
     }
     conversations.value = conversations.value.filter(x => x.id !== c.id)
     if (searchResults.value) searchResults.value = searchResults.value.filter(x => x.id !== c.id)
@@ -133,6 +145,7 @@ export function useChatList(showToast) {
 
   return reactive({
     conversations,
+    deleting,
     more,
     search,
     searchResults,

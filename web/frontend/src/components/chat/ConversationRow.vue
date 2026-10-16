@@ -8,6 +8,7 @@ defineProps({
   nested: { type: Boolean, default: false }, // inside a space folder
   draggable: { type: Boolean, default: false },
   dragging: { type: Boolean, default: false },
+  busy: { type: Boolean, default: false }, // being deleted
 })
 // open: the chat's id; dragstart: (chat, event); the rest: the chat
 const emit = defineEmits(['open', 'pin', 'move-to', 'rename', 'remove', 'dragstart', 'dragend'])
@@ -16,7 +17,8 @@ const emit = defineEmits(['open', 'pin', 'move-to', 'rename', 'remove', 'dragsta
 <template>
   <div
     class="conv-item"
-    :class="{ active, nested, dragging }"
+    :class="{ active, nested, dragging, busy }"
+    :aria-busy="busy || undefined"
     :draggable="draggable ? 'true' : undefined"
     @dragstart="draggable && emit('dragstart', conv, $event)"
     @dragend="emit('dragend')"
@@ -29,7 +31,8 @@ const emit = defineEmits(['open', 'pin', 'move-to', 'rename', 'remove', 'dragsta
       >
       <span v-if="conv.snippet" class="conv-snippet">{{ conv.snippet }}</span>
     </span>
-    <span class="conv-actions" @click.stop>
+    <span v-if="busy" class="row-spinner" title="Deleting…"></span>
+    <span v-else class="conv-actions" @click.stop>
       <button :class="{ on: conv.pinned }" :title="conv.pinned ? 'Unpin' : 'Pin to the top'" @click="emit('pin', conv)">
         📌
       </button>
@@ -41,6 +44,27 @@ const emit = defineEmits(['open', 'pin', 'move-to', 'rename', 'remove', 'dragsta
 </template>
 
 <style scoped>
+.conv-item.busy {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.row-spinner {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent2);
+  border-radius: 50%;
+  animation: row-spin 0.8s linear infinite;
+}
+
+@keyframes row-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .conv-item {
   display: flex;
   align-items: center;

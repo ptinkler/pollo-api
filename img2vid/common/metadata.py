@@ -1401,6 +1401,9 @@ class MetadataDB:
                 return False
             if conv.import_source and conv.import_id:
                 session.merge(ChatImportSkip(source=conv.import_source, import_id=conv.import_id))
+            # In bulk: the cascade would load and delete each message on its own
+            for model in (ChatMessage, ChatLibraryItem):
+                session.query(model).filter(model.conversation_id == conv_id).delete(synchronize_session=False)
             session.delete(conv)
             session.commit()
             return True
@@ -1442,6 +1445,26 @@ class MetadataDB:
             session.refresh(msg)
             session.expunge(msg)
             return msg
+
+    def add_chat_branch(self, conversation_id: str, rows: list[dict[str, Any]]) -> None:
+        """Add messages one after another (the first starts the chat) in one
+        transaction, and show the branch they make. `rows`: ChatMessage
+        fields, `media` as a list. One commit, not one per message: a long
+        chat's copy is slow on a NAS otherwise."""
+        with self._session() as session:
+            conv = session.get(ChatConversation, conversation_id)
+            parent_id = None
+            for row in rows:
+                fields = {**row, "media_json": json.dumps(row["media"]) if row.get("media") else None}
+                fields.pop("media", None)
+                msg = ChatMessage(conversation_id=conversation_id, parent_id=parent_id, **fields)
+                session.add(msg)
+                session.flush()
+                parent_id = msg.id
+            if conv and parent_id is not None:
+                conv.current_leaf_id = parent_id
+                conv.updated_at = datetime.now()
+            session.commit()
 
     # ── Imported chats (web/chatgpt_import.py) ───────────────────────
 

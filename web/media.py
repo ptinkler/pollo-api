@@ -132,20 +132,21 @@ def _thumb_url(media_id: str) -> str:
     return f"/api/media/thumb/{media_id}"
 
 
-def _thumb_path(path: Path) -> Path:
-    """Where a file's thumbnail is cached — keyed by path and mtime, so an
-    edited file gets a fresh one."""
+def _thumb_path(path: Path, size: int = THUMB_SIZE) -> Path:
+    """Where a file's thumbnail is cached — keyed by path, mtime and size, so
+    an edited file gets a fresh one."""
     try:
         mtime = path.stat().st_mtime
     except OSError:
         mtime = 0
-    return thumb_dir() / f"{hashlib.md5(f'{path}:{mtime}'.encode()).hexdigest()}.jpg"
+    key = f"{path}:{mtime}" + (f":{size}" if size != THUMB_SIZE else "")
+    return thumb_dir() / f"{hashlib.md5(key.encode()).hexdigest()}.jpg"
 
 
-def make_thumb(path: Path) -> Path | None:
-    """A small JPEG of an image, or of a video's first frame (cached). None if
-    the file can't be read."""
-    out = _thumb_path(path)
+def make_thumb(path: Path, size: int = THUMB_SIZE) -> Path | None:
+    """A small JPEG of an image, or of a video's first frame (cached), `size`
+    px on its shorter side. None if the file can't be read."""
+    out = _thumb_path(path, size)
     if out.is_file():
         return out
     try:
@@ -157,7 +158,7 @@ def make_thumb(path: Path) -> Path | None:
         else:
             img = Image.open(path)
         w, h = img.size
-        scale = min(1.0, THUMB_SIZE / min(w, h))
+        scale = min(1.0, size / min(w, h))
         target = (max(1, round(w * scale)), max(1, round(h * scale)))
         img.draft("RGB", target)  # JPEGs decode straight at a reduced size — much faster
         img = ImageOps.exif_transpose(img).convert("RGB")
@@ -175,20 +176,25 @@ def make_thumb(path: Path) -> Path | None:
 _thumb_pool = ThreadPoolExecutor(max_workers=THUMB_WORKERS, thread_name_prefix="media-thumb")
 
 
-@router.get("/thumb/{media_id:path}")
-async def api_media_thumb(media_id: str):
-    """Cached thumbnails come straight back; new ones queue for the thumbnail
-    pool. Async, so requests waiting in that queue don't tie up the worker
-    threads every other (sync) endpoint runs on."""
-    _, path, _ = await anyio.to_thread.run_sync(resolve, media_id)
-    thumb = _thumb_path(path)
+async def thumb_response(path: Path, size: int = THUMB_SIZE) -> FileResponse:
+    """A file's thumbnail: cached ones straight back, new ones queued for the
+    thumbnail pool (awaited, so queued requests don't tie up the worker
+    threads every other, sync, endpoint runs on)."""
+    thumb = _thumb_path(path, size)
     if not thumb.is_file():
-        thumb = await asyncio.wrap_future(_thumb_pool.submit(make_thumb, path))
+        thumb = await asyncio.wrap_future(_thumb_pool.submit(make_thumb, path, size))
     if not thumb:
         raise HTTPException(404, "No thumbnail")
     return FileResponse(
         thumb, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=31536000, immutable"}
     )
+
+
+@router.get("/thumb/{media_id:path}")
+async def api_media_thumb(media_id: str):
+    """A library item's thumbnail (see thumb_response)."""
+    _, path, _ = await anyio.to_thread.run_sync(resolve, media_id)
+    return await thumb_response(path)
 
 
 # ── Listing ─────────────────────────────────────────────────────────
@@ -314,7 +320,7 @@ def _chat_orphans(db, titles: dict[str, str]) -> list[dict[str, Any]]:
     cutoff = time.time() - ORPHAN_GRACE
     items = []
     for d in root.iterdir():
-        if not d.is_dir():
+        if not d.is_dir() or d.name.startswith("."):  # .deleting-<id>: a deleted chat's files, going
             continue
         for p in d.iterdir():
             kind = _kind(p) if p.is_file() and (d.name, p.name) not in used else None

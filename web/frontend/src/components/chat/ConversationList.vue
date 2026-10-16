@@ -112,6 +112,7 @@ const dropHandlers = spaceId => ({
       :key="c.id"
       :conv="c"
       :active="c.id === activeId"
+      :busy="list.deleting.has(c.id)"
       v-on="rowHandlers"
     />
     <p v-if="!list.searchResults.length" class="conv-empty">No chats match</p>
@@ -151,6 +152,7 @@ const dropHandlers = spaceId => ({
             :key="c.id"
             :conv="c"
             :active="c.id === activeId"
+            :busy="list.deleting.has(c.id)"
             :dragging="dragged?.id === c.id"
             nested
             draggable
@@ -188,6 +190,7 @@ const dropHandlers = spaceId => ({
             :key="c.id"
             :conv="c"
             :active="c.id === activeId"
+            :busy="list.deleting.has(c.id)"
             :dragging="dragged?.id === c.id"
             draggable
             v-on="rowHandlers"

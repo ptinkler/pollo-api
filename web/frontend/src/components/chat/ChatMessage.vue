@@ -2,7 +2,7 @@
 import { computed, ref, nextTick, inject, onMounted, onBeforeUnmount } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { chatMediaUrl } from '../../composables/useChat'
+import { chatMediaPreviewUrl, chatMediaUrl } from '../../composables/useChat'
 import { characterImageUrl } from '../../composables/useCharacters'
 import { useCopy } from '../../composables/useClipboard'
 import { shortModel, fmtCost } from '../../utils/format'
@@ -133,6 +133,11 @@ function url(item) {
   return chatMediaUrl(props.convId, item.file)
 }
 
+// What's shown in the chat: a scaled-down copy (a big chat's full images add up)
+function preview(item) {
+  return chatMediaPreviewUrl(props.convId, item.file)
+}
+
 // Prompts sent outside Auto mode say so — an edit or retry reruns them in that mode
 const MODE_TAGS = { image: '🖼 Image', video: '🎬 Video', text: '💬 Text only' }
 const modeTag = computed(() => MODE_TAGS[props.message.mode] || '')
@@ -225,9 +230,11 @@ const requestItem = ref(null)
             📌
           </button>
           <img
-            :src="url(item)"
+            :src="preview(item)"
             class="attachment-thumb"
             alt="attachment"
+            loading="lazy"
+            decoding="async"
             @click="emit('open-media', { url: url(item), kind: 'image', file: item.file })"
           />
           <span class="use-btns">
@@ -338,8 +345,10 @@ const requestItem = ref(null)
             <template v-if="item.status === 'done' && item.file">
               <img
                 v-if="item.kind === 'image'"
-                :src="url(item)"
+                :src="preview(item)"
                 :alt="item.prompt || 'generated image'"
+                loading="lazy"
+                decoding="async"
                 @click="emit('open-media', { url: url(item), kind: 'image', prompt: item.prompt, file: item.file })"
               />
               <video v-else :src="url(item)" controls loop playsinline preload="metadata"></video>

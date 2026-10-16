@@ -69,7 +69,7 @@ from pydantic import BaseModel, Field
 from img2vid.common import config
 from img2vid.common.metadata import get_db, iso
 
-from . import characters, openrouter, pollo_chat, request_log, venice_chat
+from . import characters, media, openrouter, pollo_chat, request_log, venice_chat
 from .auth import verify_api_key
 from .uploads import is_blank_image, read_image_upload, safe_filename
 
@@ -866,22 +866,22 @@ def api_fork_conversation(conv_id: str, data: ForkConversation):
     db.update_conversation(new.id, character_ids=[char_map.get(i, i) for i in conv.character_ids])
 
     fork = _Fork(_chat_root() / conv_id, _conv_dir(new.id), char_map)
-    parent_id = None
-    for msg in path:
-        media = [fork.media_item(item) for item in msg.media]
-        copy = db.add_chat_message(
-            new.id,
-            msg.role,
-            msg.content,
-            media=media,
-            model=msg.model,
-            status=msg.status,
-            parent_id=parent_id,
-            mode=msg.mode,
-        )
-        if msg.error or msg.cost:
-            copy = db.update_chat_message(copy.id, error=msg.error, cost=msg.cost)
-        parent_id = copy.id
+    db.add_chat_branch(
+        new.id,
+        [
+            {
+                "role": msg.role,
+                "content": msg.content,
+                "media": [fork.media_item(item) for item in msg.media],
+                "model": msg.model,
+                "status": msg.status,
+                "mode": msg.mode,
+                "error": msg.error,
+                "cost": msg.cost,
+            }
+            for msg in path
+        ],
+    )
     return db.get_conversation(new.id).to_dict()
 
 
@@ -982,8 +982,18 @@ def api_delete_conversation(conv_id: str):
     _require_conv(conv_id)
     characters.delete_for_conversation(conv_id, get_db())
     get_db().delete_conversation(conv_id)
-    shutil.rmtree(_chat_root() / conv_id, ignore_errors=True)
+    # Its files go in the background: hundreds of images take a while on a NAS
+    folder = _chat_root() / conv_id
+    if folder.exists():
+        folder.rename(folder.with_name(f".deleting-{conv_id}"))  # out of the way at once
+        threading.Thread(target=_empty_trash, daemon=True).start()
     return {"deleted": conv_id}
+
+
+def _empty_trash() -> None:
+    """Remove deleted chats' folders (any left by a restart mid-delete too)."""
+    for trash in _chat_root().glob(".deleting-*"):
+        shutil.rmtree(trash, ignore_errors=True)
 
 
 # ── Routes: media ───────────────────────────────────────────────────
@@ -1004,6 +1014,19 @@ def api_chat_media(conv_id: str, filename: str):
     if not path.is_file():
         raise HTTPException(404, "Not found")
     return FileResponse(path, headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+
+CHAT_PREVIEW_SIZE = 768  # px on the shorter side: sharp in the chat, a fraction of a full-size image
+
+
+@router.get("/media/{conv_id}/{filename}/preview")
+async def api_chat_media_preview(conv_id: str, filename: str):
+    """A chat image (or a video's first frame) scaled down for showing in the
+    chat, cached; the full file is for the lightbox and downloads."""
+    path = _chat_root() / safe_filename(conv_id) / safe_filename(filename)
+    if not path.is_file():
+        raise HTTPException(404, "Not found")
+    return await media.thumb_response(path, CHAT_PREVIEW_SIZE)
 
 
 @router.get("/request-log")

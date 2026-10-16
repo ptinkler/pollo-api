@@ -2,6 +2,7 @@
 
 import io
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -3258,3 +3259,33 @@ class TestHiddenDefaults:
         conv = client.post("/api/chat/conversations", json={}).json()
         resp = client.patch(f"/api/chat/conversations/{conv['id']}", json={"hidden_defaults": {"nope": [1]}})
         assert resp.status_code == 400
+
+
+class TestLargeChats:
+    """Big chats (imports run to hundreds of messages and images) stay quick."""
+
+    def test_images_have_a_small_preview(self, client, conv, tmp_path):
+        from PIL import Image
+
+        folder = tmp_path / "chat" / conv["id"]
+        folder.mkdir(parents=True)
+        Image.new("RGB", (1536, 2048), "red").save(folder / "img_big.png")
+        resp = client.get(f"/api/chat/media/{conv['id']}/img_big.png/preview")
+        assert resp.status_code == 200 and resp.headers["content-type"] == "image/jpeg"
+        assert min(Image.open(io.BytesIO(resp.content)).size) == 768
+        assert client.get(f"/api/chat/media/{conv['id']}/nope.png/preview").status_code == 404
+
+    def test_deleting_a_chat_removes_its_messages_and_files(self, client, conv, db, tmp_path):
+        for i in range(30):
+            db.add_chat_message(conv["id"], "user" if i % 2 == 0 else "assistant", f"m{i}")
+        folder = tmp_path / "chat" / conv["id"]
+        folder.mkdir(parents=True)
+        (folder / "img_a.png").write_bytes(_png_bytes())
+        assert client.delete(f"/api/chat/conversations/{conv['id']}").status_code == 200
+        assert db.get_chat_messages(conv["id"]) == []
+        assert not folder.exists()  # moved aside at once, then removed in the background
+        for _ in range(50):
+            if not list((tmp_path / "chat").glob(".deleting-*")):
+                break
+            time.sleep(0.02)
+        assert not list((tmp_path / "chat").glob(".deleting-*"))

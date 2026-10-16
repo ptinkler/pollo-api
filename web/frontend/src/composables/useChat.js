@@ -72,6 +72,8 @@ export const uploadChatAttachment = (convId, file) =>
   apiUpload(`/api/chat/conversations/${enc(convId)}/attachments`, file)
 
 export const chatMediaUrl = (convId, file) => `/api/chat/media/${enc(convId)}/${enc(file)}`
+// A chat image scaled down for showing in the chat (the full file is for the lightbox)
+export const chatMediaPreviewUrl = (convId, file) => `${chatMediaUrl(convId, file)}/preview`
 
 // ── Streaming turns ──────────────────────────────────────────────────
 

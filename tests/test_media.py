@@ -348,13 +348,13 @@ class TestThumbnails:
         ]
         real, lock, state = media_mod.make_thumb, threading.Lock(), {"now": 0, "peak": 0}
 
-        def slow_thumb(path):
+        def slow_thumb(path, size=media_mod.THUMB_SIZE):
             with lock:
                 state["now"] += 1
                 state["peak"] = max(state["peak"], state["now"])
             time.sleep(0.05)
             try:
-                return real(path)
+                return real(path, size)
             finally:
                 with lock:
                     state["now"] -= 1
