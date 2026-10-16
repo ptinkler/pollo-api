@@ -245,6 +245,7 @@ class ConversationCreate(BaseModel):
     instruction_ids: list[int] = []
     instruction_group_ids: list[int] = []
     character_ids: list[int] = []
+    hidden_defaults: dict[str, list[int]] = {}  # defaults switched off in this chat only
 
 
 class ConversationUpdate(BaseModel):
@@ -256,6 +257,8 @@ class ConversationUpdate(BaseModel):
     instruction_ids: list[int] | None = None  # explicit [] detaches all snippets
     instruction_group_ids: list[int] | None = None  # explicit [] detaches all groups
     character_ids: list[int] | None = None
+    # Defaults switched off in this chat only: {kind: [ids]} (kinds as in _KINDS)
+    hidden_defaults: dict[str, list[int]] | None = None
     pinned: bool | None = None
 
 
@@ -567,6 +570,7 @@ def api_create_conversation(data: ConversationCreate):
     instruction_group_ids = _require_instruction_groups(data.instruction_group_ids)
     characters.require(data.character_ids, db)
     character_ids = list(dict.fromkeys(data.character_ids))
+    hidden_defaults = _require_hidden_defaults(data.hidden_defaults)
 
     conv = db.create_conversation(
         title=(data.title or DEFAULT_TITLE).strip()[:255] or DEFAULT_TITLE,
@@ -577,8 +581,16 @@ def api_create_conversation(data: ConversationCreate):
         instruction_ids=instruction_ids,
         instruction_group_ids=instruction_group_ids,
         character_ids=character_ids,
+        hidden_defaults=hidden_defaults,
     )
     return conv.to_dict()
+
+
+def _require_hidden_defaults(value: dict | None) -> dict[str, list[int]]:
+    unknown = set(value or {}) - set(_KINDS)
+    if unknown:
+        raise HTTPException(400, f"Unknown kind of default: {', '.join(sorted(unknown))}")
+    return {k: list(dict.fromkeys(ids)) for k, ids in (value or {}).items()}
 
 
 def _require_instructions(ids: list[int]) -> list[int]:
@@ -603,13 +615,22 @@ _KINDS = ("character", "instruction", "instruction_group")
 def _inherited(conv) -> dict[str, list[int]]:
     """What a chat gets from the defaults, live: the global defaults, then its
     space's own, de-duped, per kind ("character", "instruction",
-    "instruction_group"). Changing a default changes every chat it applies to."""
+    "instruction_group") — less any it has switched off for itself. Changing a
+    default changes every chat it applies to."""
     db = get_db()
     buckets = [db.get_settings()]
     space = db.get_space(conv.space_id) if conv and conv.space_id is not None else None
     if space:
         buckets.append(space)
-    return {k: list(dict.fromkeys(i for b in buckets for i in getattr(b, f"default_{k}_ids"))) for k in _KINDS}
+    hidden = conv.hidden_defaults if conv else {}
+    return {
+        k: [
+            i
+            for i in dict.fromkeys(i for b in buckets for i in getattr(b, f"default_{k}_ids"))
+            if i not in hidden.get(k, [])
+        ]
+        for k in _KINDS
+    }
 
 
 def _effective_ids(conv, kind: str) -> list[int]:
@@ -824,6 +845,7 @@ def api_fork_conversation(conv_id: str, data: ForkConversation):
         space_id=conv.space_id,
         instruction_ids=conv.instruction_ids,
         instruction_group_ids=conv.instruction_group_ids,
+        hidden_defaults=conv.hidden_defaults,
         settings=conv.settings,
         forked_from_id=conv_id,
         forked_from_message_id=at.id,
@@ -945,6 +967,8 @@ def api_update_conversation(conv_id: str, data: ConversationUpdate):
         fields["title"] = (fields["title"] or "").strip()[:255] or DEFAULT_TITLE
     if "character_ids" in fields:
         characters.require(fields["character_ids"], get_db())
+    if "hidden_defaults" in fields:
+        fields["hidden_defaults"] = _require_hidden_defaults(fields["hidden_defaults"])
     if "pinned" in fields:
         # Not an edit: the chat keeps its place among the rest
         get_db().set_conversation_pinned(conv_id, bool(fields.pop("pinned")))

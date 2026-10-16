@@ -15,8 +15,12 @@ const props = defineProps({
   // Attached by the chat's defaults: [{ id, from }] — shown, but changed in the defaults, not here
   inheritedSnippets: { type: Array, default: () => [] },
   inheritedGroups: { type: Array, default: () => [] },
+  // Defaults switched off in this chat: [{ id, from }] — offered in the menu to switch back on
+  hiddenSnippets: { type: Array, default: () => [] },
+  hiddenGroups: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['update:snippetIds', 'update:groupIds', 'manage', 'edit'])
+// 'hide' / 'unhide': { kind, id } — a default switched off / on in this chat only
+const emit = defineEmits(['update:snippetIds', 'update:groupIds', 'manage', 'edit', 'hide', 'unhide'])
 
 const SEARCH_FROM = 8 // the menu gets a search box once there's this much to pick from
 
@@ -27,12 +31,14 @@ const searchInput = ref(null)
 
 const snippetById = computed(() => new Map(props.instructions.map(s => [s.id, s])))
 const groupById = computed(() => new Map(props.groups.map(g => [g.id, g])))
-const inheritedGroupIds = computed(() => props.inheritedGroups.map(x => x.id))
-const inheritedSnippetIds = computed(() => props.inheritedSnippets.map(x => x.id))
+const inheritedGroupIds = computed(() => [...props.inheritedGroups, ...props.hiddenGroups].map(x => x.id))
+const inheritedSnippetIds = computed(() => [...props.inheritedSnippets, ...props.hiddenSnippets].map(x => x.id))
 const fromDefaults = (list, byId) =>
   list.map(x => byId.get(x.id) && { ...byId.get(x.id), from: x.from }).filter(Boolean)
 const defaultGroups = computed(() => fromDefaults(props.inheritedGroups, groupById.value))
 const defaultSnippets = computed(() => fromDefaults(props.inheritedSnippets, snippetById.value))
+const hiddenGroupItems = computed(() => fromDefaults(props.hiddenGroups, groupById.value).filter(matches))
+const hiddenSnippetItems = computed(() => fromDefaults(props.hiddenSnippets, snippetById.value).filter(matches))
 const attachedGroups = computed(() =>
   props.groupIds
     .filter(id => !inheritedGroupIds.value.includes(id))
@@ -64,7 +70,18 @@ const unattachedSnippets = computed(() =>
 const searchable = computed(() => unattachedGroups.value.length + unattachedSnippets.value.length >= SEARCH_FROM)
 const availableGroups = computed(() => unattachedGroups.value.filter(matches))
 const availableSnippets = computed(() => unattachedSnippets.value.filter(matches))
-const nothingToAdd = computed(() => !availableGroups.value.length && !availableSnippets.value.length)
+const nothingToAdd = computed(
+  () =>
+    !availableGroups.value.length &&
+    !availableSnippets.value.length &&
+    !hiddenGroupItems.value.length &&
+    !hiddenSnippetItems.value.length,
+)
+
+function unhide(kind, item) {
+  emit('unhide', { kind, id: item.id })
+  close()
+}
 
 function groupTitle(g) {
   const n = g.snippet_ids?.length || 0
@@ -134,6 +151,13 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
           <span class="chip-name">📦 {{ g.name }}</span>
         </button>
         <span class="chip-src">{{ fromIcon(g.from) }}</span>
+        <button
+          class="chip-x"
+          :title="`Hide ${g.name} in this chat`"
+          @click="emit('hide', { kind: 'group', id: g.id })"
+        >
+          ✕
+        </button>
       </span>
       <span
         v-for="s in defaultSnippets"
@@ -146,6 +170,13 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
           <span class="chip-name">{{ s.name }}</span>
         </button>
         <span class="chip-src">{{ fromIcon(s.from) }}</span>
+        <button
+          class="chip-x"
+          :title="`Hide ${s.name} in this chat`"
+          @click="emit('hide', { kind: 'snippet', id: s.id })"
+        >
+          ✕
+        </button>
       </span>
       <span v-for="g in attachedGroups" :key="`g${g.id}`" class="chip group" :title="`${g.name} · ${groupTitle(g)}`">
         <button class="chip-main" @click="emit('edit', { kind: 'group', id: g.id })">
@@ -186,6 +217,30 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
         <span class="dot" :style="{ background: instructionColor(s.name) }"></span>
         <span class="item-name">{{ s.name }}</span>
       </button>
+      <template v-if="hiddenGroupItems.length || hiddenSnippetItems.length">
+        <p class="menu-head">Hidden in this chat</p>
+        <button
+          v-for="g in hiddenGroupItems"
+          :key="`hg${g.id}`"
+          class="item hidden-default"
+          :title="`Use ${g.name} here again (${fromTitle(g.from).toLowerCase()})`"
+          @click="unhide('group', g)"
+        >
+          <span class="item-name">📦 {{ g.name }}</span>
+          <span class="tag">{{ fromIcon(g.from) }}</span>
+        </button>
+        <button
+          v-for="s in hiddenSnippetItems"
+          :key="`hs${s.id}`"
+          class="item hidden-default"
+          :title="`Use ${s.name} here again (${fromTitle(s.from).toLowerCase()})`"
+          @click="unhide('snippet', s)"
+        >
+          <span class="dot" :style="{ background: instructionColor(s.name) }"></span>
+          <span class="item-name">{{ s.name }}</span>
+          <span class="tag">{{ fromIcon(s.from) }}</span>
+        </button>
+      </template>
       <p v-if="nothingToAdd" class="empty">
         {{
           query.trim() ? 'Nothing matches' : instructions.length || groups.length ? 'All attached' : 'None saved yet'
@@ -231,9 +286,14 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
 
 .chip-src {
   flex-shrink: 0;
-  padding: 0 8px 0 2px;
+  padding: 0 0 0 2px;
   font-size: 0.7rem;
   opacity: 0.75;
+}
+
+.item.hidden-default .item-name {
+  opacity: 0.6;
+  text-decoration: line-through;
 }
 
 .dot {

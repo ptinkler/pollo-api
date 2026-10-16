@@ -293,11 +293,38 @@ function manageInstructions() {
   router.push({ name: 'instructions' })
 }
 // What the chat in context gets from its defaults (global + its space's), live
-const { inherited: inheritedDefaults } = useChatDefaults()
+// — less any switched off in this chat only (hiddenDefaults: { kind: [ids] })
+const { inherited: allInherited } = useChatDefaults()
+const NO_HIDDEN = () => ({ character: [], instruction: [], instruction_group: [] })
+const hiddenDefaults = ref(NO_HIDDEN())
+const splitInherited = hidden =>
+  Object.fromEntries(
+    Object.entries(allInherited.value).map(([kind, list]) => [
+      kind,
+      list.filter(x => hidden === (hiddenDefaults.value[kind] || []).includes(x.id)),
+    ]),
+  )
+const inheritedDefaults = computed(() => splitInherited(false)) // in use here
+const hiddenInherited = computed(() => splitInherited(true)) // switched off here
 const inheritedInstructionIds = computed(() => ({
   snippets: inheritedDefaults.value.instruction.map(x => x.id),
   groups: inheritedDefaults.value.instruction_group.map(x => x.id),
 }))
+
+// Switch a default off (or back on) in this chat only. The pickers say
+// 'snippet' / 'group' for instructions; the chat stores the defaults' kinds.
+const DEFAULT_KIND = { snippet: 'instruction', group: 'instruction_group' }
+async function setDefaultHidden({ kind: picked, id }, hide) {
+  const kind = DEFAULT_KIND[picked] || picked
+  const ids = hiddenDefaults.value[kind].filter(x => x !== id)
+  hiddenDefaults.value = { ...hiddenDefaults.value, [kind]: hide ? [...ids, id] : ids }
+  if (!convId.value) return // a new chat gets them on creation
+  try {
+    await patchConversation(convId.value, { hidden_defaults: hiddenDefaults.value })
+  } catch (e) {
+    showToast(`Couldn't update the chat: ${e.message}`, 'error')
+  }
+}
 const {
   instructions,
   groups: instructionGroups,
@@ -335,6 +362,7 @@ function seedAttachments() {
   instructionIds.value = []
   instructionGroupIds.value = []
   characterIds.value = []
+  hiddenDefaults.value = NO_HIDDEN()
 }
 
 // Tell the shared defaults store which space is in context (for the add-to
@@ -408,6 +436,7 @@ async function loadConversation(id) {
     instructionIds.value = c.instruction_ids || []
     instructionGroupIds.value = c.instruction_group_ids || []
     characterIds.value = c.character_ids || []
+    hiddenDefaults.value = { ...NO_HIDDEN(), ...c.hidden_defaults }
     applyChat(c)
     document.title = `${c.title} — Chat`
     scrollToBottom(true)
@@ -441,6 +470,7 @@ async function ensureConversation() {
     instruction_ids: instructionIds.value, // explicit, so "None" sticks
     instruction_group_ids: instructionGroupIds.value,
     character_ids: characterIds.value,
+    hidden_defaults: hiddenDefaults.value,
   })
   conversation.value = conv
   chatList.add(conv)
@@ -855,6 +885,10 @@ onBeforeUnmount(() => {
             :group-ids="instructionGroupIds"
             :inherited-snippets="inheritedDefaults.instruction"
             :inherited-groups="inheritedDefaults.instruction_group"
+            :hidden-snippets="hiddenInherited.instruction"
+            :hidden-groups="hiddenInherited.instruction_group"
+            @hide="setDefaultHidden($event, true)"
+            @unhide="setDefaultHidden($event, false)"
             @update:snippet-ids="setInstructions"
             @update:group-ids="setGroups"
             @manage="manageInstructions"
@@ -882,7 +916,10 @@ onBeforeUnmount(() => {
             :model-value="characterIds"
             :characters="characters"
             :inherited="inheritedDefaults.character"
+            :hidden="hiddenInherited.character"
             create-label="＋ New character (this chat)"
+            @hide="setDefaultHidden({ kind: 'character', id: $event }, true)"
+            @unhide="setDefaultHidden({ kind: 'character', id: $event }, false)"
             @update:model-value="setCharacters"
             @edit="editCharacter"
             @create="newCharacter()"

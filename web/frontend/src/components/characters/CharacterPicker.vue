@@ -11,14 +11,25 @@ const props = defineProps({
   createLabel: { type: String, default: '＋ New character' },
   // Attached by the chat's defaults: [{ id, from }] — shown, but changed in the defaults, not here
   inherited: { type: Array, default: () => [] },
+  // Defaults switched off in this chat: [{ id, from }] — offered in the menu to switch back on
+  hidden: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['update:modelValue', 'edit', 'create'])
+// 'hide' / 'unhide': a default character's id, switched off / on in this chat only
+const emit = defineEmits(['update:modelValue', 'edit', 'create', 'hide', 'unhide'])
 
 const open = ref(false)
 const root = ref(null)
 
 const byId = computed(() => new Map(props.characters.map(c => [c.id, c])))
-const inheritedIds = computed(() => props.inherited.map(x => x.id))
+const inheritedIds = computed(() => [...props.inherited, ...props.hidden].map(x => x.id))
+const hiddenItems = computed(() =>
+  props.hidden.map(x => byId.value.get(x.id) && { ...byId.value.get(x.id), from: x.from }).filter(Boolean),
+)
+
+function unhide(c) {
+  emit('unhide', c.id)
+  close()
+}
 const fromDefaults = computed(() =>
   props.inherited.map(x => byId.value.get(x.id) && { ...byId.value.get(x.id), from: x.from }).filter(Boolean),
 )
@@ -83,6 +94,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
           {{ c.name }}
         </button>
         <span class="chip-src">{{ c.from === 'All chats' ? '🌐' : '🗂' }}</span>
+        <button class="chip-x" :title="`Hide ${c.name} in this chat`" @click="emit('hide', c.id)">✕</button>
       </span>
       <span
         v-for="c in attached"
@@ -110,7 +122,23 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
         <span class="item-name">{{ c.name }}</span>
         <span v-if="c.adhoc" class="tag">this chat</span>
       </button>
-      <p v-if="!available.length" class="empty">{{ characters.length ? 'All attached' : 'No characters yet' }}</p>
+      <template v-if="hiddenItems.length">
+        <p class="menu-head">Hidden in this chat</p>
+        <button
+          v-for="c in hiddenItems"
+          :key="`h${c.id}`"
+          class="item hidden-default"
+          :title="`Use ${c.name} here again`"
+          @click="unhide(c)"
+        >
+          <img v-if="characterAvatar(c)" :src="characterAvatar(c)" alt="" />
+          <span v-else class="avatar-blank">👤</span>
+          <span class="item-name">{{ c.name }}</span>
+        </button>
+      </template>
+      <p v-if="!available.length && !hiddenItems.length" class="empty">
+        {{ characters.length ? 'All attached' : 'No characters yet' }}
+      </p>
       <button v-if="allowCreate" class="item create" @click="create">{{ createLabel }}</button>
     </div>
   </div>
@@ -148,9 +176,22 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
 
 .chip-src {
   flex-shrink: 0;
-  padding: 0 8px 0 2px;
+  padding: 0 0 0 2px;
   font-size: 0.7rem;
   opacity: 0.75;
+}
+
+.menu-head {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text2);
+  padding: 6px 8px 2px;
+}
+
+.item.hidden-default {
+  opacity: 0.6;
+  text-decoration: line-through;
 }
 
 .chip-main {

@@ -3219,3 +3219,42 @@ class TestPolloRequestLog:
         assert entry["provider"] == "pollo" and entry["model"] == "seedance-2-0" and entry["status"] == 200
         assert entry["path"] == "/api/platform/generation/bytedance/seedance-2-0"
         assert entry["request"] == {"input": {"prompt": "waves", "image": "https://host/x.png"}}
+
+
+class TestHiddenDefaults:
+    """A chat can switch off any of its defaults for itself only."""
+
+    def test_hiding_a_default_in_one_chat_leaves_the_others(self, client, chat):
+        a = client.post("/api/chat/instructions", json={"name": "A", "content": "aa"}).json()
+        b = client.post("/api/chat/instructions", json={"name": "B", "content": "bb"}).json()
+        client.put("/api/chat/settings", json={"default_instruction_ids": [a["id"], b["id"]]})
+        one = client.post("/api/chat/conversations", json={}).json()
+        two = client.post("/api/chat/conversations", json={}).json()
+        hidden = client.patch(
+            f"/api/chat/conversations/{one['id']}", json={"hidden_defaults": {"instruction": [a["id"]]}}
+        ).json()
+        assert hidden["hidden_defaults"]["instruction"] == [a["id"]]
+        assert chat._conversation_instructions(one["id"]) == "bb"
+        assert chat._conversation_instructions(two["id"]) == "aa\n\nbb"
+        # Shown again
+        client.patch(f"/api/chat/conversations/{one['id']}", json={"hidden_defaults": {}})
+        assert chat._conversation_instructions(one["id"]) == "aa\n\nbb"
+
+    def test_a_new_chat_can_start_with_some_hidden(self, client, chat, db):
+        c1 = db.create_character("Alice")
+        client.put("/api/chat/settings", json={"default_character_ids": [c1.id]})
+        conv = client.post("/api/chat/conversations", json={"hidden_defaults": {"character": [c1.id]}}).json()
+        assert chat._effective_ids(db.get_conversation(conv["id"]), "character") == []
+
+    def test_a_branch_keeps_what_was_hidden(self, client, chat, db, monkeypatch):
+        a = client.post("/api/chat/instructions", json={"name": "A", "content": "aa"}).json()
+        client.put("/api/chat/settings", json={"default_instruction_ids": [a["id"]]})
+        conv = client.post("/api/chat/conversations", json={"hidden_defaults": {"instruction": [a["id"]]}}).json()
+        msg = db.add_chat_message(conv["id"], "user", "hi")
+        fork = client.post(f"/api/chat/conversations/{conv['id']}/fork", json={"message_id": msg.id}).json()
+        assert fork["hidden_defaults"]["instruction"] == [a["id"]]
+
+    def test_unknown_kinds_are_refused(self, client):
+        conv = client.post("/api/chat/conversations", json={}).json()
+        resp = client.patch(f"/api/chat/conversations/{conv['id']}", json={"hidden_defaults": {"nope": [1]}})
+        assert resp.status_code == 400

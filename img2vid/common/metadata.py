@@ -217,6 +217,9 @@ class ChatConversation(Base):
     pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     # The composer settings last used here (mode, sliders, media options; JSON)
     settings_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Defaults (global or its space's) switched off in this chat only:
+    # {"character" | "instruction" | "instruction_group": [ids]} (JSON)
+    hidden_defaults_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Imported from another app (web/chatgpt_import.py): where from, its id
     # there and when it was last changed there, so a later import of the
     # same export only adds what's new
@@ -251,10 +254,24 @@ class ChatConversation(Base):
             "forked_from_message_id": self.forked_from_message_id,
             "pinned": bool(self.pinned),
             "settings": self.settings,
+            "hidden_defaults": self.hidden_defaults,
             "import_source": self.import_source,
             "created_at": iso(self.created_at),
             "updated_at": iso(self.updated_at),
         }
+
+    @property
+    def hidden_defaults(self) -> dict[str, list[int]]:
+        try:
+            raw = json.loads(self.hidden_defaults_json) if self.hidden_defaults_json else {}
+        except json.JSONDecodeError:
+            raw = {}
+        return {k: raw.get(k) or [] for k in ("character", "instruction", "instruction_group")}
+
+    @hidden_defaults.setter
+    def hidden_defaults(self, value: dict[str, list[int]] | None) -> None:
+        kept = {k: list(dict.fromkeys(ids)) for k, ids in (value or {}).items() if ids}
+        self.hidden_defaults_json = json.dumps(kept) if kept else None
 
     @property
     def settings(self) -> dict[str, Any] | None:
@@ -680,6 +697,7 @@ class MetadataDB:
             "inherited_credits": "INTEGER",
             "pinned": "BOOLEAN NOT NULL DEFAULT 0",
             "settings_json": "TEXT",
+            "hidden_defaults_json": "TEXT",
             "import_source": "VARCHAR(20)",
             "import_id": "VARCHAR(100)",
             "import_updated_at": "FLOAT",

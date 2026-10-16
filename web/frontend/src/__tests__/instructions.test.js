@@ -112,7 +112,7 @@ describe('InstructionPicker', () => {
     expect(w.emitted('edit')).toEqual([[{ kind: 'group', id: 7 }], [{ kind: 'snippet', id: 2 }]])
   })
 
-  it('shows what the defaults attach without a ✕, and leaves it out of the add menu', async () => {
+  it('shows what the defaults attach, which can be hidden in this chat and brought back', async () => {
     const w = mount(InstructionPicker, {
       props: {
         instructions: snippets,
@@ -121,14 +121,19 @@ describe('InstructionPicker', () => {
         groupIds: [],
         inheritedSnippets: [{ id: 1, from: 'Novel' }],
         inheritedGroups: [{ id: 7, from: 'All chats' }],
+        hiddenSnippets: [{ id: 3, from: 'All chats' }],
       },
     })
     const inherited = w.findAll('.chip.inherited')
     expect(inherited.map(c => c.find('.chip-name').text())).toEqual(['📦 House style', 'Terse tone'])
-    expect(inherited.every(c => !c.find('.chip-x').exists())).toBe(true)
     expect(inherited[1].attributes('title')).toContain('From the Novel defaults')
+    await inherited[1].find('.chip-x').trigger('click')
+    expect(w.emitted('hide')).toEqual([[{ kind: 'snippet', id: 1 }]])
+    // The hidden one is offered to switch back on, not to attach as the chat's own
     await w.find('.add').trigger('click')
-    expect(w.findAll('.menu .item').map(i => i.text())).toEqual(['No emoji', '⚙ All instructions…'])
+    expect(w.findAll('.menu .item').map(i => i.text())).toEqual(['No emoji🌐', '⚙ All instructions…'])
+    await w.find('.menu .item.hidden-default').trigger('click')
+    expect(w.emitted('unhide')).toEqual([[{ kind: 'snippet', id: 3 }]])
     w.unmount()
   })
 
