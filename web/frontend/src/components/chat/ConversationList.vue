@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
+import ConversationRow from './ConversationRow.vue'
 import FoldHeading from './FoldHeading.vue'
 import MoveChatDialog from './MoveChatDialog.vue'
 import { useFolded } from '../../composables/useFolded'
@@ -44,7 +45,7 @@ function moveTo(conv, spaceId) {
 }
 
 // ── Dragging chats between spaces ──
-function onDragStart(e, conv) {
+function onDragStart(conv, e) {
   dragged.value = conv
   e.dataTransfer.effectAllowed = 'move'
   e.dataTransfer.setData('text/plain', conv.title) // Firefox won't drag without data
@@ -72,6 +73,17 @@ function onDrop(spaceId) {
   if (conv) moveTo(conv, spaceId)
 }
 
+// What every chat row does (the same in search results, spaces and Chats)
+const rowHandlers = {
+  open: id => emit('open', id),
+  pin: c => props.list.togglePin(c),
+  'move-to': c => (moving.value = c),
+  rename: c => emit('rename', c),
+  remove: c => emit('remove', c),
+  dragstart: onDragStart,
+  dragend: onDragEnd,
+}
+
 const dropHandlers = spaceId => ({
   dragover: e => onDragOver(e, spaceId),
   dragleave: e => onDragLeave(e, spaceId),
@@ -95,26 +107,13 @@ const dropHandlers = spaceId => ({
 
   <!-- Search: flat results across every chat -->
   <div v-if="searching" class="conv-list">
-    <div
+    <ConversationRow
       v-for="c in list.searchResults"
       :key="c.id"
-      class="conv-item"
-      :class="{ active: c.id === activeId }"
-      @click="emit('open', c.id)"
-    >
-      <span class="conv-text">
-        <span class="conv-title">{{ c.title }}</span>
-        <span v-if="c.snippet" class="conv-snippet">{{ c.snippet }}</span>
-      </span>
-      <span class="conv-actions" @click.stop>
-        <button :class="{ on: c.pinned }" :title="c.pinned ? 'Unpin' : 'Pin to the top'" @click="list.togglePin(c)">
-          📌
-        </button>
-        <button title="Move to…" @click="moving = c">↪</button>
-        <button title="Rename" @click="emit('rename', c)">✎</button>
-        <button title="Delete" @click="emit('remove', c)">🗑</button>
-      </span>
-    </div>
+      :conv="c"
+      :active="c.id === activeId"
+      v-on="rowHandlers"
+    />
     <p v-if="!list.searchResults.length" class="conv-empty">No chats match</p>
   </div>
 
@@ -147,31 +146,16 @@ const dropHandlers = spaceId => ({
           <button class="space-add" title="New chat here" @click="emit('new-in-space', f.space.id)">＋</button>
         </div>
         <template v-if="!isFolded(`space:${f.space.id}`)">
-          <div
+          <ConversationRow
             v-for="c in f.items"
             :key="c.id"
-            class="conv-item nested"
-            :class="{ active: c.id === activeId, dragging: dragged?.id === c.id }"
-            draggable="true"
-            @dragstart="onDragStart($event, c)"
-            @dragend="onDragEnd"
-            @click="emit('open', c.id)"
-          >
-            <span class="conv-text">
-              <span class="conv-title"
-                ><span v-if="c.forked_from_id" class="conv-fork" title="Branched off another chat">⑂ </span
-                >{{ c.title }}</span
-              >
-            </span>
-            <span class="conv-actions" @click.stop>
-              <button :class="{ on: c.pinned }" :title="c.pinned ? 'Unpin' : 'Pin'" @click="list.togglePin(c)">
-                📌
-              </button>
-              <button title="Move to…" @click="moving = c">↪</button>
-              <button title="Rename" @click="emit('rename', c)">✎</button>
-              <button title="Delete" @click="emit('remove', c)">🗑</button>
-            </span>
-          </div>
+            :conv="c"
+            :active="c.id === activeId"
+            :dragging="dragged?.id === c.id"
+            nested
+            draggable
+            v-on="rowHandlers"
+          />
           <p v-if="!f.items.length" class="space-empty">No chats yet. Drag one here.</p>
         </template>
       </div>
@@ -199,35 +183,15 @@ const dropHandlers = spaceId => ({
       <div v-show="!isFolded('chats')" class="conv-list">
         <template v-for="g in unfiledGroups" :key="g.label">
           <div class="conv-group">{{ g.label }}</div>
-          <div
+          <ConversationRow
             v-for="c in g.items"
             :key="c.id"
-            class="conv-item"
-            :class="{ active: c.id === activeId, dragging: dragged?.id === c.id }"
-            draggable="true"
-            @dragstart="onDragStart($event, c)"
-            @dragend="onDragEnd"
-            @click="emit('open', c.id)"
-          >
-            <span class="conv-text">
-              <span class="conv-title"
-                ><span v-if="c.forked_from_id" class="conv-fork" title="Branched off another chat">⑂ </span
-                >{{ c.title }}</span
-              >
-            </span>
-            <span class="conv-actions" @click.stop>
-              <button
-                :class="{ on: c.pinned }"
-                :title="c.pinned ? 'Unpin' : 'Pin to the top'"
-                @click="list.togglePin(c)"
-              >
-                📌
-              </button>
-              <button title="Move to…" @click="moving = c">↪</button>
-              <button title="Rename" @click="emit('rename', c)">✎</button>
-              <button title="Delete" @click="emit('remove', c)">🗑</button>
-            </span>
-          </div>
+            :conv="c"
+            :active="c.id === activeId"
+            :dragging="dragged?.id === c.id"
+            draggable
+            v-on="rowHandlers"
+          />
         </template>
         <p v-if="!unfiledGroups.length" class="conv-empty">No chats yet</p>
         <p v-if="list.more" class="conv-empty">Older chats aren't listed. Search to find them.</p>
@@ -264,10 +228,6 @@ const dropHandlers = spaceId => ({
 .drop-zone.drop-over {
   background: rgba(108, 92, 231, 0.12);
   box-shadow: inset 0 0 0 1px rgba(108, 92, 231, 0.55);
-}
-
-.conv-item.dragging {
-  opacity: 0.45;
 }
 
 .space-btn {
@@ -385,61 +345,6 @@ const dropHandlers = spaceId => ({
   color: var(--text);
 }
 
-.conv-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 10px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  color: var(--text2);
-}
-
-.conv-item.nested {
-  margin-left: 16px;
-  padding-left: 10px;
-  border-left: 1px solid var(--border);
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-}
-
-.conv-item:hover {
-  background: var(--surface2);
-  color: var(--text);
-}
-
-.conv-item.active {
-  background: rgba(108, 92, 231, 0.18);
-  color: var(--text);
-}
-
-.conv-text {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.conv-title {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.conv-fork {
-  color: var(--accent);
-}
-
-.conv-snippet {
-  font-size: 0.72rem;
-  color: var(--text2);
-  opacity: 0.8;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .conv-group {
   font-size: 0.66rem;
   text-transform: uppercase;
@@ -458,45 +363,6 @@ const dropHandlers = spaceId => ({
   padding: 6px 10px;
   font-size: 0.82rem;
   border-radius: 8px;
-}
-
-.conv-actions {
-  display: none;
-  gap: 2px;
-}
-
-.conv-item:hover .conv-actions {
-  display: flex;
-}
-
-.conv-actions button {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 0.8rem;
-  padding: 2px 4px;
-  border-radius: 4px;
-  color: var(--text2);
-}
-
-.conv-actions button:hover {
-  background: var(--border);
-}
-
-.conv-actions button:not(.on):first-child {
-  opacity: 0.5;
-}
-
-.conv-item:has(.conv-actions .on) .conv-actions {
-  display: flex;
-}
-
-.conv-item:has(.conv-actions .on) .conv-actions button:not(.on) {
-  display: none;
-}
-
-.conv-item:hover:has(.conv-actions .on) .conv-actions button:not(.on) {
-  display: inline-block;
 }
 
 .conv-empty {

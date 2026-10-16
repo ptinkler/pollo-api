@@ -1,8 +1,10 @@
 <script setup>
 import { computed, inject, nextTick, ref, watch } from 'vue'
+import BaseDialog from '../BaseDialog.vue'
 import CharacterPicker from '../characters/CharacterPicker.vue'
 import InstructionPicker from './InstructionPicker.vue'
 import { createSpace, deleteSpace, updateSettings, updateSpace } from '../../composables/useChat'
+import { sameIds } from '../../utils/defaults'
 
 // Settings for one bucket of new-chat defaults: a space (its name, and the
 // characters and instructions chats made in it start with), a new space, or
@@ -31,7 +33,6 @@ const title = computed(() =>
   isGlobal.value ? 'Defaults for every chat' : isNew.value ? 'New space' : `“${props.target?.name}” settings`,
 )
 
-const sameIds = (a, b) => a.length === b.length && a.every(x => b.includes(x))
 const bucket = computed(() => (isGlobal.value ? props.globalSettings : isNew.value ? null : props.target))
 const bucketLists = b => ({
   chars: b?.default_character_ids || [],
@@ -106,126 +107,55 @@ async function remove() {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="target" class="backdrop" @click.self="close" @keydown.esc="close">
-      <form class="dialog" role="dialog" :aria-label="title" @submit.prevent="save">
-        <div class="head">
-          <h3>{{ title }}</h3>
-          <button type="button" class="x" title="Close" @click="close">✕</button>
-        </div>
-        <p class="sub">
-          <template v-if="isGlobal">Every new chat starts with these characters and instructions.</template>
-          <template v-else> New chats in this space start with these, on top of the defaults for every chat. </template>
-        </p>
+  <BaseDialog :open="!!target" :title="title" form @close="close" @submit="save">
+    <p class="sub">
+      <template v-if="isGlobal">Every chat uses these characters and instructions.</template>
+      <template v-else>Every chat in this space uses these, on top of the ones for all chats.</template>
+    </p>
 
-        <div class="fields">
-          <template v-if="!isGlobal">
-            <label for="space-name">Name</label>
-            <input id="space-name" ref="nameInput" v-model="name" maxlength="255" placeholder="e.g. Fantasy novel" />
-          </template>
+    <template v-if="!isGlobal">
+      <label for="space-name">Name</label>
+      <input id="space-name" ref="nameInput" v-model="name" maxlength="255" placeholder="e.g. Fantasy novel" />
+    </template>
 
-          <label>Default characters</label>
-          <CharacterPicker
-            :model-value="charIds"
-            :characters="characters"
-            :allow-create="false"
-            @update:model-value="charIds = $event"
-          />
+    <label>Default characters</label>
+    <CharacterPicker
+      :model-value="charIds"
+      :characters="characters"
+      :allow-create="false"
+      @update:model-value="charIds = $event"
+    />
 
-          <label>Default instructions</label>
-          <InstructionPicker
-            :instructions="instructions"
-            :groups="groups"
-            :snippet-ids="snippetIds"
-            :group-ids="groupIds"
-            :manageable="false"
-            @update:snippet-ids="snippetIds = $event"
-            @update:group-ids="groupIds = $event"
-          />
-        </div>
+    <label>Default instructions</label>
+    <InstructionPicker
+      :instructions="instructions"
+      :groups="groups"
+      :snippet-ids="snippetIds"
+      :group-ids="groupIds"
+      :manageable="false"
+      @update:snippet-ids="snippetIds = $event"
+      @update:group-ids="groupIds = $event"
+    />
 
-        <div class="actions">
-          <button v-if="!isGlobal && !isNew" type="button" class="btn btn-danger" @click="remove">Delete space</button>
-          <span class="spacer"></span>
-          <button type="button" class="btn btn-secondary" @click="close">Cancel</button>
-          <button class="btn btn-primary" :disabled="saving || (!isNew && !dirty) || (!isGlobal && !name.trim())">
-            {{ isNew ? 'Create space' : 'Save' }}
-          </button>
-        </div>
-      </form>
-    </div>
-  </Teleport>
+    <template #actions>
+      <button v-if="!isGlobal && !isNew" type="button" class="btn btn-danger" @click="remove">Delete space</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-secondary" @click="close">Cancel</button>
+      <button class="btn btn-primary" :disabled="saving || (!isNew && !dirty) || (!isGlobal && !name.trim())">
+        {{ isNew ? 'Create space' : 'Save' }}
+      </button>
+    </template>
+  </BaseDialog>
 </template>
 
 <style scoped>
-.backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  background: rgba(0, 0, 0, 0.7);
-  display: grid;
-  place-items: center;
-  padding: 16px;
-}
-
-.dialog {
-  width: min(480px, 100%);
-  max-height: calc(100vh - 32px);
-  display: flex;
-  flex-direction: column;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 18px 20px;
-}
-
-.head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.head h3 {
-  flex: 1;
-  min-width: 0;
-  font-size: 1.05rem;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.x {
-  background: none;
-  border: none;
-  color: var(--text2);
-  font-size: 1rem;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 6px;
-}
-
-.x:hover {
-  background: var(--surface2);
-  color: var(--text);
-}
-
 .sub {
   font-size: 0.8rem;
   color: var(--text2);
-  margin: 6px 0 10px;
   line-height: 1.45;
 }
 
-.fields {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.fields label {
+label {
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -233,23 +163,8 @@ async function remove() {
   margin-top: 6px;
 }
 
-.fields input {
+input {
   padding: 8px 10px;
   border-radius: 8px;
-}
-
-.actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 16px;
-}
-
-.actions .btn {
-  padding: 8px 16px;
-}
-
-.spacer {
-  flex: 1;
 }
 </style>

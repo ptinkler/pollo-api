@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import { fetchSettings, updateSettings, fetchSpaces, updateSpace } from './useChat'
+import { ALL_CHATS } from '../utils/defaults'
 
 // Shared, app-wide state for the two "settings buckets": the global defaults
 // (every chat) and each space's own defaults (stacked on top for chats in that
@@ -29,7 +30,7 @@ export function useChatDefaults() {
     const out = {}
     for (const kind of ['character', 'instruction', 'instruction_group']) {
       const seen = new Map()
-      for (const id of globalSettings.value[key(kind)]) seen.set(id, 'All chats')
+      for (const id of globalSettings.value[key(kind)]) seen.set(id, ALL_CHATS)
       for (const id of currentSpace.value?.[key(kind)] || []) if (!seen.has(id)) seen.set(id, currentSpace.value.name)
       out[kind] = [...seen].map(([id, from]) => ({ id, from }))
     }

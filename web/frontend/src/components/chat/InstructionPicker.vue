@@ -1,6 +1,8 @@
 <script setup>
-import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
+import { ref, computed } from 'vue'
 import { instructionColor } from '../../utils/format'
+import { defaultIcon as fromIcon, defaultTitle as fromTitle } from '../../utils/defaults'
+import { useDropdown } from '../../composables/useDropdown'
 
 // Attached instruction groups and snippets as chips, plus a menu to attach
 // more. Editing and creating happen in InstructionEditor (and the Instructions page); this
@@ -24,10 +26,9 @@ const emit = defineEmits(['update:snippetIds', 'update:groupIds', 'manage', 'edi
 
 const SEARCH_FROM = 8 // the menu gets a search box once there's this much to pick from
 
-const open = ref(false)
-const root = ref(null)
 const query = ref('')
 const searchInput = ref(null)
+const { open, root, toggle, close } = useDropdown({ focus: searchInput, onOpen: () => (query.value = '') })
 
 const snippetById = computed(() => new Map(props.instructions.map(s => [s.id, s])))
 const groupById = computed(() => new Map(props.groups.map(g => [g.id, g])))
@@ -58,8 +59,6 @@ const anyAttached = computed(
     attachedGroups.value.length ||
     attachedSnippets.value.length,
 )
-const fromTitle = from => (from === 'All chats' ? 'From the defaults for all chats' : `From the ${from} defaults`)
-const fromIcon = from => (from === 'All chats' ? '🌐' : '🗂')
 const matches = item => item.name.toLowerCase().includes(query.value.trim().toLowerCase())
 const unattachedGroups = computed(() =>
   props.groups.filter(g => !props.groupIds.includes(g.id) && !inheritedGroupIds.value.includes(g.id)),
@@ -112,30 +111,10 @@ function detachSnippet(s) {
   )
 }
 
-function onDocClick(e) {
-  if (root.value && !root.value.contains(e.target)) close()
-}
-
-async function toggle() {
-  if (open.value) return close()
-  open.value = true
-  query.value = ''
-  document.addEventListener('mousedown', onDocClick)
-  await nextTick()
-  searchInput.value?.focus()
-}
-
-function close() {
-  open.value = false
-  document.removeEventListener('mousedown', onDocClick)
-}
-
 function manage() {
   close()
   emit('manage')
 }
-
-onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
 </script>
 
 <template>

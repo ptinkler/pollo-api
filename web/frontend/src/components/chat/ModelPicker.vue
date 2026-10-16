@@ -1,5 +1,6 @@
 <script setup>
-import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
+import { ref, computed } from 'vue'
+import { useDropdown } from '../../composables/useDropdown'
 import { useModelFavourites } from '../../composables/useModelFavourites'
 import { useShowHidden } from '../../composables/useShowHidden'
 import { useUncensoredOnly } from '../../composables/useUncensoredOnly'
@@ -19,9 +20,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:modelValue'])
 
-const open = ref(false)
 const query = ref('')
-const root = ref(null)
 const searchInput = ref(null)
 
 const current = computed(() => props.models.find(m => m.id === props.modelValue))
@@ -189,10 +188,6 @@ function videoBadges(m) {
   ]
 }
 
-function onDocClick(e) {
-  if (root.value && !root.value.contains(e.target)) close()
-}
-
 // The pop-up is position: fixed, placed next to its button, so a scrolling
 // or narrow container (the chat sidebar) can't clip it. It opens upwards
 // when there's more room above, and never runs off the window.
@@ -215,27 +210,22 @@ function place() {
   }
 }
 
-async function toggle() {
-  if (open.value) return close()
-  open.value = true
-  query.value = ''
-  // Open on the tab holding the current pick, so it's in view
-  if (props.modelValue) tab.value = providerOf(props.modelValue)
-  else if (!PROVIDERS.value[tab.value]) tab.value = Object.keys(PROVIDERS.value)[0] || tab.value
-  place()
-  document.addEventListener('mousedown', onDocClick)
-  window.addEventListener('resize', place)
-  window.addEventListener('scroll', place, true) // any scrolling ancestor moves the button
-  await nextTick()
-  searchInput.value?.focus()
-}
-
-function close() {
-  open.value = false
-  document.removeEventListener('mousedown', onDocClick)
-  window.removeEventListener('resize', place)
-  window.removeEventListener('scroll', place, true)
-}
+const { open, root, toggle, close } = useDropdown({
+  focus: searchInput,
+  onOpen() {
+    query.value = ''
+    // Open on the tab holding the current pick, so it's in view
+    if (props.modelValue) tab.value = providerOf(props.modelValue)
+    else if (!PROVIDERS.value[tab.value]) tab.value = Object.keys(PROVIDERS.value)[0] || tab.value
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true) // any scrolling ancestor moves the button
+  },
+  onClose() {
+    window.removeEventListener('resize', place)
+    window.removeEventListener('scroll', place, true)
+  },
+})
 
 // A model, or null for none
 function pick(m) {
@@ -252,8 +242,6 @@ function onKeydown(e) {
   if (e.key === 'Escape') close()
   if (e.key === 'Enter' && filtered.value.length) pick(filtered.value[0])
 }
-
-onBeforeUnmount(close)
 </script>
 
 <template>

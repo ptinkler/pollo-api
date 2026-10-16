@@ -593,20 +593,20 @@ def _require_hidden_defaults(value: dict | None) -> dict[str, list[int]]:
     return {k: list(dict.fromkeys(ids)) for k, ids in (value or {}).items()}
 
 
-def _require_instructions(ids: list[int]) -> list[int]:
-    db = get_db()
+def _require_ids(ids: list[int], get, label: str) -> list[int]:
+    """`ids` without repeats, or 400 naming the first that `get` can't find."""
     for i in ids:
-        if not db.get_instruction(i):
-            raise HTTPException(400, f"Instruction {i} not found")
+        if not get(i):
+            raise HTTPException(400, f"{label} {i} not found")
     return list(dict.fromkeys(ids))
+
+
+def _require_instructions(ids: list[int]) -> list[int]:
+    return _require_ids(ids, get_db().get_instruction, "Instruction")
 
 
 def _require_instruction_groups(ids: list[int]) -> list[int]:
-    db = get_db()
-    for i in ids:
-        if not db.get_instruction_group(i):
-            raise HTTPException(400, f"Instruction group {i} not found")
-    return list(dict.fromkeys(ids))
+    return _require_ids(ids, get_db().get_instruction_group, "Instruction group")
 
 
 _KINDS = ("character", "instruction", "instruction_group")

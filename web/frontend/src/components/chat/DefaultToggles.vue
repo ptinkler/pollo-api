@@ -1,6 +1,8 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useChatDefaults } from '../../composables/useChatDefaults'
+import { useDropdown } from '../../composables/useDropdown'
+import { ALL_CHATS, defaultIcon } from '../../utils/defaults'
 
 // "Default for": where the item being edited applies by default — all chats
 // and/or any spaces. Picked ones are pills (✕ removes); ＋ opens a searchable
@@ -17,10 +19,9 @@ const GLOBAL = 'global'
 
 const { spaces, membership, setMembership, ensureLoaded } = useChatDefaults()
 const picked = ref(new Set()) // GLOBAL and/or space ids
-const open = ref(false)
 const query = ref('')
-const root = ref(null)
 const searchInput = ref(null)
+const { open, root, toggle: openMenu, close } = useDropdown({ focus: searchInput, onOpen: () => (query.value = '') })
 
 const saved = computed(() => {
   if (props.itemId == null) return new Set()
@@ -30,8 +31,8 @@ const saved = computed(() => {
 const dirty = computed(() => picked.value.size !== saved.value.size || [...picked.value].some(k => !saved.value.has(k)))
 
 const options = computed(() => [
-  { key: GLOBAL, icon: '🌐', name: 'All chats' },
-  ...spaces.value.map(s => ({ key: s.id, icon: '🗂', name: s.name })),
+  { key: GLOBAL, icon: defaultIcon(ALL_CHATS), name: ALL_CHATS },
+  ...spaces.value.map(s => ({ key: s.id, icon: defaultIcon(s.name), name: s.name })),
 ])
 const shown = computed(() => {
   const q = query.value.trim().toLowerCase()
@@ -49,29 +50,10 @@ function toggle(key) {
   picked.value = next
 }
 
-function onDocClick(e) {
-  if (root.value && !root.value.contains(e.target)) close()
-}
-
-async function openMenu() {
-  if (open.value) return close()
-  open.value = true
-  query.value = ''
-  document.addEventListener('mousedown', onDocClick)
-  await nextTick()
-  searchInput.value?.focus()
-}
-
-function close() {
-  open.value = false
-  document.removeEventListener('mousedown', onDocClick)
-}
-
 onMounted(async () => {
   await ensureLoaded()
   reset()
 })
-onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
 watch(() => [props.kind, props.itemId], reset)
 watch(dirty, d => emit('update:dirty', d), { immediate: true })
 
@@ -135,7 +117,9 @@ defineExpose({ commit, dirty })
 </template>
 
 <style scoped>
+/* The menu hangs off the whole row, so pills coming and going don't move it */
 .def-toggles {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -202,7 +186,7 @@ defineExpose({ commit, dirty })
 }
 
 .picker {
-  position: relative;
+  display: contents;
 }
 
 .menu {
@@ -210,7 +194,7 @@ defineExpose({ commit, dirty })
   z-index: 20;
   bottom: calc(100% + 4px); /* opens upwards: it sits at the foot of the editors */
   left: 0;
-  width: 260px;
+  width: min(280px, 100%);
   max-height: 280px;
   overflow-y: auto;
   padding: 4px;

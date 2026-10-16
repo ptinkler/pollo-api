@@ -1,6 +1,8 @@
 <script setup>
-import { ref, computed, onBeforeUnmount } from 'vue'
+import { computed } from 'vue'
 import { characterAvatar } from '../../composables/useCharacters'
+import { useDropdown } from '../../composables/useDropdown'
+import { defaultIcon, defaultTitle as fromTitle } from '../../utils/defaults'
 
 // Attached characters as chips, plus a menu to attach more. Editing and
 // creating happen in CharacterEditor; this only emits 'edit' / 'create'.
@@ -17,8 +19,7 @@ const props = defineProps({
 // 'hide' / 'unhide': a default character's id, switched off / on in this chat only
 const emit = defineEmits(['update:modelValue', 'edit', 'create', 'hide', 'unhide'])
 
-const open = ref(false)
-const root = ref(null)
+const { open, root, toggle, close } = useDropdown()
 
 const byId = computed(() => new Map(props.characters.map(c => [c.id, c])))
 const inheritedIds = computed(() => [...props.inherited, ...props.hidden].map(x => x.id))
@@ -42,7 +43,6 @@ const attached = computed(() =>
 const available = computed(() =>
   props.characters.filter(c => !props.modelValue.includes(c.id) && !inheritedIds.value.includes(c.id)),
 )
-const fromTitle = from => (from === 'All chats' ? 'From the defaults for all chats' : `From the ${from} defaults`)
 
 function attach(c) {
   emit('update:modelValue', [...props.modelValue, c.id])
@@ -56,27 +56,10 @@ function detach(c) {
   )
 }
 
-function onDocClick(e) {
-  if (root.value && !root.value.contains(e.target)) close()
-}
-
-function toggle() {
-  if (open.value) return close()
-  open.value = true
-  document.addEventListener('mousedown', onDocClick)
-}
-
-function close() {
-  open.value = false
-  document.removeEventListener('mousedown', onDocClick)
-}
-
 function create() {
   close()
   emit('create')
 }
-
-onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
 </script>
 
 <template>
@@ -93,7 +76,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
           <span v-else class="avatar-blank">👤</span>
           {{ c.name }}
         </button>
-        <span class="chip-src">{{ c.from === 'All chats' ? '🌐' : '🗂' }}</span>
+        <span class="chip-src">{{ defaultIcon(c.from) }}</span>
         <button class="chip-x" :title="`Hide ${c.name} in this chat`" @click="emit('hide', c.id)">✕</button>
       </span>
       <span

@@ -8,8 +8,10 @@ import {
   updateInstructionGroup,
   deleteInstructionGroup,
 } from '../../composables/useChat'
+import BaseDialog from '../BaseDialog.vue'
 import DefaultToggles from './DefaultToggles.vue'
 import { instructionColor } from '../../utils/format'
+import { sameIds } from '../../utils/defaults'
 
 // Edit one instruction snippet or group (a group bundles snippets), or make a
 // new one — the instruction counterpart of CharacterEditor. The full list
@@ -39,9 +41,7 @@ const current = computed(() =>
     ? null
     : (isGroup.value ? props.groups : props.instructions).find(x => x.id === editingId.value),
 )
-const title = computed(() =>
-  editingId.value == null ? `New ${isGroup.value ? 'group' : 'snippet'}` : isGroup.value ? 'Group' : 'Snippet',
-)
+const title = computed(() => `${editingId.value == null ? 'New' : 'Edit'} ${isGroup.value ? 'group' : 'snippet'}`)
 
 // ── Group members ────────────────────────────────────────────────────
 const snippetById = computed(() => new Map(props.instructions.map(s => [s.id, s])))
@@ -61,7 +61,6 @@ function removeMember(s) {
 }
 
 // ── Editing ──────────────────────────────────────────────────────────
-const sameIds = (a, b) => a.length === b.length && a.every(x => b.includes(x))
 const fieldsDirty = computed(() => {
   const cur = current.value
   if (!cur) return !!(name.value.trim() || content.value.trim() || memberIds.value.length)
@@ -129,130 +128,70 @@ function close() {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="target" class="backdrop" @click.self="close" @keydown.esc="close">
-      <form class="dialog" role="dialog" :aria-label="title" @submit.prevent="save">
-        <div class="head">
-          <h3>{{ title }}</h3>
-          <button type="button" class="x" title="Close" @click="close">✕</button>
-        </div>
+  <BaseDialog :open="!!target" :title="title" width="540px" form @close="close" @submit="save">
+    <input
+      ref="nameInput"
+      v-model="name"
+      class="name"
+      maxlength="255"
+      :placeholder="isGroup ? 'Group name' : 'Name, e.g. Terse tone'"
+      aria-label="Name"
+    />
 
+    <textarea
+      v-if="!isGroup"
+      v-model="content"
+      maxlength="20000"
+      placeholder="What the chat model should do — a tone, a format, a rule."
+      aria-label="Instructions"
+    ></textarea>
+
+    <template v-else>
+      <div class="members">
+        <span v-for="s in members" :key="s.id" class="chip" :title="s.name">
+          <span class="dot" :style="{ background: instructionColor(s.name) }"></span>
+          <span class="chip-name">{{ s.name }}</span>
+          <button type="button" class="chip-x" :title="`Remove ${s.name}`" @click="removeMember(s)">✕</button>
+        </span>
+        <span v-if="!members.length" class="empty">No snippets in it yet</span>
+      </div>
+      <div class="adder">
         <input
-          ref="nameInput"
-          v-model="name"
-          class="name"
-          maxlength="255"
-          :placeholder="isGroup ? 'Group name' : 'Name, e.g. Terse tone'"
-          aria-label="Name"
+          v-model="memberQuery"
+          type="search"
+          placeholder="Add a snippet…"
+          aria-label="Add a snippet"
+          @keydown.enter.prevent="addable[0] && addMember(addable[0])"
         />
-
-        <textarea
-          v-if="!isGroup"
-          v-model="content"
-          maxlength="20000"
-          placeholder="What the chat model should do — a tone, a format, a rule."
-          aria-label="Instructions"
-        ></textarea>
-
-        <template v-else>
-          <div class="members">
-            <span v-for="s in members" :key="s.id" class="chip" :title="s.name">
-              <span class="dot" :style="{ background: instructionColor(s.name) }"></span>
-              <span class="chip-name">{{ s.name }}</span>
-              <button type="button" class="chip-x" :title="`Remove ${s.name}`" @click="removeMember(s)">✕</button>
-            </span>
-            <span v-if="!members.length" class="empty">No snippets in it yet</span>
-          </div>
-          <div class="adder">
-            <input
-              v-model="memberQuery"
-              type="search"
-              placeholder="Add a snippet…"
-              aria-label="Add a snippet"
-              @keydown.enter.prevent="addable[0] && addMember(addable[0])"
-            />
-            <div v-if="memberQuery.trim()" class="adder-menu">
-              <button v-for="s in addable" :key="s.id" type="button" class="item" @click="addMember(s)">
-                <span class="dot" :style="{ background: instructionColor(s.name) }"></span>
-                <span class="item-name">{{ s.name }}</span>
-              </button>
-              <p v-if="!addable.length" class="empty">No other snippets match</p>
-            </div>
-          </div>
-        </template>
-
-        <DefaultToggles
-          ref="toggles"
-          v-model:dirty="defaultsDirty"
-          :kind="isGroup ? 'instruction_group' : 'instruction'"
-          :item-id="editingId"
-        />
-
-        <div class="actions">
-          <button v-if="current" type="button" class="btn btn-danger" @click="remove">Delete</button>
-          <span class="spacer"></span>
-          <button type="button" class="btn btn-secondary" @click="close">Cancel</button>
-          <button class="btn btn-primary" :disabled="saving || !dirty || !name.trim()">
-            {{ current ? 'Save' : 'Create' }}
+        <div v-if="memberQuery.trim()" class="adder-menu">
+          <button v-for="s in addable" :key="s.id" type="button" class="item" @click="addMember(s)">
+            <span class="dot" :style="{ background: instructionColor(s.name) }"></span>
+            <span class="item-name">{{ s.name }}</span>
           </button>
+          <p v-if="!addable.length" class="empty">No other snippets match</p>
         </div>
-      </form>
-    </div>
-  </Teleport>
+      </div>
+    </template>
+
+    <DefaultToggles
+      ref="toggles"
+      v-model:dirty="defaultsDirty"
+      :kind="isGroup ? 'instruction_group' : 'instruction'"
+      :item-id="editingId"
+    />
+
+    <template #actions>
+      <button v-if="current" type="button" class="btn btn-danger" @click="remove">Delete</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-secondary" @click="close">Cancel</button>
+      <button class="btn btn-primary" :disabled="saving || !dirty || !name.trim()">
+        {{ current ? 'Save' : 'Create' }}
+      </button>
+    </template>
+  </BaseDialog>
 </template>
 
 <style scoped>
-.backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  background: rgba(0, 0, 0, 0.7);
-  display: grid;
-  place-items: center;
-  padding: 16px;
-}
-
-.dialog {
-  width: min(540px, 100%);
-  max-height: calc(100vh - 32px);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 16px 20px 18px;
-}
-
-.head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.head h3 {
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text2);
-}
-
-.x {
-  background: none;
-  border: none;
-  color: var(--text2);
-  font-size: 1rem;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 6px;
-}
-
-.x:hover {
-  background: var(--surface2);
-  color: var(--text);
-}
-
 .name {
   padding: 9px 11px;
   border-radius: 8px;
@@ -372,20 +311,5 @@ textarea {
   font-size: 0.8rem;
   color: var(--text2);
   padding: 4px 2px;
-}
-
-.actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-top: 4px;
-}
-
-.actions .btn {
-  padding: 8px 16px;
-}
-
-.spacer {
-  flex: 1;
 }
 </style>

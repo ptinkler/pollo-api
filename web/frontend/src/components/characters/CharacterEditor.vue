@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, inject } from 'vue'
 import MediaPicker from '../media/MediaPicker.vue'
+import BaseDialog from '../BaseDialog.vue'
 import DefaultToggles from '../chat/DefaultToggles.vue'
 import { importMedia } from '../../composables/useMedia'
 import {
@@ -154,171 +155,111 @@ async function remove() {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="open" class="backdrop" @click.self="emit('close')" @keydown.esc="emit('close')">
-      <div class="dialog" role="dialog" aria-label="Character">
-        <div class="head">
-          <h3>{{ isNew ? 'New character' : character.name }}</h3>
-          <span v-if="character?.adhoc || (isNew && conversationId)" class="tag" title="Only in this chat until saved"
-            >this chat only</span
-          >
-          <button class="x" title="Close" @click="emit('close')">✕</button>
-        </div>
-        <p class="sub">
-          The description is added to prompts and the images go to the model as references, so the character looks the
-          same every time. Drag the images into order: the first is the main one, and when an image model takes fewer
-          images than there are, each character's first ones go before the rest.
-        </p>
+  <BaseDialog
+    :open="open"
+    :title="isNew ? 'New character' : character.name"
+    label="Character"
+    width="560px"
+    @close="emit('close')"
+  >
+    <template #head>
+      <span v-if="character?.adhoc || (isNew && conversationId)" class="tag" title="Only in this chat until saved"
+        >this chat only</span
+      >
+    </template>
+    <p class="sub">
+      The description is added to prompts and the images go to the model as references, so the character looks the same
+      every time. Drag the images into order: the first is the main one, and when an image model takes fewer images than
+      there are, each character's first ones go before the rest.
+    </p>
 
-        <label for="char-name">Name</label>
-        <input id="char-name" ref="nameInput" v-model="name" maxlength="100" placeholder="e.g. Linh" />
-        <label for="char-desc">Description</label>
-        <textarea
-          id="char-desc"
-          v-model="description"
-          maxlength="4000"
-          placeholder="Appearance and anything that should stay the same: age, hair, build, clothing, style…"
-        ></textarea>
+    <label for="char-name">Name</label>
+    <input id="char-name" ref="nameInput" v-model="name" maxlength="100" placeholder="e.g. Linh" />
+    <label for="char-desc">Description</label>
+    <textarea
+      id="char-desc"
+      v-model="description"
+      maxlength="4000"
+      placeholder="Appearance and anything that should stay the same: age, hair, build, clothing, style…"
+    ></textarea>
 
-        <label
-          >Images <span class="count">{{ total }}/{{ MAX_IMAGES }}</span></label
-        >
-        <div class="images" @dragover.prevent @drop.prevent="addFiles($event.dataTransfer?.files || [])">
-          <div
-            v-for="(img, i) in images"
-            :key="img.key"
-            class="img"
-            :class="{ main: i === 0, pending: img.kind !== 'saved', dragging: dragFrom === i }"
-            draggable="true"
-            title="Drag to reorder"
-            @dragstart="onDragStart($event, i)"
-            @dragend="dragFrom = null"
-            @dragover.prevent
-            @drop.prevent.stop="onDropOn($event, i)"
-          >
-            <img :src="imageUrl(img)" alt="" draggable="false" />
-            <span v-if="i === 0" class="main-tag">main</span>
-            <span v-else class="pos-tag">{{ i + 1 }}</span>
-            <button v-if="i > 0" class="img-btn star" title="Make this the main image" @click="moveImage(i, 0)">
-              ★
-            </button>
-            <button class="img-btn x-btn" title="Remove" @click="removeImage(img)">✕</button>
-          </div>
-          <template v-if="total < MAX_IMAGES">
-            <label class="img add" title="Upload from this computer (or drop images here)">
-              ＋
-              <span class="add-label">Upload</span>
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/webp,image/gif"
-                multiple
-                hidden
-                @change="addFiles(takeFiles($event))"
-              />
-            </label>
-            <button
-              type="button"
-              class="img add"
-              title="Choose from your uploads and creations"
-              @click="pickerOpen = true"
-            >
-              🗂
-              <span class="add-label">Library</span>
-            </button>
-          </template>
-        </div>
-
-        <MediaPicker
-          :open="pickerOpen"
-          title="Add images to the character"
-          :max="MAX_IMAGES - total"
-          @pick="addFromLibrary"
-          @close="pickerOpen = false"
-        />
-
-        <DefaultToggles v-if="showDefaults" ref="toggles" kind="character" :item-id="character?.id ?? null" />
-
-        <div class="actions">
-          <button v-if="character" class="btn btn-danger" @click="remove">Delete</button>
-          <button
-            v-if="character?.adhoc"
-            class="btn btn-secondary"
-            title="Keep it after this chat, and use it anywhere"
-            @click="promote"
-          >
-            ⭐ Save to characters
-          </button>
-          <span class="spacer"></span>
-          <button class="btn btn-secondary" @click="emit('close')">Cancel</button>
-          <button class="btn btn-primary" :disabled="saving || !name.trim()" @click="save">
-            {{ saving ? 'Saving…' : isNew ? 'Create' : 'Save' }}
-          </button>
-        </div>
+    <label
+      >Images <span class="count">{{ total }}/{{ MAX_IMAGES }}</span></label
+    >
+    <div class="images" @dragover.prevent @drop.prevent="addFiles($event.dataTransfer?.files || [])">
+      <div
+        v-for="(img, i) in images"
+        :key="img.key"
+        class="img"
+        :class="{ main: i === 0, pending: img.kind !== 'saved', dragging: dragFrom === i }"
+        draggable="true"
+        title="Drag to reorder"
+        @dragstart="onDragStart($event, i)"
+        @dragend="dragFrom = null"
+        @dragover.prevent
+        @drop.prevent.stop="onDropOn($event, i)"
+      >
+        <img :src="imageUrl(img)" alt="" draggable="false" />
+        <span v-if="i === 0" class="main-tag">main</span>
+        <span v-else class="pos-tag">{{ i + 1 }}</span>
+        <button v-if="i > 0" class="img-btn star" title="Make this the main image" @click="moveImage(i, 0)">★</button>
+        <button class="img-btn x-btn" title="Remove" @click="removeImage(img)">✕</button>
       </div>
+      <template v-if="total < MAX_IMAGES">
+        <label class="img add" title="Upload from this computer (or drop images here)">
+          ＋
+          <span class="add-label">Upload</span>
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            multiple
+            hidden
+            @change="addFiles(takeFiles($event))"
+          />
+        </label>
+        <button type="button" class="img add" title="Choose from your uploads and creations" @click="pickerOpen = true">
+          🗂
+          <span class="add-label">Library</span>
+        </button>
+      </template>
     </div>
-  </Teleport>
+
+    <MediaPicker
+      :open="pickerOpen"
+      title="Add images to the character"
+      :max="MAX_IMAGES - total"
+      @pick="addFromLibrary"
+      @close="pickerOpen = false"
+    />
+
+    <DefaultToggles v-if="showDefaults" ref="toggles" kind="character" :item-id="character?.id ?? null" />
+
+    <template #actions>
+      <button v-if="character" class="btn btn-danger" @click="remove">Delete</button>
+      <button
+        v-if="character?.adhoc"
+        class="btn btn-secondary"
+        title="Keep it after this chat, and use it anywhere"
+        @click="promote"
+      >
+        ⭐ Save to characters
+      </button>
+      <span class="spacer"></span>
+      <button class="btn btn-secondary" @click="emit('close')">Cancel</button>
+      <button class="btn btn-primary" :disabled="saving || !name.trim()" @click="save">
+        {{ saving ? 'Saving…' : isNew ? 'Create' : 'Save' }}
+      </button>
+    </template>
+  </BaseDialog>
 </template>
 
 <style scoped>
-.backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1100;
-  background: rgba(0, 0, 0, 0.7);
-  display: grid;
-  place-items: center;
-  padding: 16px;
-}
-
-.dialog {
-  width: min(560px, 100%);
-  max-height: calc(100vh - 32px);
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 18px 20px;
-}
-
-.head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.head h3 {
-  font-size: 1.1rem;
-  font-weight: 600;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .tag {
   font-size: 0.7rem;
   padding: 2px 8px;
   border-radius: 6px;
   background: var(--surface2);
   color: var(--yellow);
-}
-
-.x {
-  background: none;
-  border: none;
-  color: var(--text2);
-  font-size: 1rem;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 6px;
-}
-
-.x:hover {
-  background: var(--surface2);
-  color: var(--text);
 }
 
 .sub {
@@ -456,21 +397,5 @@ textarea {
 
 .star {
   left: 4px;
-}
-
-.actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 14px;
-  flex-wrap: wrap;
-}
-
-.actions .btn {
-  padding: 8px 14px;
-}
-
-.spacer {
-  flex: 1;
 }
 </style>

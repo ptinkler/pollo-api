@@ -4,6 +4,7 @@ import InstructionEditor from '../components/chat/InstructionEditor.vue'
 import { fetchInstructions } from '../composables/useChat'
 import { useChatDefaults } from '../composables/useChatDefaults'
 import { instructionColor } from '../utils/format'
+import { ALL_CHATS, defaultIcon } from '../utils/defaults'
 
 // Every instruction snippet and group, like the Characters page: each opens
 // in InstructionEditor. Badges say where it's a default.
@@ -25,7 +26,7 @@ const snippetById = computed(() => new Map(snippets.value.map(s => [s.id, s])))
 function defaultFor(kind, id) {
   const field = `default_${kind}_ids`
   return [
-    ...(globalSettings.value[field].includes(id) ? ['All chats'] : []),
+    ...(globalSettings.value[field].includes(id) ? [ALL_CHATS] : []),
     ...spaces.value.filter(s => s[field].includes(id)).map(s => s.name),
   ]
 }
@@ -104,7 +105,7 @@ function onChanged() {
             </div>
             <div v-if="defaultFor('instruction_group', g.id).length" class="badges">
               <span v-for="b in defaultFor('instruction_group', g.id)" :key="b" class="badge">
-                {{ b === 'All chats' ? '🌐' : '🗂' }} {{ b }}
+                {{ defaultIcon(b) }} {{ b }}
               </span>
             </div>
           </button>
@@ -122,7 +123,7 @@ function onChanged() {
             <p class="preview">{{ s.content || 'Empty' }}</p>
             <div v-if="defaultFor('instruction', s.id).length" class="badges">
               <span v-for="b in defaultFor('instruction', s.id)" :key="b" class="badge">
-                {{ b === 'All chats' ? '🌐' : '🗂' }} {{ b }}
+                {{ defaultIcon(b) }} {{ b }}
               </span>
             </div>
           </button>

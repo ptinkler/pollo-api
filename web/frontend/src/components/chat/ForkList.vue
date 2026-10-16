@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { useDropdown } from '../../composables/useDropdown'
 
 // The chats branched off at a message: "⑂ 2 branches", opening a list of them
 defineProps({
@@ -8,24 +8,17 @@ defineProps({
 })
 const emit = defineEmits(['open'])
 
-const open = ref(false)
-const root = ref(null)
-
-function onDocClick(e) {
-  if (open.value && !root.value?.contains(e.target)) open.value = false
-}
-onMounted(() => document.addEventListener('click', onDocClick))
-onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
+const { open, root, toggle, close } = useDropdown()
 
 function pick(id) {
-  open.value = false
+  close()
   emit('open', id)
 }
 </script>
 
 <template>
   <span ref="root" class="fork-list">
-    <button class="fork-toggle" title="Chats branched off here" @click="open = !open">
+    <button class="fork-toggle" title="Chats branched off here" @click="toggle">
       ⑂ {{ forks.length }} branch{{ forks.length === 1 ? '' : 'es' }}
     </button>
     <span v-if="open" class="fork-menu" :class="align">

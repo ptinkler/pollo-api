@@ -39,6 +39,50 @@ class Base(DeclarativeBase):
     pass
 
 
+class JsonIds:
+    """A list kept as JSON in the text column named after it plus "_json"
+    (`character_ids` → `character_ids_json`). Reads [] when empty or
+    unreadable; writes it without repeats unless `unique=False`."""
+
+    def __init__(self, unique: bool = True):
+        self.unique = unique
+
+    def __set_name__(self, owner, name: str) -> None:
+        self.column = f"{name}_json"
+
+    def __get__(self, obj, owner=None):
+        if obj is None:
+            return self
+        raw = getattr(obj, self.column)
+        try:
+            return json.loads(raw) if raw else []
+        except json.JSONDecodeError:
+            return []
+
+    def __set__(self, obj, value) -> None:
+        items = list(value or [])
+        setattr(obj, self.column, json.dumps(list(dict.fromkeys(items)) if self.unique else items))
+
+
+class DefaultsBucket:
+    """The chat defaults kept by ChatSettings (every chat) and ChatSpace (the
+    chats in it): default characters, instruction snippets and groups."""
+
+    default_character_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    default_instruction_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    default_instruction_group_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    default_character_ids = JsonIds()
+    default_instruction_ids = JsonIds()
+    default_instruction_group_ids = JsonIds()
+
+    def defaults_dict(self) -> dict[str, list[int]]:
+        return {
+            "default_character_ids": self.default_character_ids,
+            "default_instruction_ids": self.default_instruction_ids,
+            "default_instruction_group_ids": self.default_instruction_group_ids,
+        }
+
+
 class Project(Base):
     __tablename__ = "projects"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -284,38 +328,9 @@ class ChatConversation(Base):
     def settings(self, value: dict[str, Any] | None) -> None:
         self.settings_json = json.dumps(value) if value else None
 
-    @property
-    def character_ids(self) -> list[int]:
-        try:
-            return json.loads(self.character_ids_json) if self.character_ids_json else []
-        except json.JSONDecodeError:
-            return []
-
-    @character_ids.setter
-    def character_ids(self, ids: list[int] | None) -> None:
-        self.character_ids_json = json.dumps(list(dict.fromkeys(ids or [])))
-
-    @property
-    def instruction_ids(self) -> list[int]:
-        try:
-            return json.loads(self.instruction_ids_json) if self.instruction_ids_json else []
-        except json.JSONDecodeError:
-            return []
-
-    @instruction_ids.setter
-    def instruction_ids(self, ids: list[int] | None) -> None:
-        self.instruction_ids_json = json.dumps(list(dict.fromkeys(ids or [])))
-
-    @property
-    def instruction_group_ids(self) -> list[int]:
-        try:
-            return json.loads(self.instruction_group_ids_json) if self.instruction_group_ids_json else []
-        except json.JSONDecodeError:
-            return []
-
-    @instruction_group_ids.setter
-    def instruction_group_ids(self, ids: list[int] | None) -> None:
-        self.instruction_group_ids_json = json.dumps(list(dict.fromkeys(ids or [])))
+    character_ids = JsonIds()
+    instruction_ids = JsonIds()
+    instruction_group_ids = JsonIds()
 
 
 class Character(Base):
@@ -333,16 +348,7 @@ class Character(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
 
-    @property
-    def images(self) -> list[str]:
-        try:
-            return json.loads(self.images_json) if self.images_json else []
-        except json.JSONDecodeError:
-            return []
-
-    @images.setter
-    def images(self, files: list[str]) -> None:
-        self.images_json = json.dumps(list(files))
+    images = JsonIds(unique=False)  # in the order shown
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -392,16 +398,7 @@ class ChatInstructionGroup(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
 
-    @property
-    def snippet_ids(self) -> list[int]:
-        try:
-            return json.loads(self.snippet_ids_json) if self.snippet_ids_json else []
-        except json.JSONDecodeError:
-            return []
-
-    @snippet_ids.setter
-    def snippet_ids(self, ids: list[int] | None) -> None:
-        self.snippet_ids_json = json.dumps(list(dict.fromkeys(ids or [])))
+    snippet_ids = JsonIds()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -413,112 +410,38 @@ class ChatInstructionGroup(Base):
         }
 
 
-class ChatSpace(Base):
-    """A chat-only grouping of conversations. Each space seeds new chats created
-    in it with its own default characters and instruction snippets/groups. It is
-    unrelated to the generation-side Project."""
+class ChatSpace(DefaultsBucket, Base):
+    """A chat-only grouping of conversations, with its own default characters
+    and instruction snippets/groups: every chat in it uses them, live (on top
+    of the global ones). Unrelated to the generation-side Project."""
 
     __tablename__ = "chat_spaces"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
-    default_character_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    default_instruction_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    default_instruction_group_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
-
-    @staticmethod
-    def _ids(raw: str | None) -> list[int]:
-        try:
-            return json.loads(raw) if raw else []
-        except json.JSONDecodeError:
-            return []
-
-    @property
-    def default_character_ids(self) -> list[int]:
-        return self._ids(self.default_character_ids_json)
-
-    @default_character_ids.setter
-    def default_character_ids(self, ids: list[int] | None) -> None:
-        self.default_character_ids_json = json.dumps(list(dict.fromkeys(ids or [])))
-
-    @property
-    def default_instruction_ids(self) -> list[int]:
-        return self._ids(self.default_instruction_ids_json)
-
-    @default_instruction_ids.setter
-    def default_instruction_ids(self, ids: list[int] | None) -> None:
-        self.default_instruction_ids_json = json.dumps(list(dict.fromkeys(ids or [])))
-
-    @property
-    def default_instruction_group_ids(self) -> list[int]:
-        return self._ids(self.default_instruction_group_ids_json)
-
-    @default_instruction_group_ids.setter
-    def default_instruction_group_ids(self, ids: list[int] | None) -> None:
-        self.default_instruction_group_ids_json = json.dumps(list(dict.fromkeys(ids or [])))
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
-            "default_character_ids": self.default_character_ids,
-            "default_instruction_ids": self.default_instruction_ids,
-            "default_instruction_group_ids": self.default_instruction_group_ids,
+            **self.defaults_dict(),
             "created_at": iso(self.created_at),
             "updated_at": iso(self.updated_at),
         }
 
 
-class ChatSettings(Base):
+class ChatSettings(DefaultsBucket, Base):
     """Global chat defaults (a single row, id=1): the characters and instruction
-    snippets/groups added to every new chat. A space's own defaults stack on top
+    snippets/groups every chat uses, live. A space's own defaults stack on top
     of these; the two are kept as separate buckets."""
 
     __tablename__ = "chat_settings"
     id: Mapped[int] = mapped_column(primary_key=True)  # always 1
-    default_character_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    default_instruction_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    default_instruction_group_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
 
-    @staticmethod
-    def _ids(raw: str | None) -> list[int]:
-        try:
-            return json.loads(raw) if raw else []
-        except json.JSONDecodeError:
-            return []
-
-    @property
-    def default_character_ids(self) -> list[int]:
-        return self._ids(self.default_character_ids_json)
-
-    @default_character_ids.setter
-    def default_character_ids(self, ids: list[int] | None) -> None:
-        self.default_character_ids_json = json.dumps(list(dict.fromkeys(ids or [])))
-
-    @property
-    def default_instruction_ids(self) -> list[int]:
-        return self._ids(self.default_instruction_ids_json)
-
-    @default_instruction_ids.setter
-    def default_instruction_ids(self, ids: list[int] | None) -> None:
-        self.default_instruction_ids_json = json.dumps(list(dict.fromkeys(ids or [])))
-
-    @property
-    def default_instruction_group_ids(self) -> list[int]:
-        return self._ids(self.default_instruction_group_ids_json)
-
-    @default_instruction_group_ids.setter
-    def default_instruction_group_ids(self, ids: list[int] | None) -> None:
-        self.default_instruction_group_ids_json = json.dumps(list(dict.fromkeys(ids or [])))
-
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "default_character_ids": self.default_character_ids,
-            "default_instruction_ids": self.default_instruction_ids,
-            "default_instruction_group_ids": self.default_instruction_group_ids,
-        }
+        return self.defaults_dict()
 
 
 class ChatMessage(Base):
