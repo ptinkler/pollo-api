@@ -215,12 +215,13 @@ class GenerateRequest(BaseModel):
 
 class EstimateRequest(BaseModel):
     """What a generation's price depends on: the form's settings, and which
-    kinds of media go in (not the media themselves, nor the prompt)."""
+    kinds of media go in (not the media themselves, nor the prompt) — except
+    an extend's source video, whose length Pollo prices."""
 
     model: str
     image: bool = False  # a source image
     image_tail: bool = False
-    video: bool = False  # extend: the source video
+    video_url: str | None = None  # extend: the source video's web address (Pollo prices it by its length)
     ref_types: list[str] = []  # each reference's type ("image", "video", "audio")
     aspect_ratio: str | None = None
     resolution: str | None = None
@@ -2298,7 +2299,12 @@ def _estimate_generator(data: EstimateRequest):
         "image_tail": stand_in["image"] if data.image_tail else None,
     }
     if MODEL_INFO.get(data.model, {}).get("type") == "extend":
-        kwargs["video_url"] = stand_in["video"]
+        # Pollo reads the source video to price an extend, so a placeholder
+        # won't do; a video only in the project (not uploaded yet) isn't priced
+        video_url = (data.video_url or "").strip()
+        if not video_url.startswith(("http://", "https://")):
+            raise ValueError("an extend is priced from the video's web address")
+        kwargs["video_url"] = video_url
     if data.ref_types:
         kwargs["refs"] = [{"type": t, "url": stand_in.get(t, stand_in["image"])} for t in data.ref_types[:50]]
         kwargs["image_url"] = None

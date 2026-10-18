@@ -136,7 +136,8 @@ function onCharacterDeleted(id) {
 }
 
 // Credit cost estimate on the button: Pollo prices the settings (which kinds
-// of media go in, not the media), else what identical past jobs cost
+// of media go in, not the media — bar an extend's video), else what identical
+// past jobs cost
 const creditEstimate = ref(null)
 const ifShown = (shown, value) => (shown ? value : null) // only settings the model has
 const filled = url => !!(url || '').trim()
@@ -152,6 +153,8 @@ const estimateParams = computed(() => {
     image: !isExtend.value && !showRefFields.value && filled(s.image_url),
     image_tail: showImageTailOption.value && filled(s.image_tail),
     ref_types: inV1RefMode.value ? v1Refs(s.refs).map(r => r.type) : [],
+    // Pollo prices an extend by the source video's length, so it needs the real link
+    video_url: isExtend.value ? s.video_url : null,
     aspect_ratio: ifShown(modelRatios.value.length > 0, s.aspect_ratio),
     resolution: ifShown(showResolution.value, s.resolution),
     length: ifShown(modelLengths.value.length > 0, s.length),
@@ -381,7 +384,10 @@ watch(
     }
     settings.value.model = key
     settings.value.video_url = data.video_url
-    showToast('Video ready to extend', 'success')
+    // Not enabled for this key ("hidden"): set up anyway, for when Pollo turns it on
+    const hidden = props.models[key].hidden
+    if (hidden) showToast(`Video loaded, but Pollo won't extend it yet: ${hidden}`, 'error')
+    else showToast('Video ready to extend', 'success')
   },
   { immediate: true },
 )

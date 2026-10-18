@@ -1325,8 +1325,8 @@ class TestKlingQwenImageGeneratorsV1:
             ("klingv3omniimagev1", "kling-ai/kling-v3-omni/image"),
             ("seedreamprov1", "bytedance/seedream-5-0-pro/image"),
             ("seedreamflashv1", "bytedance/seedream-5-0-flash/image"),
-            ("qwenimage3v1", "qwen/qwen-image-3/image"),
-            ("qwenimage3prov1", "qwen/qwen-image-3-pro/image"),
+            ("qwenimage3v1", "alibaba/qwen-image-3/image"),
+            ("qwenimage3prov1", "alibaba/qwen-image-3-pro/image"),
             ("qwenimageflashv1", "alibaba/pre-qwen-image-flash/image"),
         ],
     )

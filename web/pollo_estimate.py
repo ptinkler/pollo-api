@@ -4,8 +4,8 @@ twin and most legacy ones a ".../validate" twin (docs.pollo.ai/openapi.json,
 2026-10-18) that take the same body as the generation request and return
 its price without starting a task. The Generate page asks while the form
 changes, so answers are cached; the media URLs are placeholders (prices
-depend on the settings, not on which image or video goes in), so nothing
-is uploaded for an estimate.
+depend on the settings, not on which image goes in), so nothing is
+uploaded for an estimate. Checked 2026-10-18: they don't cost credits.
 """
 
 import json
@@ -18,7 +18,9 @@ import requests
 from img2vid.common.cloudflare import is_cloudflare_block
 
 # Stand-ins for the request's media: what's priced is that there is an
-# image, end frame, reference or source video, not what it shows
+# image, end frame or reference, not what it shows (Pollo accepts these,
+# checked 2026-10-18). Not for an extend's source video: Pollo reads its
+# length to price it ("Failed to fetch video duration" otherwise).
 PLACEHOLDERS = {
     "image": "https://example.com/estimate.png",
     "video": "https://example.com/estimate.mp4",

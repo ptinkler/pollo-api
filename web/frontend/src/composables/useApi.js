@@ -135,7 +135,8 @@ export const fetchUsageProjectDetails = (project, days = 30) =>
   apiGet(`/api/usage/project/${encodeURIComponent(project)}?days=${days}`)
 // What a generation with these settings costs: Pollo's own price check, or
 // failing that what identical past jobs cost. `params` says which kinds of
-// media go in (image, image_tail, video: booleans; ref_types), not the media.
+// media go in (image, image_tail: booleans; ref_types), not the media — except
+// an extend's video_url, which Pollo prices by its length.
 export const fetchCreditEstimate = params => apiPost('/api/usage/estimate', params)
 
 // Video APIs

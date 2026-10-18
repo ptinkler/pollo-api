@@ -1832,11 +1832,12 @@ class QwenImageImageGenerator(BaseVideoGenerator):
 
 
 class QwenImage3ImageGeneratorV1(BaseV1ImageGenerator):
-    """Qwen Image 3 (qwen/qwen-image-3/image): 1–3 reference images, 1K/2K.
-    NB: answered 404 "Not found" for this account's API key on 2026-10-06,
-    like a made-up model name; added at the user's request."""
+    """Qwen Image 3 (alibaba/qwen-image-3/image): 1–3 reference images, 1K/2K.
+    The provider is "alibaba", as in the spec: "qwen/qwen-image-3" answers
+    404 "Not found" (checked 2026-10-18), which is why this looked
+    unavailable on 2026-10-06."""
 
-    V1_PROVIDER: ClassVar[str] = "qwen"
+    V1_PROVIDER: ClassVar[str] = "alibaba"
     V1_MODEL: ClassVar[str] = "qwen-image-3"
     VALID_RATIOS: ClassVar[tuple] = _QWEN_IMAGE_RATIOS
     VALID_RESOLUTIONS: ClassVar[tuple] = ("1K", "2K")
@@ -1844,7 +1845,7 @@ class QwenImage3ImageGeneratorV1(BaseV1ImageGenerator):
 
 
 class QwenImage3ProImageGeneratorV1(QwenImage3ImageGeneratorV1):
-    """Qwen Image 3 Pro (qwen/qwen-image-3-pro/image): same schema as Qwen Image 3 (same 404 caveat)."""
+    """Qwen Image 3 Pro (alibaba/qwen-image-3-pro/image): same schema as Qwen Image 3."""
 
     V1_MODEL: ClassVar[str] = "qwen-image-3-pro"
 

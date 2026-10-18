@@ -2624,9 +2624,8 @@ class TestPolloImageModels:
             "pollo/seedreamflashv1",
             "pollo/qwenimage",
             "pollo/qwenimageflashv1",
-            "pollo/qwenimage3v1",
-            "pollo/qwenimage3prov1",
         }
+        assert images["pollo/qwenimage3v1"]["hidden"] is None  # works since its address was fixed
         assert "403" in images["pollo/seedreamprov1"]["hidden"]
         assert images["pollo/klingv3imagev1"]["hidden"] is None  # confirmed working
 

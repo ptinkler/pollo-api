@@ -210,9 +210,16 @@ class TestEstimateEndpoint:
         refs = post.call_args.kwargs["json"]["input"]["refs"]
         assert [r["type"] for r in refs] == ["image", "video"]
         assert refs[1]["url"] == pollo_estimate.PLACEHOLDERS["video"]
-        client.post("/api/usage/estimate", json={"model": "seedance25extendv1", "length": 10})
+        video = "https://videocdn.pollo.ai/a.mp4"
+        client.post("/api/usage/estimate", json={"model": "seedance25extendv1", "length": 10, "video_url": video})
         assert post.call_args.args[0].endswith("/seedance-2-5/video-extend/estimate")
-        assert post.call_args.kwargs["json"]["input"]["video"] == pollo_estimate.PLACEHOLDERS["video"]
+        assert post.call_args.kwargs["json"]["input"]["video"] == video
+
+    @patch("web.pollo_estimate.requests.post")
+    def test_extend_of_a_project_only_video_isnt_asked(self, post, client):
+        resp = client.post("/api/usage/estimate", json={"model": "seedance25extendv1", "video_url": "local:v.mp4"})
+        assert resp.json()["source"] is None
+        post.assert_not_called()
 
     @patch("web.pollo_estimate.requests.post")
     def test_image_models(self, post, client):

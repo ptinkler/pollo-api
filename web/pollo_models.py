@@ -111,6 +111,7 @@ MODEL_INFO = {
     },
     "seedance25draft": {
         "label": "Seedance 2.5 Draft",
+        "hidden": "Not enabled for API access on this key (403)",  # checked with real requests 2026-10-18
         "type": "img2vid",
         "lengths": list(range(4, 31)),
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9", "adaptive"],
@@ -332,6 +333,7 @@ MODEL_INFO = {
     },
     "seedance25draftv1": {
         "label": "Seedance 2.5 Draft",
+        "hidden": "Not enabled for API access on this key (403)",  # checked with real requests 2026-10-18
         "type": "img2vid",
         "lengths": list(range(4, 31)),
         "resolutions": ["480p"],
@@ -347,6 +349,7 @@ MODEL_INFO = {
     # animating an image; picked from a video's "Extend" button
     "seedance25extendv1": {
         "label": "Seedance 2.5 Extend",
+        "hidden": "Not enabled for API access on this key (403)",  # checked with real requests 2026-10-18
         "type": "extend",
         "lengths": list(range(4, 31)),
         "resolutions": ["480p", "720p", "1080p"],
@@ -529,7 +532,7 @@ MODEL_INFO = {
     "seedreamflashv1": {
         "label": "Seedream 5.0 Flash",
         "type": "image",
-        "hidden": "Not enabled for API access on this key (403)",  # checked with real requests 2026-10-06
+        "hidden": "Not enabled for API access on this key (403)",  # real requests 2026-10-06, 2026-10-18
         "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
         "resolutions": ["1K", "1.5K", "2K"],
         "options": ["images"],
@@ -537,7 +540,7 @@ MODEL_INFO = {
     "seedreamprov1": {
         "label": "Seedream 5.0 Pro",
         "type": "image",
-        "hidden": "Not enabled for API access on this key (403)",  # checked with real requests 2026-10-06
+        "hidden": "Not enabled for API access on this key (403)",  # real requests 2026-10-06, 2026-10-18
         "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
         "resolutions": ["1K", "2K"],
         "options": ["images"],
@@ -545,7 +548,6 @@ MODEL_INFO = {
     "qwenimage3v1": {
         "label": "Qwen Image 3",
         "type": "image",
-        "hidden": "Pollo doesn't serve it to this key yet (404)",  # checked with real requests 2026-10-06
         "ratios": ["1:1", "3:4", "4:3", "16:9", "9:16"],
         "resolutions": ["1K", "2K"],
         "options": ["images"],
@@ -553,7 +555,6 @@ MODEL_INFO = {
     "qwenimage3prov1": {
         "label": "Qwen Image 3 Pro",
         "type": "image",
-        "hidden": "Pollo doesn't serve it to this key yet (404)",  # checked with real requests 2026-10-06
         "ratios": ["1:1", "3:4", "4:3", "16:9", "9:16"],
         "resolutions": ["1K", "2K"],
         "options": ["images"],
@@ -561,7 +562,7 @@ MODEL_INFO = {
     "qwenimageflashv1": {
         "label": "Qwen Image Flash",
         "type": "image",
-        "hidden": "Not enabled for API access on this key (403)",  # checked with real requests 2026-10-06
+        "hidden": "Pollo says it's currently unavailable",  # 403 on 2026-10-06; "currently unavailable" on 2026-10-18
         "ratios": ["1:1", "3:4", "4:3", "16:9", "9:16"],
         "options": [],
     },

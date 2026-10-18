@@ -76,6 +76,15 @@ describe('Generate: Extend and estimates', () => {
     w.unmount()
   })
 
+  it('says so when Pollo hasn’t enabled extending for the key', async () => {
+    const models = { ...MODELS, seedance25extendv1: { ...MODELS.seedance25extendv1, hidden: 'Not enabled (403)' } }
+    const w = mountPanel({ models })
+    await w.setProps({ extendVideo: { video_url: 'https://v.mp4' } })
+    expect(settingsOf(w).model).toBe('seedance25extendv1')
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining('Not enabled (403)'), 'error')
+    w.unmount()
+  })
+
   it('without the extend model (legacy mode) it says so', async () => {
     const w = mountPanel({ models: { seedance25draftv1: MODELS.seedance25draftv1 } })
     await w.setProps({ extendVideo: { video_url: 'https://v.mp4' } })
