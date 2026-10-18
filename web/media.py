@@ -23,9 +23,12 @@ work there — so deleting it from the library never breaks what used it.
 """
 
 import asyncio
+import contextlib
 import hashlib
 import io
+import json
 import shutil
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -411,26 +414,57 @@ def api_delete_media(media_id: str):
 
 # ── Clearing blocked generations ────────────────────────────────────
 
-_blank_cache: dict[tuple[str, float], bool] = {}
+# Which saved images are solid black, per file version, kept on disk: the
+# Media page asks on every load, and decoding every chat image again after
+# each restart takes minutes on a NAS
+_blank_cache: dict[str, bool] | None = None
+_blank_lock = threading.Lock()
+
+
+def _blank_cache_path() -> Path:
+    return config.ROOT_DIR / "cache" / "blank-images.json"
+
+
+def _blank_checks() -> dict[str, bool]:
+    global _blank_cache
+    if _blank_cache is None:
+        try:
+            _blank_cache = json.loads(_blank_cache_path().read_text())
+        except (OSError, ValueError):
+            _blank_cache = {}
+    return _blank_cache
+
+
+def _save_blank_checks() -> None:
+    path = _blank_cache_path()
+    with contextlib.suppress(OSError):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".part")
+        tmp.write_text(json.dumps(_blank_checks()))
+        tmp.replace(path)
 
 
 def _is_blank_file(path: Path) -> bool:
-    """is_blank_image for a saved file, remembered per file version (the
-    Media page asks on every load, and a NAS reads slowly)."""
+    """is_blank_image for a saved file, remembered per file version. Reads its
+    small thumbnail when there is one rather than the full image."""
     try:
-        key = (str(path), path.stat().st_mtime)
+        key = f"{path}:{path.stat().st_mtime}"
     except OSError:
         return False
-    if key not in _blank_cache:
-        _blank_cache[key] = is_blank_image(path.read_bytes())
-    return _blank_cache[key]
+    checks = _blank_checks()
+    if key not in checks:
+        thumb = _thumb_path(path)
+        data = thumb.read_bytes() if thumb.is_file() else path.read_bytes()
+        with _blank_lock:
+            checks[key] = is_blank_image(data)
+    return checks[key]
 
 
 def _blocked_reason(conv_id: str, item: dict) -> str | None:
     """Why a chat media item counts as a blocked generation: "moderated" (a
     content filter refused it) or "black" (a black image saved before the
     app caught those); None otherwise."""
-    if item.get("source") == "upload":
+    if item.get("source") == "upload" or item.get("import_file"):  # imports weren't made by this app's providers
         return None
     if item.get("status") == "error":
         return "moderated" if item.get("moderated") else None
@@ -443,12 +477,15 @@ def _blocked_reason(conv_id: str, item: dict) -> str | None:
 
 def _blocked(db) -> list[tuple[Any, dict, str]]:
     """(chat message or library entry, media item, reason) for each blocked generation."""
+    checked = len(_blank_checks())
     out = []
     for msg in db.get_chat_messages_with_media():
         out += [(msg, i, r) for i in msg.media if (r := _blocked_reason(msg.conversation_id, i))]
     for lib in db.list_chat_library():
         if r := _blocked_reason(lib.conversation_id, lib.item):
             out.append((lib, lib.item, r))
+    if len(_blank_checks()) != checked:
+        _save_blank_checks()
     return out
 
 

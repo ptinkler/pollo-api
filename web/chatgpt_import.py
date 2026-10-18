@@ -44,8 +44,9 @@ from pydantic import BaseModel, Field
 from img2vid.common import config
 from img2vid.common.metadata import get_db
 
+from . import media
 from .auth import verify_api_key
-from .chat import IMAGE_EXTS, ConversationCreate, _conv_dir, api_create_conversation
+from .chat import CHAT_PREVIEW_SIZE, IMAGE_EXTS, ConversationCreate, _conv_dir, api_create_conversation
 from .uploads import safe_filename
 
 router = APIRouter(prefix="/api/chat/import", dependencies=[Depends(verify_api_key)])
@@ -90,6 +91,7 @@ class _Turn:
 class _Export:
     def __init__(self, zf: zipfile.ZipFile):
         self.zf = zf
+        self.new_files: list[Path] = []  # images written by this import (their thumbnails are made after)
         self.files: dict[str, str] = {}  # file id → zip entry
         for name in zf.namelist():
             m = _FILE_ID.match(name.rsplit("/", 1)[-1])
@@ -249,6 +251,7 @@ class _ChatMedia:
         kind = "video" if ext in VIDEO_EXTS.values() else "image"
         file = f"{'up' if source == 'upload' else 'img'}_{uuid.uuid4().hex[:12]}{ext}"
         (_conv_dir(self.conv_id) / file).write_bytes(raw)
+        self.export.new_files.append(_conv_dir(self.conv_id) / file)
         self.stats["images"] += 1
         item = {**fields, "kind": kind, "status": "done", "file": file}
         self.saved[file_id] = item
@@ -408,7 +411,18 @@ def run_import(path: Path, progress: dict | None = None) -> dict:
             if outcome:
                 stats[outcome] += 1
             stats["processed"] += 1
+    if export.new_files:
+        threading.Thread(target=_warm_thumbnails, args=(export.new_files,), daemon=True).start()
     return stats
+
+
+def _warm_thumbnails(paths: list[Path]) -> None:
+    """Make the new images' grid thumbnails and chat previews now, one at a
+    time in the background, so opening the chats and Media page later
+    doesn't wait for hundreds of them to be made."""
+    for path in paths:
+        for size in (media.THUMB_SIZE, CHAT_PREVIEW_SIZE):
+            media.make_thumb(path, size)
 
 
 # ── Routes ──────────────────────────────────────────────────────────

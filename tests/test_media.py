@@ -281,8 +281,45 @@ class TestBlocked:
         db.delete_chat_exchange(conv.id, old.id)
         return d
 
+    @pytest.fixture(autouse=True)
+    def _fresh_blank_checks(self, monkeypatch):
+        import web.media as media_mod
+
+        monkeypatch.setattr(media_mod, "_blank_cache", None)
+
     def test_counts(self, client, blocked):
         assert client.get("/api/media/blocked").json() == {"moderated": 2, "black": 1}
+
+    def test_black_images_are_checked_once_even_across_restarts(self, client, blocked, monkeypatch):
+        import web.media as media_mod
+
+        assert client.get("/api/media/blocked").json()["black"] == 1
+        monkeypatch.setattr(media_mod, "_blank_cache", None)  # as after a restart
+
+        def no_decoding(data):
+            raise AssertionError("decoded again")
+
+        monkeypatch.setattr(media_mod, "is_blank_image", no_decoding)
+        assert client.get("/api/media/blocked").json()["black"] == 1
+
+    def test_imported_images_are_not_checked(self, client, db, conv, blocked):
+        (blocked / "img_imported.png").write_bytes(_png("black"))
+        db.add_chat_message(
+            conv.id,
+            "assistant",
+            "",
+            media=[
+                {
+                    "id": "i",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "done",
+                    "file": "img_imported.png",
+                    "import_file": "file_x",
+                }
+            ],
+        )
+        assert client.get("/api/media/blocked").json()["black"] == 1  # only the app's own
 
     def test_clear_removes_them_and_keeps_the_rest(self, client, db, conv, blocked):
         assert client.post("/api/media/blocked/clear").json() == {"cleared": 3}

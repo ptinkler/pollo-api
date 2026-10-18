@@ -3289,3 +3289,15 @@ class TestLargeChats:
                 break
             time.sleep(0.02)
         assert not list((tmp_path / "chat").glob(".deleting-*"))
+
+    def test_missing_thumbnails_are_made_in_the_background(self, chat, tmp_path):
+        from PIL import Image
+
+        import web.media as media_mod
+
+        folder = tmp_path / "chat" / "c1"
+        folder.mkdir(parents=True)
+        Image.new("RGB", (1200, 1600), "blue").save(folder / "img_a.png")
+        chat._warm_missing_thumbnails()
+        for size in (media_mod.THUMB_SIZE, chat.CHAT_PREVIEW_SIZE):
+            assert media_mod._thumb_path(folder / "img_a.png", size).is_file()

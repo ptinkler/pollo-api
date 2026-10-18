@@ -2538,3 +2538,20 @@ def startup_resume_chat() -> None:
         db.update_chat_message(msg.id, status="error", error="Interrupted by server restart")
     if resumed:
         print(f"🔄 Resumed polling for {resumed} chat video(s)")
+    threading.Thread(target=_warm_missing_thumbnails, daemon=True).start()
+
+
+def _warm_missing_thumbnails() -> None:
+    """Make any missing grid thumbnails and chat previews for chat images, one
+    at a time in the background, so the Media page and big chats (imports)
+    don't wait for them on first view. Ones already made are skipped quickly."""
+    root = _chat_root()
+    if not root.is_dir():
+        return
+    for folder in root.iterdir():
+        if not folder.is_dir() or folder.name.startswith("."):
+            continue
+        for path in folder.iterdir():
+            if path.suffix.lower() in IMAGE_EXTS.values() and path.suffix.lower() != ".svg":
+                for size in (media.THUMB_SIZE, CHAT_PREVIEW_SIZE):
+                    media.make_thumb(path, size)
