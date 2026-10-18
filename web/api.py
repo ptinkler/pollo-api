@@ -41,7 +41,7 @@ from img2vid.common.metadata import get_db, iso
 from img2vid.pollo.generators import ERROR_STATUSES, SUCCESS_STATUSES
 from img2vid.pollo.pollo_img2vid import GENERATORS, IMAGE_GENERATORS, get_image_generator, get_video_generator
 
-from . import characters, image_hosts, media, vpn
+from . import characters, image_hosts, media, pollo_estimate, vpn
 
 # ── Authentication ───────────────────────────────────────────────────
 from .auth import get_api_keys, is_auth_enabled, verify_api_key
@@ -211,6 +211,25 @@ class GenerateRequest(BaseModel):
     image_meta: list | None = None  # ref2video: array of {url, order, name?, cropper?}
     character_ids: list[int] = []  # see web/characters.py
     ref_mode: bool = False  # v1 "Ref mode" is on (character images go in as refs even with no other refs)
+
+
+class EstimateRequest(BaseModel):
+    """What a generation's price depends on: the form's settings, and which
+    kinds of media go in (not the media themselves, nor the prompt)."""
+
+    model: str
+    image: bool = False  # a source image
+    image_tail: bool = False
+    video: bool = False  # extend: the source video
+    ref_types: list[str] = []  # each reference's type ("image", "video", "audio")
+    aspect_ratio: str | None = None
+    resolution: str | None = None
+    length: int | None = None
+    generate_audio: bool | None = None
+    web_search: bool | None = None
+    max_images: int | None = None
+    thinking_level: str | None = None
+    style: str | None = None
 
 
 class BulkMoveRequest(BaseModel):
@@ -906,17 +925,23 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
     model = data.model
     if model not in GENERATORS:
         raise HTTPException(status_code=400, detail=f"Unknown model: {model}")
+    extend = MODEL_INFO.get(model, {}).get("type") == "extend"
     prompt = (data.prompt or "").strip()
-    if not prompt:
+    if not prompt and not extend:  # extending can go on without one
         raise HTTPException(status_code=400, detail="Prompt is required")
-
-    db = get_db()
-    chars = characters.require(data.character_ids, db)
-    project, assets_path = _project_for_generation(data.project)
     image_url, video_url, subject_url, audio_url = (
         (url or "").strip() or None for url in (data.image_url, data.video_url, data.subject_url, data.audio_url)
     )
+    if extend and not video_url:
+        raise HTTPException(status_code=400, detail="Pick the video to extend")
 
+    db = get_db()
+    chars = [] if extend else characters.require(data.character_ids, db)
+    project, assets_path = _project_for_generation(data.project)
+
+    if extend:
+        image_url = None  # it continues the video: no source image
+        source_video = _publish_source_video(assets_path, video_url)
     image_url, local_image_ref, uploaded_image_url = _publish_source_image(assets_path, image_url)
     db.update_project(
         project.slug,
@@ -938,6 +963,8 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
         "generate_audio": data.generate_audio,
         **_model_options(model, data, audio_url),
     }
+    if extend:
+        kwargs["video_url"] = source_video
     _apply_refs(kwargs, model, data, chars, assets_path, subject_url)
 
     job_id = str(uuid.uuid4())[:8]
@@ -968,6 +995,17 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
     )
     threading.Thread(target=run_generation, args=(job_id, model, kwargs), daemon=True).start()
     return {"job_id": job_id, "project": project.slug}
+
+
+def _publish_source_video(assets_path: Path, video_url: str) -> str:
+    """The public URL of the video to extend: Pollo's own URL for a video
+    it made, or a "local:<file>" video in the project uploaded to a
+    temporary host (Pollo only takes URLs)."""
+    if video_url.startswith("local:"):
+        return _publish_local_image(assets_path, video_url, "source video")
+    if not video_url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="The video to extend needs a web address")
+    return video_url
 
 
 def _publish_source_image(assets_path: Path, image_url: str | None) -> tuple[str | None, str | None, str | None]:
@@ -2194,17 +2232,18 @@ def api_usage_estimate(
     generate_audio: bool | None = None,
     _api_key: str = Depends(verify_api_key),
 ):
-    """Estimate the credit cost for a generation from past jobs with identical settings.
+    """Estimate the credit cost for a generation from past jobs with identical settings:
+    the most common cost of prior jobs with the same model/resolution/length/
+    generate_audio (credits=None when there are none yet). The Generate page
+    uses POST, which asks Pollo first and falls back to this."""
+    return _past_job_estimate(model, resolution, length, generate_audio)
 
-    Pollo's API only reports credit cost after a task is submitted (no pre-flight
-    pricing endpoint exists), so this looks up prior jobs that used the exact same
-    model/resolution/length/generate_audio and reports the most common cost seen.
-    Returns credits=None when there's no matching history yet.
-    """
-    db = get_db()
+
+def _past_job_estimate(model: str, resolution: str | None, length: int | None, generate_audio: bool | None) -> dict:
+    """{"credits": the most common cost of past jobs with these exact settings (None: no such jobs), "samples"}."""
     matches = [
         j
-        for j in db.get_all_jobs(limit=10000)
+        for j in get_db().get_all_jobs(limit=10000)
         if j.model == model
         and j.credits_used is not None
         and j.resolution == resolution
@@ -2216,6 +2255,55 @@ def api_usage_estimate(
 
     credits, _count = Counter(j.credits_used for j in matches).most_common(1)[0]
     return {"credits": credits, "samples": len(matches)}
+
+
+@app.post("/api/usage/estimate")
+def api_usage_estimate_pollo(data: EstimateRequest, _api_key: str = Depends(verify_api_key)):
+    """The credit cost of a generation with these settings: Pollo's own
+    price check (see web/pollo_estimate.py) when it gives one, else what
+    identical past jobs cost (as GET /api/usage/estimate)."""
+    if data.model not in GENERATORS and data.model not in IMAGE_GENERATORS:
+        raise HTTPException(status_code=400, detail=f"Unknown model: {data.model}")
+    priced = None
+    if os.getenv("POLLO_API_KEY"):
+        try:
+            priced = pollo_estimate.estimate(_estimate_generator(data))
+        except Exception as exc:  # noqa: BLE001 — a settings combination the generator rejects
+            print(f"[Estimate] {data.model}: {exc}")
+    if priced is not None:
+        return {**priced, "samples": None, "source": "pollo"}
+    past = _past_job_estimate(data.model, data.resolution, data.length, data.generate_audio)
+    return {**past, "full_credits": past["credits"], "source": "history" if past["credits"] is not None else None}
+
+
+def _estimate_generator(data: EstimateRequest):
+    """A generator for the request, with placeholder media (see pollo_estimate.PLACEHOLDERS)."""
+    stand_in = pollo_estimate.PLACEHOLDERS
+    common = {
+        "api_key": os.getenv("POLLO_API_KEY"),
+        "project": "estimate",
+        "prompt": "estimate",
+        "image_url": stand_in["image"] if data.image else None,
+        "aspect_ratio": data.aspect_ratio,
+        "resolution": data.resolution,
+    }
+    if data.model in IMAGE_GENERATORS:
+        options = {"max_images": data.max_images, "thinking_level": data.thinking_level, "style": data.style}
+        return get_image_generator(data.model, **common, **{k: v for k, v in options.items() if v is not None})
+    kwargs = {
+        **common,
+        "length": data.length,
+        "generate_audio": data.generate_audio,
+        "web_search": data.web_search,
+        "image_tail": stand_in["image"] if data.image_tail else None,
+    }
+    if MODEL_INFO.get(data.model, {}).get("type") == "extend":
+        kwargs["video_url"] = stand_in["video"]
+    if data.ref_types:
+        kwargs["refs"] = [{"type": t, "url": stand_in.get(t, stand_in["image"])} for t in data.ref_types[:50]]
+        kwargs["image_url"] = None
+        kwargs["image_tail"] = None
+    return get_video_generator(data.model, **{k: v for k, v in kwargs.items() if v is not None or k == "image_url"})
 
 
 # ── Cache management ────────────────────────────────────────────────

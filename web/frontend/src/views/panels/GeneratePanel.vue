@@ -10,6 +10,7 @@ import {
   fetchCreditEstimate,
   localImageFilename,
   getLocalImagePreviewUrl,
+  getVideoUrl,
 } from '../../composables/useApi'
 import { useProjectSettings } from '../../composables/useProjectSettings'
 import { useJobsQueue } from '../../composables/useJobsQueue'
@@ -28,9 +29,10 @@ const props = defineProps({
   legacyMode: { type: Boolean, default: false },
   regenerateJob: { type: Object, default: null },
   useAsRef: { type: Object, default: null },
+  extendVideo: { type: Object, default: null }, // { video_url } from a video's Extend button
 })
 
-const emit = defineEmits(['regenerate-applied', 'use-as-ref-applied', 'update:legacy-mode'])
+const emit = defineEmits(['regenerate-applied', 'use-as-ref-applied', 'extend-applied', 'update:legacy-mode'])
 
 const showToast = inject('showToast')
 const { addJob } = useJobsQueue()
@@ -46,13 +48,17 @@ const submitButtonText = computed(() => {
   let text = '🚀 Generate'
   if (submitStatus.value === 'uploading') text = 'Uploading'
   else if (submitStatus.value === 'starting') text = 'Starting'
-  if (creditEstimate.value?.credits != null) text += ` (~${creditEstimate.value.credits} credits)`
+  const estimate = creditEstimate.value
+  // Pollo's own price is exact; one from past jobs is a guess
+  if (estimate?.credits != null) text += ` (${estimate.source === 'pollo' ? '' : '~'}${estimate.credits} credits)`
   return text
 })
 
 // Model options
 const selectedModel = computed(() => props.models[settings.value.model] || {})
 const modelType = computed(() => selectedModel.value.type || 'img2vid')
+// Extend models continue an existing video instead of animating an image
+const isExtend = computed(() => modelType.value === 'extend')
 
 // Ref mode: legacy-API ref models are their own "type: ref" models, while v1
 // models take refs on their regular endpoint when "Ref mode" is toggled on.
@@ -93,6 +99,8 @@ const attachedCharacters = computed(() =>
 // Characters need a model that takes reference images; with one that can't,
 // attached characters stay selected but aren't sent
 const characterSupport = computed(() => {
+  if (isExtend.value)
+    return { ok: false, reason: 'Extending carries on the video as it is, so characters aren’t used.' }
   if (generateModelTakesCharacters(selectedModel.value, inV1RefMode.value)) return { ok: true }
   if (refModeInfo.value) return { ok: false, reason: 'Turn on Ref mode to use characters with this model.' }
   return { ok: false, reason: "This model can't take reference images, so it can't use characters." }
@@ -127,15 +135,32 @@ function onCharacterDeleted(id) {
   settings.value.character_ids = (settings.value.character_ids || []).filter(x => x !== id)
 }
 
-// Credit cost estimate — Pollo has no pre-flight pricing API, so this looks up
-// what identical past generations actually cost and shows that on the button.
+// Credit cost estimate on the button: Pollo prices the settings (which kinds
+// of media go in, not the media), else what identical past jobs cost
 const creditEstimate = ref(null)
-const estimateParams = computed(() => ({
-  model: settings.value.model,
-  resolution: showResolution.value ? settings.value.resolution : null,
-  length: modelLengths.value.length > 0 ? settings.value.length : null,
-  generate_audio: showAudioOption.value ? settings.value.generate_audio : null,
-}))
+const ifShown = (shown, value) => (shown ? value : null) // only settings the model has
+const filled = url => !!(url || '').trim()
+// The "Images" count (1-4) when the model takes one, else null
+const maxImagesSetting = computed(() => {
+  const n = parseInt(settings.value.max_images, 10)
+  return showMaxImagesOption.value && n >= 1 && n <= 4 ? n : null
+})
+const estimateParams = computed(() => {
+  const s = settings.value
+  return {
+    model: s.model,
+    image: !isExtend.value && !showRefFields.value && filled(s.image_url),
+    image_tail: showImageTailOption.value && filled(s.image_tail),
+    ref_types: inV1RefMode.value ? v1Refs(s.refs).map(r => r.type) : [],
+    aspect_ratio: ifShown(modelRatios.value.length > 0, s.aspect_ratio),
+    resolution: ifShown(showResolution.value, s.resolution),
+    length: ifShown(modelLengths.value.length > 0, s.length),
+    generate_audio: ifShown(showAudioOption.value, s.generate_audio),
+    web_search: ifShown(showWebSearchOption.value, s.web_search),
+    max_images: maxImagesSetting.value,
+    thinking_level: ifShown(showThinkingLevelOption.value, s.thinking_level),
+  }
+})
 let estimateDebounce = null
 let estimateToken = 0
 watch(
@@ -158,6 +183,12 @@ watch(
   },
   { immediate: true, deep: true },
 )
+
+// The video to extend: Pollo's URL for a video it made, or a project video ("local:<file>")
+const sourceVideoPreviewUrl = computed(() => {
+  const url = settings.value.video_url || ''
+  return url.startsWith('local:') ? getVideoUrl(props.project, url.slice(6)) : url
+})
 
 // Source image upload
 const isUploading = ref(false)
@@ -337,6 +368,24 @@ watch(
   { immediate: true },
 )
 
+// A video's Extend button: switch to the extend model with that video
+watch(
+  () => props.extendVideo,
+  data => {
+    if (!data) return
+    emit('extend-applied')
+    const key = Object.keys(props.models).find(k => props.models[k].type === 'extend')
+    if (!key) {
+      showToast('Extending needs the current models: turn off Legacy mode', 'error')
+      return
+    }
+    settings.value.model = key
+    settings.value.video_url = data.video_url
+    showToast('Video ready to extend', 'success')
+  },
+  { immediate: true },
+)
+
 // Toggling legacy mode swaps the entire models list (legacy and v1 model
 // keys are disjoint — see MODEL_INFO in web/api.py) — fall back to
 // whatever model comes first in the new list if the current selection
@@ -484,7 +533,10 @@ watch(showRefFields, show => {
 })
 
 async function handleSubmit() {
-  if (!prompt.value.trim()) return showToast('Prompt is required', 'error')
+  if (isExtend.value && !settings.value.video_url?.trim()) {
+    return showToast('Pick the video to extend (its Extend button), or paste its URL', 'error')
+  }
+  if (!prompt.value.trim() && !isExtend.value) return showToast('Prompt is required', 'error')
   const data = requestData()
   const refsError = addRefs(data)
   if (refsError) return showToast(refsError, 'error')
@@ -522,9 +574,10 @@ function requestData() {
     ref_mode: inV1RefMode.value,
   }
   if (showSeedOption.value && s.seed) data.seed = parseInt(s.seed, 10) || undefined
-  const maxImages = parseInt(s.max_images, 10)
-  if (showMaxImagesOption.value && maxImages >= 1 && maxImages <= 4) data.max_images = maxImages
+  if (maxImagesSetting.value) data.max_images = maxImagesSetting.value
   if (showThinkingLevelOption.value) data.thinking_level = s.thinking_level
+  if (isExtend.value)
+    Object.assign(data, { video_url: s.video_url.trim(), image_url: undefined, image_tail: undefined })
   return data
 }
 
@@ -568,7 +621,12 @@ function addRefs(data) {
     <form @submit.prevent="handleSubmit">
       <!-- Prompt -->
       <div class="form-section">
-        <SleekTextarea v-model="prompt" label="Prompt" placeholder="Describe what you want to generate..." :rows="4" />
+        <SleekTextarea
+          v-model="prompt"
+          :label="isExtend ? 'What happens next' : 'Prompt'"
+          :placeholder="isExtend ? 'Optional: how the video carries on' : 'Describe what you want to generate...'"
+          :rows="4"
+        />
       </div>
 
       <!-- Characters -->
@@ -620,7 +678,26 @@ function addRefs(data) {
       <!-- Source Image & Model Row -->
       <div class="form-section">
         <div class="form-row source-row">
-          <div v-if="!showRefFields" class="image-input-group flex2">
+          <div v-if="isExtend" class="image-input-group flex2">
+            <div v-if="sourceVideoPreviewUrl" class="source-preview">
+              <video :src="sourceVideoPreviewUrl" class="source-thumb" muted preload="metadata"></video>
+              <div class="source-preview-info">
+                <span class="source-label">Video to extend</span>
+                <div class="source-actions">
+                  <button type="button" class="btn-remove" title="Clear" @click="settings.video_url = ''">✕</button>
+                </div>
+              </div>
+            </div>
+            <SleekInput
+              v-else
+              v-model="settings.video_url"
+              label="Video to extend"
+              hint="or use Extend on a video"
+              type="url"
+              placeholder="https://example.com/video.mp4"
+            />
+          </div>
+          <div v-else-if="!showRefFields" class="image-input-group flex2">
             <!-- Uploaded local image preview -->
             <div v-if="sourceImagePreviewUrl" class="source-preview">
               <img :src="sourceImagePreviewUrl" alt="Source" class="source-thumb" />

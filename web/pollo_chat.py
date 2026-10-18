@@ -118,8 +118,14 @@ def list_video_models() -> list[dict[str, Any]]:
             "created": None,
             "hidden": meta.get("hidden") or None,
         }
-        for key, cls, meta in _catalogue(GENERATORS_V1)
+        for key, cls, meta in _catalogue(_video_generators())
     ]
+
+
+def _video_generators() -> dict:
+    """The v1 video models that make a video from a prompt (and maybe a
+    first frame) — not the ones that extend an existing video."""
+    return {key: cls for key, cls in GENERATORS_V1.items() if MODEL_INFO.get(key, {}).get("type") != "extend"}
 
 
 def _generator_key(model_id: str, generators: dict) -> str:
@@ -186,7 +192,7 @@ def submit_video(
     """Start a Pollo video job. Returns {"id": "pollo:<taskId>", "params": the
     settings actually sent}, shaped like openrouter.submit_video's result.
     A first frame is uploaded to a temporary public host first (Pollo only takes URLs)."""
-    key = _generator_key(model_id, GENERATORS_V1)
+    key = _generator_key(model_id, _video_generators())
     ratios = MODEL_INFO.get(key, {}).get("ratios") or list(GENERATORS_V1[key].VALID_RATIOS)
     if aspect_ratio not in ratios:
         aspect_ratio = None

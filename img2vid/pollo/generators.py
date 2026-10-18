@@ -7,7 +7,14 @@ from PIL import Image
 
 from ..common.cloudflare import is_cloudflare_block
 from ..common.config import POLLO_API_BASE, POLLO_API_TIMEOUT, POLLO_API_V1_BASE
-from ..common.get_inputs import get_audio_url, get_image_path, get_image_url, get_prompt, get_subject_url
+from ..common.get_inputs import (
+    get_audio_url,
+    get_image_path,
+    get_image_url,
+    get_prompt,
+    get_subject_url,
+    get_video_url,
+)
 
 # Sentinel for distinguishing "not passed" from None
 _UNSET = object()
@@ -129,6 +136,17 @@ class BaseVideoGenerator:
     def build_download_metadata(self) -> dict[str, Any]:
         """Build metadata dict for download records."""
         return {"payload": self.payload_attrs}
+
+    @property
+    def estimate_url(self) -> str | None:
+        """Pollo's price check for this request (same body, no task started):
+        v1 endpoints have ".../estimate", legacy ones ".../validate" — except
+        the legacy ref2video endpoints, which have neither."""
+        if not self.model_url:
+            return None
+        if self.model_url.startswith(POLLO_API_V1_BASE):
+            return f"{self.model_url}/estimate"
+        return None if self.model_url.endswith("/ref2video") else f"{self.model_url}/validate"
 
 
 class BaseV1VideoGenerator(BaseVideoGenerator):
@@ -455,6 +473,19 @@ class Seedance25VideoGenerator(PolloDance20VideoGenerator):
             return None
         width, height = self.get_image_dimensions(self.image_path)
         return self.get_closest_aspect_ratio(width, height, ratios)
+
+
+class Seedance25DraftVideoGenerator(Seedance25VideoGenerator):
+    """Seedance 2.5 Draft (bytedance/seedance-2-5-draft): Seedance 2.5 at
+    480p only, per Pollo's OpenAPI spec (2026-10-18) — otherwise the same
+    schema, webSearch included."""
+
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("480p",)
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.model_url = f"{POLLO_API_BASE}/bytedance/seedance-2-5-draft"
+        self.resolution = "480p"
 
 
 class MinimaxH3VideoGenerator(BaseVideoGenerator):
@@ -895,6 +926,78 @@ class Seedance25VideoGeneratorV1(BaseV1VideoGenerator):
         super().__init__(**kwargs)
         if not kwargs.get("aspect_ratio") and not os.getenv("ASPECT_RATIO") and not os.getenv("RATIO"):
             self.aspect_ratio = "adaptive"
+
+
+class Seedance25DraftVideoGeneratorV1(Seedance25VideoGeneratorV1):
+    """
+    Seedance 2.5 Draft — v1 API (bytedance/seedance-2-5-draft/video).
+
+    From Pollo's OpenAPI spec (2026-10-18): the same three branches as
+    Seedance 2.5 (text, image with imageTail, refs up to 50) and the same
+    4-30s durations and ratios, but resolution is "480p" only and there's
+    no webSearch.
+    """
+
+    V1_MODEL: ClassVar[str] = "seedance-2-5-draft"
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("480p",)
+    HAS_WEB_SEARCH: ClassVar[bool] = False
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.resolution = "480p"
+
+
+class Seedance25ExtendVideoGeneratorV1(BaseV1VideoGenerator):
+    """
+    Seedance 2.5 video extend — v1 API (bytedance/seedance-2-5/video-extend).
+
+    Continues an existing video. From Pollo's OpenAPI spec (2026-10-18): the
+    input is a source `video` URL (required) plus an optional prompt,
+    resolution "480p"/"720p"/"1080p", duration 4-30, generateAudio and seed
+    — no image, aspect ratio (the source video sets it), refs or webSearch.
+    """
+
+    V1_PROVIDER: ClassVar[str] = "bytedance"
+    V1_MODEL: ClassVar[str] = "seedance-2-5"
+
+    VALID_LENGTHS: ClassVar[tuple] = tuple(range(4, 31))
+    VALID_RESOLUTIONS: ClassVar[tuple] = ("480p", "720p", "1080p")
+    DEFAULT_RESOLUTION: ClassVar[str] = "480p"
+
+    HAS_SEED: ClassVar[bool] = True
+    HAS_GENERATE_AUDIO: ClassVar[bool] = True
+
+    video_url: str | None
+
+    def __init__(self, **kwargs) -> None:
+        kwargs.setdefault("image_url", None)  # no source image: don't fall back to the project's
+        super().__init__(**kwargs)
+        self.model_url = f"{POLLO_API_V1_BASE}/{self.V1_PROVIDER}/{self.V1_MODEL}/video-extend"
+        self.video_url = kwargs.get("video_url") or get_video_url(self.project)
+
+    @property
+    def is_text_only(self) -> bool:
+        return False
+
+    @property
+    def is_video_edit(self) -> bool:
+        """Works on a source video: there's no source image to download."""
+        return True
+
+    def get_payload(self) -> dict[str, Any]:
+        if not self.video_url:
+            raise ValueError("Extending needs the source video's URL")
+        attrs: dict[str, Any] = {"video": self.video_url}
+        if self.prompt:
+            attrs["prompt"] = self.prompt
+        attrs["duration"] = self.length
+        attrs["resolution"] = self.resolution
+        if self.generate_audio is not None:
+            attrs["generateAudio"] = self.generate_audio
+        if self.seed is not None:
+            attrs["seed"] = self.seed
+        self.payload_attrs = attrs
+        return {"input": attrs}
 
 
 class MinimaxH3VideoGeneratorV1(BaseV1VideoGenerator):

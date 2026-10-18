@@ -48,6 +48,9 @@ from .generators import (
     Seedance20MiniVideoGeneratorV1,
     Seedance20VideoGenerator,
     Seedance20VideoGeneratorV1,
+    Seedance25DraftVideoGenerator,
+    Seedance25DraftVideoGeneratorV1,
+    Seedance25ExtendVideoGeneratorV1,
     Seedance25VideoGenerator,
     Seedance25VideoGeneratorV1,
     SeedanceMiniRefVideoGenerator,
@@ -79,6 +82,7 @@ GENERATORS_LEGACY = {
     "seedance20fast": Seedance20FastVideoGenerator,
     "seedance20mini": Seedance20MiniVideoGenerator,
     "seedance25": Seedance25VideoGenerator,
+    "seedance25draft": Seedance25DraftVideoGenerator,
     "seedanceref": SeedanceRefVideoGenerator,
     "seedancereffast": SeedanceRefFastVideoGenerator,
     "seedanceminiref": SeedanceMiniRefVideoGenerator,
@@ -100,6 +104,8 @@ GENERATORS_V1 = {
     "seedance20fastv1": Seedance20FastVideoGeneratorV1,
     "seedance20miniv1": Seedance20MiniVideoGeneratorV1,
     "seedance25v1": Seedance25VideoGeneratorV1,
+    "seedance25draftv1": Seedance25DraftVideoGeneratorV1,
+    "seedance25extendv1": Seedance25ExtendVideoGeneratorV1,  # extends a video; v1-only
     "minimaxh3v1": MinimaxH3VideoGeneratorV1,
     "minimaxh3max": MinimaxH3MaxVideoGenerator,  # v1-API-only; no legacy counterpart
     "wan27v1": Wan27VideoGeneratorV1,

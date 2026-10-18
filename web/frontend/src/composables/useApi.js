@@ -133,13 +133,10 @@ export const fetchUsage = (days = 30) => apiGet(`/api/usage?days=${days}`)
 export const fetchBalance = () => apiGet('/api/usage/balance')
 export const fetchUsageProjectDetails = (project, days = 30) =>
   apiGet(`/api/usage/project/${encodeURIComponent(project)}?days=${days}`)
-export const fetchCreditEstimate = ({ model, resolution, length, generate_audio }) => {
-  const params = new URLSearchParams({ model })
-  if (resolution != null) params.set('resolution', resolution)
-  if (length != null) params.set('length', length)
-  if (generate_audio != null) params.set('generate_audio', generate_audio)
-  return apiGet(`/api/usage/estimate?${params.toString()}`)
-}
+// What a generation with these settings costs: Pollo's own price check, or
+// failing that what identical past jobs cost. `params` says which kinds of
+// media go in (image, image_tail, video: booleans; ref_types), not the media.
+export const fetchCreditEstimate = params => apiPost('/api/usage/estimate', params)
 
 // Video APIs
 export const deleteVideo = (project, filename) =>

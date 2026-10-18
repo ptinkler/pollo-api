@@ -72,10 +72,10 @@ export function legacyRefs(refs) {
 
 const isLocal = url => !!url && url.startsWith('local:')
 
-/** Whether the request has local images the server must upload first (a slower start). */
+/** Whether the request has local images (or a video to extend) the server must upload first (a slower start). */
 export function hasLocalUploads(data) {
   const localRef = r =>
     (r.type === 'image' && isLocal(r.image || r.url)) ||
     (r.type === 'subject' && (r.images || []).some(img => isLocal(img.url)))
-  return isLocal(data.image_url) || (data.refs || []).some(localRef)
+  return isLocal(data.image_url) || isLocal(data.video_url) || (data.refs || []).some(localRef)
 }

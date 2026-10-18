@@ -46,6 +46,7 @@ const regenerateJob = ref(null)
 
 // Use-as-ref state - holds ref data to prefill in generate panel
 const useAsRefData = ref(null)
+const extendData = ref(null)
 
 // Gallery ref for video lookup
 const galleryRef = ref(null)
@@ -159,6 +160,19 @@ function handleUseAsRef(video) {
     selectedVideo.value = null
   }
   // Navigate to generate tab
+  router.push({ name: 'project-generate', params: { project: props.project } })
+}
+
+// Extend: the Generate form switches to the extend model with this video —
+// Pollo's own URL for it when there is one, else the project's copy
+function handleExtend(video) {
+  const url = video?.job?.video_url || (video?.filename ? `local:${video.filename}` : '')
+  if (!url) return showToast("Can't extend this video: its file is missing", 'error')
+  extendData.value = { video_url: url }
+  if (modalVisible.value) {
+    modalVisible.value = false
+    selectedVideo.value = null
+  }
   router.push({ name: 'project-generate', params: { project: props.project } })
 }
 
@@ -363,8 +377,10 @@ onUnmounted(() => {
       :legacy-mode="legacyMode"
       :regenerate-job="regenerateJob"
       :use-as-ref="useAsRefData"
+      :extend-video="extendData"
       @regenerate-applied="regenerateJob = null"
       @use-as-ref-applied="useAsRefData = null"
+      @extend-applied="extendData = null"
       @update:legacy-mode="setLegacyMode"
     />
 
@@ -376,6 +392,7 @@ onUnmounted(() => {
       @open-video="openVideoModal"
       @regenerate="handleRegenerate"
       @use-as-ref="handleUseAsRef"
+      @extend="handleExtend"
     />
 
     <HistoryPanel
@@ -395,6 +412,7 @@ onUnmounted(() => {
       @open-video="openVideoModal"
       @regenerate="handleRegenerate"
       @use-as-ref="handleUseAsRef"
+      @extend="handleExtend"
     />
 
     <VideoModal
@@ -404,6 +422,7 @@ onUnmounted(() => {
       @close="closeVideoModal"
       @regenerate="handleRegenerate"
       @use-as-ref="handleUseAsRef"
+      @extend="handleExtend"
       @archive="handleModalArchive"
       @unarchive="handleModalUnarchive"
       @deleted="handleVideoDeleted"

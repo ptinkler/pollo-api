@@ -9,7 +9,7 @@ const props = defineProps({
   active: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['open-video', 'regenerate', 'use-as-ref', 'video-deleted'])
+const emit = defineEmits(['open-video', 'regenerate', 'use-as-ref', 'extend', 'video-deleted'])
 
 const {
   videos,
@@ -104,6 +104,7 @@ defineExpose({ refresh, getVideoByFilename, removeVideo, addVideo })
           @click="openVideo"
           @regenerate="handleRegenerate"
           @use-as-ref="v => emit('use-as-ref', v)"
+          @extend="v => emit('extend', v)"
           @archive="handleArchive"
           @move="handleCardMove"
           @delete="handleDelete"

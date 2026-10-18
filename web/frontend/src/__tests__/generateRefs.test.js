@@ -53,6 +53,7 @@ describe('hasLocalUploads', () => {
     expect(hasLocalUploads({ refs: [{ type: 'image', image: 'local:a.png' }] })).toBe(true)
     expect(hasLocalUploads({ refs: [{ type: 'subject', images: [{ url: 'local:b.png' }] }] })).toBe(true)
     expect(hasLocalUploads({ refs: [{ type: 'video', video: 'local:c.mp4' }] })).toBe(false)
+    expect(hasLocalUploads({ video_url: 'local:v.mp4' })).toBe(true) // a project video to extend
   })
 })
 

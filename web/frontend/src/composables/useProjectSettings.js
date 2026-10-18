@@ -15,6 +15,13 @@ function refForForm(r) {
 const REF_URL_KEYS = ['_local_image', '_local_url', 'url', 'image', 'video', 'audio']
 const refUrl = r => REF_URL_KEYS.map(key => r[key]).find(Boolean) || ''
 
+// A job's source image and video (the one an extend continued). The recorded
+// local file rather than the temporary upload, so the Source Image input
+// shows the permanent copy
+function jobSources(job, params) {
+  return { image_url: params.source_local || job.image_url || '', video_url: job.source_video_url || '' }
+}
+
 export function useProjectSettings(projectName) {
   const settings = ref({
     model: 'seedance20fastv1',
@@ -24,6 +31,7 @@ export function useProjectSettings(projectName) {
     generate_audio: false,
     web_search: false,
     image_url: '',
+    video_url: '', // the video to extend (extend models)
     image_tail: '',
     seed: '',
     refs: [],
@@ -84,9 +92,7 @@ export function useProjectSettings(projectName) {
       refs: refs.filter(r => !r._character).map(refForForm),
       // v1 models only take refs in ref mode, so a job that used refs was one
       ref_mode: refs.length > 0,
-      // The recorded local file rather than the temporary upload, so the
-      // Source Image input shows the permanent copy
-      image_url: params.source_local || job.image_url || '',
+      ...jobSources(job, params),
     })
   }
 

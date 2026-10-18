@@ -109,6 +109,15 @@ MODEL_INFO = {
         "options": ["generate_audio", "web_search", "seed", "image_tail"],
         "legacy": True,
     },
+    "seedance25draft": {
+        "label": "Seedance 2.5 Draft",
+        "type": "img2vid",
+        "lengths": list(range(4, 31)),
+        "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9", "adaptive"],
+        "resolutions": ["480p"],
+        "options": ["generate_audio", "web_search", "seed", "image_tail"],
+        "legacy": True,
+    },
     "seedanceref": {
         "label": "Seedance 2.0 Ref",
         "type": "ref",
@@ -320,6 +329,29 @@ MODEL_INFO = {
             "max": 50,
             "limits": {"image": 30, "video": 10, "audio": 10},
         },
+    },
+    "seedance25draftv1": {
+        "label": "Seedance 2.5 Draft",
+        "type": "img2vid",
+        "lengths": list(range(4, 31)),
+        "resolutions": ["480p"],
+        "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
+        "options": ["generate_audio", "seed", "image_tail", "refs"],
+        "ref_mode": {
+            "types": ["image", "video", "audio"],
+            "max": 50,
+            "limits": {"image": 30, "video": 10, "audio": 10},
+        },
+    },
+    # "type": "extend" continues a source video (video_url) instead of
+    # animating an image; picked from a video's "Extend" button
+    "seedance25extendv1": {
+        "label": "Seedance 2.5 Extend",
+        "type": "extend",
+        "lengths": list(range(4, 31)),
+        "resolutions": ["480p", "720p", "1080p"],
+        "ratios": [],
+        "options": ["generate_audio", "seed"],
     },
     "minimaxh3v1": {
         "label": "MiniMax H3",

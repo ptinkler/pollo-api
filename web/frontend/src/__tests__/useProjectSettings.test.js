@@ -107,6 +107,14 @@ describe('useProjectSettings', () => {
     expect(settings.value.ref_mode).toBe(false)
   })
 
+  it('applyJobSettings restores the video an extend continued', () => {
+    const { settings, applyJobSettings } = useProjectSettings(ref('jobextend'))
+    applyJobSettings({ model: 'seedance25extendv1', source_video_url: 'https://videocdn.pollo.ai/a.mp4' })
+    expect(settings.value.video_url).toBe('https://videocdn.pollo.ai/a.mp4')
+    applyJobSettings({ model: 'seedance25v1' })
+    expect(settings.value.video_url).toBe('')
+  })
+
   it('applyJobSettings turns on ref mode for a job that used refs', () => {
     const projectName = ref('jobrefs')
     const { settings, applyJobSettings } = useProjectSettings(projectName)

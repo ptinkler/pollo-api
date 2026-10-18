@@ -9,7 +9,7 @@ const props = defineProps({
   visible: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['close', 'regenerate', 'use-as-ref', 'archive', 'unarchive', 'deleted'])
+const emit = defineEmits(['close', 'regenerate', 'use-as-ref', 'extend', 'archive', 'unarchive', 'deleted'])
 const showToast = inject('showToast')
 
 const isArchived = computed(() => !!props.video?.job?.archived)
@@ -113,6 +113,7 @@ onUnmounted(() => {
           <div class="modal-actions">
             <button class="btn btn-primary" @click="$emit('regenerate', video)">🔄 Regenerate</button>
             <button class="btn btn-primary" @click="$emit('use-as-ref', video)">🎯 Use as Ref</button>
+            <button v-if="!isImageJob" class="btn btn-primary" @click="$emit('extend', video)">⏩ Extend</button>
             <button v-if="isImageJob" class="btn btn-secondary" @click="characterOpen = true">👤 Make character</button>
             <button class="btn btn-secondary" @click="$emit(isArchived ? 'unarchive' : 'archive', video)">
               📦 {{ isArchived ? 'Unarchive' : 'Archive' }}

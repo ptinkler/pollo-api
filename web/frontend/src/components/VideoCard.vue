@@ -20,6 +20,7 @@ defineEmits([
   'click',
   'regenerate',
   'use-as-ref',
+  'extend',
   'archive',
   'unarchive',
   'move',
@@ -83,6 +84,17 @@ function handleThumbError() {
           <path d="M15 3h6v6" />
           <path d="M10 14L21 3" />
           <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+        </svg>
+      </button>
+      <button
+        v-if="manage && !isImageJob"
+        class="action-btn"
+        title="Extend: carry the video on"
+        @click.stop="$emit('extend', video)"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M13 17l5-5-5-5" />
+          <path d="M6 17l5-5-5-5" />
         </svg>
       </button>
       <button v-if="manage && showArchive" class="action-btn" title="Archive" @click.stop="$emit('archive', video)">
