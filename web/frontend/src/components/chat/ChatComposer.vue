@@ -170,6 +170,17 @@ defineExpose({ focus, autosize })
         </div>
       </div>
 
+      <!-- The message gets the full width; the tools and Send sit beneath it -->
+      <textarea
+        ref="textarea"
+        v-model="draft"
+        rows="1"
+        :placeholder="placeholder"
+        @input="autosize"
+        @keydown="onKeydown"
+        @paste="onPaste"
+      ></textarea>
+
       <div class="composer-row">
         <label class="icon-btn" title="Attach images (or paste / drop)">
           📎
@@ -210,15 +221,7 @@ defineExpose({ focus, autosize })
         >
           {{ leftOut.length ? '⚠' : '🖼' }} {{ refs.sent }}{{ refs.max ? `/${refs.max}` : '' }}
         </button>
-        <textarea
-          ref="textarea"
-          v-model="draft"
-          rows="1"
-          :placeholder="placeholder"
-          @input="autosize"
-          @keydown="onKeydown"
-          @paste="onPaste"
-        ></textarea>
+        <span class="spacer"></span>
         <button v-if="sending" class="send stop" title="Stop" @click="emit('stop')">■</button>
         <button v-else class="send" :disabled="!canSend" title="Send (Enter)" @click="trySend">↑</button>
       </div>
@@ -416,7 +419,7 @@ defineExpose({ focus, autosize })
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 24px;
-  padding: 6px 6px 6px 8px;
+  padding: 8px 8px 6px 10px;
   transition:
     border-color 0.2s,
     box-shadow 0.2s;
@@ -433,19 +436,24 @@ defineExpose({ focus, autosize })
 
 .composer-row {
   display: flex;
-  align-items: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
 }
 
-.composer textarea {
+.spacer {
   flex: 1;
-  min-width: 0;
+}
+
+.composer textarea {
+  display: block;
+  width: 100%;
   min-height: 24px;
   max-height: 240px;
   resize: none;
   border: none;
   background: transparent;
-  padding: 7px 4px;
+  padding: 6px 6px 8px;
   font-size: 0.95rem;
   line-height: 1.5;
   overflow-y: auto;
