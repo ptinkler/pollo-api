@@ -5,12 +5,16 @@ import { mediaOrigin } from '../../composables/useMedia'
 // A grid of media-library items with infinite scroll: tiles are added a
 // small batch at a time as you near the bottom, and each tile's small
 // server-made thumbnail loads only when the tile is near the screen.
-// With `selectable`, clicking toggles an item's selection ('toggle');
-// otherwise it opens it ('open').
+// With `selectable`, clicking toggles an item's selection ('toggle', with
+// the click event, e.g. for shift-click ranges); otherwise it opens it
+// ('open'). `checkboxes`: each tile's tick circle shows on hover, and
+// clicking it toggles that item even when not `selectable` — so selecting
+// can start from any tile.
 const props = defineProps({
   items: { type: Array, default: () => [] },
   selected: { type: Set, default: () => new Set() },
   selectable: { type: Boolean, default: false },
+  checkboxes: { type: Boolean, default: false },
   pageSize: { type: Number, default: 20 },
 })
 const emit = defineEmits(['toggle', 'open'])
@@ -80,14 +84,23 @@ function onThumbError(item, e) {
       class="tile"
       :class="{ selected: selected.has(item.id) }"
       :title="item.prompt || item.name"
-      @click="selectable ? emit('toggle', item) : emit('open', item)"
+      @click="selectable ? emit('toggle', item, $event) : emit('open', item)"
     >
       <span v-if="failed.has(item.id)" class="no-thumb">{{ item.kind === 'video' ? '🎬' : '🖼' }}</span>
       <img v-else :src="item.thumb_url" alt="" loading="lazy" decoding="async" @error="onThumbError(item, $event)" />
       <span v-if="item.kind === 'video'" class="badge video">▶</span>
       <span class="badge source">{{ item.source === 'upload' ? '⬆' : '✨' }}</span>
       <span class="caption">{{ mediaOrigin(item) }}</span>
-      <span v-if="selectable" class="check">{{ selected.has(item.id) ? '✓' : '' }}</span>
+      <span
+        v-if="selectable || checkboxes"
+        class="check"
+        :class="{ hover: !selectable }"
+        role="checkbox"
+        :aria-checked="selected.has(item.id)"
+        :aria-label="`Select ${item.name}`"
+        @click.stop="emit('toggle', item, $event)"
+        >{{ selected.has(item.id) ? '✓' : '' }}</span
+      >
     </button>
     <div v-if="visible.length < items.length" ref="sentinel" class="sentinel" aria-hidden="true"></div>
   </div>
@@ -186,6 +199,21 @@ function onThumbError(item, e) {
   color: #fff;
   font-size: 0.75rem;
   line-height: 18px;
+}
+
+/* Until something is selected, the circle only shows on hover (or keyboard focus) */
+.check.hover {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.tile:hover .check.hover,
+.tile:focus-visible .check.hover {
+  opacity: 1;
+}
+
+.check:hover {
+  border-color: var(--accent2);
 }
 
 .tile.selected .check {

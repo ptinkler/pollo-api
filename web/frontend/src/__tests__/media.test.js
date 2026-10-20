@@ -211,7 +211,7 @@ describe('MediaView', () => {
         : u.includes('/api/media/blocked')
           ? blocked
           : u.includes('/api/characters')
-            ? []
+            ? { characters: [] }
             : { items: ITEMS }
       return { ok: true, status: 200, json: async () => body }
     })
@@ -242,6 +242,50 @@ describe('MediaView', () => {
     await btn.trigger('click')
     await flushPromises()
     expect(calls).toContainEqual(['POST', '/api/media/blocked/clear'])
+    w.unmount()
+  })
+
+  const tiles = w => w.findAll('.tile')
+  const ticked = w => tiles(w).map(t => t.classes().includes('selected'))
+
+  it('ticking a tile’s circle starts selecting; then clicks toggle', async () => {
+    const { w } = await mountView()
+    expect(w.find('.selection-bar').exists()).toBe(false)
+    await tiles(w)[1].find('.check').trigger('click')
+    expect(ticked(w)).toEqual([false, true, false])
+    expect(w.find('.selection-bar').text()).toContain('1 selected')
+    await tiles(w)[0].trigger('click') // selecting now: a click toggles rather than opens
+    expect(ticked(w)).toEqual([true, true, false])
+    expect(document.querySelector('.preview')).toBeNull()
+    w.unmount()
+  })
+
+  it('shift-click selects a range; select all and clear', async () => {
+    const { w } = await mountView()
+    await tiles(w)[0].find('.check').trigger('click')
+    await tiles(w)[2].trigger('click', { shiftKey: true })
+    expect(ticked(w)).toEqual([true, true, true])
+    await w.find('.selection-bar button.btn-secondary').trigger('click') // Clear (all are selected)
+    expect(w.find('.selection-bar').exists()).toBe(false)
+    await w.find('.bar .btn-secondary:last-child').trigger('click') // Select (touch screens)
+    const selectAll = w.findAll('.selection-bar button').find(b => b.text().startsWith('Select all'))
+    await selectAll.trigger('click')
+    expect(ticked(w)).toEqual([true, true, true])
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await flushPromises()
+    expect(ticked(w)).toEqual([false, false, false])
+    w.unmount()
+  })
+
+  it('deletes the selection in one go', async () => {
+    const { w, calls } = await mountView()
+    await tiles(w)[0].find('.check').trigger('click')
+    await tiles(w)[2].trigger('click')
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await w.find('.selection-bar .btn-danger').trigger('click')
+    await flushPromises()
+    expect(calls.filter(([m]) => m === 'DELETE')).toHaveLength(2)
+    expect(tiles(w)).toHaveLength(1)
     w.unmount()
   })
 

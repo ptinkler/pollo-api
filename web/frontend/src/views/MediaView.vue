@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, inject } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, inject } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import MediaGrid from '../components/media/MediaGrid.vue'
 import MediaFilters from '../components/media/MediaFilters.vue'
@@ -61,8 +61,14 @@ async function clearAllBlocked() {
   }
 }
 
+// Selecting: ticking any tile's circle (on hover) starts it, or the Select
+// button (touch screens have no hover). While selecting, clicks toggle
+// tiles and shift-click selects the range from the last one clicked.
 const selectMode = ref(false)
 const selected = ref(new Set())
+const selecting = computed(() => selectMode.value || selected.value.size > 0)
+const lastToggled = ref(null)
+const busy = ref('') // what a bulk action is doing, e.g. "Deleting 3 of 40…"
 const selectedItems = computed(() => items.value.filter(i => selected.value.has(i.id)))
 const selectedImages = computed(() => selectedItems.value.filter(i => i.kind === 'image'))
 const preview = ref(null)
@@ -104,14 +110,40 @@ async function upload(files) {
 }
 
 function toggleSelectMode() {
-  selectMode.value = !selectMode.value
-  selected.value = new Set()
+  if (selecting.value) return clearSelection()
+  selectMode.value = true
 }
 
-function toggle(item) {
+function clearSelection() {
+  selectMode.value = false
+  selected.value = new Set()
+  lastToggled.value = null
+}
+
+function selectAll() {
+  selected.value = new Set(filtered.value.map(i => i.id))
+}
+
+function toggle(item, event) {
   const next = new Set(selected.value)
-  next.has(item.id) ? next.delete(item.id) : next.add(item.id)
+  const range = event?.shiftKey && lastToggled.value != null ? rangeTo(item) : null
+  if (range) range.forEach(i => next.add(i.id))
+  else if (!next.delete(item.id)) next.add(item.id)
   selected.value = next
+  lastToggled.value = item.id
+}
+
+// The shown items from the last one clicked to this one
+function rangeTo(item) {
+  const list = filtered.value
+  const a = list.findIndex(i => i.id === lastToggled.value)
+  const b = list.findIndex(i => i.id === item.id)
+  if (a === -1 || b === -1) return null
+  return list.slice(Math.min(a, b), Math.max(a, b) + 1)
+}
+
+function onKey(e) {
+  if (e.key === 'Escape' && selecting.value && !preview.value && !charEditor.value.open) clearSelection()
 }
 
 const DELETE_NOTE =
@@ -122,13 +154,18 @@ async function remove(list) {
   const what = list.length === 1 ? 'this item' : `${list.length} items`
   if (!confirm(`Delete ${what} permanently?\n\n${DELETE_NOTE}`)) return
   const gone = new Set()
-  for (const item of list) {
-    try {
-      await deleteMedia(item.id)
-      gone.add(item.id)
-    } catch (e) {
-      showToast(`Couldn't delete ${item.name}: ${e.message}`, 'error')
+  try {
+    for (const [n, item] of list.entries()) {
+      if (list.length > 1) busy.value = `Deleting ${n + 1} of ${list.length}…`
+      try {
+        await deleteMedia(item.id)
+        gone.add(item.id)
+      } catch (e) {
+        showToast(`Couldn't delete ${item.name}: ${e.message}`, 'error')
+      }
     }
+  } finally {
+    busy.value = ''
   }
   items.value = items.value.filter(i => !gone.has(i.id))
   selected.value = new Set([...selected.value].filter(id => !gone.has(id)))
@@ -153,10 +190,15 @@ async function addToCharacter(list) {
   const images = list.filter(i => i.kind === 'image')
   try {
     let c = null
-    for (const item of images) c = await importMedia(item.id, { target: 'character', character_id: id })
+    for (const [n, item] of images.entries()) {
+      if (images.length > 1) busy.value = `Adding ${n + 1} of ${images.length}…`
+      c = await importMedia(item.id, { target: 'character', character_id: id })
+    }
     if (c) showToast(`Added ${images.length} image${images.length !== 1 ? 's' : ''} to ${c.name}`, 'success')
   } catch (e) {
     showToast(`Couldn't add: ${e.message}`, 'error')
+  } finally {
+    busy.value = ''
   }
 }
 
@@ -172,7 +214,9 @@ onMounted(() => {
   load()
   loadCharacters()
   loadBlocked()
+  window.addEventListener('keydown', onKey)
 })
+onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 </script>
 
 <template>
@@ -208,26 +252,46 @@ onMounted(() => {
       >
         🧹 Clear blocked ({{ blockedTotal }})
       </button>
-      <button class="btn btn-secondary small" @click="toggleSelectMode">{{ selectMode ? 'Cancel' : 'Select' }}</button>
+      <button class="btn btn-secondary small" @click="toggleSelectMode">{{ selecting ? 'Cancel' : 'Select' }}</button>
     </div>
     <p v-if="uploading" class="muted">Uploading {{ uploading }}…</p>
 
-    <div v-if="selectMode && selected.size" class="selection-bar">
+    <div v-if="selecting" class="selection-bar">
       <span>{{ selected.size }} selected</span>
+      <button
+        v-if="selected.size < filtered.length"
+        class="btn btn-secondary small"
+        :disabled="!!busy"
+        @click="selectAll"
+      >
+        Select all {{ filtered.length }}
+      </button>
+      <button v-if="selected.size" class="btn btn-secondary small" :disabled="!!busy" @click="clearSelection">
+        Clear
+      </button>
+      <span class="hint">{{ busy || 'Shift-click selects a range · Esc clears' }}</span>
       <span class="spacer"></span>
-      <button v-if="selectedImages.length" class="btn btn-secondary small" @click="newCharacter(selectedItems)">
+      <button
+        v-if="selectedImages.length"
+        class="btn btn-secondary small"
+        :disabled="!!busy"
+        @click="newCharacter(selectedItems)"
+      >
         👤 New character
       </button>
       <select
         v-if="selectedImages.length && savedCharacters.length"
         v-model="addToCharacterId"
         class="char-select"
+        :disabled="!!busy"
         @change="addToCharacter(selectedItems)"
       >
         <option value="">Add to character…</option>
         <option v-for="c in savedCharacters" :key="c.id" :value="c.id">{{ c.name }}</option>
       </select>
-      <button class="btn btn-danger small" @click="remove(selectedItems)">Delete</button>
+      <button v-if="selected.size" class="btn btn-danger small" :disabled="!!busy" @click="remove(selectedItems)">
+        Delete {{ selected.size }}
+      </button>
     </div>
 
     <p v-if="loading" class="muted">Loading…</p>
@@ -239,7 +303,8 @@ onMounted(() => {
       v-else
       :items="filtered"
       :selected="selected"
-      :selectable="selectMode"
+      :selectable="selecting"
+      checkboxes
       @toggle="toggle"
       @open="preview = $event"
     />
@@ -351,6 +416,11 @@ onMounted(() => {
   border: 1px solid var(--accent);
   font-size: 0.85rem;
   flex-wrap: wrap;
+}
+
+.hint {
+  font-size: 0.75rem;
+  color: var(--text2);
 }
 
 .char-select {
