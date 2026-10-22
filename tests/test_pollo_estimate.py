@@ -173,6 +173,13 @@ def client(tmp_path, monkeypatch):
     from img2vid.common.metadata import MetadataDB
 
     monkeypatch.setenv("POLLO_API_KEY", "test-key")
+    # App auth off for these tests (no keys); opt out of fail-closed so routes serve.
+    monkeypatch.delenv("API_KEY", raising=False)
+    monkeypatch.delenv("API_KEYS", raising=False)
+    monkeypatch.setenv("ALLOW_NO_AUTH", "true")
+    import web.auth as auth_mod
+
+    auth_mod.get_api_keys.cache_clear()
     (tmp_path / "data").mkdir(exist_ok=True)
     db = MetadataDB(db_path=tmp_path / "data" / "metadata.db")
     monkeypatch.setattr(api_mod, "ASSETS_DIR", tmp_path / "assets")
