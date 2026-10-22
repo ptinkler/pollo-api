@@ -20,6 +20,13 @@ def _setup_env(tmp_path, monkeypatch):
     """Set up a clean environment for every test."""
     monkeypatch.setenv("POLLO_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("POLLO_API_KEY", "test-key")
+    # App auth off for the suite (no keys); opt out of fail-closed so routes serve.
+    monkeypatch.delenv("API_KEY", raising=False)
+    monkeypatch.delenv("API_KEYS", raising=False)
+    monkeypatch.setenv("ALLOW_NO_AUTH", "true")
+    import web.auth as auth_mod
+
+    auth_mod.get_api_keys.cache_clear()
     # Create required dirs
     (tmp_path / "assets").mkdir()
     (tmp_path / "data").mkdir()

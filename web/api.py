@@ -44,7 +44,16 @@ from img2vid.pollo.pollo_img2vid import GENERATORS, IMAGE_GENERATORS, get_image_
 from . import characters, image_hosts, media, pollo_estimate, vpn
 
 # ── Authentication ───────────────────────────────────────────────────
-from .auth import get_api_keys, is_auth_enabled, verify_api_key
+from .auth import (
+    _valid_key,
+    allow_no_auth,
+    auth_misconfigured,
+    get_api_keys,
+    is_auth_enabled,
+    make_session_token,
+    resolve_session,
+    verify_api_key,
+)
 from .chat import router as chat_router
 from .chat import startup_resume_chat
 from .chatgpt_import import router as chatgpt_import_router
@@ -54,6 +63,16 @@ from .uploads import image_media_type, read_image_upload, safe_filename
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown events."""
+    # Startup: announce the auth posture so a misconfigured deploy is obvious
+    if auth_misconfigured():
+        print(
+            "🔒 AUTH NOT CONFIGURED — protected endpoints will return 503. "
+            "Set API_KEY/API_KEYS, or ALLOW_NO_AUTH=true to run without auth (dev only)."
+        )
+    elif allow_no_auth() and not is_auth_enabled():
+        print("⚠️  AUTH DISABLED (ALLOW_NO_AUTH) — every endpoint is open. Development use only.")
+    else:
+        print(f"🔒 Auth enabled — {len(get_api_keys())} API key(s) configured.")
     # Startup: resume polling for any jobs stuck in processing
     startup_resume_jobs()
     startup_resume_chat()
@@ -280,20 +299,75 @@ class LoginRequest(BaseModel):
 COOKIE_NAME = "session"
 COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
 
+# Login brute-force throttle: per-client-IP sliding window (in-memory).
+LOGIN_MAX_ATTEMPTS = 10
+LOGIN_WINDOW_SECONDS = 300
+_login_attempts: dict[str, list[float]] = {}
+_login_lock = threading.Lock()
+
+
+def _cookie_secure(request: Request) -> bool:
+    """Whether the session cookie should be marked Secure (HTTPS-only).
+
+    Secure by default, so a TLS deployment (e.g. the NAS) needs no config. The
+    one automatic exemption is plain-HTTP access to a loopback host, where
+    local dev would otherwise break — browsers treat localhost as secure, so
+    the cookie still works there. COOKIE_SECURE=true/false overrides either
+    way: set it false only to serve auth over plain HTTP on a LAN."""
+    override = os.getenv("COOKIE_SECURE", "").strip().lower()
+    if override in {"1", "true", "yes", "on"}:
+        return True
+    if override in {"0", "false", "no", "off"}:
+        return False
+    forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    if request.url.scheme == "https" or forwarded == "https":
+        return True
+    host = (request.url.hostname or "").lower()
+    return host not in {"localhost", "127.0.0.1", "::1"}
+
+
+def _client_ip(request: Request) -> str:
+    """The real client IP. Behind the reverse proxy, request.client is the
+    proxy, so prefer the IP nginx stamps (X-Real-IP; it overwrites any client
+    value), then the first X-Forwarded-For hop, then the socket peer."""
+    real = request.headers.get("x-real-ip", "").strip()
+    if real:
+        return real
+    forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    if forwarded:
+        return forwarded
+    return request.client.host if request.client else "unknown"
+
+
+def _login_rate_limited(request: Request) -> bool:
+    """Record a login attempt for the client IP; True if it's over the limit."""
+    client = _client_ip(request)
+    now = time.time()
+    with _login_lock:
+        attempts = [t for t in _login_attempts.get(client, []) if now - t < LOGIN_WINDOW_SECONDS]
+        attempts.append(now)
+        _login_attempts[client] = attempts
+        # Opportunistically drop idle clients so the map can't grow unbounded.
+        if len(_login_attempts) > 1024:
+            for ip in [ip for ip, ts in _login_attempts.items() if all(now - t >= LOGIN_WINDOW_SECONDS for t in ts)]:
+                _login_attempts.pop(ip, None)
+        return len(attempts) > LOGIN_MAX_ATTEMPTS
+
 
 @app.post("/api/auth/login")
 async def api_auth_login(data: LoginRequest, response: Response, request: Request):
+    if _login_rate_limited(request):
+        raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
     key = data.key.strip()
     auth_keys = get_api_keys()
-    if auth_keys and key not in auth_keys:
+    if auth_keys and not _valid_key(key, auth_keys):
         raise HTTPException(status_code=401, detail="Invalid API key")
-    is_https = request.headers.get("x-forwarded-proto", "").lower() == "https"
     response.set_cookie(
         key=COOKIE_NAME,
-        value=key,
+        value=make_session_token(key) if auth_keys else key,
         httponly=True,
         samesite="strict",
-        secure=is_https,
+        secure=_cookie_secure(request),
         max_age=COOKIE_MAX_AGE,
     )
     return {"ok": True}
@@ -309,8 +383,12 @@ async def api_auth_logout(response: Response):
 async def api_auth_status(session: str | None = Cookie(None)):
     enabled = is_auth_enabled()
     if not enabled:
+        # No keys configured. Either an explicit dev opt-out (everything open),
+        # or a misconfiguration we now fail closed on (protected routes 503).
+        if auth_misconfigured():
+            return {"enabled": True, "authenticated": False, "misconfigured": True}
         return {"enabled": False, "authenticated": True}
-    authenticated = session is not None and session.strip() in get_api_keys()
+    authenticated = resolve_session(session) is not None
     return {"enabled": True, "authenticated": authenticated}
 
 
@@ -1971,9 +2049,10 @@ IMMUTABLE_CACHE = {"Cache-Control": "public, max-age=31536000, immutable"}
 
 
 @app.get("/video/{project}/{filename}")
-def serve_video(project: str, filename: str):
+def serve_video(project: str, filename: str, _api_key: str = Depends(verify_api_key)):
     """Serve a video or generated image file. Project can be slug or assets_folder."""
     safe_filename(filename)
+    safe_filename(project)  # the fallback below joins it as a path segment
     assets_folder = _get_project_assets_folder(project)
     if not assets_folder:
         assets_folder = project
@@ -1986,9 +2065,10 @@ def serve_video(project: str, filename: str):
 
 
 @app.get("/video-thumb/{project}/{filename}")
-def serve_video_thumb(project: str, filename: str):
+def serve_video_thumb(project: str, filename: str, _api_key: str = Depends(verify_api_key)):
     """Serve a thumbnail for a video (first frame) or image file (directly)."""
     safe_filename(filename)
+    safe_filename(project)  # the fallback below joins it as a path segment
     assets_folder = _get_project_assets_folder(project)
     if not assets_folder:
         assets_folder = project
@@ -2039,7 +2119,7 @@ def api_delete_video(project: str, filename: str, _api_key: str = Depends(verify
 
 
 @app.get("/image/{project}")
-def serve_image(project: str):
+def serve_image(project: str, _api_key: str = Depends(verify_api_key)):
     """Serve the project's thumbnail image.
     Priority: thumb.jpg (latest video frame) > image.* (source image)
     """

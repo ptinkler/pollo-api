@@ -72,6 +72,7 @@ def chat(monkeypatch, db):
 def client(chat, monkeypatch):
     monkeypatch.delenv("API_KEY", raising=False)
     monkeypatch.delenv("API_KEYS", raising=False)
+    monkeypatch.setenv("ALLOW_NO_AUTH", "true")  # no keys → opt out of fail-closed
     import web.auth as auth_mod
 
     auth_mod.get_api_keys.cache_clear()

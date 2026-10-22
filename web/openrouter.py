@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 
-from . import request_log, sse
+from . import net_guard, request_log, sse
 
 # Overridable so a local fake can stand in during manual testing
 OPENROUTER_BASE = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
@@ -389,7 +389,11 @@ def generate_image_chat(
             header, _, b64 = url.partition(",")
             images.append((base64.b64decode(b64), header[5:].split(";")[0] or "image/png"))
         elif url:
-            r = _client.get(url, timeout=IMAGE_TIMEOUT, follow_redirects=True)
+            # Provider-supplied URL — guard against SSRF (loopback/metadata/LAN).
+            try:
+                r = net_guard.get_public(_client, url, timeout=IMAGE_TIMEOUT)
+            except net_guard.UnsafeURLError as exc:
+                raise OpenRouterError(f"Refusing to fetch unsafe image URL: {exc}") from exc
             r.raise_for_status()
             images.append((r.content, r.headers.get("content-type", "image/png").split(";")[0]))
     if not images:

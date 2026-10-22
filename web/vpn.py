@@ -111,6 +111,6 @@ def vpn_change_country(data: VpnCountryRequest, _api_key: str = Depends(verify_a
 
 
 @router.get("/countries")
-def vpn_countries():
+def vpn_countries(_api_key: str = Depends(verify_api_key)):
     """The allowed VPN server countries."""
     return {"countries": ALLOWED_VPN_COUNTRIES}
