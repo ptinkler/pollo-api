@@ -261,12 +261,7 @@ def _project_items(db) -> list[dict[str, Any]]:
     return items
 
 
-def _chat_items(db) -> list[dict[str, Any]]:
-    titles = {c.id: c.title for c in db.list_conversations(limit=100000)}
-    return _chat_records(db, titles) + _chat_orphans(db, titles)
-
-
-def _chat_records(db, titles: dict[str, str]) -> list[dict[str, Any]]:
+def _chat_records(msgs, lib_items, titles: dict[str, str]) -> list[dict[str, Any]]:
     # Keyed by file name alone: a branched chat links its media in under the
     # same names (web/chat.py api_fork_conversation), so each shows once —
     # in the oldest chat that still has it
@@ -294,10 +289,10 @@ def _chat_records(db, titles: dict[str, str]) -> list[dict[str, Any]]:
             "cost": item.get("cost"),
         }
 
-    for msg in db.get_chat_messages_with_media():  # newest first, so older copies win
+    for msg in msgs:  # newest first, so older copies win
         for item in msg.media:
             add(msg.conversation_id, item, msg.created_at, replace=True)
-    for lib in db.list_chat_library():  # media detached from its message by older edits/retries
+    for lib in lib_items:  # media detached from its message by older edits/retries
         add(lib.conversation_id, lib.item, lib.created_at)
     return list(items.values())
 
@@ -310,15 +305,15 @@ def _referenced_files(item: dict) -> list[str]:
     return [f for f in [item.get("file"), *refs] if isinstance(f, str) and f]
 
 
-def _chat_orphans(db, titles: dict[str, str]) -> list[dict[str, Any]]:
+def _chat_orphans(msgs, lib_items, titles: dict[str, str]) -> list[dict[str, Any]]:
     """Files in chat folders that no message or library entry records."""
     root = config.ROOT_DIR / "chat"
     if not root.is_dir():
         return []
     used: set[tuple[str, str]] = set()
-    for msg in db.get_chat_messages_with_media():
+    for msg in msgs:
         used.update((msg.conversation_id, f) for i in msg.media for f in _referenced_files(i))
-    for lib in db.list_chat_library():
+    for lib in lib_items:
         used.update((lib.conversation_id, f) for f in _referenced_files(lib.item))
     cutoff = time.time() - ORPHAN_GRACE
     items = []
@@ -347,13 +342,85 @@ def _chat_orphans(db, titles: dict[str, str]) -> list[dict[str, Any]]:
     return items
 
 
-@router.get("")
-def api_list_media():
-    """Every upload and creation, newest first."""
-    db = get_db()
-    items = _library_items() + _project_items(db) + _chat_items(db)
+def _build_items(db) -> list[dict[str, Any]]:
+    """The whole library, newest first. The two chat queries (every message
+    with media, and the detached library) are each run once and shared by the
+    records and orphans passes — they were the list's main cost."""
+    msgs = db.get_chat_messages_with_media()  # newest first (id desc)
+    lib_items = db.list_chat_library()
+    titles = {c.id: c.title for c in db.list_conversations(limit=100000)}
+    items = (
+        _library_items()
+        + _project_items(db)
+        + _chat_records(msgs, lib_items, titles)
+        + _chat_orphans(msgs, lib_items, titles)
+    )
     items.sort(key=lambda i: i["created_at"] or "", reverse=True)
-    return {"items": items}
+    return items
+
+
+# The built list, cached so paging through it doesn't rebuild it each request
+# (scanning every chat folder and the whole chat DB is slow on a NAS). Keyed on
+# ROOT_DIR so tests, each with their own, never see another's. Writes through
+# this module invalidate it; a short TTL catches creations made elsewhere.
+_LIST_TTL = 30.0
+_list_cache: dict[str, Any] = {"root": None, "at": 0.0, "items": None}
+
+
+def _all_items() -> list[dict[str, Any]]:
+    now = time.monotonic()
+    if _list_cache["items"] is None or _list_cache["root"] != config.ROOT_DIR or now - _list_cache["at"] > _LIST_TTL:
+        _list_cache.update(root=config.ROOT_DIR, at=now, items=_build_items(get_db()))
+    return _list_cache["items"]
+
+
+def _invalidate_list() -> None:
+    _list_cache["items"] = None
+
+
+def _origin_label(item: dict[str, Any]) -> str:
+    """Where an item is from, for search — mirrors mediaOrigin in the frontend."""
+    origin = item.get("origin")
+    if origin == "project":
+        return item.get("project_name") or item.get("project") or ""
+    if origin == "chat":
+        return item.get("conversation_title") or "Chat"
+    if origin == "orphan":
+        title = item.get("conversation_title")
+        return f"{title} (orphaned)" if title else "Orphaned"
+    return "Library"
+
+
+def _matches(item: dict[str, Any], kind: str, source: str, origin: str, q: str) -> bool:
+    if kind != "all" and item.get("kind") != kind:
+        return False
+    if source != "all" and item.get("source") != source:
+        return False
+    if origin != "all" and item.get("origin") != origin:
+        return False
+    if not q:
+        return True
+    return any(s and q in s.lower() for s in (item.get("prompt"), item.get("name"), _origin_label(item)))
+
+
+@router.get("")
+def api_list_media(
+    offset: int = 0,
+    limit: int = 0,  # 0 = everything from `offset` on (the default — the whole library)
+    kind: str = "all",
+    source: str = "all",
+    origin: str = "all",
+    q: str = "",
+):
+    """A page of the library, newest first, narrowed by the same filters as the
+    Media page. `total` is how many match before paging, for infinite scroll."""
+    items = _all_items()
+    ql = q.strip().lower()
+    if kind != "all" or source != "all" or origin != "all" or ql:
+        items = [i for i in items if _matches(i, kind, source, origin, ql)]
+    total = len(items)
+    items = items[offset : offset + limit] if limit else items[offset:]
+    return {"items": items, "total": total, "offset": offset}
 
 
 @router.get("/library/{filename}")
@@ -372,6 +439,7 @@ async def api_upload_media(file: UploadFile = File(...)):
     d.mkdir(parents=True, exist_ok=True)
     name = f"up_{uuid.uuid4().hex[:12]}{ext}"
     (d / name).write_bytes(content)
+    _invalidate_list()
     return next(i for i in _library_items() if i["name"] == name)
 
 
@@ -409,6 +477,7 @@ def api_delete_media(media_id: str):
             if lib.conversation_id == conv_id and lib.item.get("file") == file:
                 db.delete_chat_library_item(lib.media_id)
         path.unlink()
+    _invalidate_list()
     return {"deleted": media_id}
 
 
@@ -517,6 +586,7 @@ def api_clear_blocked():
         msg = db.get_chat_message(msg_id)
         if msg:
             db.update_chat_message(msg_id, media=[i for i in msg.media if i.get("id") not in ids])
+    _invalidate_list()
     return {"cleared": len(found)}
 
 
@@ -554,6 +624,7 @@ def api_import_media(data: ImportMedia):
         folder.mkdir(parents=True, exist_ok=True)
         name = f"{data.prefix}-{uuid.uuid4().hex[:12]}{ext}"
         shutil.copyfile(path, folder / name)
+        _invalidate_list()
         return {"image_url": f"local:{name}"}
 
     if data.target == "chat":
@@ -566,6 +637,7 @@ def api_import_media(data: ImportMedia):
         d.mkdir(parents=True, exist_ok=True)
         name = f"up_{uuid.uuid4().hex[:12]}{ext}"
         shutil.copyfile(path, d / name)
+        _invalidate_list()
         return {"file": name}
 
     char = db.get_character(data.character_id or 0)

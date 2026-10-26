@@ -464,6 +464,18 @@ def _model_info(kind: str, model_id: str | None) -> dict | None:
     return info
 
 
+# Values a model exposes that mean "you decide" — mapped to from an unset ratio
+# so the "Ratio: auto" placeholder really is automatic, not the provider's
+# missing-field default (Seedream, for one, treats a missing ratio as 16:9).
+_AUTO_RATIOS = ("auto", "adaptive")
+
+
+def _auto_ratio(kind: str, model_id: str | None) -> str | None:
+    """The model's own 'auto' aspect-ratio value, if it offers one."""
+    ratios = (_model_info(kind, model_id) or {}).get("aspect_ratios") or []
+    return next((v for v in _AUTO_RATIOS if v in ratios), None)
+
+
 def _fit_video_params(
     model_id: str, duration: int | None, aspect_ratio: str | None, resolution: str | None
 ) -> tuple[int | None, str | None, str | None]:
@@ -2249,25 +2261,26 @@ def _run_image_generation(
     if context is None:
         prompt = characters.with_characters(prompt, _param_characters(params))
     request_log.forget_last()
+    # An unset ratio ("Ratio: auto") becomes the model's own auto value when it
+    # has one, so it stays automatic instead of falling back to 16:9.
+    aspect_ratio = params.get("aspect_ratio") or _auto_ratio("image", model)
     credits, sent = None, {}
     if venice_chat.is_venice(model):
         images, cost, sent = venice_chat.generate_image(
-            model, prompt, aspect_ratio=params.get("aspect_ratio"), resolution=params.get("resolution"), ref_paths=refs
+            model, prompt, aspect_ratio=aspect_ratio, resolution=params.get("resolution"), ref_paths=refs
         )
     elif pollo_chat.is_pollo(model):
         images, credits, sent = pollo_chat.generate_image(
-            model, prompt, aspect_ratio=params.get("aspect_ratio"), resolution=params.get("resolution"), ref_paths=refs
+            model, prompt, aspect_ratio=aspect_ratio, resolution=params.get("resolution"), ref_paths=refs
         )
         cost = None
     elif context is not None:
-        images, cost = openrouter.generate_image_chat(
-            model, context, aspect_ratio=params.get("aspect_ratio"), session_id=conv_id
-        )
+        images, cost = openrouter.generate_image_chat(model, context, aspect_ratio=aspect_ratio, session_id=conv_id)
     else:
         images, cost = openrouter.generate_image(
             model,
             prompt,
-            aspect_ratio=params.get("aspect_ratio"),
+            aspect_ratio=aspect_ratio,
             resolution=params.get("resolution"),
             input_images=[_file_to_data_url(f) for f in refs] or None,
             session_id=conv_id,
@@ -2293,13 +2306,16 @@ def _submit_video_generation(conv_id: str, model: str, prompt: str, params: dict
 def _submit_video(conv_id: str, model: str, prompt: str, params: dict[str, Any]) -> dict:
     frame = _ref_file(conv_id, params["first_frame"]) if params.get("first_frame") else None
     prompt = characters.with_characters(prompt, _param_characters(params))
+    # An unset ratio uses the model's own auto value when it has one (matching
+    # the image path); animating an image still derives the ratio from the frame.
+    aspect_ratio = params.get("aspect_ratio") or (None if frame else _auto_ratio("video", model))
     if venice_chat.is_venice(model):
         conv_dir = _conv_dir(conv_id)
         return venice_chat.submit_video(
             model,
             prompt,
             duration=params.get("duration"),
-            aspect_ratio=params.get("aspect_ratio"),
+            aspect_ratio=aspect_ratio,
             resolution=params.get("resolution"),
             generate_audio=params.get("generate_audio"),
             first_frame=frame,
@@ -2312,7 +2328,7 @@ def _submit_video(conv_id: str, model: str, prompt: str, params: dict[str, Any])
             model,
             prompt,
             duration=params.get("duration"),
-            aspect_ratio=params.get("aspect_ratio"),
+            aspect_ratio=aspect_ratio,
             resolution=params.get("resolution"),
             generate_audio=params.get("generate_audio"),
             first_frame=frame,
@@ -2321,7 +2337,7 @@ def _submit_video(conv_id: str, model: str, prompt: str, params: dict[str, Any])
         model,
         prompt,
         duration=params.get("duration"),
-        aspect_ratio=params.get("aspect_ratio"),
+        aspect_ratio=aspect_ratio,
         resolution=params.get("resolution"),
         generate_audio=params.get("generate_audio"),
         first_frame=_file_to_data_url(frame) if frame else None,

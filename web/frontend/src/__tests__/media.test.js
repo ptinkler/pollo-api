@@ -166,6 +166,35 @@ describe('MediaGrid lazy rendering', () => {
     delete globalThis.IntersectionObserver
     w.unmount()
   })
+
+  it('asks the caller for more once every loaded tile is shown (server paging)', async () => {
+    const { default: MediaGrid } = await import('../components/media/MediaGrid.vue')
+    let trigger
+    globalThis.IntersectionObserver = class {
+      constructor(cb) {
+        trigger = cb
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    // A full server page already loaded, with more rows waiting on the server
+    const all = Array.from({ length: 80 }, (_, i) => ({ id: `lib:${i}.png`, kind: 'image', name: `${i}.png` }))
+    const w = mount(MediaGrid, { props: { items: all.slice(0, 50), pageSize: 50, hasMore: true } })
+    await flushPromises()
+    expect(w.findAll('.tile')).toHaveLength(50)
+    trigger([{ isIntersecting: true }]) // reaching the end of the loaded page asks for the next
+    await flushPromises()
+    expect(w.emitted('more')).toHaveLength(1)
+    // The parent appends the next page to the end — the window isn't reset to the top
+    await w.setProps({ items: all, hasMore: false })
+    trigger([{ isIntersecting: true }])
+    await flushPromises()
+    expect(w.findAll('.tile')).toHaveLength(80)
+    expect(w.find('.sentinel').exists()).toBe(false) // nothing more to load
+    delete globalThis.IntersectionObserver
+    w.unmount()
+  })
 })
 
 describe('MediaGrid thumbnails', () => {

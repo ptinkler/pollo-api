@@ -103,6 +103,25 @@ class TestListing:
     def test_bad_ids(self, client, media_id):
         assert client.delete(f"/api/media/{media_id}").status_code in (400, 404)
 
+    def test_paginates_with_total(self, client):
+        for n in range(5):
+            client.post("/api/media/upload", files={"file": (f"a{n}.png", _png(), "image/png")})
+        full = client.get("/api/media").json()
+        assert full["total"] == 5 and len(full["items"]) == 5  # no limit → everything
+        page = client.get("/api/media?offset=0&limit=2").json()
+        assert page["total"] == 5 and [i["id"] for i in page["items"]] == [i["id"] for i in full["items"][:2]]
+        rest = client.get("/api/media?offset=2&limit=2").json()
+        assert [i["id"] for i in rest["items"]] == [i["id"] for i in full["items"][2:4]]
+
+    def test_filters_server_side(self, client, project, conv):
+        images = client.get("/api/media?kind=image").json()
+        assert images["items"] and all(i["kind"] == "image" for i in images["items"])
+        assert images["total"] == len(images["items"])
+        chats = client.get("/api/media?origin=chat").json()
+        assert chats["items"] and all(i["origin"] == "chat" for i in chats["items"])
+        found = client.get("/api/media?q=fox").json()  # matches prompts / names / where-from
+        assert found["items"] and found["total"] == len(found["items"])
+
 
 class TestOrphans:
     @pytest.fixture()

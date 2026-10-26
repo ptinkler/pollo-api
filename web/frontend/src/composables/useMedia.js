@@ -7,6 +7,19 @@ import { apiGet, apiPost, apiDelete, apiUpload } from './useApi'
 const enc = encodeURIComponent
 
 export const fetchMedia = () => apiGet('/api/media').then(r => r.items)
+
+/**
+ * A page of the library with its filters applied server-side (for the Media
+ * page's infinite scroll). Returns { items, total } — total is how many match
+ * before paging. `all`/'' filter values and null params are left off.
+ */
+export function fetchMediaPage({ offset = 0, limit = 0, kind, source, origin, q } = {}) {
+  const params = { offset, limit, kind, source, origin, q }
+  const qs = new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v != null && v !== '' && v !== 'all'),
+  ).toString()
+  return apiGet(`/api/media${qs ? `?${qs}` : ''}`).then(r => ({ items: r.items, total: r.total ?? r.items.length }))
+}
 export const uploadMedia = file => apiUpload('/api/media/upload', file)
 export const deleteMedia = id => apiDelete(`/api/media/${enc(id)}`)
 

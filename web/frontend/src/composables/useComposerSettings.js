@@ -48,7 +48,14 @@ function setStep(index, steps, value) {
 // Saved media options in the composer's shape: '' for unset
 const optionsOrUnset = (saved, keys) => Object.fromEntries(keys.map(k => [k, saved?.[k] || '']))
 
-const ratiosOf = info => (info?.aspect_ratios?.length ? info.aspect_ratios : DEFAULT_RATIOS)
+// "auto"/"adaptive" are dropped from the list: the "Ratio: auto" placeholder
+// already stands for them (the backend sends the model's own auto value when
+// the ratio is left unset), so showing them again is a confusing duplicate.
+const AUTO_RATIOS = ['auto', 'adaptive']
+const ratiosOf = info => {
+  const ratios = info?.aspect_ratios?.length ? info.aspect_ratios : DEFAULT_RATIOS
+  return ratios.filter(r => !AUTO_RATIOS.includes(r))
+}
 
 // A newly picked model may not offer the old picks — fall back to auto/default
 function dropUnsupported(opts, ratios, resolutions, durations = null) {

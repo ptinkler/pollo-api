@@ -1,16 +1,15 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, inject } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, inject } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import MediaGrid from '../components/media/MediaGrid.vue'
 import MediaFilters from '../components/media/MediaFilters.vue'
 import CharacterEditor from '../components/characters/CharacterEditor.vue'
 import {
-  fetchMedia,
+  fetchMediaPage,
   uploadMedia,
   deleteMedia,
   importMedia,
   mediaOrigin,
-  useMediaFilters,
   fetchBlockedCounts,
   clearBlocked,
 } from '../composables/useMedia'
@@ -20,10 +19,19 @@ import { takeFiles } from '../utils/files'
 
 const showToast = inject('showToast', () => {})
 
+// The library is paged from the server (filters applied there) and grown as
+// you scroll — only what's on screen is fetched. `items` is what's loaded so
+// far, `total` how many match the current filters.
+const PAGE = 60
 const items = ref([])
+const total = ref(0)
 const loading = ref(true)
+const loadingMore = ref(false)
 const uploading = ref(0)
-const { filters, filtered } = useMediaFilters(items)
+const filters = reactive({ kind: 'all', source: 'all', origin: 'all', q: '' })
+const filtersActive = computed(
+  () => filters.kind !== 'all' || filters.source !== 'all' || filters.origin !== 'all' || !!filters.q.trim(),
+)
 // The chat sidebar's 🖼 Media button opens this filtered to chats
 const ORIGINS = ['library', 'project', 'chat', 'orphan']
 const route = useRoute()
@@ -78,15 +86,49 @@ const charEditor = ref({ open: false, seed: [] })
 const savedCharacters = ref([])
 const addToCharacterId = ref('')
 
+const queryParams = (extra = {}) => ({
+  kind: filters.kind,
+  source: filters.source,
+  origin: filters.origin,
+  q: filters.q,
+  ...extra,
+})
+
 async function load() {
+  loading.value = true
   try {
-    items.value = await fetchMedia()
+    const { items: page, total: t } = await fetchMediaPage(queryParams({ offset: 0, limit: PAGE }))
+    items.value = page
+    total.value = t
   } catch (e) {
     showToast(`Couldn't load media: ${e.message}`, 'error')
   } finally {
     loading.value = false
   }
 }
+
+// Next page, appended, when the grid scrolls near its end
+async function loadMore() {
+  if (loadingMore.value || items.value.length >= total.value) return
+  loadingMore.value = true
+  try {
+    const { items: page, total: t } = await fetchMediaPage(queryParams({ offset: items.value.length, limit: PAGE }))
+    const seen = new Set(items.value.map(i => i.id)) // a creation mid-scroll could shift the pages
+    items.value = [...items.value, ...page.filter(i => !seen.has(i.id))]
+    total.value = t
+  } catch (e) {
+    showToast(`Couldn't load more: ${e.message}`, 'error')
+  } finally {
+    loadingMore.value = false
+  }
+}
+
+// Changing a filter (typing in search is debounced) reloads from the top
+let reloadTimer
+watch(filters, () => {
+  clearTimeout(reloadTimer)
+  reloadTimer = setTimeout(load, 250)
+})
 
 async function loadCharacters() {
   try {
@@ -101,6 +143,7 @@ async function upload(files) {
     uploading.value++
     try {
       items.value = [await uploadMedia(file), ...items.value]
+      total.value++
     } catch (e) {
       showToast(`Upload failed: ${e.message}`, 'error')
     } finally {
@@ -120,8 +163,18 @@ function clearSelection() {
   lastToggled.value = null
 }
 
-function selectAll() {
-  selected.value = new Set(filtered.value.map(i => i.id))
+async function selectAll() {
+  // Select every match, not just the loaded page — fetch the rest first
+  if (items.value.length < total.value) {
+    try {
+      const { items: all, total: t } = await fetchMediaPage(queryParams({ offset: 0, limit: 0 }))
+      items.value = all
+      total.value = t
+    } catch (e) {
+      return showToast(`Couldn't select all: ${e.message}`, 'error')
+    }
+  }
+  selected.value = new Set(items.value.map(i => i.id))
 }
 
 function toggle(item, event) {
@@ -135,7 +188,7 @@ function toggle(item, event) {
 
 // The shown items from the last one clicked to this one
 function rangeTo(item) {
-  const list = filtered.value
+  const list = items.value
   const a = list.findIndex(i => i.id === lastToggled.value)
   const b = list.findIndex(i => i.id === item.id)
   if (a === -1 || b === -1) return null
@@ -168,6 +221,7 @@ async function remove(list) {
     busy.value = ''
   }
   items.value = items.value.filter(i => !gone.has(i.id))
+  total.value -= gone.size
   selected.value = new Set([...selected.value].filter(id => !gone.has(id)))
   if (preview.value && gone.has(preview.value.id)) preview.value = null
   if (gone.size) showToast(`Deleted ${gone.size} item${gone.size !== 1 ? 's' : ''}`, 'success')
@@ -216,7 +270,10 @@ onMounted(() => {
   loadBlocked()
   window.addEventListener('keydown', onKey)
 })
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKey)
+  clearTimeout(reloadTimer)
+})
 </script>
 
 <template>
@@ -258,13 +315,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
     <div v-if="selecting" class="selection-bar">
       <span>{{ selected.size }} selected</span>
-      <button
-        v-if="selected.size < filtered.length"
-        class="btn btn-secondary small"
-        :disabled="!!busy"
-        @click="selectAll"
-      >
-        Select all {{ filtered.length }}
+      <button v-if="selected.size < total" class="btn btn-secondary small" :disabled="!!busy" @click="selectAll">
+        Select all {{ total }}
       </button>
       <button v-if="selected.size" class="btn btn-secondary small" :disabled="!!busy" @click="clearSelection">
         Clear
@@ -295,19 +347,23 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     </div>
 
     <p v-if="loading" class="muted">Loading…</p>
-    <div v-else-if="!filtered.length" class="empty-state">
-      <h3>{{ items.length ? 'Nothing matches these filters' : 'No media yet' }}</h3>
+    <div v-else-if="!total" class="empty-state">
+      <h3>{{ filtersActive ? 'Nothing matches these filters' : 'No media yet' }}</h3>
       <p>Upload images here, or make some in a project or chat.</p>
     </div>
-    <MediaGrid
-      v-else
-      :items="filtered"
-      :selected="selected"
-      :selectable="selecting"
-      checkboxes
-      @toggle="toggle"
-      @open="preview = $event"
-    />
+    <template v-else>
+      <MediaGrid
+        :items="items"
+        :selected="selected"
+        :selectable="selecting"
+        :has-more="items.length < total"
+        checkboxes
+        @toggle="toggle"
+        @open="preview = $event"
+        @more="loadMore"
+      />
+      <p v-if="loadingMore" class="muted center">Loading more…</p>
+    </template>
 
     <!-- Preview -->
     <Teleport to="body">
@@ -434,6 +490,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
 .spacer {
   flex: 1;
+}
+
+.center {
+  text-align: center;
+  padding: 12px;
 }
 
 .empty-state {

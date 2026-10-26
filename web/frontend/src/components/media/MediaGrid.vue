@@ -16,16 +16,21 @@ const props = defineProps({
   selectable: { type: Boolean, default: false },
   checkboxes: { type: Boolean, default: false },
   pageSize: { type: Number, default: 20 },
+  // The caller has more rows it can load (server-side paging): once the last
+  // loaded tile is revealed, reaching the sentinel asks for them ('more').
+  hasMore: { type: Boolean, default: false },
 })
-const emit = defineEmits(['toggle', 'open'])
+const emit = defineEmits(['toggle', 'open', 'more'])
 
 const shown = ref(props.pageSize)
 const visible = computed(() => props.items.slice(0, shown.value))
-// New filters or search: start from the top again
+// New filters or search start from the top again; a page appended to the end
+// (same first item, longer) keeps the current scroll position.
 watch(
   () => props.items,
-  () => {
-    shown.value = props.pageSize
+  (next, prev) => {
+    const appended = prev && next.length > prev.length && next[0] === prev[0]
+    if (!appended) shown.value = props.pageSize
   },
 )
 
@@ -43,7 +48,10 @@ watch(sentinel, el => {
   observer = new IntersectionObserver(
     entries => {
       if (!entries.some(e => e.isIntersecting)) return
-      shown.value += props.pageSize
+      // Reveal the next batch of already-loaded tiles; once they're all shown,
+      // ask the caller for another server page.
+      if (shown.value < props.items.length) shown.value += props.pageSize
+      else if (props.hasMore) emit('more')
       // Still in range after the new page (a tall screen)? Observing afresh
       // reports the current state again, so it keeps filling.
       nextTick(() => {
@@ -102,7 +110,7 @@ function onThumbError(item, e) {
         >{{ selected.has(item.id) ? '✓' : '' }}</span
       >
     </button>
-    <div v-if="visible.length < items.length" ref="sentinel" class="sentinel" aria-hidden="true"></div>
+    <div v-if="visible.length < items.length || hasMore" ref="sentinel" class="sentinel" aria-hidden="true"></div>
   </div>
 </template>
 
