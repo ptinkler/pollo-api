@@ -251,6 +251,32 @@ class TestTurns:
         path = chat._chat_root() / conv["id"] / done["media"][0]["file"]
         assert path.read_bytes() == _png_bytes()
 
+    def test_image_models_own_auto_beats_the_chat_models_ratio_pick(self, client, conv, chat, monkeypatch):
+        # With the composer ratio left unset and the image model offering its
+        # own "auto", that wins over whatever ratio the chat model guessed.
+        chat._models_cache.update(
+            at=9e18,
+            data={"text": [], "video": [], "image": [{"id": "i/model", "aspect_ratios": ["auto", "16:9", "1:1"]}]},
+        )
+        rounds = iter([_tool_chunks("generate_image", {"prompt": "a cat", "aspect_ratio": "16:9"}, text="A cat.")])
+        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(rounds))
+        img_args = {}
+        monkeypatch.setattr(
+            chat.openrouter,
+            "generate_image",
+            lambda model, prompt, **kw: (
+                img_args.update(aspect_ratio=kw.get("aspect_ratio")),
+                ([(_png_bytes(), "image/png")], 0.04),
+            )[1],
+        )
+        _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "draw a cat", "mode": "auto", **SETTINGS},
+            )
+        )
+        assert img_args["aspect_ratio"] == "auto"  # the image model's auto, not the chat model's 16:9
+
     def test_model_can_create_and_attach_an_instruction(self, client, conv, chat, monkeypatch, db):
         rounds = iter(
             [
@@ -3258,6 +3284,68 @@ class TestHiddenDefaults:
     def test_unknown_kinds_are_refused(self, client):
         conv = client.post("/api/chat/conversations", json={}).json()
         resp = client.patch(f"/api/chat/conversations/{conv['id']}", json={"hidden_defaults": {"nope": [1]}})
+        assert resp.status_code == 400
+
+
+class TestPausedInstructions:
+    """A chat can pause attached snippets/groups: kept attached, not sent."""
+
+    def test_paused_snippets_and_groups_stay_attached_but_are_not_sent(self, client, conv, chat):
+        tone = client.post("/api/chat/instructions", json={"name": "Tone", "content": "Be warm."}).json()
+        fmt = client.post("/api/chat/instructions", json={"name": "Fmt", "content": "Use markdown."}).json()
+        lang = client.post("/api/chat/instructions", json={"name": "Lang", "content": "In French."}).json()
+        g = client.post(
+            "/api/chat/instruction-groups", json={"name": "G", "snippet_ids": [tone["id"], fmt["id"]]}
+        ).json()
+        client.patch(
+            f"/api/chat/conversations/{conv['id']}",
+            json={"instruction_group_ids": [g["id"]], "instruction_ids": [tone["id"], lang["id"]]},
+        )
+        assert chat._conversation_instructions(conv["id"]) == "Be warm.\n\nUse markdown.\n\nIn French."
+        # Pause the group: its Fmt drops, but Tone stays (attached individually too)
+        r = client.patch(
+            f"/api/chat/conversations/{conv['id']}", json={"paused_instructions": {"instruction_group": [g["id"]]}}
+        ).json()
+        assert r["paused_instructions"]["instruction_group"] == [g["id"]]
+        assert r["instruction_group_ids"] == [g["id"]]  # still attached, just paused
+        assert chat._conversation_instructions(conv["id"]) == "Be warm.\n\nIn French."
+        # Also pause the Tone snippet → only Lang is left
+        client.patch(
+            f"/api/chat/conversations/{conv['id']}",
+            json={"paused_instructions": {"instruction_group": [g["id"]], "instruction": [tone["id"]]}},
+        )
+        assert chat._conversation_instructions(conv["id"]) == "In French."
+        # Resume everything
+        client.patch(f"/api/chat/conversations/{conv['id']}", json={"paused_instructions": {}})
+        assert chat._conversation_instructions(conv["id"]) == "Be warm.\n\nUse markdown.\n\nIn French."
+
+    def test_an_inherited_default_can_be_paused(self, client, chat):
+        a = client.post("/api/chat/instructions", json={"name": "A", "content": "aa"}).json()
+        b = client.post("/api/chat/instructions", json={"name": "B", "content": "bb"}).json()
+        client.put("/api/chat/settings", json={"default_instruction_ids": [a["id"], b["id"]]})
+        one = client.post("/api/chat/conversations", json={}).json()
+        two = client.post("/api/chat/conversations", json={}).json()
+        client.patch(f"/api/chat/conversations/{one['id']}", json={"paused_instructions": {"instruction": [a["id"]]}})
+        assert chat._conversation_instructions(one["id"]) == "bb"  # paused here
+        assert chat._conversation_instructions(two["id"]) == "aa\n\nbb"  # unaffected elsewhere
+
+    def test_a_new_chat_can_start_with_some_paused(self, client, chat):
+        a = client.post("/api/chat/instructions", json={"name": "A", "content": "aa"}).json()
+        client.put("/api/chat/settings", json={"default_instruction_ids": [a["id"]]})
+        conv = client.post("/api/chat/conversations", json={"paused_instructions": {"instruction": [a["id"]]}}).json()
+        assert conv["paused_instructions"]["instruction"] == [a["id"]]
+        assert chat._conversation_instructions(conv["id"]) is None
+
+    def test_a_branch_keeps_what_was_paused(self, client, db):
+        a = client.post("/api/chat/instructions", json={"name": "A", "content": "aa"}).json()
+        conv = client.post("/api/chat/conversations", json={"instruction_ids": [a["id"]]}).json()
+        client.patch(f"/api/chat/conversations/{conv['id']}", json={"paused_instructions": {"instruction": [a["id"]]}})
+        msg = db.add_chat_message(conv["id"], "user", "hi")
+        fork = client.post(f"/api/chat/conversations/{conv['id']}/fork", json={"message_id": msg.id}).json()
+        assert fork["paused_instructions"]["instruction"] == [a["id"]]
+
+    def test_unknown_kinds_are_refused(self, client, conv):
+        resp = client.patch(f"/api/chat/conversations/{conv['id']}", json={"paused_instructions": {"character": [1]}})
         assert resp.status_code == 400
 
 

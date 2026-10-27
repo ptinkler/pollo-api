@@ -246,6 +246,7 @@ class ConversationCreate(BaseModel):
     instruction_group_ids: list[int] = []
     character_ids: list[int] = []
     hidden_defaults: dict[str, list[int]] = {}  # defaults switched off in this chat only
+    paused_instructions: dict[str, list[int]] = {}  # snippets/groups paused in this chat
 
 
 class ConversationUpdate(BaseModel):
@@ -259,6 +260,9 @@ class ConversationUpdate(BaseModel):
     character_ids: list[int] | None = None
     # Defaults switched off in this chat only: {kind: [ids]} (kinds as in _KINDS)
     hidden_defaults: dict[str, list[int]] | None = None
+    # Instruction snippets/groups paused in this chat: {"instruction" |
+    # "instruction_group": [ids]} — attached but not sent until resumed
+    paused_instructions: dict[str, list[int]] | None = None
     pinned: bool | None = None
 
 
@@ -583,6 +587,7 @@ def api_create_conversation(data: ConversationCreate):
     characters.require(data.character_ids, db)
     character_ids = list(dict.fromkeys(data.character_ids))
     hidden_defaults = _require_hidden_defaults(data.hidden_defaults)
+    paused_instructions = _require_paused(data.paused_instructions)
 
     conv = db.create_conversation(
         title=(data.title or DEFAULT_TITLE).strip()[:255] or DEFAULT_TITLE,
@@ -594,6 +599,7 @@ def api_create_conversation(data: ConversationCreate):
         instruction_group_ids=instruction_group_ids,
         character_ids=character_ids,
         hidden_defaults=hidden_defaults,
+        paused_instructions=paused_instructions,
     )
     return conv.to_dict()
 
@@ -602,6 +608,16 @@ def _require_hidden_defaults(value: dict | None) -> dict[str, list[int]]:
     unknown = set(value or {}) - set(_KINDS)
     if unknown:
         raise HTTPException(400, f"Unknown kind of default: {', '.join(sorted(unknown))}")
+    return {k: list(dict.fromkeys(ids)) for k, ids in (value or {}).items()}
+
+
+_PAUSE_KINDS = ("instruction", "instruction_group")
+
+
+def _require_paused(value: dict | None) -> dict[str, list[int]]:
+    unknown = set(value or {}) - set(_PAUSE_KINDS)
+    if unknown:
+        raise HTTPException(400, f"Can't pause kind: {', '.join(sorted(unknown))}")
     return {k: list(dict.fromkeys(ids)) for k, ids in (value or {}).items()}
 
 
@@ -858,6 +874,7 @@ def api_fork_conversation(conv_id: str, data: ForkConversation):
         instruction_ids=conv.instruction_ids,
         instruction_group_ids=conv.instruction_group_ids,
         hidden_defaults=conv.hidden_defaults,
+        paused_instructions=conv.paused_instructions,
         settings=conv.settings,
         forked_from_id=conv_id,
         forked_from_message_id=at.id,
@@ -981,6 +998,8 @@ def api_update_conversation(conv_id: str, data: ConversationUpdate):
         characters.require(fields["character_ids"], get_db())
     if "hidden_defaults" in fields:
         fields["hidden_defaults"] = _require_hidden_defaults(fields["hidden_defaults"])
+    if "paused_instructions" in fields:
+        fields["paused_instructions"] = _require_paused(fields["paused_instructions"])
     if "pinned" in fields:
         # Not an edit: the chat keeps its place among the rest
         get_db().set_conversation_pinned(conv_id, bool(fields.pop("pinned")))
@@ -1505,8 +1524,12 @@ class Turn:
             return {"ok": False, "error": str(e), "moderated": _is_moderation_error(e)}
 
     def _image_tool(self, prompt: str, args: dict, source: str | None, chars: list) -> dict:
-        # A setting picked in the composer beats the model's guess
-        ratio = self.s.image_options.aspect_ratio or args.get("aspect_ratio")
+        # A ratio picked in the composer wins; otherwise let the image model
+        # decide with its own "auto" if it has one, and only fall back to the
+        # chat model's guess for models that don't offer auto.
+        ratio = (
+            self.s.image_options.aspect_ratio or _auto_ratio("image", self.s.image_model) or args.get("aspect_ratio")
+        )
         refs, dropped = self._image_refs(args, source, chars)
         ref_args = {k: args[k] for k in ("source_image", "keep_consistent", "characters") if k in args}
         self._generate_image(prompt, ratio, refs, ref_args, chars, dropped)
@@ -2146,11 +2169,17 @@ def _conversation_instructions(conv_id: str) -> str | None:
     conv = db.get_conversation(conv_id)
     if not conv:
         return None
+    # Paused snippets/groups stay attached but are left out of what's sent
+    paused = conv.paused_instructions
+    paused_groups, paused_snippets = set(paused["instruction_group"]), set(paused["instruction"])
     snippet_ids: list[int] = []
-    for group in (db.get_instruction_group(gid) for gid in _effective_ids(conv, "instruction_group")):
+    for gid in _effective_ids(conv, "instruction_group"):
+        if gid in paused_groups:
+            continue
+        group = db.get_instruction_group(gid)
         if group:
             snippet_ids += group.snippet_ids
-    snippet_ids += _effective_ids(conv, "instruction")
+    snippet_ids += [sid for sid in _effective_ids(conv, "instruction") if sid not in paused_snippets]
     snippet_ids = list(dict.fromkeys(snippet_ids))  # a snippet in several groups is sent once
     parts = [s.content.strip() for s in db.get_instructions(snippet_ids) if s.content.strip()]
     return "\n\n".join(parts) or None

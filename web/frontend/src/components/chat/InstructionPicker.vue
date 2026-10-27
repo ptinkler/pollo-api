@@ -20,9 +20,22 @@ const props = defineProps({
   // Defaults switched off in this chat: [{ id, from }] — offered in the menu to switch back on
   hiddenSnippets: { type: Array, default: () => [] },
   hiddenGroups: { type: Array, default: () => [] },
+  // Attached but paused in this chat (own or inherited): shown dimmed, not sent
+  pausedSnippets: { type: Array, default: () => [] },
+  pausedGroups: { type: Array, default: () => [] },
 })
 // 'hide' / 'unhide': { kind, id } — a default switched off / on in this chat only
-const emit = defineEmits(['update:snippetIds', 'update:groupIds', 'manage', 'edit', 'hide', 'unhide'])
+// 'pause' / 'resume': { kind, id } — an attachment paused / resumed in this chat
+const emit = defineEmits([
+  'update:snippetIds',
+  'update:groupIds',
+  'manage',
+  'edit',
+  'hide',
+  'unhide',
+  'pause',
+  'resume',
+])
 
 const SEARCH_FROM = 8 // the menu gets a search box once there's this much to pick from
 
@@ -111,6 +124,11 @@ function detachSnippet(s) {
   )
 }
 
+const isPaused = (kind, id) => (kind === 'group' ? props.pausedGroups : props.pausedSnippets).includes(id)
+function togglePause(kind, item) {
+  emit(isPaused(kind, item.id) ? 'resume' : 'pause', { kind, id: item.id })
+}
+
 function manage() {
   close()
   emit('manage')
@@ -124,8 +142,16 @@ function manage() {
         v-for="g in defaultGroups"
         :key="`dg${g.id}`"
         class="chip group inherited"
+        :class="{ paused: isPaused('group', g.id) }"
         :title="`${g.name} · ${fromTitle(g.from)}`"
       >
+        <button
+          class="chip-pause"
+          :title="isPaused('group', g.id) ? `Resume ${g.name}` : `Pause ${g.name} for now`"
+          @click="togglePause('group', g)"
+        >
+          {{ isPaused('group', g.id) ? '▶' : '⏸' }}
+        </button>
         <button class="chip-main" @click="emit('edit', { kind: 'group', id: g.id })">
           <span class="chip-name">📦 {{ g.name }}</span>
         </button>
@@ -142,8 +168,16 @@ function manage() {
         v-for="s in defaultSnippets"
         :key="`ds${s.id}`"
         class="chip inherited"
+        :class="{ paused: isPaused('snippet', s.id) }"
         :title="`${s.name} · ${fromTitle(s.from)}`"
       >
+        <button
+          class="chip-pause"
+          :title="isPaused('snippet', s.id) ? `Resume ${s.name}` : `Pause ${s.name} for now`"
+          @click="togglePause('snippet', s)"
+        >
+          {{ isPaused('snippet', s.id) ? '▶' : '⏸' }}
+        </button>
         <button class="chip-main" @click="emit('edit', { kind: 'snippet', id: s.id })">
           <span class="dot" :style="{ background: instructionColor(s.name) }"></span>
           <span class="chip-name">{{ s.name }}</span>
@@ -157,13 +191,39 @@ function manage() {
           ✕
         </button>
       </span>
-      <span v-for="g in attachedGroups" :key="`g${g.id}`" class="chip group" :title="`${g.name} · ${groupTitle(g)}`">
+      <span
+        v-for="g in attachedGroups"
+        :key="`g${g.id}`"
+        class="chip group"
+        :class="{ paused: isPaused('group', g.id) }"
+        :title="`${g.name} · ${groupTitle(g)}`"
+      >
+        <button
+          class="chip-pause"
+          :title="isPaused('group', g.id) ? `Resume ${g.name}` : `Pause ${g.name} for now`"
+          @click="togglePause('group', g)"
+        >
+          {{ isPaused('group', g.id) ? '▶' : '⏸' }}
+        </button>
         <button class="chip-main" @click="emit('edit', { kind: 'group', id: g.id })">
           <span class="chip-name">📦 {{ g.name }}</span>
         </button>
         <button class="chip-x" :title="`Detach ${g.name}`" @click="detachGroup(g)">✕</button>
       </span>
-      <span v-for="s in attachedSnippets" :key="`s${s.id}`" class="chip" :title="s.name">
+      <span
+        v-for="s in attachedSnippets"
+        :key="`s${s.id}`"
+        class="chip"
+        :class="{ paused: isPaused('snippet', s.id) }"
+        :title="s.name"
+      >
+        <button
+          class="chip-pause"
+          :title="isPaused('snippet', s.id) ? `Resume ${s.name}` : `Pause ${s.name} for now`"
+          @click="togglePause('snippet', s)"
+        >
+          {{ isPaused('snippet', s.id) ? '▶' : '⏸' }}
+        </button>
         <button class="chip-main" @click="emit('edit', { kind: 'snippet', id: s.id })">
           <span class="dot" :style="{ background: instructionColor(s.name) }"></span>
           <span class="chip-name">{{ s.name }}</span>
@@ -261,6 +321,35 @@ function manage() {
 /* Attached by the chat's defaults: no ✕ — the icon says where from */
 .chip.inherited {
   background: transparent;
+}
+
+/* Paused: still attached, but dimmed and struck through — not sent for now */
+.chip.paused .chip-main {
+  opacity: 0.5;
+}
+
+.chip.paused .chip-name {
+  text-decoration: line-through;
+}
+
+.chip-pause {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text2);
+  cursor: pointer;
+  padding: 0 2px 0 7px;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.chip-pause:hover {
+  color: var(--text);
+}
+
+/* The icon already carries the left padding of the chip */
+.chip-pause + .chip-main {
+  padding-left: 4px;
 }
 
 .chip-src {

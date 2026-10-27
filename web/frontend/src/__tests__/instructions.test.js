@@ -140,6 +140,26 @@ describe('InstructionPicker', () => {
     w.unmount()
   })
 
+  it('pauses and resumes an attached snippet or group, keeping it attached', async () => {
+    const w = mount(InstructionPicker, {
+      props: { instructions: snippets, groups, snippetIds: [2], groupIds: [7], pausedSnippets: [2] },
+    })
+    const chipNamed = name => w.findAll('.chip').find(c => c.find('.chip-name').text() === name)
+    // The paused snippet is dimmed and its control offers to resume
+    const snippetChip = chipNamed('British spelling')
+    expect(snippetChip.classes()).toContain('paused')
+    expect(snippetChip.find('.chip-pause').text()).toBe('▶')
+    await snippetChip.find('.chip-pause').trigger('click')
+    expect(w.emitted('resume')).toEqual([[{ kind: 'snippet', id: 2 }]])
+    // The group isn't paused → its control pauses it, and it stays attached (no detach)
+    const groupChip = chipNamed('📦 House style')
+    expect(groupChip.classes()).not.toContain('paused')
+    await groupChip.find('.chip-pause').trigger('click')
+    expect(w.emitted('pause')).toEqual([[{ kind: 'group', id: 7 }]])
+    expect(w.emitted('update:groupIds')).toBeUndefined()
+    w.unmount()
+  })
+
   it('searches the add menu once there is a lot to pick from', async () => {
     const many = Array.from({ length: 10 }, (_, i) => ({ id: 100 + i, name: `Snippet ${i}`, content: '' }))
     const w = mount(InstructionPicker, { props: { instructions: many, groups: [], snippetIds: [], groupIds: [] } })
