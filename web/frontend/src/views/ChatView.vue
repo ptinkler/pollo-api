@@ -788,9 +788,16 @@ async function forkFrom(msg) {
   }
 }
 
-// Retry a failed image/video in place (same or another model). The server
-// runs it in the background; polling picks up the result.
+// Retry a failed image/video in place. The server runs it in the background;
+// polling picks up the result. Plain Retry (model == null) uses the composer's
+// currently-selected model for that media kind, so changing the model and
+// retrying switches to it; "Try another model…" passes an explicit model that
+// overrides this. Falls back to the item's stored model when nothing is picked.
 async function regenerateMedia(msg, { mediaId, model }) {
+  if (!model) {
+    const kind = (msg.media || []).find(i => i.id === mediaId)?.kind
+    if (kind && selected[kind]) model = selected[kind]
+  }
   try {
     replaceMessage(await regenerateChatMedia(msg.id, mediaId, model))
     polling.ensure()

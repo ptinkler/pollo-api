@@ -406,7 +406,7 @@ const requestItem = ref(null)
               >
                 <button
                   class="retry-btn"
-                  title="Run the same prompt on the same model again"
+                  title="Run the same prompt again on the currently selected model"
                   @click="emit('regenerate', { mediaId: item.id, model: null })"
                 >
                   ↻ Retry

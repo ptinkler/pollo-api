@@ -155,7 +155,8 @@ def _send(method: str, path: str, timeout, waiting_for: str, check: bool = True,
     except (httpx.RemoteProtocolError, httpx.ReadError, httpx.WriteError, httpx.ConnectError) as e:
         raise VeniceError(
             f"The connection to Venice dropped after {round(time.monotonic() - start)}s waiting "
-            f"for the {waiting_for} ({type(e).__name__}). It may still have been billed."
+            f"for the {waiting_for} ({type(e).__name__}) — usually a network/VPN closing idle "
+            "connections. It may still have been billed."
         ) from e
     except httpx.TimeoutException as e:
         raise VeniceError(f"Venice didn't answer in time ({type(e).__name__})", 504) from e

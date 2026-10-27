@@ -2669,7 +2669,7 @@ class TestOpenRouterConnection:
         opts = chat.openrouter._keepalive_socket_options()
         assert (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1) in opts
         if hasattr(socket, "TCP_KEEPIDLE"):
-            assert (socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 15) in opts
+            assert (socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 5) in opts
 
     def test_dropped_connection_fails_the_card_with_an_explanation(self, client, conv, chat, monkeypatch):
         """httpx.RemoteProtocolError used to escape as a raw error and leave the image pending."""

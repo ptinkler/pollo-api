@@ -38,13 +38,18 @@ class OpenRouterError(Exception):
 
 
 def _keepalive_socket_options() -> list[tuple[int, int, int]]:
-    """TCP keepalive probes every 15s while a request waits. Image and video
+    """TCP keepalive probes every 5s while a request waits. Image and video
     calls sit silent for a minute or more (Seedream 5.0 Pro with references:
     ~2 min), and some networks — VPNs, NAT routers, NAS/Docker hosts — drop
     connections idle that long, surfacing as httpx.RemoteProtocolError
-    "Server disconnected without sending a response"."""
+    "Server disconnected without sending a response".
+
+    NB: observed cuts at ~62s on both OpenRouter and Venice through the
+    Surfshark/gluetun tunnel suggest the VPN ignores these keepalive ACKs
+    (they carry no payload) and times out on idle *data*. If so, tightening
+    the interval won't help and the fix is at the VPN layer."""
     options = [(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)]
-    for name, value in (("TCP_KEEPIDLE", 15), ("TCP_KEEPINTVL", 15), ("TCP_KEEPCNT", 8)):
+    for name, value in (("TCP_KEEPIDLE", 5), ("TCP_KEEPINTVL", 5), ("TCP_KEEPCNT", 8)):
         if hasattr(socket, name):  # Linux names; other platforms keep OS defaults
             options.append((socket.IPPROTO_TCP, getattr(socket, name), value))
     return options
