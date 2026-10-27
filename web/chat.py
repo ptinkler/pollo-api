@@ -123,11 +123,6 @@ TOOLS_IMAGE = {
             "type": "object",
             "properties": {
                 "prompt": {"type": "string", "description": "Detailed description of the image to create."},
-                "aspect_ratio": {
-                    "type": "string",
-                    "enum": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
-                    "description": "Aspect ratio. Omit to use the image model's default.",
-                },
                 "source_image": {
                     "type": "string",
                     "enum": ["none", "latest"],
@@ -1524,12 +1519,10 @@ class Turn:
             return {"ok": False, "error": str(e), "moderated": _is_moderation_error(e)}
 
     def _image_tool(self, prompt: str, args: dict, source: str | None, chars: list) -> dict:
-        # A ratio picked in the composer wins; otherwise let the image model
-        # decide with its own "auto" if it has one, and only fall back to the
-        # chat model's guess for models that don't offer auto.
-        ratio = (
-            self.s.image_options.aspect_ratio or _auto_ratio("image", self.s.image_model) or args.get("aspect_ratio")
-        )
+        # Aspect ratio is the composer's to set, not the chat model's. A ratio
+        # picked there wins; left on "auto" it becomes the image model's own
+        # "auto" value if it has one, else nothing — the model's natural shape.
+        ratio = self.s.image_options.aspect_ratio or _auto_ratio("image", self.s.image_model)
         refs, dropped = self._image_refs(args, source, chars)
         ref_args = {k: args[k] for k in ("source_image", "keep_consistent", "characters") if k in args}
         self._generate_image(prompt, ratio, refs, ref_args, chars, dropped)

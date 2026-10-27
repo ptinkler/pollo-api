@@ -241,7 +241,9 @@ class TestTurns:
         ]
         assert len(calls) == 1  # reply written + image made → complete
         assert img_args["model"] == "i/model" and img_args["prompt"] == "a cat"
-        assert img_args["aspect_ratio"] == "16:9"
+        # The ratio is the composer's, not the model's: on "auto" with an image
+        # model that has no auto value, nothing is sent (its natural shape)
+        assert img_args["aspect_ratio"] is None
         media_events = [e["item"] for e in ev if e["type"] == "media"]
         assert [m["status"] for m in media_events] == ["pending", "done"]
         done = ev[-1]["message"]
@@ -1077,7 +1079,8 @@ class TestModerationAndRegenerate:
         assert done["content"] == "Here goes." and done["status"] == "done"
         item = done["media"][0]
         assert item["status"] == "error" and item["moderated"] is True
-        assert item["params"] == {"aspect_ratio": "9:16", "resolution": None, "refs": []}
+        # The model's 9:16 is ignored — ratio is the composer's, left on auto here
+        assert item["params"] == {"aspect_ratio": None, "resolution": None, "refs": []}
 
     @pytest.mark.parametrize(
         "status,msg,expected",
@@ -1674,7 +1677,8 @@ class TestConversationalImageModels:
             )
         )
         msgs = got["messages"]
-        assert got["model"] == "i/model" and got["aspect_ratio"] == "3:4"
+        # The model's 3:4 pick is ignored; the composer (on auto) governs the ratio
+        assert got["model"] == "i/model" and got["aspect_ratio"] is None
         assert [m["role"] for m in msgs] == ["user", "assistant", "user", "assistant", "user"]
         assert msgs[0]["content"][0]["text"] == "write a story about Linh, with a photo"
         # the earlier generated image is in the context as pixels
@@ -2322,7 +2326,8 @@ class TestPolloImageModels:
         assert msg["cost"] == pytest.approx(0.003)  # OpenRouter text only — credits aren't dollars
         key, kwargs = pollo["generators"][0]
         assert key == "seedreamv1"
-        assert (kwargs["prompt"], kwargs["aspect_ratio"], kwargs["images"]) == ("a red fox", "16:9", None)
+        # The model's 16:9 is ignored; composer on auto → no ratio sent (model default)
+        assert (kwargs["prompt"], kwargs["aspect_ratio"], kwargs["images"]) == ("a red fox", None, None)
 
     def test_unsupported_ratio_falls_back_to_model_default(self, client, conv, chat, monkeypatch, pollo):
         self._draw(
