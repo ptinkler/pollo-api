@@ -292,8 +292,15 @@ def generate_image(
 
     # Streamed so the connection carries traffic while the image renders:
     # a silent request was cut at exactly 60s by something between us and
-    # OpenRouter (TCP keepalive didn't help). Only the final image is kept.
-    body["stream"] = True
+    # OpenRouter (TCP keepalive didn't help). Streaming only helps if bytes
+    # actually flow before 60s, so we also ask for partial-image frames —
+    # without them the stream stays silent until the render is done and a slow
+    # model (Seedream ~2 min) is still cut at 60s. Only the final image is kept.
+    # OpenRouter rejects streaming for image-to-image (edit) requests, so
+    # only stream plain text-to-image — edits come back as plain JSON.
+    if not input_images:
+        body["stream"] = True
+        body["partial_images"] = 2  # keepalive previews; ignored if unsupported
     with (
         request_log.logged("openrouter", "POST", "/images", body) as outcome,
         _connection_guard("image"),
