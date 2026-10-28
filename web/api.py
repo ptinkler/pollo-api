@@ -41,7 +41,7 @@ from img2vid.common.metadata import get_db, iso
 from img2vid.pollo.generators import ERROR_STATUSES, SUCCESS_STATUSES
 from img2vid.pollo.pollo_img2vid import GENERATORS, IMAGE_GENERATORS, get_image_generator, get_video_generator
 
-from . import characters, image_hosts, media, pollo_estimate, vpn
+from . import characters, generate_providers, image_hosts, media, pollo_estimate, vpn
 
 # ── Authentication ───────────────────────────────────────────────────
 from .auth import (
@@ -57,7 +57,7 @@ from .auth import (
 from .chat import router as chat_router
 from .chat import startup_resume_chat
 from .chatgpt_import import router as chatgpt_import_router
-from .uploads import image_media_type, read_image_upload, safe_filename
+from .uploads import image_media_type, read_image_upload, read_video_upload, safe_filename
 
 
 @asynccontextmanager
@@ -230,6 +230,7 @@ class GenerateRequest(BaseModel):
     image_meta: list | None = None  # ref2video: array of {url, order, name?, cropper?}
     character_ids: list[int] = []  # see web/characters.py
     ref_mode: bool = False  # v1 "Ref mode" is on (character images go in as refs even with no other refs)
+    mode: str | None = None  # provider models: quality tier / recast mode (std|pro)
 
 
 class EstimateRequest(BaseModel):
@@ -999,9 +1000,65 @@ def _validate_v1_refs(refs: list, ref_mode: dict) -> None:
         raise HTTPException(status_code=400, detail="At least one non-audio reference is required")
 
 
+def _generate_provider_video(data: GenerateRequest) -> dict:
+    """Generate a video on a chat provider (Pollo v1 / Venice / OpenRouter)
+    from the Generate page. Reuses generate_providers (the chat's uniform
+    layer); the job flows through the same job DB so the frontend shows it
+    like any other. Recast/motion models take the reference image on
+    image_url and the source video on video_url."""
+    model = data.model
+    project, assets_path = _project_for_generation(data.project)
+    first_frame = generate_providers.local_path(assets_path, (data.image_url or "").strip() or None)
+    source_video = generate_providers.local_path(assets_path, (data.video_url or "").strip() or None)
+    refs = [
+        p
+        for p in (
+            generate_providers.local_path(assets_path, (r or {}).get("image") or (r or {}).get("url"))
+            for r in (data.refs or [])
+        )
+        if p
+    ] or None
+    db = get_db()
+    db.update_project(project.slug, prompt=(data.prompt or "").strip() or project.prompt)
+    job_id = str(uuid.uuid4())[:8]
+    db.create_job(
+        job_id=job_id,
+        project=project.slug,
+        model=model,
+        prompt=(data.prompt or "").strip(),
+        image_url=data.image_url,
+        source_video_url=data.video_url,
+        aspect_ratio=data.aspect_ratio,
+        resolution=data.resolution,
+        length=data.length,
+        generate_audio=data.generate_audio,
+        params={"mode": data.mode, "provider": True},
+    )
+    generate_providers.start_video(
+        job_id,
+        model,
+        {
+            "prompt": (data.prompt or "").strip(),
+            "first_frame": first_frame,
+            "source_video": source_video,
+            "refs": refs,
+            "duration": data.length,
+            "aspect_ratio": data.aspect_ratio,
+            "resolution": data.resolution,
+            "generate_audio": data.generate_audio,
+            "mode": data.mode,
+        },
+        assets_path,
+        get_db,
+    )
+    return {"job_id": job_id, "project": project.slug}
+
+
 @app.post("/api/generate")
 def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key)):
     model = data.model
+    if generate_providers.is_provider_model(model):
+        return _generate_provider_video(data)
     if model not in GENERATORS:
         raise HTTPException(status_code=400, detail=f"Unknown model: {model}")
     extend = MODEL_INFO.get(model, {}).get("type") == "extend"
@@ -2167,9 +2224,42 @@ def api_models(legacy: bool = False):
     The exception is `legacy_only` models (no working v1 endpoint), which
     are in both lists.
     """
-    return {
+    models = {
         name: info for name, info in MODEL_INFO.items() if bool(info.get("legacy")) == legacy or info.get("legacy_only")
     }
+    # Chat providers (Pollo v1, Venice, OpenRouter) — the same models the chat
+    # offers, so the Generate page can use them too. Only in the current (non-
+    # legacy) set; they carry a "/" in their id and a "provider" flag.
+    if not legacy:
+        for m in generate_providers.list_video_models():
+            models[m["id"]] = {
+                "label": m.get("name") or m["id"],
+                "provider": True,
+                "kind": "video",
+                "type": m.get("type") or ("recast" if m.get("family") == "motion" else "img2vid"),
+                "lengths": m.get("durations"),
+                "resolutions": m.get("resolutions"),
+                "ratios": m.get("aspect_ratios"),
+                "frame_images": m.get("frame_images"),
+                "video_input": m.get("video_input"),
+                "reference_images": m.get("reference_images"),
+                "modes": m.get("modes"),
+                "family": m.get("family"),
+                "generate_audio": m.get("generate_audio"),
+                "hidden": m.get("hidden"),
+            }
+        for m in generate_providers.list_image_models():
+            models[m["id"]] = {
+                "label": m.get("name") or m["id"],
+                "provider": True,
+                "kind": "image",
+                "type": "image",
+                "ratios": m.get("aspect_ratios"),
+                "resolutions": m.get("resolutions"),
+                "max_refs": m.get("max_refs"),
+                "hidden": m.get("hidden"),
+            }
+    return models
 
 
 # ── Usage / Credit tracking ─────────────────────────────────────────
@@ -2540,6 +2630,22 @@ def api_get_source_image(project: str, f: str | None = None, _api_key: str = Dep
     return FileResponse(
         source, media_type=image_media_type(source) or "application/octet-stream", headers=IMMUTABLE_CACHE
     )
+
+
+@app.post("/api/projects/{project}/source-video")
+async def api_upload_source_video(project: str, file: UploadFile = File(...), _api_key: str = Depends(verify_api_key)):
+    """Upload a source video for a project (Recast / motion-control / video
+    edit). Saved as src-<uuid>.mp4; returns {"video_url": "local:<file>"}."""
+    proj = _require_project(project)
+    assets_path = ASSETS_DIR / proj.assets_folder
+    assets_path.mkdir(parents=True, exist_ok=True)
+    content, ext = await read_video_upload(file)
+    name = f"src-{uuid.uuid4().hex[:12]}{ext}"
+    (assets_path / name).write_bytes(content)
+    ref = f"local:{name}"
+    get_db().update_project(project, video_url=ref)
+    _invalidate_project_caches()
+    return {"video_url": ref}
 
 
 @app.post("/api/projects/{project}/ref-image")

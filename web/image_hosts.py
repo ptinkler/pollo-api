@@ -1,6 +1,7 @@
 """
-Temporary public hosting for local images, for providers that only take an
-image URL (Pollo): tmpfiles.org, falling back to litterbox.catbox.moe.
+Temporary public hosting for local media, for providers that only take a
+URL (Pollo): tmpfiles.org, falling back to litterbox.catbox.moe. Videos use
+litterbox first — it accepts much larger files (up to 1 GB) than tmpfiles.
 """
 
 from pathlib import Path
@@ -15,19 +16,30 @@ TMPFILES_URL = "https://tmpfiles.org/api/v1/upload"
 
 
 def upload_image(filepath: Path) -> str:
-    """Upload a file to tmpfiles.org, falling back to litterbox if that fails."""
-    try:
-        url = _upload_to_tmpfiles(filepath)
-        print(f"[Upload] tmpfiles.org succeeded: {url}")
-        return url
-    except ValueError as primary_exc:
-        print(f"[Upload] tmpfiles.org failed ({primary_exc}), trying litterbox…")
+    """Upload an image to tmpfiles.org, falling back to litterbox if that fails."""
+    return upload_file(filepath, prefer_large=False)
+
+
+def upload_file(filepath: Path, prefer_large: bool = False) -> str:
+    """Upload any file to a temporary public host and return its URL. With
+    prefer_large (videos), try litterbox first — it accepts much larger files
+    and handles video — then tmpfiles; otherwise tmpfiles first (fast for
+    images), then litterbox."""
+    hosts = (
+        [("litterbox", _upload_to_litterbox), ("tmpfiles.org", _upload_to_tmpfiles)]
+        if prefer_large
+        else [("tmpfiles.org", _upload_to_tmpfiles), ("litterbox", _upload_to_litterbox)]
+    )
+    errors: list[str] = []
+    for name, upload in hosts:
         try:
-            return _upload_to_litterbox(filepath)
-        except ValueError as fallback_exc:
-            raise ValueError(
-                f"All upload hosts failed — tmpfiles: {primary_exc}; litterbox: {fallback_exc}"
-            ) from fallback_exc
+            url = upload(filepath)
+            print(f"[Upload] {name} succeeded: {url}")
+            return url
+        except ValueError as exc:
+            print(f"[Upload] {name} failed ({exc}), trying next host…")
+            errors.append(f"{name}: {exc}")
+    raise ValueError("All upload hosts failed — " + "; ".join(errors))
 
 
 def _http_failure(service: str, resp: requests.Response) -> ValueError:

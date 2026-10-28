@@ -111,6 +111,8 @@ export const generateImage = data => apiPost('/api/generate-image', data)
 // Source / ref image upload (saved in the project; returns { image_url: "local:<file>" })
 export const uploadSourceImage = (project, file) =>
   apiUpload(`/api/projects/${encodeURIComponent(project)}/source-image`, file)
+export const uploadSourceVideo = (project, file) =>
+  apiUpload(`/api/projects/${encodeURIComponent(project)}/source-video`, file)
 export const uploadRefImage = (project, file) =>
   apiUpload(`/api/projects/${encodeURIComponent(project)}/ref-image`, file)
 export const deleteSourceImage = (project, filename) =>

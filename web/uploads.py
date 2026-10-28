@@ -14,6 +14,10 @@ from PIL import Image
 IMAGE_UPLOAD_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}
 MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024
 
+# Video uploads (chat's Recast source video); clips are short (4-30s)
+VIDEO_UPLOAD_TYPES = {"video/mp4": ".mp4"}
+MAX_VIDEO_UPLOAD_BYTES = 200 * 1024 * 1024
+
 
 def safe_filename(name: str) -> str:
     """A bare filename from a URL path, or 400 — no directories, traversal or dotfiles."""
@@ -54,4 +58,20 @@ async def read_image_upload(file: UploadFile) -> tuple[bytes, str]:
         Image.open(io.BytesIO(content)).verify()
     except Exception:
         raise HTTPException(400, "File is not a valid image") from None
+    return content, ext
+
+
+async def read_video_upload(file: UploadFile) -> tuple[bytes, str]:
+    """Validate an uploaded video (type, size, mp4 signature); returns
+    (bytes, file extension to save it with)."""
+    ext = VIDEO_UPLOAD_TYPES.get(file.content_type or "")
+    if not ext:
+        raise HTTPException(400, f"Unsupported file type: {file.content_type}. Use MP4.")
+    content = await file.read()
+    if len(content) > MAX_VIDEO_UPLOAD_BYTES:
+        raise HTTPException(400, f"File too large (max {MAX_VIDEO_UPLOAD_BYTES // 1024 // 1024} MB)")
+    # MP4/QuickTime files carry an "ftyp" box near the start — a cheap check
+    # that the bytes are really a video, not a renamed file.
+    if b"ftyp" not in content[:64]:
+        raise HTTPException(400, "File is not a valid MP4 video")
     return content, ext

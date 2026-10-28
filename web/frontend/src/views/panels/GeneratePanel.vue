@@ -5,6 +5,7 @@ import {
   generateVideo,
   generateImage,
   uploadSourceImage,
+  uploadSourceVideo,
   deleteSourceImage,
   uploadRefImage,
   fetchCreditEstimate,
@@ -59,6 +60,10 @@ const selectedModel = computed(() => props.models[settings.value.model] || {})
 const modelType = computed(() => selectedModel.value.type || 'img2vid')
 // Extend models continue an existing video instead of animating an image
 const isExtend = computed(() => modelType.value === 'extend')
+// Recast (provider: wan-2-2-animate-mix / Venice motion-control): a source
+// video (the motion) + a reference image (the person/thing to put in) + mode.
+const isRecast = computed(() => modelType.value === 'recast')
+const modelModes = computed(() => selectedModel.value.modes || null)
 
 // Ref mode: legacy-API ref models are their own "type: ref" models, while v1
 // models take refs on their regular endpoint when "Ref mode" is toggled on.
@@ -202,6 +207,27 @@ const sourceImagePreviewUrl = computed(() => previewUrl(settings.value.image_url
 
 function triggerFileInput() {
   fileInputRef.value?.click()
+}
+
+// Source video upload (Recast): saved into the project as "local:src-….mp4"
+const videoInputRef = ref(null)
+function triggerVideoInput() {
+  videoInputRef.value?.click()
+}
+async function handleVideoUpload(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  event.target.value = ''
+  isUploading.value = true
+  try {
+    const result = await uploadSourceVideo(props.project, file)
+    settings.value.video_url = result.video_url // "local:src-abc123.mp4"
+    showToast('Source video uploaded', 'success')
+  } catch (err) {
+    showToast('Upload failed: ' + err.message, 'error')
+  } finally {
+    isUploading.value = false
+  }
 }
 
 async function handleFileUpload(event) {
@@ -538,11 +564,25 @@ watch(showRefFields, show => {
   }
 })
 
+// Recast needs a source video (the motion) and a reference image (the subject)
+function recastError() {
+  if (!settings.value.video_url?.trim()) return 'Upload a source video to recast'
+  if (!settings.value.image_url?.trim()) return 'Add a reference image (the person or thing to put in)'
+  return null
+}
+
+// The first thing wrong with the form before submitting, or null
+function submitError() {
+  if (isExtend.value)
+    return settings.value.video_url?.trim() ? null : 'Pick the video to extend (its Extend button), or paste its URL'
+  if (isRecast.value) return recastError()
+  if (!prompt.value.trim()) return 'Prompt is required'
+  return null
+}
+
 async function handleSubmit() {
-  if (isExtend.value && !settings.value.video_url?.trim()) {
-    return showToast('Pick the video to extend (its Extend button), or paste its URL', 'error')
-  }
-  if (!prompt.value.trim() && !isExtend.value) return showToast('Prompt is required', 'error')
+  const error = submitError()
+  if (error) return showToast(error, 'error')
   const data = requestData()
   const refsError = addRefs(data)
   if (refsError) return showToast(refsError, 'error')
@@ -582,9 +622,17 @@ function requestData() {
   if (showSeedOption.value && s.seed) data.seed = parseInt(s.seed, 10) || undefined
   if (maxImagesSetting.value) data.max_images = maxImagesSetting.value
   if (showThinkingLevelOption.value) data.thinking_level = s.thinking_level
+  applySourceMedia(data, s)
+  return data
+}
+
+// Source media for video→video models: extend drops the source image; recast
+// keeps it (the reference) and adds the source video; both can carry a mode.
+function applySourceMedia(data, s) {
   if (isExtend.value)
     Object.assign(data, { video_url: s.video_url.trim(), image_url: undefined, image_tail: undefined })
-  return data
+  if (isRecast.value) data.video_url = (s.video_url || '').trim() || undefined
+  if (modelModes.value && s.mode) data.mode = s.mode
 }
 
 // Put the form's references on the request (ref models and Ref mode drop
@@ -754,6 +802,53 @@ function addRefs(data) {
               @change="handleFileUpload"
             />
           </div>
+          <!-- Recast: the source video (its motion) to put the reference image into -->
+          <div v-if="isRecast" class="image-input-group flex2">
+            <div v-if="sourceVideoPreviewUrl" class="source-preview">
+              <video :src="sourceVideoPreviewUrl" class="source-thumb" muted preload="metadata"></video>
+              <div class="source-preview-info">
+                <span class="source-label">Source video (motion)</span>
+                <div class="source-actions">
+                  <button type="button" class="btn-change" :disabled="isUploading" @click="triggerVideoInput">
+                    Change
+                  </button>
+                  <button type="button" class="btn-remove" title="Clear" @click="settings.video_url = ''">✕</button>
+                </div>
+              </div>
+            </div>
+            <div v-else class="url-row">
+              <SleekInput
+                v-model="settings.video_url"
+                label="Source video"
+                hint="4–30s; the motion to copy"
+                type="url"
+                placeholder="https://example.com/video.mp4"
+              />
+              <button
+                type="button"
+                class="btn-upload"
+                :disabled="isUploading"
+                :title="isUploading ? 'Uploading...' : 'Upload a video'"
+                @click="triggerVideoInput"
+              >
+                <span v-if="isUploading" class="btn-spinner"></span>
+                <span v-else>📁</span>
+              </button>
+            </div>
+            <input
+              ref="videoInputRef"
+              type="file"
+              accept="video/mp4"
+              style="display: none"
+              @change="handleVideoUpload"
+            />
+          </div>
+          <SleekSelect
+            v-if="isRecast && modelModes"
+            v-model="settings.mode"
+            label="Quality"
+            :options="modelModes.map(m => ({ value: m, label: m === 'pro' ? 'Pro' : 'Standard' }))"
+          />
           <SleekSelect v-model="settings.model" label="Model" :options="modelSelectOptions" />
         </div>
       </div>

@@ -62,6 +62,7 @@ class TestGeneratorsMap:
             "klingv3v1",
             "klingv3turbov1",
             "klingv3omniv1",
+            "recastv1",
         }
         assert set(GENERATORS_LEGACY.keys()) == legacy
         assert set(GENERATORS_V1.keys()) == v1

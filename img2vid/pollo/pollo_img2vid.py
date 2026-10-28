@@ -66,6 +66,7 @@ from .generators import (
     Wan30PrimeVideoGeneratorV1,
     Wan30VideoGenerator,
     Wan30VideoGeneratorV1,
+    WanAnimateMixVideoGeneratorV1,
 )
 
 # Legacy (pre-v1) endpoints — kept as a fallback, only shown in the web UI
@@ -119,6 +120,7 @@ GENERATORS_V1 = {
     "klingv3v1": KlingV3VideoGeneratorV1,
     "klingv3turbov1": KlingV3TurboVideoGeneratorV1,
     "klingv3omniv1": KlingV3OmniVideoGeneratorV1,
+    "recastv1": WanAnimateMixVideoGeneratorV1,  # Pollo Recast = alibaba/wan-2-2-animate-mix/motion
 }
 
 GENERATORS = {**GENERATORS_LEGACY, **GENERATORS_V1}

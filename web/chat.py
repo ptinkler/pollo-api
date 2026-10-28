@@ -71,7 +71,7 @@ from img2vid.common.metadata import get_db, iso
 
 from . import characters, media, openrouter, pollo_chat, request_log, venice_chat
 from .auth import verify_api_key
-from .uploads import is_blank_image, read_image_upload, safe_filename
+from .uploads import is_blank_image, read_image_upload, read_video_upload, safe_filename
 
 router = APIRouter(prefix="/api/chat", dependencies=[Depends(verify_api_key)])
 
@@ -1034,6 +1034,17 @@ async def api_upload_attachment(conv_id: str, file: UploadFile = File(...)):
     return {"file": name}
 
 
+@router.post("/conversations/{conv_id}/attachments/video")
+async def api_upload_video_attachment(conv_id: str, file: UploadFile = File(...)):
+    """A source video upload (e.g. Recast). Saved with a 'upv_' prefix so the
+    message endpoint records it as a video (not image) media item."""
+    _require_conv(conv_id)
+    content, ext = await read_video_upload(file)
+    name = f"upv_{uuid.uuid4().hex[:12]}{ext}"
+    (_conv_dir(conv_id) / name).write_bytes(content)
+    return {"file": name}
+
+
 @router.get("/media/{conv_id}/{filename}")
 def api_chat_media(conv_id: str, filename: str):
     path = _chat_root() / safe_filename(conv_id) / safe_filename(filename)
@@ -1175,7 +1186,8 @@ def api_send_message(conv_id: str, data: SendMessage):
     for name in data.attachments[:8]:
         if not (conv_dir / safe_filename(name)).is_file():
             raise HTTPException(400, f"Attachment not found: {name}")
-        media.append(_saved_media("image", "upload", name))
+        kind = "video" if name.lower().endswith(".mp4") else "image"
+        media.append(_saved_media(kind, "upload", name))
 
     db = get_db()
     user_msg = db.add_chat_message(conv_id, "user", content, media=media, mode=data.mode)
@@ -2354,6 +2366,8 @@ def _submit_video(conv_id: str, model: str, prompt: str, params: dict[str, Any])
             resolution=params.get("resolution"),
             generate_audio=params.get("generate_audio"),
             first_frame=frame,
+            source_video=_conv_dir(conv_id) / params["source_video"] if params.get("source_video") else None,
+            mode=params.get("mode"),
         )
     return openrouter.submit_video(
         model,

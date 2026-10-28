@@ -1000,6 +1000,61 @@ class Seedance25ExtendVideoGeneratorV1(BaseV1VideoGenerator):
         return {"input": attrs}
 
 
+class WanAnimateMixVideoGeneratorV1(BaseV1VideoGenerator):
+    """
+    Pollo Recast — Wan 2.2 Animate Mix, v1 API
+    (alibaba/wan-2-2-animate-mix/motion). Replaces the character/subject in a
+    source video with the person or thing in a reference image, keeping the
+    source video's motion (Pollo's "replace anyone or anything in a video").
+
+    From Pollo's OpenAPI spec (2026-10-27, confirmed enabled via /estimate):
+    input is `image` (one reference image URL, required), `video` (motion
+    source video URL, required) and `mode` ("std" | "pro"). No prompt, refs,
+    duration, resolution or aspect ratio — the source video sets those. The
+    website's richer "up to 10 images + prompt" is an internal API only.
+    """
+
+    V1_PROVIDER: ClassVar[str] = "alibaba"
+    V1_MODEL: ClassVar[str] = "wan-2-2-animate-mix"
+
+    HAS_MODE: ClassVar[bool] = True
+    VALID_MODES: ClassVar[tuple] = ("std", "pro")
+    DEFAULT_MODE: ClassVar[str] = "std"
+
+    video_url: str | None
+
+    def __init__(self, **kwargs) -> None:
+        # Recast ignores the prompt, but the base __init__ reads prompt.txt
+        # from the project when it's empty (CLI mode) — give it a placeholder
+        # so the web path (no project file) never trips on a blank prompt.
+        kwargs["prompt"] = kwargs.get("prompt") or " "
+        super().__init__(**kwargs)
+        self.model_url = f"{POLLO_API_V1_BASE}/{self.V1_PROVIDER}/{self.V1_MODEL}/motion"
+        self.video_url = kwargs.get("video_url") or get_video_url(self.project)
+
+    @property
+    def is_text_only(self) -> bool:
+        return False
+
+    @property
+    def is_video_edit(self) -> bool:
+        """Works on a source video (plus a reference image URL); no source image to download."""
+        return True
+
+    def get_payload(self) -> dict[str, Any]:
+        if not self.video_url:
+            raise ValueError("Recast needs the source video's URL")
+        if not self.image_url:
+            raise ValueError("Recast needs a reference image URL")
+        attrs: dict[str, Any] = {
+            "image": self.image_url,
+            "video": self.video_url,
+            "mode": self.mode or self.DEFAULT_MODE,
+        }
+        self.payload_attrs = attrs
+        return {"input": attrs}
+
+
 class MinimaxH3VideoGeneratorV1(BaseV1VideoGenerator):
     """
     MiniMax H3 (Hailuo 03) — v1 API (minimax/minimax-h3/video).

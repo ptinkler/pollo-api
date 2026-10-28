@@ -106,20 +106,28 @@ def list_image_models() -> list[dict[str, Any]]:
 
 def list_video_models() -> list[dict[str, Any]]:
     """Pollo's v1 video models, shaped like openrouter.list_video_models()."""
-    return [
-        {
-            "id": PREFIX + key,
-            "name": f"Pollo: {meta.get('label') or key}",
-            "durations": meta.get("lengths") or list(cls.VALID_LENGTHS) or None,
-            "resolutions": meta.get("resolutions") or list(cls.VALID_RESOLUTIONS) or None,
-            "aspect_ratios": meta.get("ratios") or list(cls.VALID_RATIOS) or None,
-            "frame_images": ["first_frame"],  # all animate a source image
-            "generate_audio": "generate_audio" in meta.get("options", []),
-            "created": None,
-            "hidden": meta.get("hidden") or None,
-        }
-        for key, cls, meta in _catalogue(_video_generators())
-    ]
+    out = []
+    for key, cls, meta in _catalogue(_video_generators()):
+        # Recast works on a source video + one reference image, so it has no
+        # duration/resolution/aspect ratio (the source video sets those).
+        recast = meta.get("type") == "recast"
+        out.append(
+            {
+                "id": PREFIX + key,
+                "name": f"Pollo: {meta.get('label') or key}",
+                "type": meta.get("type"),
+                "durations": None if recast else (meta.get("lengths") or list(cls.VALID_LENGTHS) or None),
+                "resolutions": None if recast else (meta.get("resolutions") or list(cls.VALID_RESOLUTIONS) or None),
+                "aspect_ratios": None if recast else (meta.get("ratios") or list(cls.VALID_RATIOS) or None),
+                "frame_images": ["first_frame"],  # recast: the reference image rides on first_frame
+                "video_input": bool(meta.get("video_input")),
+                "modes": meta.get("modes") or None,
+                "generate_audio": "generate_audio" in meta.get("options", []),
+                "created": None,
+                "hidden": meta.get("hidden") or None,
+            }
+        )
+    return out
 
 
 def _video_generators() -> dict:
@@ -142,6 +150,15 @@ def _upload(path: Path) -> str:
         return image_hosts.upload_image(path)
     except ValueError as e:
         raise PolloError(f"Couldn't upload the image for Pollo: {e}") from e
+
+
+def _upload_video(path: Path) -> str:
+    """Upload a source video to a temporary public host (Pollo only takes URLs).
+    Prefers the host that accepts larger files, since videos dwarf images."""
+    try:
+        return image_hosts.upload_file(path, prefer_large=True)
+    except ValueError as e:
+        raise PolloError(f"Couldn't upload the video for Pollo: {e}") from e
 
 
 def generate_image(
@@ -188,11 +205,32 @@ def submit_video(
     resolution: str | None = None,
     generate_audio: bool | None = None,
     first_frame: Path | None = None,
+    source_video: Path | None = None,
+    mode: str | None = None,
 ) -> dict:
     """Start a Pollo video job. Returns {"id": "pollo:<taskId>", "params": the
     settings actually sent}, shaped like openrouter.submit_video's result.
     A first frame is uploaded to a temporary public host first (Pollo only takes URLs)."""
     key = _generator_key(model_id, _video_generators())
+    if MODEL_INFO.get(key, {}).get("type") == "recast":
+        # Pollo Recast: a source video + one reference image (the first frame)
+        # + a std/pro mode. Both are uploaded to public URLs; the source video
+        # goes to the host that takes larger files.
+        if not source_video:
+            raise PolloError("Recast needs a source video")
+        if not first_frame:
+            raise PolloError("Recast needs a reference image")
+        generator = get_video_generator(
+            key,
+            api_key=os.getenv("POLLO_API_KEY"),
+            project="chat",
+            prompt=prompt,
+            image_url=_upload(first_frame),
+            video_url=_upload_video(source_video),
+            mode=mode,
+        )
+        task_id = _submit(generator)
+        return {"id": JOB_PREFIX + task_id, "params": _sent_params(generator)}
     ratios = MODEL_INFO.get(key, {}).get("ratios") or list(GENERATORS_V1[key].VALID_RATIOS)
     if aspect_ratio not in ratios:
         aspect_ratio = None

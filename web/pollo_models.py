@@ -356,6 +356,21 @@ MODEL_INFO = {
         "ratios": [],
         "options": ["generate_audio", "seed"],
     },
+    # "type": "recast" = Pollo Recast (wan-2-2-animate-mix): replaces the
+    # subject in a source video with one reference image, keeping the motion.
+    # A selectable model (unlike "extend"): the source video rides in on
+    # video_input (latest chat video or an uploaded one), the reference image
+    # on first_frame. No length/resolution/ratio — the source video sets them.
+    "recastv1": {
+        "label": "Pollo Recast",
+        "type": "recast",
+        "lengths": [],
+        "resolutions": [],
+        "ratios": [],
+        "options": ["mode"],
+        "modes": ["std", "pro"],
+        "video_input": True,
+    },
     "minimaxh3v1": {
         "label": "MiniMax H3",
         "type": "img2vid",
