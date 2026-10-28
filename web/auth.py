@@ -136,6 +136,54 @@ def resolve_session(session: str | None) -> str | None:
     return None
 
 
+# ── User sessions (OAuth sign-in) ────────────────────────────────────
+#
+# A separate cookie from the API-key "session": it holds a signed user id, so
+# OAuth users have real sessions independent of the shared key. Signed with
+# SESSION_SECRET when set, else derived from the API keys (rotating a key ends
+# all sessions), else a dev fallback.
+
+USER_COOKIE = "user_session"
+
+
+def _user_secret() -> bytes:
+    explicit = os.getenv("SESSION_SECRET", "").strip()
+    if explicit:
+        return hashlib.sha256(b"pollo-user-v1\x00" + explicit.encode()).digest()
+    keys = get_api_keys()
+    if keys:
+        return hashlib.sha256(b"pollo-user-v1\x00" + _signing_secret(keys)).digest()
+    return hashlib.sha256(b"pollo-user-v1-dev").digest()
+
+
+def make_user_session(user_id: str) -> str:
+    """A signed cookie value for a signed-in user id."""
+    payload = f"{user_id}.{int(time.time()) + SESSION_TTL}"
+    sig = hmac.new(_user_secret(), payload.encode(), hashlib.sha256).digest()
+    return f"{payload}.{_b64(sig)}"
+
+
+def resolve_user_session(token: str | None) -> str | None:
+    """The user id a user-session cookie authenticates, or None (bad signature
+    or expired). User ids are uuid hex, so they carry no '.' of their own."""
+    if not token:
+        return None
+    parts = token.strip().split(".")
+    if len(parts) != 3:
+        return None
+    user_id, exp_s, sig_b64 = parts
+    payload = f"{user_id}.{exp_s}"
+    expected = hmac.new(_user_secret(), payload.encode(), hashlib.sha256).digest()
+    try:
+        if not hmac.compare_digest(expected, _unb64(sig_b64)):
+            return None
+        if time.time() > int(exp_s):
+            return None
+    except (ValueError, TypeError):
+        return None
+    return user_id
+
+
 # ── Shared key extraction ────────────────────────────────────────────
 
 

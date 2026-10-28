@@ -73,6 +73,12 @@ async def lifespan(app: FastAPI):
         print("⚠️  AUTH DISABLED (ALLOW_NO_AUTH) — every endpoint is open. Development use only.")
     else:
         print(f"🔒 Auth enabled — {len(get_api_keys())} API key(s) configured.")
+    # Register any OAuth providers that have credentials configured
+    from .oauth import configured_providers, register_providers
+
+    register_providers()
+    providers = configured_providers()
+    print(f"🔑 OAuth providers: {', '.join(providers) if providers else 'none configured'}")
     # Startup: resume polling for any jobs stuck in processing
     startup_resume_jobs()
     startup_resume_chat()
@@ -95,6 +101,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Session middleware holds Authlib's transient OAuth state across the redirect.
+# SameSite=lax so the state cookie survives the return hop from the provider.
+from starlette.middleware.sessions import SessionMiddleware  # noqa: E402
+
+from .auth import _user_secret  # noqa: E402
+
+app.add_middleware(SessionMiddleware, secret_key=_user_secret().hex(), same_site="lax", https_only=False)
 
 # ── Constants ───────────────────────────────────────────────────────
 from .pollo_models import MODEL_INFO  # noqa: E402 — after the bootstrap above
@@ -377,6 +391,7 @@ async def api_auth_login(data: LoginRequest, response: Response, request: Reques
 @app.post("/api/auth/logout")
 async def api_auth_logout(response: Response):
     response.delete_cookie(key=COOKIE_NAME, samesite="strict")
+    response.delete_cookie(key="user_session", samesite="lax")  # OAuth user session too
     return {"ok": True}
 
 
@@ -2765,6 +2780,11 @@ def startup_resume_jobs():
 
 # ── Chat mode (OpenRouter) — see web/chat.py ─────────────────────────
 # Must be registered before the SPA catch-all below.
+from .oauth_routes import router as oauth_router  # noqa: E402
+from .user_keys import router as keys_router  # noqa: E402
+
+app.include_router(oauth_router)
+app.include_router(keys_router)
 app.include_router(chat_router)
 app.include_router(chatgpt_import_router)
 app.include_router(characters.router)

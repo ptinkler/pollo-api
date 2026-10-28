@@ -8,13 +8,20 @@ import MediaView from '../views/MediaView.vue'
 // Lazy: chat pulls in the markdown renderer, which the video pages don't need
 const ChatView = () => import('../views/ChatView.vue')
 const RequestLogView = () => import('../views/RequestLogView.vue')
+const StudioView = () => import('../views/StudioView.vue')
 
 // Empty component for child routes - ProjectView handles tab rendering via v-show
 const EmptyRouteComponent = { render: () => null }
 
 const routes = [
   {
+    // Cutover: the unified Studio is the default landing
     path: '/',
+    redirect: '/studio',
+  },
+  {
+    // The classic Generate landing, still reachable
+    path: '/classic',
     name: 'home',
     component: HomeView,
     meta: { title: 'Pollo Video Generator' },
@@ -48,6 +55,19 @@ const routes = [
     name: 'instructions',
     component: InstructionsView,
     meta: { title: 'Instructions — Pollo' },
+  },
+  {
+    // Unified Studio shell (overhaul, in progress — runs alongside the old UI)
+    path: '/studio',
+    name: 'studio',
+    component: StudioView,
+    meta: { title: 'Studio — Pollo', fullBleed: true },
+  },
+  {
+    path: '/studio/:id',
+    name: 'studio-thread',
+    component: StudioView,
+    meta: { title: 'Studio — Pollo', fullBleed: true },
   },
   {
     path: '/chat',

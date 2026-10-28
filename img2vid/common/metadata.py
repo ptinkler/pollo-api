@@ -39,6 +39,26 @@ class Base(DeclarativeBase):
     pass
 
 
+class User(Base):
+    """A person who signs in via OAuth (Google/Microsoft/X). Multi-tenant: each
+    user owns their own threads/media (user_id added to those tables in a later
+    migration). Provider API keys are per-user (api_keys_json), so each person
+    pays their own way; the admin (the instance owner) also controls the VPN."""
+
+    __tablename__ = "users"
+    id: Mapped[str] = mapped_column(String(50), primary_key=True)  # uuid hex
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    provider: Mapped[str] = mapped_column(String(32))  # google | microsoft | x
+    provider_sub: Mapped[str] = mapped_column(String(255))  # stable per-provider user id
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Per-user provider keys, JSON {"pollo": "...", "venice": "...", "openrouter": "..."}
+    api_keys_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class JsonIds:
     """A list kept as JSON in the text column named after it plus "_json"
     (`character_ids` → `character_ids_json`). Reads [] when empty or
@@ -687,6 +707,70 @@ class MetadataDB:
         """
         with self._lock, Session(self.engine) as session:
             yield session
+
+    # ── User methods (OAuth) ─────────────────────────────────────────
+
+    def get_user(self, user_id: str) -> User | None:
+        with self._session() as session:
+            user = session.get(User, user_id)
+            if user:
+                session.expunge(user)
+            return user
+
+    def get_user_by_email(self, email: str) -> User | None:
+        with self._session() as session:
+            user = session.query(User).filter(User.email == email.lower()).first()
+            if user:
+                session.expunge(user)
+            return user
+
+    def upsert_oauth_user(self, profile: dict, is_admin: bool = False) -> User:
+        """Create or refresh a user from an OAuth profile {provider, sub, email,
+        name, avatar}. Matches on (provider, sub) first, then email."""
+        with self._session() as session:
+            user = (
+                session.query(User)
+                .filter(User.provider == profile["provider"], User.provider_sub == profile["sub"])
+                .first()
+            )
+            if not user and profile.get("email"):
+                user = session.query(User).filter(User.email == profile["email"]).first()
+            if user:
+                user.name = profile.get("name") or user.name
+                user.avatar_url = profile.get("avatar") or user.avatar_url
+                user.provider = profile["provider"]
+                user.provider_sub = profile["sub"]
+                user.last_login_at = datetime.now()
+                if is_admin:
+                    user.is_admin = True
+            else:
+                user = User(
+                    id=uuid.uuid4().hex,
+                    email=profile["email"],
+                    name=profile.get("name"),
+                    avatar_url=profile.get("avatar"),
+                    provider=profile["provider"],
+                    provider_sub=profile["sub"],
+                    is_admin=is_admin,
+                    last_login_at=datetime.now(),
+                )
+                session.add(user)
+            session.commit()
+            session.refresh(user)
+            session.expunge(user)
+            return user
+
+    def count_users(self) -> int:
+        with self._session() as session:
+            return session.query(User).count()
+
+    def set_user_api_keys(self, user_id: str, api_keys_json: str | None) -> None:
+        """Store the user's (encrypted) provider keys blob."""
+        with self._session() as session:
+            user = session.get(User, user_id)
+            if user:
+                user.api_keys_json = api_keys_json
+                session.commit()
 
     # ── Project methods ──────────────────────────────────────────────
 
