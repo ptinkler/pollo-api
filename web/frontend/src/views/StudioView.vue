@@ -16,6 +16,7 @@ import StudioSidebar from '../components/studio/StudioSidebar.vue'
 import StudioInspector from '../components/studio/StudioInspector.vue'
 import StudioComposer from '../components/studio/StudioComposer.vue'
 import StudioFeed from '../components/studio/StudioFeed.vue'
+import StudioGenerations from '../components/studio/StudioGenerations.vue'
 import StudioSpace from '../components/studio/StudioSpace.vue'
 import StudioMedia from '../components/studio/StudioMedia.vue'
 import StudioSettings from '../components/studio/StudioSettings.vue'
@@ -117,7 +118,15 @@ const {
   onCharacterSaved,
   onCharacterDeleted,
   spend,
+  balances,
+  providers,
 } = studio
+
+const fmtCredits = v => (v == null ? '—' : Math.round(v).toLocaleString())
+const fmtBal = v => (v == null ? '—' : `$${v.toFixed(2)}`)
+
+// Thread has two views: the chat conversation and a gallery of its generations.
+const threadView = ref('chat')
 
 const spendLabel = computed(() => {
   const s = spend.value
@@ -252,14 +261,28 @@ onMounted(() => {
       <template v-else>
         <div class="top">
           <div class="ttitle">{{ activeTitle }}</div>
+          <div class="vtoggle">
+            <button :class="{ on: threadView === 'chat' }" @click="threadView = 'chat'">Chat</button>
+            <button :class="{ on: threadView === 'gens' }" @click="threadView = 'gens'">Generations</button>
+          </div>
           <div class="spacer"></div>
           <span v-if="spendLabel" class="spend" title="Spent in this thread">{{ spendLabel }}</span>
+          <span class="bal pollo" title="Pollo credits remaining — click for usage" @click="router.push('/usage')">
+            Pollo <b>{{ fmtCredits(balances.pollo) }}</b>
+          </span>
+          <span v-if="providers.openrouter" class="bal" title="OpenRouter balance remaining">
+            OpenRouter <b>{{ fmtBal(balances.openrouter) }}</b>
+          </span>
+          <span v-if="providers.venice" class="bal venice" title="Venice balance remaining">
+            Venice <b>{{ fmtBal(balances.venice) }}</b>
+          </span>
           <button class="iconbtn" title="Inspector" @click="rightCollapsed = !rightCollapsed">
             <svg class="ic"><use href="#s-cog" /></svg>
           </button>
         </div>
 
         <StudioFeed
+          v-if="threadView === 'chat'"
           :messages="messages"
           :active="active"
           :sending="sending"
@@ -278,6 +301,7 @@ onMounted(() => {
           @stop="stop"
           @open-media="lightbox = $event"
         />
+        <StudioGenerations v-else :messages="messages" :conv-id="active?.id" @open-media="lightbox = $event" />
 
         <StudioComposer
           v-model:draft="draft"
@@ -460,6 +484,45 @@ onMounted(() => {
   padding: 3px 9px;
   border: 1px solid var(--sborder);
   border-radius: 7px;
+}
+.bal {
+  font-size: 12px;
+  color: var(--smuted);
+  padding: 3px 9px;
+  border: 1px solid var(--sborder);
+  border-radius: 7px;
+  white-space: nowrap;
+}
+.bal b {
+  color: var(--sfg);
+  font-weight: 600;
+}
+.bal.pollo {
+  cursor: pointer;
+}
+.bal.pollo:hover {
+  border-color: var(--saccent);
+}
+.vtoggle {
+  display: inline-flex;
+  gap: 2px;
+  background: var(--sbg2);
+  border: 1px solid var(--sborder);
+  border-radius: 7px;
+  padding: 2px;
+}
+.vtoggle button {
+  font-size: 12px;
+  padding: 3px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--smuted);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.vtoggle button.on {
+  background: var(--shover);
+  color: var(--sfg);
 }
 .sprite {
   position: absolute;
