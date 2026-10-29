@@ -98,7 +98,7 @@ class BaseVideoGenerator:
         return default
 
     def __init__(self, **kwargs) -> None:
-        self.api_key = kwargs.get("api_key") or os.getenv("POLLO_API_KEY")
+        self.api_key = kwargs.get("api_key")  # supplied by the caller; never read from the environment
         self.project = kwargs.get("project") or os.getenv("PROJECT", "default")
         self.prompt = kwargs.get("prompt") or get_prompt(self.project)
         self.image_url = kwargs.get("image_url", _UNSET)

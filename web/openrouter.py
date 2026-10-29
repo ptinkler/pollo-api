@@ -76,7 +76,9 @@ def _connection_guard(waiting_for: str):
 
 
 def get_api_key() -> str:
-    return os.getenv("OPENROUTER_API_KEY", "").strip()
+    from . import keyctx
+
+    return keyctx.provider_key("openrouter") or ""
 
 
 def is_configured() -> bool:
@@ -86,7 +88,7 @@ def is_configured() -> bool:
 def _headers() -> dict[str, str]:
     key = get_api_key()
     if not key:
-        raise OpenRouterError("OPENROUTER_API_KEY is not configured", 503)
+        raise OpenRouterError("No OpenRouter API key set — add one in Settings → Keys", 503)
     return {
         "Authorization": f"Bearer {key}",
         # App attribution (https://openrouter.ai/docs/app-attribution). The URL

@@ -168,18 +168,11 @@ class TestEstimate:
 
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, provider_keys):
     import web.api as api_mod
     from img2vid.common.metadata import MetadataDB
 
-    monkeypatch.setenv("POLLO_API_KEY", "test-key")
-    # App auth off for these tests (no keys); opt out of fail-closed so routes serve.
-    monkeypatch.delenv("API_KEY", raising=False)
-    monkeypatch.delenv("API_KEYS", raising=False)
-    monkeypatch.setenv("ALLOW_NO_AUTH", "true")
-    import web.auth as auth_mod
-
-    auth_mod.get_api_keys.cache_clear()
+    provider_keys["pollo"] = "test-key"  # the current user's Pollo key (not from env)
     (tmp_path / "data").mkdir(exist_ok=True)
     db = MetadataDB(db_path=tmp_path / "data" / "metadata.db")
     monkeypatch.setattr(api_mod, "ASSETS_DIR", tmp_path / "assets")
@@ -251,8 +244,8 @@ class TestEstimateEndpoint:
         )
         assert resp.json() == {"credits": 15, "full_credits": 15, "samples": 2, "source": "history"}
 
-    def test_nothing_known(self, client, monkeypatch):
-        monkeypatch.delenv("POLLO_API_KEY")
+    def test_nothing_known(self, client, provider_keys):
+        provider_keys["pollo"] = None
         resp = client.post("/api/usage/estimate", json={"model": "seedance25v1"})
         assert resp.json() == {"credits": None, "full_credits": None, "samples": 0, "source": None}
 

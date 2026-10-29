@@ -53,11 +53,22 @@ Environment variables
 Create a `.env` file in the compose folder (same directory as `docker-compose.yml`) and set at minimum the environment variables referenced by the compose file. Example `.env`:
 
 ```env
-# App auth (leave unset to disable — not recommended)
-API_KEY=your_strong_random_key_here
+# Auth: admins log in with email + password; everyone else via OAuth.
+# Fail-closed — with none of these set, only admins get in.
+ADMIN_EMAILS=you@gmail.com
+# ALLOWED_EMAILS=friend@x.com
+# OPEN_SIGNUP=false
+SESSION_SECRET=a_long_random_string
+# Set these once, never change them.
+PASSWORD_PEPPER=a_long_random_string
+KEYS_SECRET=a_long_random_string
 
-# Pollo API
-POLLO_API_KEY=your_pollo_api_key_here
+# OAuth (optional): public https host + provider credentials
+PUBLIC_BASE_URL=https://your-host.synology.me
+GOOGLE_OAUTH_CLIENT_ID=
+GOOGLE_OAUTH_CLIENT_SECRET=
+
+# Provider keys (Pollo/OpenRouter/Venice) are entered per-user in the app, not here.
 POLLO_DATA_DIR=/data
 
 # Host port the app is exposed on
@@ -108,6 +119,29 @@ docker compose up -d
 ```
 
 Important: The VPN profile requires `/dev/net/tun` and NET_ADMIN capability. Start from the shell as root — the DSM GUI may block these settings causing gluetun to fail.
+
+Database migrations run automatically on every container start (`entrypoint.sh` runs `alembic upgrade head`), so there is no manual migration step — just start the stack.
+
+Important (upgrading an existing single-user install): set `ADMIN_EMAILS` in `.env` **before** the first start on this version. The migration that adds multi-user ownership assigns all your existing data to the admin named by `ADMIN_EMAILS` (falling back to a throwaway `admin@local` if it is unset) — so if you start without it, your chats/projects/media are backfilled to the wrong account.
+
+First-run: create the admin account
+------------------------------------
+Admin accounts are created only from the CLI (never through the app), so run this inside the container once the stack is up — use `app-vpn` instead of `app` if you started the VPN profile:
+
+```bash
+docker compose exec app python -m web.provision_admin --email you@gmail.com --set-password
+```
+
+The email must be in `ADMIN_EMAILS`. Then sign in at the app with that email + password. Upgrading an older single-user install? Add `--claim-orphans` to adopt your existing (unowned) chats/projects/media and move the old shared library into the admin's folder.
+
+OAuth sign-in
+-------------
+To let users sign in with Google/Microsoft/X rather than the LAN `API_KEY`:
+
+1. Set `PUBLIC_BASE_URL` in `.env` to your public https host (e.g. `https://your-host.synology.me` — a `.local` name can't do OAuth).
+2. Register the app with each provider and set its `*_OAUTH_CLIENT_ID` / `*_OAUTH_CLIENT_SECRET` in `.env`.
+3. Set each provider's authorised redirect URI to `<PUBLIC_BASE_URL>/api/auth/callback/<provider>` (e.g. `.../api/auth/callback/google`).
+4. Restart the stack so the new env is picked up.
 
 Automating startup on boot (use `synology-boot.sh`)
 -------------------------------------------------

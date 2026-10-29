@@ -91,7 +91,7 @@ export async function streamTurn(path, body, onEvent, signal) {
     signal,
   })
   if (res.status === 401) {
-    useAuth().promptForKey()
+    useAuth().promptLogin()
     throw new Error('API key required')
   }
   if (!res.ok) {

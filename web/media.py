@@ -46,10 +46,10 @@ from img2vid.common import config
 from img2vid.common.metadata import get_db, iso
 
 from . import characters
-from .auth import verify_api_key
 from .uploads import image_media_type, is_blank_image, read_image_upload, safe_filename
+from .users import require_user
 
-router = APIRouter(prefix="/api/media", dependencies=[Depends(verify_api_key)])
+router = APIRouter(prefix="/api/media", dependencies=[Depends(require_user)])
 
 VIDEO_EXTS = {".mp4"}
 THUMB_SIZE = 320  # px, the thumbnail's shorter side (grid tiles are square, cropped to fill)
@@ -69,8 +69,14 @@ def _web_api():
 
 
 def library_dir() -> Path:
-    # Read config at call time so tests can redirect ROOT_DIR
-    return config.ROOT_DIR / "library"
+    # Read config at call time so tests can redirect ROOT_DIR. Per-user
+    # (<data>/library/<user_id>/) so one user's uploads never show to another;
+    # the shared legacy folder is the admin's, migrated by provision_admin.
+    from img2vid.common.metadata import current_tenant
+
+    base = config.ROOT_DIR / "library"
+    uid = current_tenant()
+    return base / uid if uid else base
 
 
 def thumb_dir() -> Path:
@@ -317,7 +323,10 @@ def _chat_orphans(msgs, lib_items, titles: dict[str, str]) -> list[dict[str, Any
         used.update((lib.conversation_id, f) for f in _referenced_files(lib.item))
     cutoff = time.time() - ORPHAN_GRACE
     items = []
-    for d in root.iterdir():
+    # Only the current user's conversation folders (titles is tenant-scoped), so
+    # one user's orphan scan never lists another user's files.
+    for conv_id in titles:
+        d = root / conv_id
         if not d.is_dir() or d.name.startswith("."):  # .deleting-<id>: a deleted chat's files, going
             continue
         for p in d.iterdir():
@@ -360,22 +369,28 @@ def _build_items(db) -> list[dict[str, Any]]:
 
 
 # The built list, cached so paging through it doesn't rebuild it each request
-# (scanning every chat folder and the whole chat DB is slow on a NAS). Keyed on
-# ROOT_DIR so tests, each with their own, never see another's. Writes through
-# this module invalidate it; a short TTL catches creations made elsewhere.
+# (scanning the user's chat folders and the chat DB is slow on a NAS). Keyed on
+# (ROOT_DIR, tenant) so one user never sees another's list, and tests (each with
+# their own ROOT_DIR) stay isolated. Writes invalidate it; a short TTL catches
+# creations made elsewhere.
 _LIST_TTL = 30.0
-_list_cache: dict[str, Any] = {"root": None, "at": 0.0, "items": None}
+_list_cache: dict[tuple, dict] = {}
 
 
 def _all_items() -> list[dict[str, Any]]:
+    from img2vid.common.metadata import current_tenant
+
+    key = (config.ROOT_DIR, current_tenant())
     now = time.monotonic()
-    if _list_cache["items"] is None or _list_cache["root"] != config.ROOT_DIR or now - _list_cache["at"] > _LIST_TTL:
-        _list_cache.update(root=config.ROOT_DIR, at=now, items=_build_items(get_db()))
-    return _list_cache["items"]
+    entry = _list_cache.get(key)
+    if entry is None or now - entry["at"] > _LIST_TTL:
+        entry = {"at": now, "items": _build_items(get_db())}
+        _list_cache[key] = entry
+    return entry["items"]
 
 
 def _invalidate_list() -> None:
-    _list_cache["items"] = None
+    _list_cache.clear()
 
 
 def _origin_label(item: dict[str, Any]) -> str:

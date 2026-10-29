@@ -168,10 +168,10 @@ class FakeVenice:
 
 
 @pytest.fixture()
-def venice(chat, monkeypatch, tmp_path):
+def venice(chat, monkeypatch, tmp_path, provider_keys):
     import web.venice_chat as v
 
-    monkeypatch.setenv("VENICE_API_KEY", "v-test")
+    provider_keys["venice"] = "v-test"
     fake = FakeVenice()
     # Catalogue builds price each video model; tests that queue videos set their own quote
     fake.routes["/video/quote"] = lambda kw: httpx.Response(200, json={"quote": QUOTES.get(kw["json"]["model"])})
@@ -250,9 +250,9 @@ class TestCatalogue:
         assert [m["id"] for m in data["text"]] == ["venice/venice-uncensored", "venice/llama-big", "or/text"]
         assert any(m["id"] == "venice/seedream-v5-pro" for m in data["image"])
 
-    def test_not_listed_without_a_key(self, venice, monkeypatch):
+    def test_not_listed_without_a_key(self, venice, provider_keys):
         v, fake = venice
-        monkeypatch.delenv("VENICE_API_KEY")
+        provider_keys["venice"] = None
         assert v.list_models("image") == [] and fake.calls == []
 
 

@@ -26,6 +26,7 @@ the new turns; if it was carried on here too, they're a separate branch.
 """
 
 import contextlib
+import contextvars
 import json
 import re
 import threading
@@ -45,11 +46,11 @@ from img2vid.common import config
 from img2vid.common.metadata import get_db
 
 from . import media
-from .auth import verify_api_key
 from .chat import CHAT_PREVIEW_SIZE, IMAGE_EXTS, ConversationCreate, _conv_dir, api_create_conversation
 from .uploads import safe_filename
+from .users import require_user
 
-router = APIRouter(prefix="/api/chat/import", dependencies=[Depends(verify_api_key)])
+router = APIRouter(prefix="/api/chat/import", dependencies=[Depends(require_user)])
 
 SOURCE = "chatgpt"
 SPACE_NAME = "ChatGPT"  # the space new imports go in
@@ -465,7 +466,9 @@ def api_start_import(data: StartImport):
             raise HTTPException(409, "An import is already running")
         _job.clear()
         _job.update(state="running", file=path.name, started_at=datetime.now().isoformat())
-    threading.Thread(target=_run_job, args=(path,), daemon=True).start()
+    # Copy the request context so imported rows belong to the signed-in user
+    ctx = contextvars.copy_context()
+    threading.Thread(target=lambda: ctx.run(_run_job, path), daemon=True).start()
     return dict(_job)
 
 

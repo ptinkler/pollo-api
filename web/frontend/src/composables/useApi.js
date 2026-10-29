@@ -18,8 +18,8 @@ async function fetchWithRetry(url, options = {}, retries = RETRY_CONFIG.maxRetri
     try {
       const response = await fetch(url, opts)
       if (response.status === 401) {
-        const { promptForKey } = useAuth()
-        promptForKey()
+        const { promptLogin } = useAuth()
+        promptLogin()
         throw new Error('API key required')
       }
       if (response.ok || response.status < 500 || attempt === retries) {

@@ -1,0 +1,101 @@
+/* Shared Studio design tokens + icon primitive. Imported once (global) by
+   StudioView; scoped under .studio so it never leaks to the rest of the app.
+   Custom properties cascade into every child component, so each scoped SFC can
+   use var(--s*) freely and the <svg class="ic"> icons stay consistent. */
+.studio {
+  --sbg: #14171d;
+  --srail: #101318;
+  --shover: #1e232c;
+  --sfg: #e9ecf2;
+  --smuted: #8a93a3;
+  --sfaint: #596273;
+  --sborder: #232832;
+  --sborder2: #1b2028;
+  --saccent: #6e8bff;
+  --saccent-soft: color-mix(in srgb, #6e8bff 16%, transparent);
+  --sbg2: #0d0f13;
+  --spanel2: #1a1e26;
+}
+
+/* Light theme — opt in with data-theme="light" on the shell */
+.studio[data-theme='light'] {
+  --sbg: #ffffff;
+  --srail: #f3f4f6;
+  --shover: #eef1f6;
+  --sfg: #1a1d23;
+  --smuted: #5b6472;
+  --sfaint: #8b94a3;
+  --sborder: #e3e7ee;
+  --sborder2: #edf0f5;
+  --saccent: #4f6bed;
+  --saccent-soft: color-mix(in srgb, #4f6bed 12%, transparent);
+  --sbg2: #f7f8fa;
+  --spanel2: #f1f3f7;
+}
+
+.studio .ic {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.studio .ic.sm {
+  width: 14px;
+  height: 14px;
+}
+.studio .ic.lg {
+  width: 22px;
+  height: 22px;
+}
+
+/* Shared inspector primitives (used by the StudioInspector section components) */
+.studio .isection {
+  padding: 13px 0;
+  border-bottom: 1px solid var(--sborder2);
+}
+.studio .ilabel {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--sfaint);
+  font-weight: 650;
+  margin-bottom: 10px;
+}
+.studio .pickers {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.studio .orow {
+  display: flex;
+  gap: 8px;
+}
+.studio .orow .msel {
+  flex: 1;
+}
+.studio .msel {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--sborder);
+  border-radius: 9px;
+  background: var(--spanel2);
+  color: var(--sfg);
+  outline: none;
+}
+.studio .audio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--smuted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.studio .inote {
+  font-size: 12px;
+  color: var(--sfaint);
+  line-height: 1.5;
+}

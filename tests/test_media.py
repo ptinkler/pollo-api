@@ -159,9 +159,12 @@ class TestOrphans:
     def test_lists_unrecorded_chat_files(self, client, conv, orphans):
         items = _items(client)
         orphaned = {k for k, i in items.items() if i["origin"] == "orphan"}
-        assert orphaned == {f"chat:{conv.id}:up_lost.png", "chat:gone:img_old.png"}
+        # Multi-tenant: only orphans in the user's own conversation folders. A
+        # folder with no owning conversation ("gone") can't be attributed to a
+        # user, so it is shown to no one.
+        assert orphaned == {f"chat:{conv.id}:up_lost.png"}
         assert items[f"chat:{conv.id}:up_lost.png"]["conversation_title"] == "Fox chat"
-        assert items["chat:gone:img_old.png"]["conversation_id"] is None
+        assert "chat:gone:img_old.png" not in items
         assert items[f"chat:{conv.id}:img_1.png"]["origin"] == "chat"
 
     def test_delete(self, client, orphans):

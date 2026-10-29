@@ -13,7 +13,7 @@ import requests
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from .auth import verify_api_key
+from .users import require_admin
 
 router = APIRouter(prefix="/api/vpn")
 
@@ -66,7 +66,7 @@ def _gluetun_json(path: str, if_not_ok: Any, if_unreachable: Any, timeout: int =
 
 
 @router.get("/status")
-def vpn_status(_api_key: str = Depends(verify_api_key)):
+def vpn_status(_admin=Depends(require_admin)):
     """Current VPN status, public IP, and server country from Gluetun."""
     public_ip = _gluetun_json("/v1/publicip/ip", {}, {}, timeout=5)
     settings = _gluetun_json("/v1/vpn/settings", {}, {})
@@ -80,7 +80,7 @@ def vpn_status(_api_key: str = Depends(verify_api_key)):
 
 
 @router.post("/restart")
-def vpn_restart(_api_key: str = Depends(verify_api_key)):
+def vpn_restart(_admin=Depends(require_admin)):
     """Restart the VPN tunnel by cycling Gluetun's status off then on."""
     try:
         _gluetun_put("/v1/vpn/status", {"status": "stopped"})
@@ -94,7 +94,7 @@ def vpn_restart(_api_key: str = Depends(verify_api_key)):
 
 
 @router.put("/country")
-def vpn_change_country(data: VpnCountryRequest, _api_key: str = Depends(verify_api_key)):
+def vpn_change_country(data: VpnCountryRequest, _admin=Depends(require_admin)):
     """Change VPN server country. Body: {"country": "United Kingdom"}"""
     country = data.country.strip()
     if not country:
@@ -111,6 +111,6 @@ def vpn_change_country(data: VpnCountryRequest, _api_key: str = Depends(verify_a
 
 
 @router.get("/countries")
-def vpn_countries(_api_key: str = Depends(verify_api_key)):
+def vpn_countries(_admin=Depends(require_admin)):
     """The allowed VPN server countries."""
     return {"countries": ALLOWED_VPN_COUNTRIES}

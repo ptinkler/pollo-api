@@ -27,10 +27,10 @@ from pydantic import BaseModel, Field
 from img2vid.common import config
 from img2vid.common.metadata import get_db
 
-from .auth import verify_api_key
 from .uploads import image_media_type, read_image_upload, safe_filename
+from .users import require_user
 
-router = APIRouter(prefix="/api/characters", dependencies=[Depends(verify_api_key)])
+router = APIRouter(prefix="/api/characters", dependencies=[Depends(require_user)])
 
 MAX_IMAGES = 6  # stored per character
 REF_PREFIX = "char:"
@@ -362,7 +362,9 @@ def api_character_image_from_generation(character_id: int, data: CopyFromGenerat
 
 @router.get("/{character_id}/images/{filename}")
 def api_character_image(character_id: int, filename: str):
-    path = char_dir(character_id) / safe_filename(filename)
+    path = char_dir(character_id) / safe_filename(filename)  # rejects traversal (400)
+    if not get_db().get_character(character_id):  # tenant-scoped: another user's id → not found
+        raise HTTPException(404, "Not found")
     if not path.is_file():
         raise HTTPException(404, "Not found")
     return FileResponse(

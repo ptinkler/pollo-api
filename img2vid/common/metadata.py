@@ -8,12 +8,13 @@ import re
 import threading
 import uuid
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, create_engine, event, func
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, with_loader_criteria
 from sqlalchemy.pool import StaticPool
 
 from .config import DB_PATH
@@ -37,6 +38,28 @@ def iso(dt: datetime | None) -> str | None:
 
 class Base(DeclarativeBase):
     pass
+
+
+class User(Base):
+    """A person who signs in via OAuth (Google/Microsoft/X). Multi-tenant: each
+    user owns their own threads/media (user_id added to those tables in a later
+    migration). Provider API keys are per-user (api_keys_json), so each person
+    pays their own way; the admin (the instance owner) also controls the VPN."""
+
+    __tablename__ = "users"
+    id: Mapped[str] = mapped_column(String(50), primary_key=True)  # uuid hex
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    provider: Mapped[str] = mapped_column(String(32))  # google | microsoft | x | local
+    provider_sub: Mapped[str] = mapped_column(String(255))  # stable per-provider user id
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    # argon2id hash for a local (email + password) admin account; null for OAuth users
+    password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Per-user provider keys, JSON {"pollo": "...", "venice": "...", "openrouter": "..."}
+    api_keys_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class JsonIds:
@@ -85,6 +108,8 @@ class DefaultsBucket:
 
 class Project(Base):
     __tablename__ = "projects"
+    # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020
+    user_id: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
     id: Mapped[int] = mapped_column(primary_key=True)
     slug: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(255))
@@ -119,6 +144,8 @@ class Project(Base):
 
 class Download(Base):
     __tablename__ = "downloads"
+    # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020
+    user_id: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
     id: Mapped[int] = mapped_column(primary_key=True)
     url: Mapped[str] = mapped_column(Text, index=True)
     local_path: Mapped[str] = mapped_column(Text)
@@ -152,6 +179,8 @@ class Download(Base):
 
 class Job(Base):
     __tablename__ = "jobs"
+    # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020
+    user_id: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
     id: Mapped[int] = mapped_column(primary_key=True)
     job_id: Mapped[str] = mapped_column(String(50), unique=True, index=True)
     project: Mapped[str] = mapped_column(String(255), ForeignKey("projects.slug"), index=True)
@@ -219,6 +248,8 @@ class GenerationFavourite(Base):
     moved between projects; the job says which project it's in now."""
 
     __tablename__ = "generation_favourites"
+    # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020
+    user_id: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
     id: Mapped[int] = mapped_column(primary_key=True)
     filename: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     job_id: Mapped[str] = mapped_column(String(50), index=True)
@@ -227,6 +258,8 @@ class GenerationFavourite(Base):
 
 class ChatConversation(Base):
     __tablename__ = "chat_conversations"
+    # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020
+    user_id: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
     id: Mapped[str] = mapped_column(String(50), primary_key=True)
     title: Mapped[str] = mapped_column(String(255), default="New chat")
     text_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -358,6 +391,8 @@ class Character(Base):
     in that chat and deleted with it — until promoted (conversation_id None)."""
 
     __tablename__ = "characters"
+    # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020
+    user_id: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100))
     description: Mapped[str] = mapped_column(Text, default="")
@@ -387,6 +422,8 @@ class ChatInstruction(Base):
     flag."""
 
     __tablename__ = "chat_instructions"
+    # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020
+    user_id: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
     content: Mapped[str] = mapped_column(Text, default="")
@@ -410,6 +447,8 @@ class ChatInstructionGroup(Base):
     by the settings buckets (ChatSettings, ChatSpace)."""
 
     __tablename__ = "chat_instruction_groups"
+    # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020
+    user_id: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
     snippet_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -434,6 +473,8 @@ class ChatSpace(DefaultsBucket, Base):
     of the global ones). Unrelated to the generation-side Project."""
 
     __tablename__ = "chat_spaces"
+    # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020
+    user_id: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
@@ -455,6 +496,8 @@ class ChatSettings(DefaultsBucket, Base):
     of these; the two are kept as separate buckets."""
 
     __tablename__ = "chat_settings"
+    # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020
+    user_id: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
     id: Mapped[int] = mapped_column(primary_key=True)  # always 1
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -470,6 +513,8 @@ class ChatMessage(Base):
     branch); siblings are alternative versions of the same turn."""
 
     __tablename__ = "chat_messages"
+    # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020
+    user_id: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
     id: Mapped[int] = mapped_column(primary_key=True)
     conversation_id: Mapped[str] = mapped_column(
         String(50),
@@ -522,6 +567,8 @@ class ChatImportSkip(Base):
     """An imported chat the user deleted, so importing it again doesn't bring it back."""
 
     __tablename__ = "chat_import_skips"
+    # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020
+    user_id: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
     source: Mapped[str] = mapped_column(String(20), primary_key=True)
     import_id: Mapped[str] = mapped_column(String(100), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
@@ -533,6 +580,8 @@ class ChatLibraryItem(Base):
     ChatMessage.media_json; the library view shows both."""
 
     __tablename__ = "chat_library_items"
+    # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020
+    user_id: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
     id: Mapped[int] = mapped_column(primary_key=True)
     media_id: Mapped[str] = mapped_column(String(50), unique=True, index=True)
     conversation_id: Mapped[str] = mapped_column(
@@ -551,6 +600,70 @@ class ChatLibraryItem(Base):
             return json.loads(self.item_json)
         except json.JSONDecodeError:
             return {}
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Multi-tenant row scoping (enforced at the ORM layer)
+# ═══════════════════════════════════════════════════════════════════
+#
+# Every tenant-owned row carries a user_id. A context variable holds the
+# current tenant; while it is set, ORM SELECTs are automatically filtered to
+# that user and new rows are stamped with it. Enforcing this in the ORM (not
+# per query) means no endpoint can forget to scope and leak another user's
+# data. When the tenant is unset (startup, migrations, system tasks) there is
+# no filter — those contexts are not user-facing.
+
+TENANT_MODELS = (
+    Project,
+    Download,
+    Job,
+    GenerationFavourite,
+    ChatConversation,
+    Character,
+    ChatInstruction,
+    ChatInstructionGroup,
+    ChatSpace,
+    ChatSettings,
+    ChatMessage,
+    ChatLibraryItem,
+    ChatImportSkip,
+)
+
+_tenant: ContextVar[str | None] = ContextVar("tenant_user_id", default=None)
+
+
+def set_tenant(user_id: str | None):
+    """Bind the current tenant (user id); returns a token for reset_tenant."""
+    return _tenant.set(user_id)
+
+
+def reset_tenant(token) -> None:
+    _tenant.reset(token)
+
+
+def current_tenant() -> str | None:
+    return _tenant.get()
+
+
+@event.listens_for(Session, "do_orm_execute")
+def _scope_selects_to_tenant(execute_state) -> None:
+    uid = _tenant.get()
+    if uid is None or not execute_state.is_select:
+        return
+    for model in TENANT_MODELS:
+        execute_state.statement = execute_state.statement.options(
+            with_loader_criteria(model, model.user_id == uid, include_aliases=True)
+        )
+
+
+@event.listens_for(Session, "before_flush")
+def _stamp_new_rows_with_tenant(session, flush_context, instances) -> None:
+    uid = _tenant.get()
+    if uid is None:
+        return
+    for obj in session.new:
+        if isinstance(obj, TENANT_MODELS) and getattr(obj, "user_id", None) is None:
+            obj.user_id = uid
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -643,8 +756,28 @@ class MetadataDB:
             "import_source": "VARCHAR(20)",
             "import_id": "VARCHAR(100)",
             "import_updated_at": "FLOAT",
+            "user_id": "VARCHAR(50)",
         },
-        "chat_messages": {"parent_id": "INTEGER", "mode": "VARCHAR(10)", "import_id": "VARCHAR(100)"},
+        "chat_messages": {
+            "parent_id": "INTEGER",
+            "mode": "VARCHAR(10)",
+            "import_id": "VARCHAR(100)",
+            "user_id": "VARCHAR(50)",
+        },
+        # Tenant ownership on the remaining user-owned tables (the local-dev
+        # counterpart to Alembic 0020)
+        "projects": {"user_id": "VARCHAR(50)"},
+        "downloads": {"user_id": "VARCHAR(50)"},
+        "jobs": {"user_id": "VARCHAR(50)"},
+        "generation_favourites": {"user_id": "VARCHAR(50)"},
+        "characters": {"user_id": "VARCHAR(50)"},
+        "chat_instructions": {"user_id": "VARCHAR(50)"},
+        "chat_instruction_groups": {"user_id": "VARCHAR(50)"},
+        "chat_spaces": {"user_id": "VARCHAR(50)"},
+        "chat_settings": {"user_id": "VARCHAR(50)"},
+        "chat_library_items": {"user_id": "VARCHAR(50)"},
+        "chat_import_skips": {"user_id": "VARCHAR(50)"},
+        "users": {"password_hash": "TEXT"},
     }
     # Run once when the column is added: chats from before branching were
     # linear, so each message's parent is the one before it
@@ -687,6 +820,139 @@ class MetadataDB:
         """
         with self._lock, Session(self.engine) as session:
             yield session
+
+    # ── User methods (OAuth) ─────────────────────────────────────────
+
+    def get_user(self, user_id: str) -> User | None:
+        with self._session() as session:
+            user = session.get(User, user_id)
+            if user:
+                session.expunge(user)
+            return user
+
+    def get_user_by_email(self, email: str) -> User | None:
+        with self._session() as session:
+            user = session.query(User).filter(User.email == email.lower()).first()
+            if user:
+                session.expunge(user)
+            return user
+
+    def get_user_by_provider(self, provider: str, provider_sub: str) -> User | None:
+        with self._session() as session:
+            user = session.query(User).filter(User.provider == provider, User.provider_sub == provider_sub).first()
+            if user:
+                session.expunge(user)
+            return user
+
+    def upsert_oauth_user(self, profile: dict, is_admin: bool = False) -> User:
+        """Create or refresh a user from an OAuth profile {provider, sub, email,
+        name, avatar}. Matches on (provider, sub) first, then email."""
+        with self._session() as session:
+            user = (
+                session.query(User)
+                .filter(User.provider == profile["provider"], User.provider_sub == profile["sub"])
+                .first()
+            )
+            if not user and profile.get("email"):
+                user = session.query(User).filter(User.email == profile["email"]).first()
+            if user:
+                user.name = profile.get("name") or user.name
+                user.avatar_url = profile.get("avatar") or user.avatar_url
+                user.provider = profile["provider"]
+                user.provider_sub = profile["sub"]
+                user.last_login_at = datetime.now()
+                if is_admin:
+                    user.is_admin = True
+            else:
+                user = User(
+                    id=uuid.uuid4().hex,
+                    email=profile["email"],
+                    name=profile.get("name"),
+                    avatar_url=profile.get("avatar"),
+                    provider=profile["provider"],
+                    provider_sub=profile["sub"],
+                    is_admin=is_admin,
+                    last_login_at=datetime.now(),
+                )
+                session.add(user)
+            session.commit()
+            session.refresh(user)
+            session.expunge(user)
+            return user
+
+    def count_users(self) -> int:
+        with self._session() as session:
+            return session.query(User).count()
+
+    def ensure_admin(self, email: str, name: str = "Admin") -> User:
+        """Create the user with this email as admin, or promote an existing one
+        (without changing their sign-in provider)."""
+        with self._session() as session:
+            user = session.query(User).filter(User.email == email.lower()).first()
+            if user:
+                user.is_admin = True
+            else:
+                user = User(
+                    id=uuid.uuid4().hex,
+                    email=email.lower(),
+                    name=name,
+                    provider="local",
+                    provider_sub="admin",
+                    is_admin=True,
+                )
+                session.add(user)
+            session.commit()
+            session.refresh(user)
+            session.expunge(user)
+            return user
+
+    def claim_orphans(self, user_id: str) -> int:
+        """Assign every tenant row that has no owner to this user. For setup /
+        after an import; runs with no tenant bound, so it sees all rows."""
+        count = 0
+        with self._session() as session:
+            for model in TENANT_MODELS:
+                count += session.query(model).filter(model.user_id.is_(None)).update({model.user_id: user_id}) or 0
+            session.commit()
+        return count
+
+    def set_user_api_keys(self, user_id: str, api_keys_json: str | None) -> None:
+        """Store the user's (encrypted) provider keys blob."""
+        with self._session() as session:
+            user = session.get(User, user_id)
+            if user:
+                user.api_keys_json = api_keys_json
+                session.commit()
+
+    def create_local_admin(self, email: str, password_hash: str, name: str = "Admin") -> User:
+        """Create (or promote + set the password of) a local email+password admin
+        account. Caller enforces that the email is an allowed admin email."""
+        with self._session() as session:
+            user = session.query(User).filter(User.email == email.lower()).first()
+            if not user:
+                user = User(
+                    id=uuid.uuid4().hex,
+                    email=email.lower(),
+                    name=name,
+                    provider="local",
+                    provider_sub="admin",
+                    is_admin=True,
+                )
+                session.add(user)
+            user.is_admin = True
+            user.password_hash = password_hash
+            session.commit()
+            session.refresh(user)
+            session.expunge(user)
+            return user
+
+    def set_user_password(self, user_id: str, password_hash: str) -> None:
+        """Replace a user's stored password hash (e.g. after a transparent rehash)."""
+        with self._session() as session:
+            user = session.get(User, user_id)
+            if user:
+                user.password_hash = password_hash
+                session.commit()
 
     # ── Project methods ──────────────────────────────────────────────
 
@@ -1282,14 +1548,17 @@ class MetadataDB:
             session.commit()
             return True
 
-    # ── Global settings (singleton) ──────────────────────────────────
+    # ── Per-user defaults ─────────────────────────────────────────────
+    # One ChatSettings row per user. The ORM tenant filter scopes the query to
+    # the current user, so each person has their own defaults (the admin keeps
+    # the pre-login global row, backfilled to them in 0020).
 
     def get_settings(self) -> ChatSettings:
-        """The global defaults row (id=1), created empty on first access."""
+        """The current user's defaults row, created empty on first access."""
         with self._session() as session:
-            item = session.get(ChatSettings, 1)
+            item = session.query(ChatSettings).first()
             if not item:
-                item = ChatSettings(id=1)
+                item = ChatSettings()
                 session.add(item)
                 session.commit()
                 session.refresh(item)
@@ -1298,7 +1567,7 @@ class MetadataDB:
 
     def save_settings(self, **fields) -> ChatSettings:
         with self._session() as session:
-            item = session.get(ChatSettings, 1) or ChatSettings(id=1)
+            item = session.query(ChatSettings).first() or ChatSettings()
             session.add(item)
             for key, value in fields.items():
                 setattr(item, key, value)

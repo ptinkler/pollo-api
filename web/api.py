@@ -41,38 +41,34 @@ from img2vid.common.metadata import get_db, iso
 from img2vid.pollo.generators import ERROR_STATUSES, SUCCESS_STATUSES
 from img2vid.pollo.pollo_img2vid import GENERATORS, IMAGE_GENERATORS, get_image_generator, get_video_generator
 
-from . import characters, generate_providers, image_hosts, media, pollo_estimate, vpn
+from . import characters, generate_providers, image_hosts, keyctx, media, pollo_estimate, vpn
 
 # ── Authentication ───────────────────────────────────────────────────
-from .auth import (
-    _valid_key,
-    allow_no_auth,
-    auth_misconfigured,
-    get_api_keys,
-    is_auth_enabled,
-    make_session_token,
-    resolve_session,
-    verify_api_key,
-)
+from .auth import USER_COOKIE, make_user_session
 from .chat import router as chat_router
 from .chat import startup_resume_chat
 from .chatgpt_import import router as chatgpt_import_router
 from .uploads import image_media_type, read_image_upload, read_video_upload, safe_filename
+from .users import require_user
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown events."""
     # Startup: announce the auth posture so a misconfigured deploy is obvious
-    if auth_misconfigured():
-        print(
-            "🔒 AUTH NOT CONFIGURED — protected endpoints will return 503. "
-            "Set API_KEY/API_KEYS, or ALLOW_NO_AUTH=true to run without auth (dev only)."
-        )
-    elif allow_no_auth() and not is_auth_enabled():
-        print("⚠️  AUTH DISABLED (ALLOW_NO_AUTH) — every endpoint is open. Development use only.")
+    from .users import admin_emails
+
+    admins = admin_emails()
+    if admins:
+        print(f"🔒 Auth: email+password login for admin(s) {', '.join(sorted(admins))}; others via OAuth.")
     else:
-        print(f"🔒 Auth enabled — {len(get_api_keys())} API key(s) configured.")
+        print("🔒 Auth: no ADMIN_EMAILS set — no one can create a local admin until it is configured.")
+    # Register any OAuth providers that have credentials configured
+    from .oauth import configured_providers, register_providers
+
+    register_providers()
+    providers = configured_providers()
+    print(f"🔑 OAuth providers: {', '.join(providers) if providers else 'none configured'}")
     # Startup: resume polling for any jobs stuck in processing
     startup_resume_jobs()
     startup_resume_chat()
@@ -95,6 +91,54 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Session middleware holds Authlib's transient OAuth state across the redirect.
+# SameSite=lax so the state cookie survives the return hop from the provider.
+from starlette.middleware.sessions import SessionMiddleware  # noqa: E402
+
+from .auth import _user_secret  # noqa: E402
+
+app.add_middleware(SessionMiddleware, secret_key=_user_secret().hex(), same_site="lax", https_only=False)
+
+
+class UserContextMiddleware:
+    """Bind the signed-in user's provider keys AND tenant for the whole request,
+    the streamed response body included. A pure ASGI middleware (not
+    BaseHTTPMiddleware) is required: its context survives into the response
+    streaming, where chat turns run and would otherwise see no keys/tenant."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not scope.get("path", "").startswith("/api"):
+            return await self.app(scope, receive, send)
+
+        from http.cookies import SimpleCookie
+
+        from img2vid.common.metadata import reset_tenant, set_tenant
+
+        from . import user_keys
+        from .users import resolve_current_user
+
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+        jar = SimpleCookie()
+        jar.load(headers.get("cookie", ""))
+        cookie = lambda name: jar[name].value if name in jar else None  # noqa: E731
+
+        user = resolve_current_user(cookie("user_session"))
+        ktoken = keyctx.set_keys(user_keys.get_user_keys(user) if user else {})
+        # "" owns no rows, so an unauthenticated API call sees no tenant data
+        # (with None the scope filter would be bypassed entirely).
+        ttoken = set_tenant(user.id if user else "")
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            keyctx.reset_keys(ktoken)
+            reset_tenant(ttoken)
+
+
+app.add_middleware(UserContextMiddleware)
 
 # ── Constants ───────────────────────────────────────────────────────
 from .pollo_models import MODEL_INFO  # noqa: E402 — after the bootstrap above
@@ -292,12 +336,12 @@ class ProjectUpdate(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    key: str
+    email: str
+    password: str
 
 
 # ── Auth Routes ─────────────────────────────────────────────────────
 
-COOKIE_NAME = "session"
 COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
 
 # Login brute-force throttle: per-client-IP sliding window (in-memory).
@@ -355,42 +399,53 @@ def _login_rate_limited(request: Request) -> bool:
         return len(attempts) > LOGIN_MAX_ATTEMPTS
 
 
+def _set_user_cookie(response: Response, request: Request, user_id: str) -> None:
+    response.set_cookie(
+        key=USER_COOKIE,
+        value=make_user_session(user_id),
+        httponly=True,
+        samesite="lax",  # lax so the OAuth redirect back from the provider keeps it
+        secure=_cookie_secure(request),
+        max_age=COOKIE_MAX_AGE,
+    )
+
+
 @app.post("/api/auth/login")
 async def api_auth_login(data: LoginRequest, response: Response, request: Request):
     if _login_rate_limited(request):
         raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
-    key = data.key.strip()
-    auth_keys = get_api_keys()
-    if auth_keys and not _valid_key(key, auth_keys):
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    response.set_cookie(
-        key=COOKIE_NAME,
-        value=make_session_token(key) if auth_keys else key,
-        httponly=True,
-        samesite="strict",
-        secure=_cookie_secure(request),
-        max_age=COOKIE_MAX_AGE,
-    )
-    return {"ok": True}
+    from .passwords import needs_rehash, verify_password
+
+    email = data.email.strip().lower()
+    db = get_db()
+    user = db.get_user_by_email(email)
+    if not user or not user.password_hash or not verify_password(user.password_hash, data.password):
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+    if needs_rehash(user.password_hash):  # transparently upgrade to stronger params
+        from .passwords import hash_password
+
+        db.set_user_password(user.id, hash_password(data.password))
+    _set_user_cookie(response, request, user.id)
+    return {"ok": True, "email": user.email, "name": user.name}
 
 
 @app.post("/api/auth/logout")
 async def api_auth_logout(response: Response):
-    response.delete_cookie(key=COOKIE_NAME, samesite="strict")
+    response.delete_cookie(key=USER_COOKIE, samesite="lax")
     return {"ok": True}
 
 
 @app.get("/api/auth/status")
-async def api_auth_status(session: str | None = Cookie(None)):
-    enabled = is_auth_enabled()
-    if not enabled:
-        # No keys configured. Either an explicit dev opt-out (everything open),
-        # or a misconfiguration we now fail closed on (protected routes 503).
-        if auth_misconfigured():
-            return {"enabled": True, "authenticated": False, "misconfigured": True}
-        return {"enabled": False, "authenticated": True}
-    authenticated = resolve_session(session) is not None
-    return {"enabled": True, "authenticated": authenticated}
+async def api_auth_status(user_session: str | None = Cookie(None)):
+    """Who (if anyone) is signed in. Admin accounts are created via the CLI
+    (web.provision_admin), never through the app."""
+    from .users import resolve_current_user
+
+    user = resolve_current_user(user_session)
+    return {
+        "authenticated": user is not None,
+        "user": {"email": user.email, "name": user.name, "is_admin": user.is_admin} if user else None,
+    }
 
 
 # ── Background worker ──────────────────────────────────────────────
@@ -1055,7 +1110,7 @@ def _generate_provider_video(data: GenerateRequest) -> dict:
 
 
 @app.post("/api/generate")
-def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key)):
+def api_generate(data: GenerateRequest, _api_key: str = Depends(require_user)):
     model = data.model
     if generate_providers.is_provider_model(model):
         return _generate_provider_video(data)
@@ -1089,7 +1144,7 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
     )
 
     kwargs = {
-        "api_key": os.getenv("POLLO_API_KEY"),
+        "api_key": keyctx.provider_key("pollo"),
         "project": project.assets_folder,  # Use assets folder for file storage
         "prompt": characters.with_characters(prompt, chars),
         "image_url": image_url,
@@ -1328,7 +1383,7 @@ def run_image_generation(job_id: str, model: str, kwargs: dict):
 
 
 @app.post("/api/generate-image")
-def api_generate_image(data: GenerateImageRequest, _api_key: str = Depends(verify_api_key)):
+def api_generate_image(data: GenerateImageRequest, _api_key: str = Depends(require_user)):
     model = data.model
     if model not in IMAGE_GENERATORS:
         raise HTTPException(
@@ -1361,7 +1416,7 @@ def api_generate_image(data: GenerateImageRequest, _api_key: str = Depends(verif
     }
 
     kwargs = {
-        "api_key": os.getenv("POLLO_API_KEY"),
+        "api_key": keyctx.provider_key("pollo"),
         "project": project.assets_folder,
         "prompt": characters.with_characters(prompt, chars),
         "image_url": image_url,
@@ -1451,7 +1506,7 @@ def _recover_stale_job_inner(job):
         db.update_job(job.job_id, status="error", message="Stuck with no task ID — cannot recover")
         return
 
-    api_key = os.getenv("POLLO_API_KEY")
+    api_key = keyctx.provider_key("pollo")
     if not api_key:
         db.update_job(job.job_id, status="error", message="Stuck — no API key to check task status")
         return
@@ -1556,7 +1611,7 @@ def _download_recovered_job(job_id: str, video_url: str):
 
 
 @app.post("/api/jobs/bulk-move")
-def api_bulk_move_jobs(body: BulkMoveRequest, _api_key: str = Depends(verify_api_key)):
+def api_bulk_move_jobs(body: BulkMoveRequest, _api_key: str = Depends(require_user)):
     """Move a batch of jobs (and their video files) to a different project."""
     db = get_db()
     target = db.get_project_by_slug(body.target_project)
@@ -1606,7 +1661,7 @@ def _move_job_video(db, job, target_assets: Path, target_slug: str, source_folde
 
 
 @app.get("/api/jobs/{job_id}")
-def api_job_status(job_id: str, _api_key: str = Depends(verify_api_key)):
+def api_job_status(job_id: str, _api_key: str = Depends(require_user)):
     job = get_db().get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -1615,7 +1670,7 @@ def api_job_status(job_id: str, _api_key: str = Depends(verify_api_key)):
 
 
 @app.post("/api/jobs/{job_id}/check")
-def api_check_job(job_id: str, _api_key: str = Depends(verify_api_key)):
+def api_check_job(job_id: str, _api_key: str = Depends(require_user)):
     """Check the status of an incomplete job and potentially resume it."""
     db = get_db()
     job = db.get_job(job_id)
@@ -1633,7 +1688,7 @@ def api_check_job(job_id: str, _api_key: str = Depends(verify_api_key)):
         db.update_job(job_id, status="error", message="No task ID - cannot recover job")
         return db.get_job(job_id).to_dict()
 
-    api_key = os.getenv("POLLO_API_KEY")
+    api_key = keyctx.provider_key("pollo")
     if not api_key:
         raise HTTPException(status_code=500, detail="API key not configured")
 
@@ -1651,7 +1706,7 @@ def api_check_job(job_id: str, _api_key: str = Depends(verify_api_key)):
 
 
 @app.post("/api/jobs/{job_id}/download")
-def api_download_job_video(job_id: str, _api_key: str = Depends(verify_api_key)):
+def api_download_job_video(job_id: str, _api_key: str = Depends(require_user)):
     """Download the video for a completed job that doesn't have the video file."""
     db = get_db()
     job = db.get_job(job_id)
@@ -1715,7 +1770,7 @@ def api_jobs(
     status: str | None = None,
     project: str | None = None,
     active: bool | None = None,
-    _api_key: str = Depends(verify_api_key),
+    _api_key: str = Depends(require_user),
 ):
     """All jobs (optionally filter by status, project, or active state)."""
     db = get_db()
@@ -1747,7 +1802,7 @@ def api_jobs(
 
 
 @app.delete("/api/jobs/{job_id}")
-def api_delete_job(job_id: str, _api_key: str = Depends(verify_api_key)):
+def api_delete_job(job_id: str, _api_key: str = Depends(require_user)):
     """Delete a job and its associated video file."""
     db = get_db()
     job = db.get_job(job_id)
@@ -1809,7 +1864,7 @@ class FavouriteIn(BaseModel):
 
 
 @app.post("/api/favourites")
-def api_add_favourite(data: FavouriteIn, _api_key: str = Depends(verify_api_key)):
+def api_add_favourite(data: FavouriteIn, _api_key: str = Depends(require_user)):
     safe_filename(data.filename)
     db = get_db()
     job = db.get_job(data.job_id)
@@ -1820,14 +1875,14 @@ def api_add_favourite(data: FavouriteIn, _api_key: str = Depends(verify_api_key)
 
 
 @app.delete("/api/favourites/{filename}")
-def api_remove_favourite(filename: str, _api_key: str = Depends(verify_api_key)):
+def api_remove_favourite(filename: str, _api_key: str = Depends(require_user)):
     safe_filename(filename)
     get_db().remove_favourite(filename)
     return {"favourite": False, "filename": filename}
 
 
 @app.get("/api/favourites")
-def api_list_favourites(_api_key: str = Depends(verify_api_key)):
+def api_list_favourites(_api_key: str = Depends(require_user)):
     """Starred generations from every project, newest star first, shaped like a
     project's gallery items plus the project they're in now. Stars whose job
     or file is gone (deleted another way) are left out."""
@@ -1854,13 +1909,13 @@ def api_list_favourites(_api_key: str = Depends(verify_api_key)):
 
 
 @app.post("/api/jobs/{job_id}/archive")
-def api_archive_job(job_id: str, _api_key: str = Depends(verify_api_key)):
+def api_archive_job(job_id: str, _api_key: str = Depends(require_user)):
     """Archive a job (hide from gallery)."""
     return _set_job_archived(job_id, True)
 
 
 @app.post("/api/jobs/{job_id}/unarchive")
-def api_unarchive_job(job_id: str, _api_key: str = Depends(verify_api_key)):
+def api_unarchive_job(job_id: str, _api_key: str = Depends(require_user)):
     """Unarchive a job (show in gallery again)."""
     return _set_job_archived(job_id, False)
 
@@ -1869,7 +1924,7 @@ def api_unarchive_job(job_id: str, _api_key: str = Depends(verify_api_key)):
 
 
 @app.get("/api/projects")
-def api_list_projects(archived: bool | None = None, _api_key: str = Depends(verify_api_key)):
+def api_list_projects(archived: bool | None = None, _api_key: str = Depends(require_user)):
     db = get_db()
     projects = db.get_all_projects(archived=archived)
     result = []
@@ -1913,7 +1968,7 @@ def api_list_projects(archived: bool | None = None, _api_key: str = Depends(veri
 
 
 @app.get("/api/projects/{project}")
-def api_get_project(project: str, archived: bool | None = None, _api_key: str = Depends(verify_api_key)):
+def api_get_project(project: str, archived: bool | None = None, _api_key: str = Depends(require_user)):
     db = get_db()
     proj = _require_project(project)
     assets_path = ASSETS_DIR / proj.assets_folder
@@ -1994,7 +2049,7 @@ def _image_results(jobs: list) -> list[tuple[Path, float]]:
 
 
 @app.post("/api/projects")
-def api_create_project(data: ProjectCreate, _api_key: str = Depends(verify_api_key)):
+def api_create_project(data: ProjectCreate, _api_key: str = Depends(require_user)):
     name = (data.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="Project name is required")
@@ -2028,7 +2083,7 @@ def api_create_project(data: ProjectCreate, _api_key: str = Depends(verify_api_k
 
 
 @app.put("/api/projects/{project}")
-def api_update_project(project: str, data: ProjectUpdate, _api_key: str = Depends(verify_api_key)):
+def api_update_project(project: str, data: ProjectUpdate, _api_key: str = Depends(require_user)):
     db = get_db()
     proj = _require_project(project)
 
@@ -2062,19 +2117,19 @@ def _set_project_archived(project: str, archived: bool) -> ProjectArchivedResult
 
 
 @app.post("/api/projects/{project}/archive")
-def api_archive_project(project: str, _api_key: str = Depends(verify_api_key)):
+def api_archive_project(project: str, _api_key: str = Depends(require_user)):
     """Archive a project (hide from main listing)."""
     return _set_project_archived(project, True)
 
 
 @app.post("/api/projects/{project}/unarchive")
-def api_unarchive_project(project: str, _api_key: str = Depends(verify_api_key)):
+def api_unarchive_project(project: str, _api_key: str = Depends(require_user)):
     """Unarchive a project (show in main listing again)."""
     return _set_project_archived(project, False)
 
 
 @app.delete("/api/projects/{project}")
-def api_delete_project(project: str, _api_key: str = Depends(verify_api_key)):
+def api_delete_project(project: str, _api_key: str = Depends(require_user)):
     """Delete a project, all its jobs, and all its video/asset files."""
     db = get_db()
     proj = _require_project(project)
@@ -2106,7 +2161,7 @@ IMMUTABLE_CACHE = {"Cache-Control": "public, max-age=31536000, immutable"}
 
 
 @app.get("/video/{project}/{filename}")
-def serve_video(project: str, filename: str, _api_key: str = Depends(verify_api_key)):
+def serve_video(project: str, filename: str, _api_key: str = Depends(require_user)):
     """Serve a video or generated image file. Project can be slug or assets_folder."""
     safe_filename(filename)
     safe_filename(project)  # the fallback below joins it as a path segment
@@ -2122,7 +2177,7 @@ def serve_video(project: str, filename: str, _api_key: str = Depends(verify_api_
 
 
 @app.get("/video-thumb/{project}/{filename}")
-def serve_video_thumb(project: str, filename: str, _api_key: str = Depends(verify_api_key)):
+def serve_video_thumb(project: str, filename: str, _api_key: str = Depends(require_user)):
     """Serve a thumbnail for a video (first frame) or image file (directly)."""
     safe_filename(filename)
     safe_filename(project)  # the fallback below joins it as a path segment
@@ -2145,7 +2200,7 @@ def serve_video_thumb(project: str, filename: str, _api_key: str = Depends(verif
 
 
 @app.delete("/api/videos/{project}/{filename}")
-def api_delete_video(project: str, filename: str, _api_key: str = Depends(verify_api_key)):
+def api_delete_video(project: str, filename: str, _api_key: str = Depends(require_user)):
     """Delete a video file and its associated database records."""
     safe_filename(filename)
     db = get_db()
@@ -2176,7 +2231,7 @@ def api_delete_video(project: str, filename: str, _api_key: str = Depends(verify
 
 
 @app.get("/image/{project}")
-def serve_image(project: str, _api_key: str = Depends(verify_api_key)):
+def serve_image(project: str, _api_key: str = Depends(require_user)):
     """Serve the project's thumbnail image.
     Priority: thumb.jpg (latest video frame) > image.* (source image)
     """
@@ -2224,9 +2279,19 @@ def api_models(legacy: bool = False):
     The exception is `legacy_only` models (no working v1 endpoint), which
     are in both lists.
     """
-    models = {
-        name: info for name, info in MODEL_INFO.items() if bool(info.get("legacy")) == legacy or info.get("legacy_only")
-    }
+    # MODEL_INFO holds the native Pollo models (legacy + v1); they're billed to
+    # the user's Pollo key, so they're offered only when that key is set.
+    from . import pollo_chat
+
+    models = (
+        {
+            name: info
+            for name, info in MODEL_INFO.items()
+            if bool(info.get("legacy")) == legacy or info.get("legacy_only")
+        }
+        if pollo_chat.is_configured()
+        else {}
+    )
     # Chat providers (Pollo v1, Venice, OpenRouter) — the same models the chat
     # offers, so the Generate page can use them too. Only in the current (non-
     # legacy) set; they carry a "/" in their id and a "provider" flag.
@@ -2266,9 +2331,9 @@ def api_models(legacy: bool = False):
 
 
 @app.get("/api/usage/balance")
-def api_usage_balance(_api_key: str = Depends(verify_api_key)):
+def api_usage_balance(_api_key: str = Depends(require_user)):
     """Fetch current credit balance from the Pollo API."""
-    api_key = os.getenv("POLLO_API_KEY")
+    api_key = keyctx.provider_key("pollo")
     if not api_key:
         raise HTTPException(status_code=500, detail="API key not configured")
 
@@ -2280,7 +2345,7 @@ def api_usage_balance(_api_key: str = Depends(verify_api_key)):
 
 
 @app.get("/api/usage")
-def api_usage(days: int = 30, _api_key: str = Depends(verify_api_key)):
+def api_usage(days: int = 30, _api_key: str = Depends(require_user)):
     """Get credit usage summary.
 
     Uses actual credit costs from the Pollo API (stored per job).
@@ -2356,7 +2421,7 @@ def api_usage(days: int = 30, _api_key: str = Depends(verify_api_key)):
 
 
 @app.get("/api/usage/project/{project_slug}")
-def api_usage_project_details(project_slug: str, days: int = 30, _api_key: str = Depends(verify_api_key)):
+def api_usage_project_details(project_slug: str, days: int = 30, _api_key: str = Depends(require_user)):
     """Get per-generation credit details for a project (used in usage view expansion)."""
     db = get_db()
     jobs = db.get_jobs_by_project(project_slug)
@@ -2401,7 +2466,7 @@ def api_usage_estimate(
     resolution: str | None = None,
     length: int | None = None,
     generate_audio: bool | None = None,
-    _api_key: str = Depends(verify_api_key),
+    _api_key: str = Depends(require_user),
 ):
     """Estimate the credit cost for a generation from past jobs with identical settings:
     the most common cost of prior jobs with the same model/resolution/length/
@@ -2429,14 +2494,14 @@ def _past_job_estimate(model: str, resolution: str | None, length: int | None, g
 
 
 @app.post("/api/usage/estimate")
-def api_usage_estimate_pollo(data: EstimateRequest, _api_key: str = Depends(verify_api_key)):
+def api_usage_estimate_pollo(data: EstimateRequest, _api_key: str = Depends(require_user)):
     """The credit cost of a generation with these settings: Pollo's own
     price check (see web/pollo_estimate.py) when it gives one, else what
     identical past jobs cost (as GET /api/usage/estimate)."""
     if data.model not in GENERATORS and data.model not in IMAGE_GENERATORS:
         raise HTTPException(status_code=400, detail=f"Unknown model: {data.model}")
     priced = None
-    if os.getenv("POLLO_API_KEY"):
+    if keyctx.provider_key("pollo"):
         try:
             priced = pollo_estimate.estimate(_estimate_generator(data))
         except Exception as exc:  # noqa: BLE001 — a settings combination the generator rejects
@@ -2451,7 +2516,7 @@ def _estimate_generator(data: EstimateRequest):
     """A generator for the request, with placeholder media (see pollo_estimate.PLACEHOLDERS)."""
     stand_in = pollo_estimate.PLACEHOLDERS
     common = {
-        "api_key": os.getenv("POLLO_API_KEY"),
+        "api_key": keyctx.provider_key("pollo"),
         "project": "estimate",
         "prompt": "estimate",
         "image_url": stand_in["image"] if data.image else None,
@@ -2486,14 +2551,14 @@ def _estimate_generator(data: EstimateRequest):
 
 
 @app.post("/api/cache/clear")
-def api_clear_cache(_api_key: str = Depends(verify_api_key)):
+def api_clear_cache(_api_key: str = Depends(require_user)):
     """Clear all in-memory caches. Useful after manual file changes."""
     _invalidate_project_caches()
     return {"cleared": True, "message": "All caches cleared"}
 
 
 @app.post("/api/cache/cleanup-thumbnails")
-def api_cleanup_thumbnails(_api_key: str = Depends(verify_api_key)):
+def api_cleanup_thumbnails(_api_key: str = Depends(require_user)):
     """Remove orphaned thumbnail cache files whose source videos no longer exist."""
     removed = _cleanup_thumb_cache()
     return {"removed": removed, "message": f"Removed {removed} orphaned thumbnail(s)"}
@@ -2587,7 +2652,7 @@ async def _save_uploaded_image(project: str, file: UploadFile, prefix: str) -> d
 
 
 @app.post("/api/projects/{project}/source-image")
-async def api_upload_source_image(project: str, file: UploadFile = File(...), _api_key: str = Depends(verify_api_key)):
+async def api_upload_source_image(project: str, file: UploadFile = File(...), _api_key: str = Depends(require_user)):
     """Upload a source image for a project.
 
     Saved permanently with a unique name (src-{uuid}.ext) so multiple
@@ -2604,7 +2669,7 @@ async def api_upload_source_image(project: str, file: UploadFile = File(...), _a
 
 
 @app.get("/api/projects/{project}/source-image")
-def api_get_source_image(project: str, f: str | None = None, _api_key: str = Depends(verify_api_key)):
+def api_get_source_image(project: str, f: str | None = None, _api_key: str = Depends(require_user)):
     """Serve a project's uploaded source image.
 
     If ?f=filename is given, serve that specific file.
@@ -2633,7 +2698,7 @@ def api_get_source_image(project: str, f: str | None = None, _api_key: str = Dep
 
 
 @app.post("/api/projects/{project}/source-video")
-async def api_upload_source_video(project: str, file: UploadFile = File(...), _api_key: str = Depends(verify_api_key)):
+async def api_upload_source_video(project: str, file: UploadFile = File(...), _api_key: str = Depends(require_user)):
     """Upload a source video for a project (Recast / motion-control / video
     edit). Saved as src-<uuid>.mp4; returns {"video_url": "local:<file>"}."""
     proj = _require_project(project)
@@ -2649,7 +2714,7 @@ async def api_upload_source_video(project: str, file: UploadFile = File(...), _a
 
 
 @app.post("/api/projects/{project}/ref-image")
-async def api_upload_ref_image(project: str, file: UploadFile = File(...), _api_key: str = Depends(verify_api_key)):
+async def api_upload_ref_image(project: str, file: UploadFile = File(...), _api_key: str = Depends(require_user)):
     """Upload a reference image for a project.
 
     Uses 'ref-' prefix to distinguish from source images (src-).
@@ -2660,7 +2725,7 @@ async def api_upload_ref_image(project: str, file: UploadFile = File(...), _api_
 
 
 @app.delete("/api/projects/{project}/source-image")
-def api_delete_source_image(project: str, f: str | None = None, _api_key: str = Depends(verify_api_key)):
+def api_delete_source_image(project: str, f: str | None = None, _api_key: str = Depends(require_user)):
     """Remove a source image.
 
     If ?f=filename, delete that specific file.
@@ -2698,7 +2763,7 @@ def api_delete_source_image(project: str, f: str | None = None, _api_key: str = 
 def resume_polling_job(job):
     """Resume polling for a job that was interrupted (e.g., server restart)."""
     db = get_db()
-    api_key = os.getenv("POLLO_API_KEY")
+    api_key = keyctx.provider_key("pollo")
 
     if not api_key:
         db.update_job(job.job_id, status="error", message="Cannot resume: API key not configured")
@@ -2765,6 +2830,11 @@ def startup_resume_jobs():
 
 # ── Chat mode (OpenRouter) — see web/chat.py ─────────────────────────
 # Must be registered before the SPA catch-all below.
+from .oauth_routes import router as oauth_router  # noqa: E402
+from .user_keys import router as keys_router  # noqa: E402
+
+app.include_router(oauth_router)
+app.include_router(keys_router)
 app.include_router(chat_router)
 app.include_router(chatgpt_import_router)
 app.include_router(characters.router)
