@@ -57,7 +57,8 @@ def _tenant(request, monkeypatch):
         return
 
     admin = types.SimpleNamespace(id="test-user", is_admin=True, email="admin@local", api_keys_json=None)
-    monkeypatch.setattr("web.users.resolve_current_user", lambda *a, **k: admin, raising=False)
+    # Match the real 1-arg signature so a stale multi-arg call fails here too.
+    monkeypatch.setattr("web.users.resolve_current_user", lambda user_cookie=None: admin, raising=False)
     token = metadata.set_tenant(admin.id)
     try:
         yield admin
