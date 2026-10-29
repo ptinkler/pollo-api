@@ -85,6 +85,7 @@ def get_credit_balance(api_key: str) -> dict[str, int] | None:
                 "availableCredits": data.get("availableCredits", 0),
                 "totalCredits": data.get("totalCredits", 0),
             }
+        print(f"[Credits] Balance fetch {response.status_code} from {url}: {response.text[:300]}")
     except Exception as e:
         print(f"[Credits] Failed to fetch balance: {e}")
     return None
