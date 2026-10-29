@@ -35,6 +35,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
+import sqlalchemy as sa
 from alembic import op
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -221,7 +222,17 @@ def _normalize_favourites(session, fav_files):
 
 
 def upgrade() -> None:
-    session = Session(bind=op.get_bind())
+    bind = op.get_bind()
+    # The ORM models carry a user_id column (added for multi-tenancy in 0020,
+    # which runs AFTER this). On a fresh DB this migration would otherwise query
+    # those models before the column exists, so ensure it's present on the
+    # tables this migration touches. 0020's add is guarded and will skip these.
+    insp = sa.inspect(bind)
+    for table in ("projects", "jobs", "downloads", "generation_favourites", "chat_conversations", "chat_messages"):
+        if "user_id" not in {c["name"] for c in insp.get_columns(table)}:
+            op.execute(f"ALTER TABLE {table} ADD COLUMN user_id VARCHAR(50)")
+
+    session = Session(bind=bind)
     fav_files = {f.filename for f in session.scalars(select(GenerationFavourite)).all()}
     _backfill(session, fav_files)
     _normalize_favourites(session, fav_files)

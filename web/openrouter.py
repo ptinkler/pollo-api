@@ -76,7 +76,9 @@ def _connection_guard(waiting_for: str):
 
 
 def get_api_key() -> str:
-    return os.getenv("OPENROUTER_API_KEY", "").strip()
+    from . import keyctx
+
+    return keyctx.provider_key("openrouter") or ""
 
 
 def is_configured() -> bool:

@@ -362,7 +362,9 @@ def api_character_image_from_generation(character_id: int, data: CopyFromGenerat
 
 @router.get("/{character_id}/images/{filename}")
 def api_character_image(character_id: int, filename: str):
-    path = char_dir(character_id) / safe_filename(filename)
+    path = char_dir(character_id) / safe_filename(filename)  # rejects traversal (400)
+    if not get_db().get_character(character_id):  # tenant-scoped: another user's id → not found
+        raise HTTPException(404, "Not found")
     if not path.is_file():
         raise HTTPException(404, "Not found")
     return FileResponse(

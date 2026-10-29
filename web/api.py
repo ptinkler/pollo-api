@@ -41,7 +41,7 @@ from img2vid.common.metadata import get_db, iso
 from img2vid.pollo.generators import ERROR_STATUSES, SUCCESS_STATUSES
 from img2vid.pollo.pollo_img2vid import GENERATORS, IMAGE_GENERATORS, get_image_generator, get_video_generator
 
-from . import characters, generate_providers, image_hosts, media, pollo_estimate, vpn
+from . import characters, generate_providers, image_hosts, keyctx, media, pollo_estimate, vpn
 
 # ── Authentication ───────────────────────────────────────────────────
 from .auth import (
@@ -109,6 +109,46 @@ from starlette.middleware.sessions import SessionMiddleware  # noqa: E402
 from .auth import _user_secret  # noqa: E402
 
 app.add_middleware(SessionMiddleware, secret_key=_user_secret().hex(), same_site="lax", https_only=False)
+
+
+class UserContextMiddleware:
+    """Bind the signed-in user's provider keys AND tenant for the whole request,
+    the streamed response body included. A pure ASGI middleware (not
+    BaseHTTPMiddleware) is required: its context survives into the response
+    streaming, where chat turns run and would otherwise see no keys/tenant."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not scope.get("path", "").startswith("/api"):
+            return await self.app(scope, receive, send)
+
+        from http.cookies import SimpleCookie
+
+        from img2vid.common.metadata import reset_tenant, set_tenant
+
+        from . import user_keys
+        from .users import resolve_current_user
+
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+        jar = SimpleCookie()
+        jar.load(headers.get("cookie", ""))
+        cookie = lambda name: jar[name].value if name in jar else None  # noqa: E731
+
+        user = resolve_current_user(cookie("user_session"), cookie("session"), headers.get("authorization"))
+        ktoken = keyctx.set_keys(user_keys.get_user_keys(user) if user else {})
+        # "" owns no rows, so an unauthenticated API call sees no tenant data
+        # (with None the scope filter would be bypassed entirely).
+        ttoken = set_tenant(user.id if user else "")
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            keyctx.reset_keys(ktoken)
+            reset_tenant(ttoken)
+
+
+app.add_middleware(UserContextMiddleware)
 
 # ── Constants ───────────────────────────────────────────────────────
 from .pollo_models import MODEL_INFO  # noqa: E402 — after the bootstrap above
@@ -1104,7 +1144,7 @@ def api_generate(data: GenerateRequest, _api_key: str = Depends(verify_api_key))
     )
 
     kwargs = {
-        "api_key": os.getenv("POLLO_API_KEY"),
+        "api_key": keyctx.provider_key("pollo"),
         "project": project.assets_folder,  # Use assets folder for file storage
         "prompt": characters.with_characters(prompt, chars),
         "image_url": image_url,
@@ -1376,7 +1416,7 @@ def api_generate_image(data: GenerateImageRequest, _api_key: str = Depends(verif
     }
 
     kwargs = {
-        "api_key": os.getenv("POLLO_API_KEY"),
+        "api_key": keyctx.provider_key("pollo"),
         "project": project.assets_folder,
         "prompt": characters.with_characters(prompt, chars),
         "image_url": image_url,
@@ -1466,7 +1506,7 @@ def _recover_stale_job_inner(job):
         db.update_job(job.job_id, status="error", message="Stuck with no task ID — cannot recover")
         return
 
-    api_key = os.getenv("POLLO_API_KEY")
+    api_key = keyctx.provider_key("pollo")
     if not api_key:
         db.update_job(job.job_id, status="error", message="Stuck — no API key to check task status")
         return
@@ -1648,7 +1688,7 @@ def api_check_job(job_id: str, _api_key: str = Depends(verify_api_key)):
         db.update_job(job_id, status="error", message="No task ID - cannot recover job")
         return db.get_job(job_id).to_dict()
 
-    api_key = os.getenv("POLLO_API_KEY")
+    api_key = keyctx.provider_key("pollo")
     if not api_key:
         raise HTTPException(status_code=500, detail="API key not configured")
 
@@ -2283,7 +2323,7 @@ def api_models(legacy: bool = False):
 @app.get("/api/usage/balance")
 def api_usage_balance(_api_key: str = Depends(verify_api_key)):
     """Fetch current credit balance from the Pollo API."""
-    api_key = os.getenv("POLLO_API_KEY")
+    api_key = keyctx.provider_key("pollo")
     if not api_key:
         raise HTTPException(status_code=500, detail="API key not configured")
 
@@ -2451,7 +2491,7 @@ def api_usage_estimate_pollo(data: EstimateRequest, _api_key: str = Depends(veri
     if data.model not in GENERATORS and data.model not in IMAGE_GENERATORS:
         raise HTTPException(status_code=400, detail=f"Unknown model: {data.model}")
     priced = None
-    if os.getenv("POLLO_API_KEY"):
+    if keyctx.provider_key("pollo"):
         try:
             priced = pollo_estimate.estimate(_estimate_generator(data))
         except Exception as exc:  # noqa: BLE001 — a settings combination the generator rejects
@@ -2466,7 +2506,7 @@ def _estimate_generator(data: EstimateRequest):
     """A generator for the request, with placeholder media (see pollo_estimate.PLACEHOLDERS)."""
     stand_in = pollo_estimate.PLACEHOLDERS
     common = {
-        "api_key": os.getenv("POLLO_API_KEY"),
+        "api_key": keyctx.provider_key("pollo"),
         "project": "estimate",
         "prompt": "estimate",
         "image_url": stand_in["image"] if data.image else None,
@@ -2713,7 +2753,7 @@ def api_delete_source_image(project: str, f: str | None = None, _api_key: str = 
 def resume_polling_job(job):
     """Resume polling for a job that was interrupted (e.g., server restart)."""
     db = get_db()
-    api_key = os.getenv("POLLO_API_KEY")
+    api_key = keyctx.provider_key("pollo")
 
     if not api_key:
         db.update_job(job.job_id, status="error", message="Cannot resume: API key not configured")

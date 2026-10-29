@@ -88,7 +88,9 @@ class VeniceError(OpenRouterError):
 
 
 def get_api_key() -> str:
-    return os.getenv("VENICE_API_KEY", "").strip()
+    from . import keyctx
+
+    return keyctx.provider_key("venice") or ""
 
 
 def is_configured() -> bool:

@@ -692,6 +692,7 @@ class TestStartupResume:
         assert db.get_chat_message(m2.id).status == "error"
 
 
+@pytest.mark.no_tenant
 def test_alembic_migration_creates_chat_tables(tmp_path):
     """0003 adds the chat tables to a pre-chat DB, and is a no-op when
     create_all() already made them (the app creates tables on startup)."""
@@ -724,6 +725,7 @@ def test_alembic_migration_creates_chat_tables(tmp_path):
     command.upgrade(cfg_for(fresh), "head")
 
 
+@pytest.mark.no_tenant
 def test_old_is_default_flags_seed_the_global_settings_bucket(tmp_path):
     """Opening a database that still carries the old per-item is_default flag
     moves those ids into the global settings bucket, once."""
@@ -2079,6 +2081,7 @@ class TestCustomInstructions:
         )
         assert got["messages"][0] == {"role": "system", "content": "Watercolour style only."}
 
+    @pytest.mark.no_tenant
     def test_branch_columns_are_backfilled_on_older_databases(self, tmp_path):
         import sqlalchemy as sa
 
@@ -2113,6 +2116,7 @@ class TestCustomInstructions:
         assert db.get_conversation("a").current_leaf_id == 3
         assert db.get_conversation("b").current_leaf_id == 2
 
+    @pytest.mark.no_tenant
     def test_missing_column_is_added_to_older_databases(self, tmp_path):
         import sqlalchemy as sa
 

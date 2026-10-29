@@ -71,10 +71,21 @@ def current_user(user_cookie: str | None):
     return get_db().get_user(user_id)
 
 
+def admin_email() -> str:
+    """The owner's email — the first ADMIN_EMAILS entry, else a local default.
+    The admin account is keyed on this, so signing in with the LAN access key
+    and signing in with Google (same email) resolve to the SAME account."""
+    return next(iter(admin_emails()), "admin@local")
+
+
 def admin_user():
-    """The owner's local admin account, created on first use."""
-    email = next(iter(admin_emails()), "admin@local")
-    return get_db().upsert_oauth_user({**LOCAL_ADMIN, "email": email}, is_admin=True)
+    """The owner's account, matched by email so the key and Google paths unify.
+    Created on first use; reads first and only writes to create."""
+    db = get_db()
+    existing = db.get_user_by_email(admin_email())
+    if existing:
+        return existing
+    return db.upsert_oauth_user({**LOCAL_ADMIN, "email": admin_email()}, is_admin=True)
 
 
 def _key_authenticated(session: str | None, authorization: str | None) -> bool:

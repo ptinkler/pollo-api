@@ -39,3 +39,4 @@ dist/
 .vite/
 vite.config.*.timestamp-*
 /web/frontend/coverage/
+/.env.bak

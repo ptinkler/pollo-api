@@ -46,6 +46,7 @@ and videos keep polling in their own threads until they land on disk.
 
 import base64
 import contextlib
+import contextvars
 import io
 import json
 import mimetypes
@@ -74,6 +75,45 @@ from .auth import verify_api_key
 from .uploads import is_blank_image, read_image_upload, read_video_upload, safe_filename
 
 router = APIRouter(prefix="/api/chat", dependencies=[Depends(verify_api_key)])
+
+
+def _ctx_thread(target, *args, name: str | None = None) -> "threading.Thread":
+    """A daemon thread that runs `target(*args)` inside a copy of the CURRENT
+    context, so it inherits the request's tenant + provider keys (plain threads
+    don't). Started from a request handler or another context-bearing thread."""
+    ctx = contextvars.copy_context()
+    return threading.Thread(target=lambda: ctx.run(target, *args), daemon=True, name=name)
+
+
+@contextlib.contextmanager
+def _owner_keys(conv_id: str):
+    """Bind the conversation owner's provider keys for a background worker that
+    runs outside the request (pollers, retries, startup resume). Keys live only
+    in the DB per user, so without this the worker would have no key. It binds
+    keys only — the worker acts on a specific id, so it needs no tenant scope."""
+    from . import keyctx, user_keys
+
+    conv = get_db().get_conversation(conv_id)
+    owner = get_db().get_user(conv.user_id) if conv and getattr(conv, "user_id", None) else None
+    token = keyctx.set_keys(user_keys.get_user_keys(owner) if owner else {})
+    try:
+        yield
+    finally:
+        keyctx.reset_keys(token)
+
+
+def _with_owner_keys(fn):
+    """Decorator for background workers whose first arg is conv_id: run them
+    with the conversation owner's provider keys bound."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(conv_id, *args, **kwargs):
+        with _owner_keys(conv_id):
+            return fn(conv_id, *args, **kwargs)
+
+    return wrapper
+
 
 MAX_TOOL_ROUNDS = 4
 CONSISTENCY_REFS = 2  # recent images passed to the image model to keep characters consistent
@@ -1045,9 +1085,17 @@ async def api_upload_video_attachment(conv_id: str, file: UploadFile = File(...)
     return {"file": name}
 
 
+def _require_own_conversation(conv_id: str) -> None:
+    """404 unless the conversation belongs to the current user (get_conversation
+    is tenant-scoped, so another user's id reads as not found)."""
+    if not get_db().get_conversation(conv_id):
+        raise HTTPException(404, "Not found")
+
+
 @router.get("/media/{conv_id}/{filename}")
 def api_chat_media(conv_id: str, filename: str):
-    path = _chat_root() / safe_filename(conv_id) / safe_filename(filename)
+    path = _chat_root() / safe_filename(conv_id) / safe_filename(filename)  # rejects traversal (400)
+    _require_own_conversation(conv_id)
     if not path.is_file():
         raise HTTPException(404, "Not found")
     return FileResponse(path, headers={"Cache-Control": "private, max-age=31536000, immutable"})
@@ -1060,7 +1108,8 @@ CHAT_PREVIEW_SIZE = 768  # px on the shorter side: sharp in the chat, a fraction
 async def api_chat_media_preview(conv_id: str, filename: str):
     """A chat image (or a video's first frame) scaled down for showing in the
     chat, cached; the full file is for the lightbox and downloads."""
-    path = _chat_root() / safe_filename(conv_id) / safe_filename(filename)
+    path = _chat_root() / safe_filename(conv_id) / safe_filename(filename)  # rejects traversal (400)
+    _require_own_conversation(conv_id)
     if not path.is_file():
         raise HTTPException(404, "Not found")
     return await media.thumb_response(path, CHAT_PREVIEW_SIZE)
@@ -1285,7 +1334,10 @@ def _start_turn(conv_id: str, settings: TurnSettings, user_msg, parent_id: int |
             _cancel_events.pop(assistant.id, None)
             events.put(None)
 
-    threading.Thread(target=worker, daemon=True, name=f"chat-turn-{assistant.id}").start()
+    # Run in a copy of the current context so the turn's DB writes/reads are
+    # scoped to the signed-in user (tenant) and use their keys — a plain thread
+    # would not inherit those contextvars.
+    _ctx_thread(worker, name=f"chat-turn-{assistant.id}").start()
 
     def stream() -> Iterator[str]:
         yield _sse(start)
@@ -1890,7 +1942,7 @@ class Turn:
                 with contextlib.suppress(Exception):
                     job["title"], job["cost"] = _generate_title(model, first.content)
 
-            job["thread"] = threading.Thread(target=work, daemon=True, name=f"chat-title-{self.message_id}")
+            job["thread"] = _ctx_thread(work, name=f"chat-title-{self.message_id}")
             job["thread"].start()
         return job
 
@@ -2445,6 +2497,7 @@ def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia):
     return _message_out(msg)
 
 
+@_with_owner_keys
 def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) -> None:
     db = get_db()
     media_id = item["id"]
@@ -2516,6 +2569,7 @@ def start_video_poller(conv_id: str, message_id: int, media_id: str, job_id: str
     ).start()
 
 
+@_with_owner_keys
 def _poll_video(conv_id: str, message_id: int, media_id: str, job_id: str) -> None:
     db = get_db()
     source = (

@@ -16,7 +16,6 @@ Pollo bills in credits, not dollars, so Pollo media records `credits` on
 its media item rather than adding to the OpenRouter `cost`.
 """
 
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -35,7 +34,7 @@ from img2vid.pollo.pollo_img2vid import (
     get_video_generator,
 )
 
-from . import image_hosts, request_log
+from . import image_hosts, keyctx, request_log
 from .openrouter import OpenRouterError
 from .pollo_models import MODEL_INFO
 
@@ -56,7 +55,7 @@ DOWNLOAD_TIMEOUT = 120
 
 
 def is_configured() -> bool:
-    return bool(os.getenv("POLLO_API_KEY"))
+    return bool(keyctx.provider_key("pollo"))
 
 
 def is_pollo(model_id: str | None) -> bool:
@@ -180,7 +179,7 @@ def generate_image(
 
     generator = get_image_generator(
         key,
-        api_key=os.getenv("POLLO_API_KEY"),
+        api_key=keyctx.provider_key("pollo"),
         project="chat",
         prompt=prompt,
         image_url=None,
@@ -222,7 +221,7 @@ def submit_video(
             raise PolloError("Recast needs a reference image")
         generator = get_video_generator(
             key,
-            api_key=os.getenv("POLLO_API_KEY"),
+            api_key=keyctx.provider_key("pollo"),
             project="chat",
             prompt=prompt,
             image_url=_upload(first_frame),
@@ -241,7 +240,7 @@ def submit_video(
         aspect_ratio = _ratio_for_image(first_frame, ratios)
     generator = get_video_generator(
         key,
-        api_key=os.getenv("POLLO_API_KEY"),
+        api_key=keyctx.provider_key("pollo"),
         project="chat",
         prompt=prompt,
         image_url=_upload(first_frame) if first_frame else None,
@@ -357,7 +356,7 @@ def _task_state(task_id: str) -> dict:
     transient, "error", "urls", "credits"}. "transient" = Cloudflare/network/
     HTTP trouble worth retrying, not a verdict on the generation."""
     try:
-        results = get_task_status(task_id, os.getenv("POLLO_API_KEY"))
+        results = get_task_status(task_id, keyctx.provider_key("pollo"))
     except Exception as e:  # noqa: BLE001 — network/VPN hiccups
         return {"status": "transient", "error": f"Pollo: {e}"}
     status, fail_msg = results[0][0], results[0][1]
