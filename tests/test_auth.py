@@ -42,6 +42,21 @@ class TestHashing:
         assert passwords.hash_password("samepassword") != passwords.hash_password("samepassword")
 
 
+class TestKeys:
+    """The signed-in user manages their own provider keys (no env)."""
+
+    def test_get_keys(self, client):
+        r = client.get("/api/keys")
+        assert r.status_code == 200
+        assert set(r.json()["keys"]) == {"pollo", "venice", "openrouter"}
+
+    def test_put_keys(self, client, db, monkeypatch):
+        monkeypatch.setenv("KEYS_SECRET", "test-secret")
+        monkeypatch.setattr("web.user_keys.get_db", lambda: db)
+        r = client.put("/api/keys", json={"keys": {"pollo": "sk-test-key"}})
+        assert r.status_code == 200
+
+
 class TestLogin:
     """Admins are created via the CLI (web.provision_admin), not the app — there
     is no register endpoint. Login verifies against that CLI-set password."""

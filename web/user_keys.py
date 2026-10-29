@@ -14,13 +14,13 @@ import json
 import os
 
 from cryptography.fernet import Fernet, InvalidToken
-from fastapi import APIRouter, Cookie, Header, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from img2vid.common.metadata import get_db
 
-from . import users
 from .auth import _user_secret
+from .users import require_user
 
 KEY_PROVIDERS = ("pollo", "venice", "openrouter")
 
@@ -66,31 +66,13 @@ class KeysUpdate(BaseModel):
     keys: dict[str, str | None]
 
 
-def _require_user(user_session, session, authorization):
-    user = users.resolve_current_user(user_session, session, authorization)
-    if not user:
-        raise HTTPException(status_code=401, detail="Sign in to manage keys")
-    return user
-
-
 @router.get("")
-async def get_keys(
-    user_session: str | None = Cookie(None),
-    session: str | None = Cookie(None),
-    authorization: str | None = Header(None),
-):
-    user = _require_user(user_session, session, authorization)
+async def get_keys(user=Depends(require_user)):
     return {"keys": _masked(user)}
 
 
 @router.put("")
-async def set_keys(
-    data: KeysUpdate,
-    user_session: str | None = Cookie(None),
-    session: str | None = Cookie(None),
-    authorization: str | None = Header(None),
-):
-    user = _require_user(user_session, session, authorization)
+async def set_keys(data: KeysUpdate, user=Depends(require_user)):
     current = get_user_keys(user)
     for provider, value in data.keys.items():
         if provider not in KEY_PROVIDERS:

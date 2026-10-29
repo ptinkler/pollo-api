@@ -272,7 +272,7 @@ function onKeydown(e) {
         >
         <span class="picker-value">
           <template v-if="loading">Loading…</template>
-          <template v-else>{{ current?.name || modelValue || 'None' }}</template>
+          <template v-else>{{ current?.name || 'None' }}</template>
           <span v-if="!loading && current?.uncensored" class="item-badge uncensored picked" :title="UNCENSORED_TITLE"
             >🔞 uncensored</span
           >
@@ -369,8 +369,11 @@ function onKeydown(e) {
           </div>
         </template>
         <div v-if="!filtered.length" class="picker-empty">
-          No {{ showTabs ? ALL_PROVIDERS[tab].label + ' ' : '' }}models match “{{ query }}”
-          <button v-if="showTabs && otherTab" type="button" class="tab-hint" @click="tab = otherTab">
+          <template v-if="query"
+            >No {{ showTabs ? ALL_PROVIDERS[tab].label + ' ' : '' }}models match “{{ query }}”</template
+          >
+          <template v-else>No models available</template>
+          <button v-if="query && showTabs && otherTab" type="button" class="tab-hint" @click="tab = otherTab">
             {{ tabCounts[otherTab] }} match{{ tabCounts[otherTab] === 1 ? '' : 'es' }} in
             {{ ALL_PROVIDERS[otherTab].label }} →
           </button>

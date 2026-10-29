@@ -41,10 +41,7 @@ onMounted(load)
 <template>
   <section class="card">
     <div class="ctitle">Provider keys</div>
-    <p class="cnote">
-      Your own keys for Pollo, Venice and OpenRouter — you pay your own way. Stored encrypted; shown only as a hint once
-      saved, never in full.
-    </p>
+    <p class="cnote">Enter your Pollo, Venice and OpenRouter keys.</p>
     <div class="rows">
       <div v-for="p in KEY_PROVIDERS" :key="p.id" class="krow">
         <div class="kl">

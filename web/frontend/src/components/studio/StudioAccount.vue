@@ -41,9 +41,7 @@ onMounted(load)
           >Continue with {{ PROVIDER_LABELS[p] || p }}</a
         >
       </div>
-      <p v-if="!providers.length" class="cnote">
-        No sign-in providers configured yet. The owner signs in with the access key over the LAN.
-      </p>
+      <p v-if="!providers.length" class="cnote">No sign-in providers configured.</p>
     </template>
   </section>
 </template>
