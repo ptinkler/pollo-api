@@ -49,7 +49,7 @@ def db(tmp_path):
 
 
 @pytest.fixture()
-def chat(monkeypatch, db):
+def chat(monkeypatch, db, provider_keys):
     import web.chat as chat_mod
 
     monkeypatch.setattr(chat_mod, "get_db", lambda: db)
@@ -59,8 +59,8 @@ def chat(monkeypatch, db):
     import web.media as media_mod
 
     monkeypatch.setattr(media_mod, "get_db", lambda: db)
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
-    monkeypatch.delenv("VENICE_API_KEY", raising=False)  # tests never reach the real Venice
+    provider_keys["openrouter"] = "sk-test"
+    provider_keys["venice"] = None  # tests never reach the real Venice
     monkeypatch.setattr(chat_mod, "VIDEO_POLL_INTERVAL", 0)
     monkeypatch.setattr(chat_mod, "start_video_poller", lambda *a: None)
     monkeypatch.setattr(chat_mod, "_generate_title", lambda model, prompt: (None, 0.0))  # tests opt in
@@ -69,13 +69,7 @@ def chat(monkeypatch, db):
 
 
 @pytest.fixture()
-def client(chat, monkeypatch):
-    monkeypatch.delenv("API_KEY", raising=False)
-    monkeypatch.delenv("API_KEYS", raising=False)
-    monkeypatch.setenv("ALLOW_NO_AUTH", "true")  # no keys → opt out of fail-closed
-    import web.auth as auth_mod
-
-    auth_mod.get_api_keys.cache_clear()
+def client(chat):
     import web.api as api_mod
 
     return TestClient(api_mod.app, raise_server_exceptions=False)
@@ -99,11 +93,11 @@ class TestConversations:
         assert client.delete(f"/api/chat/conversations/{c['id']}").status_code == 200
         assert client.get(f"/api/chat/conversations/{c['id']}").status_code == 404
 
-    def test_status_reports_key(self, client, monkeypatch):
+    def test_status_reports_key(self, client, provider_keys):
         assert client.get("/api/chat/status").json() == {"configured": True, "openrouter": True, "venice": False}
-        monkeypatch.delenv("OPENROUTER_API_KEY")
+        provider_keys["openrouter"] = None
         assert client.get("/api/chat/status").json()["configured"] is False
-        monkeypatch.setenv("VENICE_API_KEY", "v-test")  # Venice alone can run the chat
+        provider_keys["venice"] = "v-test"  # Venice alone can run the chat
         assert client.get("/api/chat/status").json() == {"configured": True, "openrouter": False, "venice": True}
 
     def test_openrouter_balance(self, client, chat, monkeypatch):
@@ -127,8 +121,8 @@ class TestConversations:
         monkeypatch.setattr(chat.openrouter, "_get", boom)
         assert client.get("/api/chat/credits").status_code == 502
 
-    def test_send_without_key_is_503(self, client, conv, monkeypatch):
-        monkeypatch.delenv("OPENROUTER_API_KEY")
+    def test_send_without_key_is_503(self, client, conv, provider_keys):
+        provider_keys["openrouter"] = None
         r = client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", **SETTINGS})
         assert r.status_code == 503
 
@@ -2224,8 +2218,8 @@ class TestPolloImageModels:
     POLLO = {**SETTINGS, "image_model": "pollo/seedreamv1"}
 
     @pytest.fixture()
-    def pollo(self, chat, monkeypatch):
-        monkeypatch.setenv("POLLO_API_KEY", "pollo-test")
+    def pollo(self, chat, monkeypatch, provider_keys):
+        provider_keys["pollo"] = "pollo-test"
         monkeypatch.setattr(chat.pollo_chat, "POLL_INTERVAL", 0)
         calls = {"generators": [], "uploads": [], "statuses": iter([])}
 
@@ -2301,7 +2295,7 @@ class TestPolloImageModels:
             )
         )[-1]["message"]
 
-    def test_listed_in_the_image_catalogue_when_key_is_set(self, chat, monkeypatch, pollo):
+    def test_listed_in_the_image_catalogue_when_key_is_set(self, chat, monkeypatch, pollo, provider_keys):
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
             monkeypatch.setattr(chat.openrouter, fn, lambda: [])
         models = {m["id"]: m for m in chat.get_models(refresh=True)["image"]}
@@ -2311,7 +2305,7 @@ class TestPolloImageModels:
         # legacy-only: no working v1 endpoint, so chat offers the legacy one
         assert models["pollo/polloimage2"]["name"] == "Pollo: Pollo Image 2.0"
         assert "pollo/polloimage2v1" not in models and "pollo/seedream" not in models
-        monkeypatch.delenv("POLLO_API_KEY")
+        provider_keys["pollo"] = None
         assert not any(m["id"].startswith("pollo/") for m in chat.get_models(refresh=True)["image"])
 
     def test_tool_call_runs_on_pollo(self, client, conv, chat, monkeypatch, pollo):

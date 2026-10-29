@@ -14,16 +14,15 @@ from __future__ import annotations
 
 import os
 
-from fastapi import Cookie, Header, HTTPException
+from fastapi import Cookie, HTTPException
 
 from img2vid.common.metadata import get_db
 
-from . import auth
 from .auth import resolve_user_session
 
-# The owner's account. They sign in over the LAN with the API key (no OAuth, no
-# internet); that key session resolves to this single local admin user, so the
-# owner's data is a tenant bucket like any OAuth user's.
+# The owner's account. They sign in with their email + password (provider
+# "local", no OAuth, no internet needed); that session resolves to this single
+# local admin user, so the owner's data is a tenant bucket like any OAuth user's.
 LOCAL_ADMIN = {"provider": "local", "sub": "admin", "name": "Admin", "avatar": None}
 
 
@@ -73,8 +72,8 @@ def current_user(user_cookie: str | None):
 
 def admin_email() -> str:
     """The owner's email — the first ADMIN_EMAILS entry, else a local default.
-    The admin account is keyed on this, so signing in with the LAN access key
-    and signing in with Google (same email) resolve to the SAME account."""
+    The admin account is keyed on this, so the email+password login and an OAuth
+    login with the same email resolve to the SAME account."""
     return next(iter(admin_emails()), "admin@local")
 
 
@@ -88,61 +87,32 @@ def admin_user():
     return db.upsert_oauth_user({**LOCAL_ADMIN, "email": admin_email()}, is_admin=True)
 
 
-def _key_authenticated(session: str | None, authorization: str | None) -> bool:
-    """Whether the request carries a valid API key (session cookie, Bearer
-    header, or an explicit dev opt-out)."""
-    if auth.resolve_session(session):
-        return True
-    if authorization:
-        parts = authorization.split()
-        if len(parts) == 2 and parts[0].lower() == "bearer" and auth._valid_key(parts[1], auth.get_api_keys()):
-            return True
-    return not auth.is_auth_enabled() and auth.allow_no_auth()  # dev: everything open → owner
-
-
-def resolve_current_user(user_cookie: str | None, session: str | None = None, authorization: str | None = None):
-    """The current User: an OAuth user by their session cookie, else the local
-    admin when the request is API-key authenticated, else None."""
-    user = current_user(user_cookie)
-    if user:
-        return user
-    if _key_authenticated(session, authorization):
-        return admin_user()
-    return None
+def resolve_current_user(user_cookie: str | None):
+    """The current User, resolved from the signed user-session cookie, or None.
+    Email+password (local admin) and OAuth both mint that same cookie."""
+    return current_user(user_cookie)
 
 
 # ── FastAPI dependencies ─────────────────────────────────────────────
 
 
-def current_user_dep(
-    user_session: str | None = Cookie(None),
-    session: str | None = Cookie(None),
-    authorization: str | None = Header(None),
-):
+def current_user_dep(user_session: str | None = Cookie(None)):
     """The signed-in User for this request, or None."""
-    return resolve_current_user(user_session, session, authorization)
+    return resolve_current_user(user_session)
 
 
-def require_user(
-    user_session: str | None = Cookie(None),
-    session: str | None = Cookie(None),
-    authorization: str | None = Header(None),
-):
+def require_user(user_session: str | None = Cookie(None)):
     """Dependency: a signed-in user, else 401."""
-    user = resolve_current_user(user_session, session, authorization)
+    user = resolve_current_user(user_session)
     if not user:
         raise HTTPException(status_code=401, detail="Sign in required")
     return user
 
 
-def require_admin(
-    user_session: str | None = Cookie(None),
-    session: str | None = Cookie(None),
-    authorization: str | None = Header(None),
-):
+def require_admin(user_session: str | None = Cookie(None)):
     """Dependency: the admin (the instance owner), else 401/403. Used for VPN
     controls and other owner-only actions."""
-    user = resolve_current_user(user_session, session, authorization)
+    user = resolve_current_user(user_session)
     if not user:
         raise HTTPException(status_code=401, detail="Sign in required")
     if not user.is_admin:

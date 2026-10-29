@@ -95,10 +95,25 @@ jobs:
 
       - name: Bump version tag
         id: tag
+        # Bump level comes from the merge commit message: "#major" or "#minor"
+        # (case-insensitive), otherwise patch. e.g. a commit with "#major"
+        # takes v1.4.2 -> v2.0.0.
         run: |
-          LATEST=$(git tag --sort=-version:refname | head -1 || echo "v0.0.0")
-          PATCH=$(echo "$LATEST" | awk -F. '{print $3+1}')
-          NEXT=$(echo "$LATEST" | awk -F. -v p="$PATCH" '{print $1"."$2"."p}')
+          LATEST=$(git tag --sort=-version:refname | head -1)
+          LATEST=${LATEST:-v0.0.0}
+          MSG=$(git log -1 --pretty=%B)
+          if echo "$MSG" | grep -qiE '#major'; then LEVEL=major
+          elif echo "$MSG" | grep -qiE '#minor'; then LEVEL=minor
+          else LEVEL=patch; fi
+          VER=${LATEST#v}
+          MAJ=${VER%%.*}; REST=${VER#*.}; MIN=${REST%%.*}; PAT=${REST#*.}
+          case "$LEVEL" in
+            major) MAJ=$((MAJ+1)); MIN=0; PAT=0 ;;
+            minor) MIN=$((MIN+1)); PAT=0 ;;
+            patch) PAT=$((PAT+1)) ;;
+          esac
+          NEXT="v$MAJ.$MIN.$PAT"
+          echo "Bumping $LATEST -> $NEXT ($LEVEL)"
           echo "version=$NEXT" >> "$GITHUB_OUTPUT"
           git tag "$NEXT"
           git push origin "$NEXT"

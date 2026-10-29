@@ -6,7 +6,7 @@ models. This module lets them run on Pollo's v1 models too (plus legacy
 models that have no working v1 endpoint), reusing the
 generator classes the Generate page uses. They're listed in the chat's
 catalogues as "pollo/<generator key>" (e.g. "pollo/seedreamv1",
-"pollo/seedance20fastv1") and bill the Pollo account (POLLO_API_KEY).
+"pollo/seedance20fastv1") and bill the signed-in user's Pollo account (their per-user Pollo key).
 
 Images are generated synchronously, like OpenRouter's. Videos mirror
 openrouter.submit_video / get_video / download_video, with job ids prefixed
@@ -137,7 +137,7 @@ def _video_generators() -> dict:
 
 def _generator_key(model_id: str, generators: dict) -> str:
     if not is_configured():
-        raise PolloError("POLLO_API_KEY is not set on the server")
+        raise PolloError("No Pollo API key set — add one in Settings → Keys")
     key = model_id[len(PREFIX) :]
     if key not in generators:
         raise PolloError(f"Unknown Pollo model: {key}")

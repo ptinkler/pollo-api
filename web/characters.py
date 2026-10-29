@@ -27,10 +27,10 @@ from pydantic import BaseModel, Field
 from img2vid.common import config
 from img2vid.common.metadata import get_db
 
-from .auth import verify_api_key
 from .uploads import image_media_type, read_image_upload, safe_filename
+from .users import require_user
 
-router = APIRouter(prefix="/api/characters", dependencies=[Depends(verify_api_key)])
+router = APIRouter(prefix="/api/characters", dependencies=[Depends(require_user)])
 
 MAX_IMAGES = 6  # stored per character
 REF_PREFIX = "char:"

@@ -2,7 +2,7 @@
 import { provide, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import AppHeader from './components/AppHeader.vue'
-import KeyModal from './components/KeyModal.vue'
+import LoginModal from './components/LoginModal.vue'
 import ToastContainer from './components/ToastContainer.vue'
 import JobsSidebar from './components/JobsSidebar.vue'
 import { useToast } from './composables/useToast'
@@ -54,7 +54,7 @@ onMounted(() => {
     <JobsSidebar v-if="activeJobs.length > 0" />
   </div>
 
-  <KeyModal />
+  <LoginModal />
   <ToastContainer :toasts="toasts" @remove="removeToast" />
 </template>
 

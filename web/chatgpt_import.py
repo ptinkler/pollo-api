@@ -46,11 +46,11 @@ from img2vid.common import config
 from img2vid.common.metadata import get_db
 
 from . import media
-from .auth import verify_api_key
 from .chat import CHAT_PREVIEW_SIZE, IMAGE_EXTS, ConversationCreate, _conv_dir, api_create_conversation
 from .uploads import safe_filename
+from .users import require_user
 
-router = APIRouter(prefix="/api/chat/import", dependencies=[Depends(verify_api_key)])
+router = APIRouter(prefix="/api/chat/import", dependencies=[Depends(require_user)])
 
 SOURCE = "chatgpt"
 SPACE_NAME = "ChatGPT"  # the space new imports go in

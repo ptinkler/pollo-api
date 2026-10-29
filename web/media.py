@@ -46,10 +46,10 @@ from img2vid.common import config
 from img2vid.common.metadata import get_db, iso
 
 from . import characters
-from .auth import verify_api_key
 from .uploads import image_media_type, is_blank_image, read_image_upload, safe_filename
+from .users import require_user
 
-router = APIRouter(prefix="/api/media", dependencies=[Depends(verify_api_key)])
+router = APIRouter(prefix="/api/media", dependencies=[Depends(require_user)])
 
 VIDEO_EXTS = {".mp4"}
 THUMB_SIZE = 320  # px, the thumbnail's shorter side (grid tiles are square, cropped to fill)

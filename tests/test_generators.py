@@ -108,8 +108,7 @@ class TestBaseVideoGenerator:
     @patch("img2vid.pollo.generators.get_prompt", return_value="test prompt")
     @patch("img2vid.pollo.generators.get_image_url", return_value=None)
     @patch("img2vid.pollo.generators.get_image_path", return_value=None)
-    def test_init_with_kwargs(self, mock_path, mock_url, mock_prompt, monkeypatch):
-        monkeypatch.setenv("POLLO_API_KEY", "test-key")
+    def test_init_with_kwargs(self, mock_path, mock_url, mock_prompt):
         gen = Pollo20VideoGenerator(api_key="k", project="p", prompt="hello", image_url="https://img.com/i.jpg")
         assert gen.api_key == "k"
         assert gen.project == "p"
@@ -119,11 +118,11 @@ class TestBaseVideoGenerator:
     @patch("img2vid.pollo.generators.get_prompt", return_value="test prompt")
     @patch("img2vid.pollo.generators.get_image_url", return_value="https://fallback.com/i.jpg")
     @patch("img2vid.pollo.generators.get_image_path", return_value=None)
-    def test_init_fallback_to_env(self, mock_path, mock_url, mock_prompt, monkeypatch):
-        monkeypatch.setenv("POLLO_API_KEY", "env-key")
+    def test_init_without_api_key(self, mock_path, mock_url, mock_prompt, monkeypatch):
+        # No key is passed and none is read from the environment: api_key is None.
         monkeypatch.setenv("PROJECT", "envproj")
         gen = Pollo20VideoGenerator()
-        assert gen.api_key == "env-key"
+        assert gen.api_key is None
         assert gen.project == "envproj"
         assert gen.image_url == "https://fallback.com/i.jpg"
 

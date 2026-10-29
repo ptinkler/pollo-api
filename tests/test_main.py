@@ -19,6 +19,7 @@ class TestMain:
             length=None,
             resolution=None,
             generate_audio=False,
+            api_key=None,
         )
 
     @patch("img2vid.pollo.__main__.create_video")
@@ -37,6 +38,7 @@ class TestMain:
             length=10,
             resolution="720p",
             generate_audio=True,
+            api_key=None,
         )
 
     @patch("img2vid.pollo.__main__.create_video", side_effect=ValueError("bad model"))

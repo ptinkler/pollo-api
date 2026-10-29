@@ -1,33 +1,41 @@
 """Provision the admin (owner) account — run on the host.
 
-    python -m web.provision_admin --email you@gmail.com
+    python -m web.provision_admin --email you@gmail.com --set-password
     python -m web.provision_admin --email you@gmail.com --claim-orphans
 
-Creates the user with that email as admin, or promotes an existing one. The
-account is keyed on email, so signing in later with Google (same address) — or
-with the LAN access key — resolves to this same account and its data.
-
---claim-orphans assigns any tenant rows with no owner to the admin (useful
-right after the 0020 migration or a data import). The 0020 migration already
-backfills existing rows to the admin; this is the belt-and-braces / re-run.
+Creates/promotes the admin, keyed on email (an OAuth login with the same email
+resolves to this account). --set-password sets its email+password login;
+--claim-orphans adopts pre-existing unowned data (and moves the legacy shared
+library into the admin's folder).
 """
 
 from __future__ import annotations
 
 import argparse
+import getpass
 
 from img2vid.common.metadata import get_db
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Create or promote the admin account.")
-    ap.add_argument("--email", required=True, help="the owner's email (match your Google address)")
+    ap.add_argument("--email", required=True, help="the owner's email (match your login address)")
     ap.add_argument("--name", default="Admin")
     ap.add_argument("--claim-orphans", action="store_true", help="assign unowned tenant rows to the admin")
+    ap.add_argument("--set-password", action="store_true", help="set the admin's email+password login (prompts)")
+    ap.add_argument("--password", help="password for --set-password (else prompts; avoid in shell history)")
     args = ap.parse_args()
 
     db = get_db()
-    admin = db.ensure_admin(args.email, args.name)
+    if args.set_password:
+        from .passwords import hash_password
+
+        pw = args.password or getpass.getpass("New admin password: ")
+        if len(pw) < 10:
+            raise SystemExit("Password must be at least 10 characters.")
+        admin = db.create_local_admin(args.email, hash_password(pw), name=args.name)
+    else:
+        admin = db.ensure_admin(args.email, args.name)
     print(f"Admin: {admin.email}  (id {admin.id}, provider {admin.provider}, is_admin={admin.is_admin})")
     if args.claim_orphans:
         n = db.claim_orphans(admin.id)

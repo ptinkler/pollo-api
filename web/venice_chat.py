@@ -2,7 +2,7 @@
 Venice (https://venice.ai) text, image and video models for chat mode.
 
 Listed in the chat's catalogues as "venice/<model id>" and billed to the
-Venice account (VENICE_API_KEY), alongside OpenRouter's and Pollo's models.
+signed-in user's Venice account (their per-user Venice key), alongside OpenRouter's and Pollo's models.
 
   • text   — POST /chat/completions (OpenAI-compatible, streamed; tools on
              models that support function calling)
@@ -108,7 +108,7 @@ def is_venice_job(job_id: str | None) -> bool:
 def _headers() -> dict[str, str]:
     key = get_api_key()
     if not key:
-        raise VeniceError("VENICE_API_KEY is not set on the server", 503)
+        raise VeniceError("No Venice API key set — add one in Settings → Keys", 503)
     return {"Authorization": f"Bearer {key}"}
 
 

@@ -5,7 +5,7 @@ import CreditDisplay from './CreditDisplay.vue'
 import { useAuth } from '../composables/useAuth'
 
 const route = useRoute()
-const { hasKey, showKeyModal } = useAuth()
+const { isAuthenticated, promptLogin, logout } = useAuth()
 </script>
 
 <template>
@@ -30,11 +30,11 @@ const { hasKey, showKeyModal } = useAuth()
       <VpnStatus />
       <button
         class="key-btn"
-        :class="{ 'key-set': hasKey, 'key-missing': !hasKey }"
-        :title="hasKey ? 'API key set — click to change' : 'No API key — click to set'"
-        @click="showKeyModal = true"
+        :class="{ 'key-set': isAuthenticated, 'key-missing': !isAuthenticated }"
+        :title="isAuthenticated ? 'Signed in — click to sign out' : 'Sign in'"
+        @click="isAuthenticated ? logout() : promptLogin()"
       >
-        🔑
+        {{ isAuthenticated ? '🔓' : '🔒' }}
       </button>
     </div>
   </header>

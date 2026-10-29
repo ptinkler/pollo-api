@@ -16,17 +16,10 @@ from img2vid.common.metadata import MetadataDB
 
 
 @pytest.fixture(autouse=True)
-def _setup_env(tmp_path, monkeypatch):
+def _setup_env(tmp_path, monkeypatch, provider_keys):
     """Set up a clean environment for every test."""
     monkeypatch.setenv("POLLO_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("POLLO_API_KEY", "test-key")
-    # App auth off for the suite (no keys); opt out of fail-closed so routes serve.
-    monkeypatch.delenv("API_KEY", raising=False)
-    monkeypatch.delenv("API_KEYS", raising=False)
-    monkeypatch.setenv("ALLOW_NO_AUTH", "true")
-    import web.auth as auth_mod
-
-    auth_mod.get_api_keys.cache_clear()
+    provider_keys["pollo"] = "test-key"  # the current user's Pollo key (not from env)
     # Create required dirs
     (tmp_path / "assets").mkdir()
     (tmp_path / "data").mkdir()
@@ -1099,13 +1092,13 @@ class TestRecoverStaleJob:
         job = db.get_job("rcv2")
         assert job.status == "error"
 
-    def test_recover_no_api_key(self, client, db, monkeypatch):
+    def test_recover_no_api_key(self, client, db, provider_keys):
         import web.api as api_mod
 
         proj = db.create_project(name="Recover3")
         db.create_job(job_id="rcv3", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("rcv3", status="processing", task_id="t1")
-        monkeypatch.delenv("POLLO_API_KEY", raising=False)
+        provider_keys["pollo"] = None
         job = db.get_job("rcv3")
         api_mod._recover_stale_job(job)
         job = db.get_job("rcv3")
@@ -1295,8 +1288,8 @@ class TestJobEndpointsExtended:
         assert resp.status_code == 200
         assert resp.json()["status"] == "error"
 
-    def test_check_job_no_api_key(self, client, db, monkeypatch):
-        monkeypatch.delenv("POLLO_API_KEY", raising=False)
+    def test_check_job_no_api_key(self, client, db, provider_keys):
+        provider_keys["pollo"] = None
         proj = db.create_project(name="ChkNoKey")
         db.create_job(job_id="cnk1", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("cnk1", status="processing", task_id="t1")
@@ -1900,10 +1893,10 @@ class TestResumePollingJob:
         job = db.get_job("rs3")
         assert job.status == "error"
 
-    def test_resume_no_api_key(self, client, db, monkeypatch):
+    def test_resume_no_api_key(self, client, db, provider_keys):
         import web.api as api_mod
 
-        monkeypatch.delenv("POLLO_API_KEY", raising=False)
+        provider_keys["pollo"] = None
         proj = db.create_project(name="Resume4")
         db.create_job(job_id="rs4", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("rs4", status="processing", task_id="t1")

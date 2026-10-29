@@ -51,9 +51,11 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-    provider: Mapped[str] = mapped_column(String(32))  # google | microsoft | x
+    provider: Mapped[str] = mapped_column(String(32))  # google | microsoft | x | local
     provider_sub: Mapped[str] = mapped_column(String(255))  # stable per-provider user id
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    # argon2id hash for a local (email + password) admin account; null for OAuth users
+    password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Per-user provider keys, JSON {"pollo": "...", "venice": "...", "openrouter": "..."}
     api_keys_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
@@ -775,6 +777,7 @@ class MetadataDB:
         "chat_settings": {"user_id": "VARCHAR(50)"},
         "chat_library_items": {"user_id": "VARCHAR(50)"},
         "chat_import_skips": {"user_id": "VARCHAR(50)"},
+        "users": {"password_hash": "TEXT"},
     }
     # Run once when the column is added: chats from before branching were
     # linear, so each message's parent is the one before it
@@ -919,6 +922,36 @@ class MetadataDB:
             user = session.get(User, user_id)
             if user:
                 user.api_keys_json = api_keys_json
+                session.commit()
+
+    def create_local_admin(self, email: str, password_hash: str, name: str = "Admin") -> User:
+        """Create (or promote + set the password of) a local email+password admin
+        account. Caller enforces that the email is an allowed admin email."""
+        with self._session() as session:
+            user = session.query(User).filter(User.email == email.lower()).first()
+            if not user:
+                user = User(
+                    id=uuid.uuid4().hex,
+                    email=email.lower(),
+                    name=name,
+                    provider="local",
+                    provider_sub="admin",
+                    is_admin=True,
+                )
+                session.add(user)
+            user.is_admin = True
+            user.password_hash = password_hash
+            session.commit()
+            session.refresh(user)
+            session.expunge(user)
+            return user
+
+    def set_user_password(self, user_id: str, password_hash: str) -> None:
+        """Replace a user's stored password hash (e.g. after a transparent rehash)."""
+        with self._session() as session:
+            user = session.get(User, user_id)
+            if user:
+                user.password_hash = password_hash
                 session.commit()
 
     # ── Project methods ──────────────────────────────────────────────

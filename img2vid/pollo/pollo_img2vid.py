@@ -194,6 +194,7 @@ def create_video(
     video_num: int | None = None,
     image_meta: list | None = None,
     num_outputs: int | None = None,
+    api_key: str | None = None,
 ) -> None:
     """Generate a video from the command line: send the task, poll it and
     download the result, recording a job like the web interface does."""
@@ -221,6 +222,7 @@ def create_video(
         "refs": refs,
         "video_num": video_num,
         "image_meta": image_meta,
+        "api_key": api_key,
     }
     kwargs = {k: v for k, v in given.items() if v} | {k: v for k, v in optional.items() if v is not None}
     generator = get_video_generator(model, **kwargs)

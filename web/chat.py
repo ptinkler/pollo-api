@@ -30,9 +30,9 @@ character from images in the chat when asked (create_character), which
 attaches it. Image mode uses every attached character.
 
 Image and video models come from OpenRouter, plus Pollo's own models
-("pollo/<key>", see web/pollo_chat.py) when POLLO_API_KEY is set, and
+("pollo/<key>", see web/pollo_chat.py) when the user has a Pollo key, and
 Venice's text, image and video models ("venice/<id>", see
-web/venice_chat.py) when VENICE_API_KEY is set.
+web/venice_chat.py) when the user has a Venice key.
 
 Messages form a tree (ChatMessage.parent_id): editing a prompt or retrying
 a reply adds a sibling — a new branch — rather than deleting what came after,
@@ -71,10 +71,10 @@ from img2vid.common import config
 from img2vid.common.metadata import get_db, iso
 
 from . import characters, media, openrouter, pollo_chat, request_log, venice_chat
-from .auth import verify_api_key
 from .uploads import is_blank_image, read_image_upload, read_video_upload, safe_filename
+from .users import require_user
 
-router = APIRouter(prefix="/api/chat", dependencies=[Depends(verify_api_key)])
+router = APIRouter(prefix="/api/chat", dependencies=[Depends(require_user)])
 
 
 def _ctx_thread(target, *args, name: str | None = None) -> "threading.Thread":
@@ -447,7 +447,7 @@ def _shown_branch(conv_id: str) -> list[dict]:
 def _require_openrouter():
     """Chat needs a text-model provider: OpenRouter or Venice."""
     if not (openrouter.is_configured() or venice_chat.is_configured()):
-        raise HTTPException(503, "Neither OPENROUTER_API_KEY nor VENICE_API_KEY is set on the server")
+        raise HTTPException(503, "No chat provider key set — add an OpenRouter or Venice key in Settings → Keys")
 
 
 # ── Model catalogue cache ───────────────────────────────────────────
@@ -559,7 +559,7 @@ def api_chat_credits():
 def api_venice_balance():
     """Venice balance for the chat header: USD, and the plan's bundled credits."""
     if not venice_chat.is_configured():
-        raise HTTPException(503, "VENICE_API_KEY is not set on the server")
+        raise HTTPException(503, "No Venice API key set — add one in Settings → Keys")
     return {"usd": venice_chat.get_balance(), "credits": venice_chat.get_plan_credits()}
 
 

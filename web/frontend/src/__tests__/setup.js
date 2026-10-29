@@ -20,7 +20,10 @@ const localStorageMock = (() => {
   }
 })()
 
-Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock })
+// vi.stubGlobal installs reliably whether or not jsdom already defined
+// localStorage as a non-configurable property (a plain defineProperty threw
+// there, aborting setup and leaving tests with no localStorage).
+vi.stubGlobal('localStorage', localStorageMock)
 
 // Mock import.meta.env
 globalThis.import = globalThis.import || {}

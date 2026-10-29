@@ -18,6 +18,9 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // A real origin: jsdom's native localStorage throws on the default
+    // opaque about:blank origin, which raced our mock and failed tests.
+    environmentOptions: { jsdom: { url: 'http://localhost/' } },
     globals: true,
     setupFiles: ['./src/__tests__/setup.js'],
   },

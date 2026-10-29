@@ -18,6 +18,7 @@ def main():
     parser.add_argument(
         "--audio", dest="generate_audio", action="store_true", default=False, help="Enable audio generation"
     )
+    parser.add_argument("--api-key", dest="api_key", default=None, help="Pollo API key (required; not read from env)")
 
     args = parser.parse_args()
 
@@ -29,6 +30,7 @@ def main():
             length=args.length,
             resolution=args.resolution,
             generate_audio=args.generate_audio,
+            api_key=args.api_key,
         )
     except ValueError as e:
         print(f"Error: {e}")

@@ -14,27 +14,26 @@ def _guard_real_db(monkeypatch, tmp_path):
     monkeypatch.setattr(config_mod, "DB_PATH", tmp_path / "data" / "metadata.db")
 
 
+# Per-test provider keys, injected without ever touching the environment:
+# production reads a user's keys from the DB, and nothing (prod or test) reads
+# a provider key from an env var. Tests request the `provider_keys` fixture and
+# set entries on it, e.g. provider_keys["pollo"] = "test-key".
+_TEST_PROVIDER_KEYS: dict[str, str | None] = {}
+
+
 @pytest.fixture(autouse=True)
-def _provider_keys_from_env(monkeypatch):
-    """Production resolves provider keys per user from the DB (no .env fallback).
-    Tests inject keys the convenient way — via env vars — so patch only the
-    resolver seam to read env in tests. Production keyctx is unchanged.
+def provider_keys(monkeypatch):
+    """Inject per-user provider keys for a test via an in-memory dict, patching
+    only the resolver seam. No API key is read from the environment."""
+    import web.api  # noqa: F401 — ensure app import side effects have run
 
-    Import web.api first so its load_dotenv() has run, then clear the provider
-    keys to a clean baseline (otherwise a later first import would re-add the
-    developer's .env keys and undo a test's delenv)."""
-    import os
-
-    import web.api  # noqa: F401 — ensure load_dotenv() has already run
-
-    env = {"pollo": "POLLO_API_KEY", "venice": "VENICE_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
-    for var in env.values():
-        monkeypatch.delenv(var, raising=False)
+    _TEST_PROVIDER_KEYS.clear()
     monkeypatch.setattr(
         "web.keyctx.provider_key",
-        lambda provider: os.getenv(env.get(provider, ""), "").strip() or None,
+        lambda provider: _TEST_PROVIDER_KEYS.get(provider) or None,
         raising=False,
     )
+    return _TEST_PROVIDER_KEYS
 
 
 def pytest_configure(config):
