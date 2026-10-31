@@ -27,6 +27,7 @@ import StudioCharactersPage from '../components/studio/StudioCharactersPage.vue'
 import StudioInstructionsPage from '../components/studio/StudioInstructionsPage.vue'
 import StudioRequestLog from '../components/studio/StudioRequestLog.vue'
 import StudioSettings from '../components/studio/StudioSettings.vue'
+import StudioTools from '../components/studio/StudioTools.vue'
 import MediaLightbox from '../components/chat/MediaLightbox.vue'
 import CharacterEditor from '../components/characters/CharacterEditor.vue'
 import InstructionEditor from '../components/chat/InstructionEditor.vue'
@@ -280,6 +281,9 @@ function goThread() {
 function goSettings() {
   router.push('/settings')
 }
+function goTools() {
+  router.push('/tools')
+}
 function goMedia() {
   router.push('/media')
 }
@@ -315,6 +319,7 @@ function onSettingsNavigate(dest) {
 // Which center pane each route name shows (threads handled separately below).
 const PANE_FOR_ROUTE = {
   'studio-settings': 'settings',
+  'studio-tools': 'tools',
   'studio-media': 'media',
   'studio-usage': 'usage',
   'studio-characters': 'characters',
@@ -391,6 +396,7 @@ onMounted(() => {
       @delete-space="deleteSpaceView"
       @move="moveThread"
       @media="goMedia"
+      @tools="goTools"
       @space-settings="spaceSettings = $event"
     />
 
@@ -402,6 +408,12 @@ onMounted(() => {
         @close="goThread"
         @navigate="onSettingsNavigate"
         @sign-out="onSignOut"
+      />
+
+      <StudioTools
+        v-else-if="centerView === 'tools'"
+        @close="goThread"
+        @navigate="onSettingsNavigate"
         @defaults="spaceSettings = 'global'"
         @import="importOpen = true"
       />

@@ -9,7 +9,7 @@ import StudioVpnCard from './StudioVpnCard.vue'
 defineProps({
   theme: { type: String, default: 'system' },
 })
-defineEmits(['set-theme', 'close', 'navigate', 'sign-out', 'defaults', 'import'])
+defineEmits(['set-theme', 'close', 'sign-out'])
 
 // VPN controls are admin-only; StudioAccount reports the signed-in user
 const isAdmin = ref(false)
@@ -21,13 +21,6 @@ const THEMES = [
   { id: 'system', label: 'System' },
   { id: 'light', label: 'Light' },
   { id: 'dark', label: 'Dark' },
-]
-// Existing utility pages, reachable from the unified shell
-const TOOLS = [
-  { route: 'characters', label: 'Characters' },
-  { route: 'instructions', label: 'Instructions' },
-  { route: 'usage', label: 'Credit usage' },
-  { route: 'request-log', label: 'Request log' },
 ]
 </script>
 
@@ -56,24 +49,6 @@ const TOOLS = [
       <StudioAccount @user="onUser" @sign-out="$emit('sign-out')" />
 
       <StudioKeys />
-
-      <section class="card">
-        <div class="ctitle">Tools &amp; library</div>
-        <div class="links">
-          <button class="link" @click="$emit('defaults')">
-            <span>Default instructions &amp; characters</span>
-            <svg class="ic"><use href="#s-chev" /></svg>
-          </button>
-          <button v-for="t in TOOLS" :key="t.route" class="link" @click="$emit('navigate', t.route)">
-            <span>{{ t.label }}</span>
-            <svg class="ic"><use href="#s-chev" /></svg>
-          </button>
-          <button class="link" @click="$emit('import')">
-            <span>Import chats…</span>
-            <svg class="ic"><use href="#s-chev" /></svg>
-          </button>
-        </div>
-      </section>
 
       <StudioVpnCard v-if="isAdmin" />
     </div>

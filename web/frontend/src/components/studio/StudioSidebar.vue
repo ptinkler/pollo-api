@@ -29,6 +29,7 @@ const emit = defineEmits([
   'space-settings',
   'move',
   'media',
+  'tools',
 ])
 
 const openSpaces = ref(new Set())
@@ -286,6 +287,9 @@ const bySpace = computed(() => {
       <div class="pfoot">
         <button class="footbtn" @click="emit('media')">
           <svg class="ic"><use href="#s-image" /></svg> Media
+        </button>
+        <button class="footbtn" @click="emit('tools')">
+          <svg class="ic"><use href="#s-spark" /></svg> Tools &amp; library
         </button>
         <button class="footbtn" @click="emit('settings')">
           <svg class="ic"><use href="#s-cog" /></svg> Settings

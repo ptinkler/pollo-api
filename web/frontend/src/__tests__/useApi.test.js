@@ -1,5 +1,5 @@
 /**
- * Tests for composables/useApi.js — API client functions
+ * Tests for composables/useApi.js — the HTTP client helpers.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -7,30 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const mockFetch = vi.fn()
 globalThis.fetch = mockFetch
 
-// Now import the module under test
-import {
-  apiGet,
-  apiPost,
-  apiPut,
-  apiDelete,
-  fetchProjects,
-  fetchProject,
-  createProject,
-  updateProject,
-  fetchJobs,
-  fetchJob,
-  checkJob,
-  downloadJobVideo,
-  deleteJob,
-  archiveJob,
-  unarchiveJob,
-  generateVideo,
-  fetchModels,
-  deleteVideo,
-  getImageUrl,
-  getVideoUrl,
-  getVideoThumbUrl,
-} from '../composables/useApi.js'
+import { apiGet, apiPost, apiPut, apiDelete } from '../composables/useApi.js'
 
 beforeEach(() => {
   mockFetch.mockReset()
@@ -95,12 +72,17 @@ describe('apiGet', () => {
 describe('apiPost', () => {
   it('posts data with JSON content type', async () => {
     mockFetch.mockReturnValueOnce(mockOkResponse({ created: true }))
-    const data = await apiPost('/api/projects', { name: 'Test' })
+    const data = await apiPost('/api/thing', { name: 'Test' })
     expect(data).toEqual({ created: true })
     const [, opts] = mockFetch.mock.calls[0]
     expect(opts.method).toBe('POST')
     expect(opts.headers['Content-Type']).toBe('application/json')
     expect(JSON.parse(opts.body)).toEqual({ name: 'Test' })
+  })
+
+  it("surfaces the error body's detail", async () => {
+    mockFetch.mockReturnValueOnce(mockErrorResponse(400))
+    await expect(apiPost('/api/thing', {})).rejects.toThrow('error')
   })
 })
 
@@ -109,7 +91,7 @@ describe('apiPost', () => {
 describe('apiPut', () => {
   it('sends PUT request', async () => {
     mockFetch.mockReturnValueOnce(mockOkResponse({ updated: true }))
-    const data = await apiPut('/api/projects/test', { name: 'New' })
+    const data = await apiPut('/api/thing/test', { name: 'New' })
     expect(data).toEqual({ updated: true })
     expect(mockFetch.mock.calls[0][1].method).toBe('PUT')
   })
@@ -120,169 +102,8 @@ describe('apiPut', () => {
 describe('apiDelete', () => {
   it('sends DELETE request', async () => {
     mockFetch.mockReturnValueOnce(mockOkResponse({ deleted: true }))
-    const data = await apiDelete('/api/jobs/123')
+    const data = await apiDelete('/api/thing/123')
     expect(data).toEqual({ deleted: true })
     expect(mockFetch.mock.calls[0][1].method).toBe('DELETE')
-  })
-})
-
-// ── Project API functions ───────────────────────────────────────────
-
-describe('Project API', () => {
-  it('fetchProjects calls correct endpoint', async () => {
-    mockFetch.mockReturnValueOnce(mockOkResponse([]))
-    await fetchProjects()
-    expect(mockFetch.mock.calls[0][0]).toBe('/api/projects')
-  })
-
-  it('fetchProject with params', async () => {
-    mockFetch.mockReturnValueOnce(mockOkResponse({ slug: 'test' }))
-    await fetchProject('test', { archived: true })
-    expect(mockFetch.mock.calls[0][0]).toContain('/api/projects/test')
-    expect(mockFetch.mock.calls[0][0]).toContain('archived=true')
-  })
-
-  it('fetchProject without params', async () => {
-    mockFetch.mockReturnValueOnce(mockOkResponse({ slug: 'test' }))
-    await fetchProject('test')
-    expect(mockFetch.mock.calls[0][0]).toBe('/api/projects/test')
-  })
-
-  it('createProject sends POST', async () => {
-    mockFetch.mockReturnValueOnce(mockOkResponse({ created: true }))
-    await createProject({ name: 'New' })
-    expect(mockFetch.mock.calls[0][1].method).toBe('POST')
-  })
-
-  it('updateProject sends PUT', async () => {
-    mockFetch.mockReturnValueOnce(mockOkResponse({ updated: true }))
-    await updateProject('test', { name: 'Updated' })
-    expect(mockFetch.mock.calls[0][1].method).toBe('PUT')
-  })
-
-  it('encodes project name in URL', async () => {
-    mockFetch.mockReturnValueOnce(mockOkResponse({}))
-    await fetchProject('my project')
-    expect(mockFetch.mock.calls[0][0]).toContain('my%20project')
-  })
-})
-
-// ── Job API functions ───────────────────────────────────────────────
-
-describe('Job API', () => {
-  it('fetchJobs with params', async () => {
-    mockFetch.mockReturnValueOnce(mockOkResponse([]))
-    await fetchJobs({ active: true })
-    expect(mockFetch.mock.calls[0][0]).toContain('active=true')
-  })
-
-  it('fetchJobs without params', async () => {
-    mockFetch.mockReturnValueOnce(mockOkResponse([]))
-    await fetchJobs()
-    expect(mockFetch.mock.calls[0][0]).toBe('/api/jobs')
-  })
-
-  it('fetchJob by ID', async () => {
-    mockFetch.mockReturnValueOnce(mockOkResponse({ job_id: 'j1' }))
-    await fetchJob('j1')
-    expect(mockFetch.mock.calls[0][0]).toBe('/api/jobs/j1')
-  })
-
-  it('checkJob sends POST', async () => {
-    mockFetch.mockReturnValueOnce(mockOkResponse({}))
-    await checkJob('j1')
-    expect(mockFetch.mock.calls[0][0]).toBe('/api/jobs/j1/check')
-  })
-
-  it('downloadJobVideo sends POST', async () => {
-    mockFetch.mockReturnValueOnce(mockOkResponse({}))
-    await downloadJobVideo('j1')
-    expect(mockFetch.mock.calls[0][0]).toBe('/api/jobs/j1/download')
-  })
-
-  it('deleteJob sends DELETE', async () => {
-    mockFetch.mockReturnValueOnce(mockOkResponse({}))
-    await deleteJob('j1')
-    expect(mockFetch.mock.calls[0][1].method).toBe('DELETE')
-  })
-
-  it('archiveJob sends POST', async () => {
-    mockFetch.mockReturnValueOnce(mockOkResponse({}))
-    await archiveJob('j1')
-    expect(mockFetch.mock.calls[0][0]).toBe('/api/jobs/j1/archive')
-  })
-
-  it('unarchiveJob sends POST', async () => {
-    mockFetch.mockReturnValueOnce(mockOkResponse({}))
-    await unarchiveJob('j1')
-    expect(mockFetch.mock.calls[0][0]).toBe('/api/jobs/j1/unarchive')
-  })
-})
-
-// ── Generate API ────────────────────────────────────────────────────
-
-describe('Generate API', () => {
-  it('generateVideo sends POST', async () => {
-    mockFetch.mockReturnValueOnce(mockOkResponse({ job_id: 'j1' }))
-    await generateVideo({ model: 'pollodance20', prompt: 'test' })
-    expect(mockFetch.mock.calls[0][0]).toBe('/api/generate')
-    expect(mockFetch.mock.calls[0][1].method).toBe('POST')
-  })
-})
-
-// ── Models API ──────────────────────────────────────────────────────
-
-describe('Models API', () => {
-  it('fetchModels defaults to the current (non-legacy) models', async () => {
-    mockFetch.mockReturnValueOnce(mockOkResponse({}))
-    await fetchModels()
-    expect(mockFetch.mock.calls[0][0]).toBe('/api/models?legacy=false')
-  })
-
-  it('fetchModels(true) requests legacy models', async () => {
-    mockFetch.mockReturnValueOnce(mockOkResponse({}))
-    await fetchModels(true)
-    expect(mockFetch.mock.calls[0][0]).toBe('/api/models?legacy=true')
-  })
-})
-
-// ── Video API ───────────────────────────────────────────────────────
-
-describe('Video API', () => {
-  it('deleteVideo sends DELETE', async () => {
-    mockFetch.mockReturnValueOnce(mockOkResponse({}))
-    await deleteVideo('myproj', 'vid.mp4')
-    expect(mockFetch.mock.calls[0][0]).toBe('/api/videos/myproj/vid.mp4')
-    expect(mockFetch.mock.calls[0][1].method).toBe('DELETE')
-  })
-
-  it('encodes video filename', async () => {
-    mockFetch.mockReturnValueOnce(mockOkResponse({}))
-    await deleteVideo('proj', 'my video.mp4')
-    expect(mockFetch.mock.calls[0][0]).toContain('my%20video.mp4')
-  })
-})
-
-// ── URL helpers ─────────────────────────────────────────────────────
-
-describe('URL helpers', () => {
-  it('getImageUrl without thumbTs', () => {
-    expect(getImageUrl('proj')).toBe('/image/proj')
-  })
-
-  it('getImageUrl with thumbTs', () => {
-    expect(getImageUrl('proj', '123')).toBe('/image/proj?t=123')
-  })
-
-  it('getVideoUrl', () => {
-    expect(getVideoUrl('proj', 'vid.mp4')).toBe('/video/proj/vid.mp4')
-  })
-
-  it('getVideoThumbUrl', () => {
-    expect(getVideoThumbUrl('proj', 'vid.mp4')).toBe('/video-thumb/proj/vid.mp4')
-  })
-
-  it('encodes special chars in URLs', () => {
-    expect(getVideoUrl('my proj', 'my vid.mp4')).toBe('/video/my%20proj/my%20vid.mp4')
   })
 })

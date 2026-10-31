@@ -19,6 +19,7 @@ const page = (path, name, title, extra = {}) => ({
 const routes = [
   page('/', 'studio', 'Pollo Studio'),
   page('/settings', 'studio-settings', 'Settings — Pollo'),
+  page('/tools', 'studio-tools', 'Tools & library — Pollo'),
   page('/media', 'studio-media', 'Media — Pollo'),
   page('/favourites', 'studio-favourites', 'Favourites — Pollo'),
   page('/usage', 'studio-usage', 'Credit usage — Pollo'),

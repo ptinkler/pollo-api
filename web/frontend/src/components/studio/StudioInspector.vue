@@ -35,13 +35,17 @@ defineEmits([
 
 <template>
   <aside class="side" :class="{ collapsed }">
-    <div class="rail">
-      <button class="rail-btn" title="Expand" @click="$emit('update:collapsed', false)">
-        <svg class="ic lg"><use href="#s-chevL" /></svg>
-      </button>
-      <button class="rail-btn" title="Inspector" @click="$emit('update:collapsed', false)">
-        <svg class="ic lg"><use href="#s-spark" /></svg>
-      </button>
+    <!-- Collapsed: the whole rail expands on click (no stray icons). -->
+    <div
+      class="rail"
+      role="button"
+      tabindex="0"
+      title="Expand inspector"
+      @click="$emit('update:collapsed', false)"
+      @keydown.enter="$emit('update:collapsed', false)"
+    >
+      <svg class="ic lg chev"><use href="#s-chevL" /></svg>
+      <span class="rail-label">Inspector</span>
     </div>
     <div class="panel">
       <div class="phead">
@@ -112,24 +116,29 @@ defineEmits([
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
+  gap: 12px;
   height: 100%;
-  padding: 12px 0;
+  padding: 14px 0;
   background: var(--srail);
-}
-.rail-btn {
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  border-radius: 9px;
-  color: var(--smuted);
-  background: none;
-  border: none;
   cursor: pointer;
+  outline: none;
 }
-.rail-btn:hover {
+.side.collapsed > .rail:hover,
+.side.collapsed > .rail:focus-visible {
   background: var(--shover);
+}
+.rail .chev {
+  color: var(--smuted);
+}
+.rail-label {
+  writing-mode: vertical-rl;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--smuted);
+}
+.side.collapsed > .rail:hover .chev,
+.side.collapsed > .rail:hover .rail-label {
   color: var(--sfg);
 }
 .side.collapsed > .panel {

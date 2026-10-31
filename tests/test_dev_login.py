@@ -27,6 +27,11 @@ def client(db, monkeypatch):
     monkeypatch.setattr("web.users.get_db", lambda: db)
     monkeypatch.setattr("web.user_keys.get_db", lambda: db)
     monkeypatch.setattr("web.dev_login.get_db", lambda: db)
+    # Dev serves over plain HTTP; without this the session cookie is marked
+    # Secure for the non-localhost "testserver" host and the TestClient won't
+    # resend it, so follow-up requests look unauthenticated. (Passes locally
+    # only because a dev .env sets COOKIE_SECURE=false.)
+    monkeypatch.setenv("COOKIE_SECURE", "false")
     return TestClient(api_mod.app, raise_server_exceptions=False)
 
 

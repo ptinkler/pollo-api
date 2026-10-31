@@ -68,13 +68,17 @@ def _gluetun_json(path: str, if_not_ok: Any, if_unreachable: Any, timeout: int =
 @router.get("/status")
 def vpn_status(_admin=Depends(require_admin)):
     """Current VPN status, public IP, and server country from Gluetun."""
-    public_ip = _gluetun_json("/v1/publicip/ip", {}, {}, timeout=5)
+    # Gluetun's /v1/publicip/ip returns the tunnel's exit IP under "public_ip"
+    # (older builds used "ip"); normalise to {ip, country} for the UI.
+    raw = _gluetun_json("/v1/publicip/ip", {}, {}, timeout=5)
+    ip = raw.get("public_ip") or raw.get("ip")
+    country = raw.get("country")
     settings = _gluetun_json("/v1/vpn/settings", {}, {})
     # The public IP lookup's country stands in when settings name none
-    countries = settings.get("server_countries") or ([public_ip["country"]] if public_ip.get("country") else [])
+    countries = settings.get("server_countries") or ([country] if country else [])
     return {
         "vpn": _gluetun_json("/v1/vpn/status", {"status": "unknown"}, {"status": "unreachable"}),
-        "public_ip": public_ip,
+        "public_ip": {"ip": ip, "country": country},
         "server_countries": countries,
     }
 
