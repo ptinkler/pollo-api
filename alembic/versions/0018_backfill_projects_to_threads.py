@@ -231,6 +231,10 @@ def upgrade() -> None:
     for table in ("projects", "jobs", "downloads", "generation_favourites", "chat_conversations", "chat_messages"):
         if "user_id" not in {c["name"] for c in insp.get_columns(table)}:
             op.execute(f"ALTER TABLE {table} ADD COLUMN user_id VARCHAR(50)")
+    # Likewise chat_conversations.kind, added in 0022 (after this). 0022's add is
+    # guarded and skips it when already present.
+    if "kind" not in {c["name"] for c in sa.inspect(bind).get_columns("chat_conversations")}:
+        op.execute("ALTER TABLE chat_conversations ADD COLUMN kind VARCHAR(10) NOT NULL DEFAULT 'chat'")
 
     session = Session(bind=bind)
     fav_files = {f.filename for f in session.scalars(select(GenerationFavourite)).all()}

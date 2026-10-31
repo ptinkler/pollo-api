@@ -17,6 +17,8 @@ import {
   editChatMessage,
   regenerateChatMedia,
   pinChatMedia,
+  favouriteChatMedia,
+  fetchChatLibrary,
   deleteChatExchange,
   fetchDeleteInfo,
   switchChatBranch,
@@ -50,6 +52,9 @@ export function useStudio({ models, settings, showToast }) {
   const draft = ref('')
   const lightbox = ref(null)
   const spend = ref(null)
+  const favourites = ref([]) // cross-thread gallery of favourited generations
+  // The thread being created from scratch opens on this view ('chat' | 'gallery')
+  const newKind = ref('chat')
   let abort = null
   let forking = false
 
@@ -167,6 +172,9 @@ export function useStudio({ models, settings, showToast }) {
     () => (!!draft.value.trim() || attachments.value.some(a => a.file)) && !uploading.value && !sending.value,
   )
   const activeTitle = computed(() => threads.value.find(t => t.id === active.value)?.title || 'New thread')
+  // Which view the current thread opens on. A saved thread carries its own
+  // kind; an unsaved new thread uses the kind picked in the sidebar.
+  const activeKind = computed(() => (active.value ? activeThread.value?.kind || 'chat' : newKind.value))
 
   function replaceMessage(fresh) {
     const i = messageIndex(fresh.id)
@@ -236,14 +244,18 @@ export function useStudio({ models, settings, showToast }) {
       paused.value = { ...NO_PAUSED(), ...activeThread.value.paused_instructions }
       refreshSpend(id)
       polling.ensure()
+      return true
     } catch {
-      activeThread.value = null
-      messages.value = []
+      // The thread doesn't exist (e.g. a stale URL) — fall back to a clean new
+      // thread rather than leaving `active` pointing at a bad id, which would
+      // make every later action 404 ("Conversation not found").
+      newThread()
+      return false
     } finally {
       loading.value = false
     }
   }
-  function newThread() {
+  function newThread(kind = 'chat') {
     active.value = null
     activeThread.value = null
     messages.value = []
@@ -253,6 +265,23 @@ export function useStudio({ models, settings, showToast }) {
     hiddenDefaults.value = NO_HIDDEN()
     paused.value = NO_PAUSED()
     spend.value = null
+    newKind.value = kind === 'gallery' ? 'gallery' : 'chat'
+  }
+  // Switch a thread between Chat and Gallery (its default landing view).
+  async function setThreadKind(kind) {
+    const k = kind === 'gallery' ? 'gallery' : 'chat'
+    if (!active.value) {
+      newKind.value = k
+      return
+    }
+    try {
+      await patchConversation(active.value, { kind: k })
+      if (activeThread.value) activeThread.value.kind = k
+      const t = threads.value.find(x => x.id === active.value)
+      if (t) t.kind = k
+    } catch (e) {
+      showToast(e.message, 'error')
+    }
   }
 
   // ── Sending (same streamed-turn protocol as ChatView) ────────────────────
@@ -318,6 +347,7 @@ export function useStudio({ models, settings, showToast }) {
   async function ensureThread() {
     if (active.value) return active.value
     const conv = await createConversation({
+      kind: newKind.value,
       text_model: selected.text || null,
       image_model: selected.image || null,
       video_model: selected.video || null,
@@ -429,6 +459,30 @@ export function useStudio({ models, settings, showToast }) {
       showToast(e.message, 'error')
     }
   }
+  // Star/un-star a generation (bookmark for the Favourites gallery). `msg` may
+  // be a real message (in-thread) or a library row carrying { message_id }.
+  async function favouriteMedia(msg, { mediaId, favourite: on }) {
+    const messageId = msg.id ?? msg.message_id
+    try {
+      const { media } = await favouriteChatMedia(messageId, mediaId, on)
+      const current = messages.value[messageIndex(messageId)]
+      if (current) replaceMessage({ ...current, media })
+      // Reflect it in the open favourites gallery without a full reload
+      const f = favourites.value.find(i => i.id === mediaId)
+      if (f) f.favourite = on
+      if (!on) favourites.value = favourites.value.filter(i => i.id !== mediaId)
+    } catch (e) {
+      showToast(e.message, 'error')
+    }
+  }
+  async function loadFavourites() {
+    try {
+      const { items } = await fetchChatLibrary()
+      favourites.value = (items || []).filter(i => i.favourite && i.file)
+    } catch {
+      favourites.value = []
+    }
+  }
   async function stop() {
     if (!streamingId.value) return
     try {
@@ -459,12 +513,14 @@ export function useStudio({ models, settings, showToast }) {
       showToast(e.message, 'error')
     }
   }
-  async function renameThread(t) {
-    const name = prompt('Rename thread', t.title || '')
-    if (name == null) return
+  // Rename from the sidebar's inline editor (no prompt). `name` is the new title.
+  async function renameThread(t, name) {
+    const title = (name ?? '').trim()
+    if (!title || title === (t.title || '')) return
     try {
-      await patchConversation(t.id, { title: name.trim() })
-      t.title = name.trim()
+      await patchConversation(t.id, { title })
+      t.title = title
+      if (activeThread.value?.id === t.id) activeThread.value.title = title
     } catch (e) {
       showToast(e.message, 'error')
     }
@@ -538,6 +594,12 @@ export function useStudio({ models, settings, showToast }) {
     lastAssistantId,
     canSend,
     activeTitle,
+    activeKind,
+    newKind,
+    favourites,
+    loadFavourites,
+    favouriteMedia,
+    setThreadKind,
     // instructions
     instructions,
     instructionGroups,

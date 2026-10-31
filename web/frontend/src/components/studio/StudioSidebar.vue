@@ -10,15 +10,15 @@ const props = defineProps({
   active: { type: String, default: null },
   collapsed: { type: Boolean, default: false },
   search: { type: String, default: '' },
-  favourites: { type: Boolean, default: false },
+  filter: { type: String, default: 'all' }, // 'all' | 'chat' | 'gallery' | 'favourites'
 })
 const emit = defineEmits([
   'update:collapsed',
   'update:search',
-  'update:favourites',
+  'update:filter',
   'open',
   'new',
-  'favourite',
+  'pin',
   'rename',
   'delete',
   'settings',
@@ -38,6 +38,24 @@ function toggleSpace(id) {
   openSpaces.value = new Set(s)
 }
 
+// ── Inline rename (no modal / prompt) ──────────────────────────────────
+const renamingId = ref(null)
+const renameText = ref('')
+const vFocusSelect = { mounted: el => (el.focus(), el.select()) }
+function startRename(t) {
+  renamingId.value = t.id
+  renameText.value = t.title || ''
+}
+function commitRename(t) {
+  if (renamingId.value !== t.id) return // already committed (e.g. Enter then blur)
+  const name = renameText.value.trim()
+  renamingId.value = null
+  if (name && name !== (t.title || '')) emit('rename', t, name)
+}
+function cancelRename() {
+  renamingId.value = null
+}
+
 // Drag a thread onto a space folder (or Recent) to move it
 const dragId = ref(null)
 const dropOn = ref(null)
@@ -48,9 +66,17 @@ function onDrop(spaceId) {
   dropOn.value = null
 }
 
+// Chat/Gallery filter the list by a thread's kind; All and Favourites show
+// every thread (Favourites swaps the centre pane for the gallery, not the nav).
+function matchesKind(t) {
+  const k = t.kind || 'chat'
+  if (props.filter === 'chat') return k !== 'gallery'
+  if (props.filter === 'gallery') return k === 'gallery'
+  return true
+}
 const filtered = computed(() => {
   const q = props.search.trim().toLowerCase()
-  return props.threads.filter(t => (!props.favourites || t.pinned) && (!q || (t.title || '').toLowerCase().includes(q)))
+  return props.threads.filter(t => matchesKind(t) && (!q || (t.title || '').toLowerCase().includes(q)))
 })
 const pinned = computed(() => filtered.value.filter(t => t.pinned))
 const bySpace = computed(() => {
@@ -72,7 +98,7 @@ const bySpace = computed(() => {
       <button class="rail-btn" title="Expand" @click="emit('update:collapsed', false)">
         <svg class="ic lg"><use href="#s-chev" /></svg>
       </button>
-      <button class="rail-btn" title="New thread" @click="emit('new')">
+      <button class="rail-btn" title="New chat" @click="emit('new', 'chat')">
         <svg class="ic lg"><use href="#s-plus" /></svg>
       </button>
       <button class="rail-btn" title="Threads" @click="emit('update:collapsed', false)">
@@ -92,16 +118,23 @@ const bySpace = computed(() => {
         </button>
       </div>
       <div class="pbody">
-        <button class="newbtn" @click="emit('new')">
-          <svg class="ic"><use href="#s-plus" /></svg> New thread
-        </button>
+        <div class="newrow">
+          <button class="newbtn" @click="emit('new', 'chat')">
+            <svg class="ic"><use href="#s-plus" /></svg> New chat
+          </button>
+          <button class="newbtn" @click="emit('new', 'gallery')">
+            <svg class="ic"><use href="#s-image" /></svg> New gallery
+          </button>
+        </div>
         <div class="nsearch">
           <svg class="ic"><use href="#s-search" /></svg>
           <input :value="search" placeholder="Search threads…" @input="emit('update:search', $event.target.value)" />
         </div>
         <div class="nfilter">
-          <button :class="{ on: !favourites }" @click="emit('update:favourites', false)">All</button>
-          <button :class="{ on: favourites }" @click="emit('update:favourites', true)">
+          <button :class="{ on: filter === 'all' }" @click="emit('update:filter', 'all')">All</button>
+          <button :class="{ on: filter === 'chat' }" @click="emit('update:filter', 'chat')">Chat</button>
+          <button :class="{ on: filter === 'gallery' }" @click="emit('update:filter', 'gallery')">Gallery</button>
+          <button :class="{ on: filter === 'favourites' }" @click="emit('update:filter', 'favourites')">
             <svg class="ic"><use href="#s-star" /></svg> Favourites
           </button>
         </div>
@@ -109,14 +142,24 @@ const bySpace = computed(() => {
         <template v-if="pinned.length">
           <div class="nlabel">Pinned</div>
           <div v-for="t in pinned" :key="t.id" class="nrow" :class="{ active: t.id === active }">
-            <button class="nitem" @click="emit('open', t.id)">
+            <input
+              v-if="renamingId === t.id"
+              v-focus-select
+              class="nrename"
+              :value="renameText"
+              @input="renameText = $event.target.value"
+              @keydown.enter.prevent="commitRename(t)"
+              @keydown.esc="cancelRename"
+              @blur="commitRename(t)"
+            />
+            <button v-else class="nitem" @click="emit('open', t.id)">
               <svg class="ic"><use href="#s-chat" /></svg><span class="lbl">{{ t.title || 'Untitled' }}</span>
             </button>
             <div class="nactions">
-              <button class="nact on" title="Unfavourite" @click.stop="emit('favourite', t)">
-                <svg class="ic sm"><use href="#s-star" /></svg>
+              <button class="nact on" title="Unpin" @click.stop="emit('pin', t)">
+                <svg class="ic sm"><use href="#s-pin" /></svg>
               </button>
-              <button class="nact" title="Rename" @click.stop="emit('rename', t)">
+              <button class="nact" title="Rename" @click.stop="startRename(t)">
                 <svg class="ic sm"><use href="#s-pencil" /></svg>
               </button>
               <button class="nact" title="Delete" @click.stop="emit('delete', t)">
@@ -126,101 +169,119 @@ const bySpace = computed(() => {
           </div>
         </template>
 
-        <template v-if="!favourites">
-          <div class="nlabel row">
-            <span>Spaces</span>
-            <button class="addspace" title="New space" @click="emit('add-space')">
-              <svg class="ic sm"><use href="#s-plus" /></svg>
+        <div class="nlabel row">
+          <span>Spaces</span>
+          <button class="addspace" title="New space" @click="emit('add-space')">
+            <svg class="ic sm"><use href="#s-plus" /></svg>
+          </button>
+        </div>
+        <template v-for="g in bySpace.groups" :key="g.space.id">
+          <div
+            class="folder"
+            :class="{ open: openSpaces.has(g.space.id), drop: dropOn === g.space.id }"
+            @dragover.prevent="dropOn = g.space.id"
+            @dragleave="dropOn = null"
+            @drop.prevent="onDrop(g.space.id)"
+          >
+            <button class="fchev" @click="toggleSpace(g.space.id)">
+              <svg class="ic sm"><use href="#s-chev" /></svg>
             </button>
-          </div>
-          <template v-for="g in bySpace.groups" :key="g.space.id">
-            <div
-              class="folder"
-              :class="{ open: openSpaces.has(g.space.id), drop: dropOn === g.space.id }"
-              @dragover.prevent="dropOn = g.space.id"
-              @dragleave="dropOn = null"
-              @drop.prevent="onDrop(g.space.id)"
-            >
-              <button class="fchev" @click="toggleSpace(g.space.id)">
-                <svg class="ic sm"><use href="#s-chev" /></svg>
+            <button class="fmain" @click="emit('open-space', g.space)">
+              <svg class="ic"><use href="#s-folder" /></svg><span class="lbl">{{ g.space.name }}</span
+              ><span class="count">{{ g.items.length }}</span>
+            </button>
+            <div class="nactions">
+              <button class="nact" title="Space defaults" @click.stop="emit('space-settings', g.space)">
+                <svg class="ic sm"><use href="#s-cog" /></svg>
               </button>
-              <button class="fmain" @click="emit('open-space', g.space)">
-                <svg class="ic"><use href="#s-folder" /></svg><span class="lbl">{{ g.space.name }}</span
-                ><span class="count">{{ g.items.length }}</span>
+              <button class="nact" title="Rename" @click.stop="emit('rename-space', g.space)">
+                <svg class="ic sm"><use href="#s-pencil" /></svg>
+              </button>
+              <button class="nact" title="Delete" @click.stop="emit('delete-space', g.space)">
+                <svg class="ic sm"><use href="#s-trash" /></svg>
+              </button>
+            </div>
+          </div>
+          <div v-show="openSpaces.has(g.space.id)" class="fkids">
+            <div
+              v-for="t in g.items"
+              :key="t.id"
+              class="nrow sm"
+              :class="{ active: t.id === active }"
+              draggable="true"
+              @dragstart="dragId = t.id"
+            >
+              <input
+                v-if="renamingId === t.id"
+                v-focus-select
+                class="nrename"
+                :value="renameText"
+                @input="renameText = $event.target.value"
+                @keydown.enter.prevent="commitRename(t)"
+                @keydown.esc="cancelRename"
+                @blur="commitRename(t)"
+              />
+              <button v-else class="nitem" @click="emit('open', t.id)">
+                <svg class="ic"><use href="#s-chat" /></svg><span class="lbl">{{ t.title || 'Untitled' }}</span>
               </button>
               <div class="nactions">
-                <button class="nact" title="Space defaults" @click.stop="emit('space-settings', g.space)">
-                  <svg class="ic sm"><use href="#s-cog" /></svg>
+                <button class="nact" :class="{ on: t.pinned }" title="Pin" @click.stop="emit('pin', t)">
+                  <svg class="ic sm"><use href="#s-pin" /></svg>
                 </button>
-                <button class="nact" title="Rename" @click.stop="emit('rename-space', g.space)">
+                <button class="nact" title="Rename" @click.stop="startRename(t)">
                   <svg class="ic sm"><use href="#s-pencil" /></svg>
                 </button>
-                <button class="nact" title="Delete" @click.stop="emit('delete-space', g.space)">
+                <button class="nact" title="Delete" @click.stop="emit('delete', t)">
                   <svg class="ic sm"><use href="#s-trash" /></svg>
                 </button>
               </div>
             </div>
-            <div v-show="openSpaces.has(g.space.id)" class="fkids">
-              <div
-                v-for="t in g.items"
-                :key="t.id"
-                class="nrow sm"
-                :class="{ active: t.id === active }"
-                draggable="true"
-                @dragstart="dragId = t.id"
-              >
-                <button class="nitem" @click="emit('open', t.id)">
-                  <svg class="ic"><use href="#s-chat" /></svg><span class="lbl">{{ t.title || 'Untitled' }}</span>
-                </button>
-                <div class="nactions">
-                  <button class="nact" :class="{ on: t.pinned }" title="Favourite" @click.stop="emit('favourite', t)">
-                    <svg class="ic sm"><use href="#s-star" /></svg>
-                  </button>
-                  <button class="nact" title="Rename" @click.stop="emit('rename', t)">
-                    <svg class="ic sm"><use href="#s-pencil" /></svg>
-                  </button>
-                  <button class="nact" title="Delete" @click.stop="emit('delete', t)">
-                    <svg class="ic sm"><use href="#s-trash" /></svg>
-                  </button>
-                </div>
-              </div>
-              <div v-if="!g.items.length" class="fempty">Empty — drag threads here</div>
-            </div>
-          </template>
-
-          <div
-            class="nlabel drop-target"
-            :class="{ drop: dropOn === 'unfiled' }"
-            @dragover.prevent="dropOn = 'unfiled'"
-            @dragleave="dropOn = null"
-            @drop.prevent="onDrop(null)"
-          >
-            Recent
-          </div>
-          <div
-            v-for="t in bySpace.unfiled"
-            :key="t.id"
-            class="nrow sm"
-            :class="{ active: t.id === active }"
-            draggable="true"
-            @dragstart="dragId = t.id"
-          >
-            <button class="nitem" @click="emit('open', t.id)">
-              <svg class="ic"><use href="#s-chat" /></svg><span class="lbl">{{ t.title || 'Untitled' }}</span>
-            </button>
-            <div class="nactions">
-              <button class="nact" :class="{ on: t.pinned }" title="Favourite" @click.stop="emit('favourite', t)">
-                <svg class="ic sm"><use href="#s-star" /></svg>
-              </button>
-              <button class="nact" title="Rename" @click.stop="emit('rename', t)">
-                <svg class="ic sm"><use href="#s-pencil" /></svg>
-              </button>
-              <button class="nact" title="Delete" @click.stop="emit('delete', t)">
-                <svg class="ic sm"><use href="#s-trash" /></svg>
-              </button>
-            </div>
+            <div v-if="!g.items.length" class="fempty">Empty — drag threads here</div>
           </div>
         </template>
+
+        <div
+          class="nlabel drop-target"
+          :class="{ drop: dropOn === 'unfiled' }"
+          @dragover.prevent="dropOn = 'unfiled'"
+          @dragleave="dropOn = null"
+          @drop.prevent="onDrop(null)"
+        >
+          Recent
+        </div>
+        <div
+          v-for="t in bySpace.unfiled"
+          :key="t.id"
+          class="nrow sm"
+          :class="{ active: t.id === active }"
+          draggable="true"
+          @dragstart="dragId = t.id"
+        >
+          <input
+            v-if="renamingId === t.id"
+            v-focus-select
+            class="nrename"
+            :value="renameText"
+            @input="renameText = $event.target.value"
+            @keydown.enter.prevent="commitRename(t)"
+            @keydown.esc="cancelRename"
+            @blur="commitRename(t)"
+          />
+          <button v-else class="nitem" @click="emit('open', t.id)">
+            <svg class="ic"><use href="#s-chat" /></svg><span class="lbl">{{ t.title || 'Untitled' }}</span>
+          </button>
+          <div class="nactions">
+            <button class="nact" :class="{ on: t.pinned }" title="Pin" @click.stop="emit('pin', t)">
+              <svg class="ic sm"><use href="#s-pin" /></svg>
+            </button>
+            <button class="nact" title="Rename" @click.stop="startRename(t)">
+              <svg class="ic sm"><use href="#s-pencil" /></svg>
+            </button>
+            <button class="nact" title="Delete" @click.stop="emit('delete', t)">
+              <svg class="ic sm"><use href="#s-trash" /></svg>
+            </button>
+          </div>
+        </div>
       </div>
       <div class="pfoot">
         <button class="footbtn" @click="emit('media')">
@@ -325,18 +386,26 @@ const bySpace = computed(() => {
   overflow-y: auto;
   padding: 10px;
 }
+.newrow {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
 .newbtn {
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 9px 12px;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 9px 8px;
   border: 1px solid var(--sborder);
   color: var(--sfg);
   border-radius: 10px;
   background: none;
   cursor: pointer;
-  margin-bottom: 10px;
+  font-size: 12.5px;
+  white-space: nowrap;
 }
 .newbtn:hover {
   border-color: var(--sfaint);
@@ -431,6 +500,19 @@ const bySpace = computed(() => {
   border: none;
   cursor: pointer;
   text-align: left;
+}
+.nrename {
+  flex: 1;
+  min-width: 0;
+  margin: 3px 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--saccent);
+  border-radius: 7px;
+  background: var(--spanel2, var(--sbg2));
+  color: var(--sfg);
+  outline: none;
+  font: inherit;
+  font-size: 13px;
 }
 .nrow.sm .nitem {
   padding: 7px 10px;

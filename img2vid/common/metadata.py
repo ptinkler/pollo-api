@@ -292,6 +292,10 @@ class ChatConversation(Base):
     inherited_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
     inherited_credits: Mapped[int | None] = mapped_column(Integer, nullable=True)
     pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Which view a thread opens on: "chat" or "gallery". Both views (the
+    # conversation and the generations gallery) exist on every thread; this
+    # only sets the default landing view and the sidebar filter bucket.
+    kind: Mapped[str] = mapped_column(String(10), default="chat", server_default="chat")
     # The composer settings last used here (mode, sliders, media options; JSON)
     settings_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Defaults (global or its space's) switched off in this chat only:
@@ -334,6 +338,7 @@ class ChatConversation(Base):
             "forked_from_id": self.forked_from_id,
             "forked_from_message_id": self.forked_from_message_id,
             "pinned": bool(self.pinned),
+            "kind": self.kind or "chat",
             "settings": self.settings,
             "hidden_defaults": self.hidden_defaults,
             "paused_instructions": self.paused_instructions,
@@ -750,6 +755,7 @@ class MetadataDB:
             "inherited_cost": "FLOAT",
             "inherited_credits": "INTEGER",
             "pinned": "BOOLEAN NOT NULL DEFAULT 0",
+            "kind": "VARCHAR(10) NOT NULL DEFAULT 'chat'",
             "settings_json": "TEXT",
             "hidden_defaults_json": "TEXT",
             "paused_instructions_json": "TEXT",
@@ -923,6 +929,12 @@ class MetadataDB:
             if user:
                 user.api_keys_json = api_keys_json
                 session.commit()
+
+    def list_api_key_blobs(self) -> list[str]:
+        """Every stored api_keys_json across all users (non-empty), for deciding
+        whether the DB already holds encrypted key material."""
+        with self._session() as session:
+            return [b for (b,) in session.query(User.api_keys_json).filter(User.api_keys_json.isnot(None)) if b]
 
     def create_local_admin(self, email: str, password_hash: str, name: str = "Admin") -> User:
         """Create (or promote + set the password of) a local email+password admin

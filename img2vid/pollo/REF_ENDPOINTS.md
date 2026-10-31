@@ -93,7 +93,7 @@ Cropping/positioning metadata for refs (passed via API, not CLI).
 
 ## Metadata Database
 
-All downloads are tracked in `data/metadata.db` (SQLite). This stores:
+All downloads are tracked in `../../data` (SQLite). This stores:
 - Source URLs
 - Local file paths
 - Task IDs

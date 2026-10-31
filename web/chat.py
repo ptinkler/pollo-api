@@ -272,6 +272,7 @@ TOOLS_VIDEO = {
 
 class ConversationCreate(BaseModel):
     title: str | None = None
+    kind: str | None = None  # "chat" (default) or "gallery" — the thread's landing view
     text_model: str | None = None
     image_model: str | None = None
     video_model: str | None = None
@@ -299,6 +300,7 @@ class ConversationUpdate(BaseModel):
     # "instruction_group": [ids]} — attached but not sent until resumed
     paused_instructions: dict[str, list[int]] | None = None
     pinned: bool | None = None
+    kind: str | None = None  # "chat" or "gallery"
 
 
 class InstructionIn(BaseModel):
@@ -611,6 +613,14 @@ def _snippet(text: str, q: str) -> str:
     )
 
 
+THREAD_KINDS = ("chat", "gallery")
+
+
+def _clean_kind(kind: str | None) -> str:
+    """A thread's landing view: 'chat' or 'gallery' (default 'chat')."""
+    return kind if kind in THREAD_KINDS else "chat"
+
+
 @router.post("/conversations")
 def api_create_conversation(data: ConversationCreate):
     db = get_db()
@@ -626,6 +636,7 @@ def api_create_conversation(data: ConversationCreate):
 
     conv = db.create_conversation(
         title=(data.title or DEFAULT_TITLE).strip()[:255] or DEFAULT_TITLE,
+        kind=_clean_kind(data.kind),
         text_model=data.text_model,
         image_model=data.image_model,
         video_model=data.video_model,
@@ -1017,10 +1028,9 @@ class _Fork:
             shutil.copy2(self.src / name, self.dst / name)
 
 
-@router.patch("/conversations/{conv_id}")
-def api_update_conversation(conv_id: str, data: ConversationUpdate):
-    _require_conv(conv_id)
-    fields = data.model_dump(exclude_unset=True)
+def _clean_conv_update(fields: dict) -> None:
+    """Normalize/validate the mutable ConversationUpdate fields in place
+    (everything except `pinned`, which the route handles separately)."""
     if "instruction_ids" in fields:
         fields["instruction_ids"] = _require_instructions(fields["instruction_ids"] or [])
     if "instruction_group_ids" in fields:
@@ -1029,12 +1039,21 @@ def api_update_conversation(conv_id: str, data: ConversationUpdate):
         _require_space(fields["space_id"])
     if "title" in fields:
         fields["title"] = (fields["title"] or "").strip()[:255] or DEFAULT_TITLE
+    if "kind" in fields:
+        fields["kind"] = _clean_kind(fields["kind"])
     if "character_ids" in fields:
         characters.require(fields["character_ids"], get_db())
     if "hidden_defaults" in fields:
         fields["hidden_defaults"] = _require_hidden_defaults(fields["hidden_defaults"])
     if "paused_instructions" in fields:
         fields["paused_instructions"] = _require_paused(fields["paused_instructions"])
+
+
+@router.patch("/conversations/{conv_id}")
+def api_update_conversation(conv_id: str, data: ConversationUpdate):
+    _require_conv(conv_id)
+    fields = data.model_dump(exclude_unset=True)
+    _clean_conv_update(fields)
     if "pinned" in fields:
         # Not an edit: the chat keeps its place among the rest
         get_db().set_conversation_pinned(conv_id, bool(fields.pop("pinned")))
@@ -2460,6 +2479,24 @@ def api_pin_media(message_id: int, media_id: str, data: PinMedia):
     if not item or item["kind"] != "image" or not item.get("file") or item.get("status", "done") != "done":
         raise HTTPException(404, "Image not found")
     return _message_out(db.update_chat_media_item(message_id, media_id, pinned=data.pinned))
+
+
+class FavouriteMedia(BaseModel):
+    favourite: bool
+
+
+@router.post("/messages/{message_id}/media/{media_id}/favourite")
+def api_favourite_media(message_id: int, media_id: str, data: FavouriteMedia):
+    """Star/un-star a generation. Unlike pinning (which re-sends an image as a
+    reference with every new generation), a favourite is just a bookmark: it
+    surfaces the item in the cross-thread Favourites gallery. Works for images
+    and videos."""
+    db = get_db()
+    msg = db.get_chat_message(message_id)
+    item = _find_media(msg, media_id)
+    if not item or not item.get("file") or item.get("status", "done") != "done":
+        raise HTTPException(404, "Generation not found")
+    return _message_out(db.update_chat_media_item(message_id, media_id, favourite=data.favourite))
 
 
 class RegenerateMedia(BaseModel):

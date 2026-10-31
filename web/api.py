@@ -1,5 +1,5 @@
 """
-Pollo Video Generator — API Backend (FastAPI)
+Pollo Studio — API Backend (FastAPI)
 
 Run:  python web/app.py   (from the pollo root directory)
 """
@@ -69,6 +69,10 @@ async def lifespan(app: FastAPI):
     register_providers()
     providers = configured_providers()
     print(f"🔑 OAuth providers: {', '.join(providers) if providers else 'none configured'}")
+    # Dev: seed the one-click dev account when enabled (no-op otherwise).
+    from .dev_login import seed_dev_user
+
+    seed_dev_user()
     # Startup: resume polling for any jobs stuck in processing
     startup_resume_jobs()
     startup_resume_chat()
@@ -76,7 +80,7 @@ async def lifespan(app: FastAPI):
     # Shutdown: nothing to do
 
 
-app = FastAPI(title="Pollo Video Generator API", lifespan=lifespan)
+app = FastAPI(title="Pollo Studio API", lifespan=lifespan)
 
 # CORS - allow frontend dev server
 app.add_middleware(
@@ -2830,11 +2834,13 @@ def startup_resume_jobs():
 
 # ── Chat mode (OpenRouter) — see web/chat.py ─────────────────────────
 # Must be registered before the SPA catch-all below.
+from .dev_login import router as dev_login_router  # noqa: E402
 from .oauth_routes import router as oauth_router  # noqa: E402
 from .user_keys import router as keys_router  # noqa: E402
 
 app.include_router(oauth_router)
 app.include_router(keys_router)
+app.include_router(dev_login_router)
 app.include_router(chat_router)
 app.include_router(chatgpt_import_router)
 app.include_router(characters.router)

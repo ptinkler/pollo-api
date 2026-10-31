@@ -17,7 +17,6 @@ __pycache__/
 .coverage
 # Data
 data/
-data-dev/
 
 # Projects
 projects/

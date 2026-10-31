@@ -15,6 +15,7 @@ from img2vid.common.metadata import get_db
 
 from . import users
 from .auth import USER_COOKIE, make_user_session
+from .dev_login import dev_login_enabled
 from .oauth import configured_providers, normalize_profile, oauth
 
 router = APIRouter(prefix="/api/auth")
@@ -48,6 +49,7 @@ async def providers(user_session: str | None = Cookie(None)):
     return {
         "providers": configured_providers(),
         "open_signup": users.open_signup(),
+        "dev_login": dev_login_enabled(),
         "user": _user_dict(user) if user else None,
     }
 

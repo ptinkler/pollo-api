@@ -1,6 +1,6 @@
-# Pollo Video Generator - Vue Frontend
+# Pollo Studio - Vue Frontend
 
-A Vue 3 frontend for the Pollo Video Generator with client-side routing.
+A Vue 3 frontend for Pollo Studio with client-side routing.
 
 ## URL Routes
 

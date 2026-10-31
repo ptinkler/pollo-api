@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from img2vid.common.metadata import get_db
 
 from .auth import _user_secret
+from .dev_login import store_keys_plaintext
 from .users import require_user
 
 KEY_PROVIDERS = ("pollo", "venice", "openrouter")
@@ -34,12 +35,23 @@ def _fernet() -> Fernet:
 
 
 def _encrypt(keys: dict) -> str:
+    # In dev (DEV_LOGIN, fresh DB) store plaintext JSON — no secret to set,
+    # nothing to lose. A Fernet token is never valid JSON, so reads tell the
+    # two apart. See web/dev_login.py.
+    if store_keys_plaintext():
+        return json.dumps(keys)
     return _fernet().encrypt(json.dumps(keys).encode()).decode()
 
 
 def _decrypt(blob: str | None) -> dict:
     if not blob:
         return {}
+    try:  # plaintext JSON (dev / no-encryption)
+        data = json.loads(blob)
+        if isinstance(data, dict):
+            return data
+    except (ValueError, TypeError):
+        pass
     try:
         return json.loads(_fernet().decrypt(blob.encode()).decode())
     except (InvalidToken, ValueError):

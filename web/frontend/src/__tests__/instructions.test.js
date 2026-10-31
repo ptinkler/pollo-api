@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import InstructionEditor from '../components/chat/InstructionEditor.vue'
 import InstructionPicker from '../components/chat/InstructionPicker.vue'
-import InstructionsView from '../views/InstructionsView.vue'
+import StudioInstructionsPage from '../components/studio/StudioInstructionsPage.vue'
 import { useChatDefaults } from '../composables/useChatDefaults'
 
 const resp = j => ({ ok: true, status: 200, json: async () => j })
@@ -85,9 +85,9 @@ describe('InstructionEditor', () => {
   })
 })
 
-describe('InstructionsView', () => {
+describe('StudioInstructionsPage', () => {
   it('lists groups and snippets and opens one in the editor', async () => {
-    const w = mount(InstructionsView, { attachTo: document.body })
+    const w = mount(StudioInstructionsPage, { attachTo: document.body })
     await flushPromises()
     expect(w.findAll('.card h3').map(h => h.text())).toEqual([
       '📦 House style',

@@ -1,9 +1,9 @@
 <!-- Studio compose bar: attachments + mode pills + prompt box + send.
      Presentational — attachment list/upload state come from props. -->
 <script setup>
-import { ref } from 'vue'
+import { ref, watch, nextTick, onMounted } from 'vue'
 
-defineProps({
+const props = defineProps({
   modes: { type: Array, default: () => [] },
   mode: { type: String, default: 'auto' },
   draft: { type: String, default: '' },
@@ -17,6 +17,27 @@ const emit = defineEmits(['update:draft', 'update:mode', 'send', 'files', 'remov
 
 const fileInput = ref(null)
 const drag = ref(false)
+const ta = ref(null)
+
+// Grow the prompt box with its content up to the CSS max-height, then scroll.
+function autogrow() {
+  const el = ta.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight}px`
+}
+watch(
+  () => props.draft,
+  () => nextTick(autogrow),
+)
+onMounted(autogrow)
+
+// A method (not two inline statements) so a prettier reformat can't break the
+// template handler by splitting it across lines without a separator.
+function onInput(e) {
+  emit('update:draft', e.target.value)
+  autogrow()
+}
 
 function onKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -60,11 +81,12 @@ function onDrop(e) {
       </div>
 
       <textarea
+        ref="ta"
         :value="draft"
         rows="1"
         placeholder="Message, or describe an image / video…"
         :disabled="sending"
-        @input="emit('update:draft', $event.target.value)"
+        @input="onInput"
         @keydown="onKey"
       ></textarea>
 
@@ -162,7 +184,8 @@ textarea {
   resize: none;
   outline: none;
   min-height: 24px;
-  max-height: 180px;
+  max-height: 45vh;
+  overflow-y: auto;
   font: inherit;
 }
 .cbar {

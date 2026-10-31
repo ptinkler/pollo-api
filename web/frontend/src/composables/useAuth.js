@@ -42,6 +42,11 @@ export function useAuth() {
     _signedIn(await _post('/api/auth/login', { email, password }))
   }
 
+  // One-click local dev account (only works when the server has DEV_LOGIN on).
+  async function devLogin() {
+    _signedIn(await _post('/api/auth/dev-login', {}))
+  }
+
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' })
     isAuthenticated.value = false
@@ -53,5 +58,5 @@ export function useAuth() {
     showLogin.value = true
   }
 
-  return { isAuthenticated, currentUser, showLogin, login, logout, promptLogin }
+  return { isAuthenticated, currentUser, showLogin, login, devLogin, logout, promptLogin }
 }

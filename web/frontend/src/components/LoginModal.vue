@@ -3,20 +3,35 @@ import { ref, watch, onMounted } from 'vue'
 import { useAuth } from '../composables/useAuth'
 import { fetchAuthProviders, authLoginUrl } from '../composables/useAccount'
 
-const { showLogin, login } = useAuth()
+const { showLogin, login, devLogin } = useAuth()
 const email = ref('')
 const password = ref('')
 const error = ref('')
 const busy = ref(false)
 const providers = ref([])
+const devAvailable = ref(false)
 
 onMounted(async () => {
   try {
-    providers.value = (await fetchAuthProviders()).providers || []
+    const info = await fetchAuthProviders()
+    providers.value = info.providers || []
+    devAvailable.value = !!info.dev_login
   } catch {
     providers.value = []
   }
 })
+
+async function devSignIn() {
+  busy.value = true
+  error.value = ''
+  try {
+    await devLogin()
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    busy.value = false
+  }
+}
 
 watch(showLogin, open => {
   if (open) {
@@ -61,6 +76,10 @@ const providerLabels = { google: 'Google', microsoft: 'Microsoft', x: 'X' }
           <a v-for="p in providers" :key="p" class="btn btn-secondary oauth" :href="authLoginUrl(p)">
             Continue with {{ providerLabels[p] || p }}
           </a>
+        </template>
+        <template v-if="devAvailable">
+          <div class="divider">dev</div>
+          <button class="btn btn-secondary oauth" :disabled="busy" @click="devSignIn">🛠 Dev sign-in</button>
         </template>
       </div>
     </div>
