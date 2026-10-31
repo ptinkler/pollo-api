@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from img2vid.common.metadata import MetadataDB
+from web.core.metadata import MetadataDB
 
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 
@@ -760,7 +760,7 @@ class TestOpenRouterErrors:
         return httpx.Response(status, json=body)
 
     def test_names_upstream_provider(self):
-        from web import openrouter
+        from web.providers import openrouter
 
         body = {
             "error": {
@@ -775,7 +775,7 @@ class TestOpenRouterErrors:
         assert e.value.status == 400
 
     def test_appends_raw_upstream_message(self):
-        from web import openrouter
+        from web.providers import openrouter
 
         body = {
             "error": {
@@ -790,7 +790,7 @@ class TestOpenRouterErrors:
     def test_non_json_body(self):
         import httpx
 
-        from web import openrouter
+        from web.providers import openrouter
 
         with pytest.raises(openrouter.OpenRouterError) as e:
             openrouter._raise_for_response(httpx.Response(503, text="upstream down"))

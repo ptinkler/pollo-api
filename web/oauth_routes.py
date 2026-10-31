@@ -11,7 +11,7 @@ import os
 from fastapi import APIRouter, Cookie, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
-from img2vid.common.metadata import get_db
+from web.core.metadata import get_db
 
 from . import users
 from .auth import USER_COOKIE, make_user_session

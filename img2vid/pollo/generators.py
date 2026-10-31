@@ -5,9 +5,9 @@ from typing import Any, ClassVar
 import requests
 from PIL import Image
 
-from ..common.cloudflare import is_cloudflare_block
-from ..common.config import POLLO_API_BASE, POLLO_API_TIMEOUT, POLLO_API_V1_BASE
-from ..common.get_inputs import (
+from web.core.cloudflare import is_cloudflare_block
+from web.core.config import POLLO_API_BASE, POLLO_API_TIMEOUT, POLLO_API_V1_BASE
+from web.core.get_inputs import (
     get_audio_url,
     get_image_path,
     get_image_url,

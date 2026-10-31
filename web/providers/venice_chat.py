@@ -37,7 +37,7 @@ from typing import Any
 
 import httpx
 
-from . import request_log, sse
+from .. import request_log, sse
 from .openrouter import CHAT_TIMEOUT, IMAGE_TIMEOUT, OpenRouterError, _keepalive_socket_options
 
 VENICE_BASE = os.getenv("VENICE_BASE_URL", "https://api.venice.ai/api/v1").rstrip("/")
@@ -88,7 +88,7 @@ class VeniceError(OpenRouterError):
 
 
 def get_api_key() -> str:
-    from . import keyctx
+    from .. import keyctx
 
     return keyctx.provider_key("venice") or ""
 

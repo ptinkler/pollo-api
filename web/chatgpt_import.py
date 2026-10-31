@@ -42,8 +42,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
-from img2vid.common import config
-from img2vid.common.metadata import get_db
+from web.core import config
+from web.core.metadata import get_db
 
 from . import media
 from .chat import CHAT_PREVIEW_SIZE, IMAGE_EXTS, ConversationCreate, _conv_dir, api_create_conversation

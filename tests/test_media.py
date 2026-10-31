@@ -34,7 +34,7 @@ def project(db):
 
 @pytest.fixture()
 def conv(db, tmp_path):
-    import img2vid.common.config as config
+    import web.core.config as config
 
     c = db.create_conversation(title="Fox chat")
     d = config.ROOT_DIR / "chat" / c.id
@@ -130,7 +130,7 @@ class TestOrphans:
         from, and the folder of a deleted chat — all old enough."""
         import os
 
-        import img2vid.common.config as config
+        import web.core.config as config
 
         root = config.ROOT_DIR / "chat"
         (root / conv.id / "up_lost.png").write_bytes(_png())
@@ -195,7 +195,7 @@ class TestImport:
         assert same == {"image_url": "local:src-abc.png"}
 
     def test_into_a_chat(self, client, project, conv):
-        import img2vid.common.config as config
+        import web.core.config as config
 
         r = client.post(
             "/api/media/import",
@@ -230,7 +230,7 @@ class TestDelete:
         assert db.get_project_by_slug(project.slug).image_url is None
 
     def test_chat_item_leaves_its_message(self, client, db, conv):
-        import img2vid.common.config as config
+        import web.core.config as config
 
         assert client.delete(f"/api/media/chat:{conv.id}:img_1.png").status_code == 200
         reply = db.get_chat_messages(conv.id)[-1]
@@ -253,7 +253,7 @@ class TestBlocked:
     def blocked(self, db, conv):
         """conv plus: a moderated failure and a black image in a reply, an
         ordinary failure (kept), and a moderated failure detached to the library."""
-        import img2vid.common.config as config
+        import web.core.config as config
 
         d = config.ROOT_DIR / "chat" / conv.id
         (d / "img_black.png").write_bytes(_png("black"))

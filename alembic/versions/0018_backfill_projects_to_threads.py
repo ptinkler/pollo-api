@@ -40,8 +40,8 @@ from alembic import op
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from img2vid.common import config
-from img2vid.common.metadata import (
+from web.core import config
+from web.core.metadata import (
     ChatConversation,
     ChatMessage,
     Download,

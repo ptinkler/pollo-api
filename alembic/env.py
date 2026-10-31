@@ -10,7 +10,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from img2vid.common.metadata import Base
+from web.core.metadata import Base
 
 # Alembic Config object
 config = context.config
@@ -18,7 +18,7 @@ config = context.config
 # Use sqlalchemy.url if already set (e.g. by tests or CLI override),
 # otherwise derive from the app's DB_PATH config.
 if not config.get_main_option("sqlalchemy.url") or config.get_main_option("sqlalchemy.url") == "sqlite:///placeholder":
-    from img2vid.common.config import DB_PATH
+    from web.core.config import DB_PATH
 
     config.set_main_option("sqlalchemy.url", f"sqlite:///{DB_PATH}")
 

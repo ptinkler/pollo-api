@@ -42,8 +42,8 @@ from fastapi.responses import FileResponse
 from PIL import Image, ImageOps
 from pydantic import BaseModel
 
-from img2vid.common import config
-from img2vid.common.metadata import get_db, iso
+from web.core import config
+from web.core.metadata import get_db, iso
 
 from . import characters
 from .uploads import image_media_type, is_blank_image, read_image_upload, safe_filename
@@ -72,7 +72,7 @@ def library_dir() -> Path:
     # Read config at call time so tests can redirect ROOT_DIR. Per-user
     # (<data>/library/<user_id>/) so one user's uploads never show to another;
     # the shared legacy folder is the admin's, migrated by provision_admin.
-    from img2vid.common.metadata import current_tenant
+    from web.core.metadata import current_tenant
 
     base = config.ROOT_DIR / "library"
     uid = current_tenant()
@@ -378,7 +378,7 @@ _list_cache: dict[tuple, dict] = {}
 
 
 def _all_items() -> list[dict[str, Any]]:
-    from img2vid.common.metadata import current_tenant
+    from web.core.metadata import current_tenant
 
     key = (config.ROOT_DIR, current_tenant())
     now = time.monotonic()

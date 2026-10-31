@@ -15,7 +15,7 @@ from typing import Any
 
 import requests
 
-from img2vid.common.cloudflare import is_cloudflare_block
+from web.core.cloudflare import is_cloudflare_block
 
 # Stand-ins for the request's media: what's priced is that there is an
 # image, end frame or reference, not what it shows (Pollo accepts these,

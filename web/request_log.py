@@ -30,7 +30,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from img2vid.common import config
+from web.core import config
 
 MAX_BYTES = 5 * 1024 * 1024
 _lock = threading.Lock()

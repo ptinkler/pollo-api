@@ -1,4 +1,4 @@
-"""Tests for web.venice_chat — Venice text, image and video models in chat (no network)."""
+"""Tests for web.providers.venice_chat — Venice text, image and video models in chat (no network)."""
 
 import base64
 import json
@@ -169,7 +169,7 @@ class FakeVenice:
 
 @pytest.fixture()
 def venice(chat, monkeypatch, tmp_path, provider_keys):
-    import web.venice_chat as v
+    import web.providers.venice_chat as v
 
     provider_keys["venice"] = "v-test"
     fake = FakeVenice()

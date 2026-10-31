@@ -1,10 +1,10 @@
-"""Tests for img2vid.common.metadata — MetadataDB, ORM models, convenience functions."""
+"""Tests for web.core.metadata — MetadataDB, ORM models, convenience functions."""
 
 from datetime import UTC
 
 import pytest
 
-from img2vid.common.metadata import Download, Job, MetadataDB, get_db, record_download
+from web.core.metadata import Download, Job, MetadataDB, get_db, record_download
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 
@@ -389,8 +389,8 @@ class TestToDict:
 
 class TestGlobalDB:
     def test_get_db_returns_singleton(self, tmp_path, monkeypatch):
-        import img2vid.common.config as config_mod
-        import img2vid.common.metadata as meta_mod
+        import web.core.config as config_mod
+        import web.core.metadata as meta_mod
 
         old = meta_mod._db_instance
         # Point DB_PATH to tmp so we never touch the real filesystem
@@ -405,7 +405,7 @@ class TestGlobalDB:
             meta_mod._db_instance = old
 
     def test_record_download_convenience(self, db, monkeypatch):
-        import img2vid.common.metadata as meta_mod
+        import web.core.metadata as meta_mod
 
         monkeypatch.setattr(meta_mod, "_db_instance", db)
         db.create_project(name="conv", slug="conv")

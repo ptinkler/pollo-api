@@ -24,8 +24,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from img2vid.common import config
-from img2vid.common.metadata import get_db
+from web.core import config
+from web.core.metadata import get_db
 
 from .uploads import image_media_type, read_image_upload, safe_filename
 from .users import require_user

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from img2vid.common.metadata import MetadataDB
+from web.core.metadata import MetadataDB
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 
@@ -1194,7 +1194,7 @@ class TestJobEndpointsExtended:
         db.update_job("stale1", status="downloading", video_url="https://v.mp4")
         # Make it stale by setting updated_at to the past
         with db._session() as session:
-            from img2vid.common.metadata import Job as JobModel
+            from web.core.metadata import Job as JobModel
 
             job = session.query(JobModel).filter(JobModel.job_id == "stale1").first()
             job.updated_at = datetime.now() - timedelta(seconds=300)
@@ -1408,7 +1408,7 @@ class TestDownloadJobVideo:
         db.update_job("dbj1", status="done", video_url="https://v.mp4")
         # Manually set bad params_json
         with db._session() as session:
-            from img2vid.common.metadata import Job as JobModel
+            from web.core.metadata import Job as JobModel
 
             job = session.query(JobModel).filter(JobModel.job_id == "dbj1").first()
             job.params_json = "not valid json"
@@ -1673,7 +1673,7 @@ class TestJobsListStaleRecovery:
         db.create_job(job_id="sl1", project=proj.slug, model="pollodance20", prompt="x")
         db.update_job("sl1", status="downloading", video_url="https://v.mp4")
         with db._session() as session:
-            from img2vid.common.metadata import Job as JobModel
+            from web.core.metadata import Job as JobModel
 
             job = session.query(JobModel).filter(JobModel.job_id == "sl1").first()
             job.updated_at = datetime.now() - timedelta(seconds=300)

@@ -24,7 +24,6 @@ from urllib.parse import urlsplit
 import requests
 from PIL import Image
 
-from img2vid.common.get_task import get_task_status
 from img2vid.pollo.generators import ERROR_STATUSES, SUCCESS_STATUSES, BaseVideoGenerator
 from img2vid.pollo.pollo_img2vid import (
     GENERATORS_V1,
@@ -33,8 +32,9 @@ from img2vid.pollo.pollo_img2vid import (
     get_image_generator,
     get_video_generator,
 )
+from web.core.get_task import get_task_status
 
-from . import image_hosts, keyctx, request_log
+from .. import image_hosts, keyctx, request_log
 from .openrouter import OpenRouterError
 from .pollo_models import MODEL_INFO
 

@@ -1,8 +1,8 @@
-"""Tests for img2vid.common.get_task — task status polling."""
+"""Tests for web.core.get_task — task status polling."""
 
 from unittest.mock import MagicMock, patch
 
-from img2vid.common.get_task import get_credit_balance, get_task_status
+from web.core.get_task import get_credit_balance, get_task_status
 
 
 class TestGetTaskStatus:
@@ -12,7 +12,7 @@ class TestGetTaskStatus:
         mock_resp.json.return_value = {
             "data": {"generations": [{"status": "succeed", "failMsg": None, "url": "https://video.com/out.mp4"}]}
         }
-        with patch("img2vid.common.get_task.requests.request", return_value=mock_resp):
+        with patch("web.core.get_task.requests.request", return_value=mock_resp):
             results = get_task_status("task123", "api-key-123")
         assert len(results) == 1
         assert results[0] == ("succeed", None, "https://video.com/out.mp4", None)
@@ -28,7 +28,7 @@ class TestGetTaskStatus:
                 ],
             }
         }
-        with patch("img2vid.common.get_task.requests.request", return_value=mock_resp):
+        with patch("web.core.get_task.requests.request", return_value=mock_resp):
             results = get_task_status("task123", "api-key-123")
         assert results[0][3] == 21
 
@@ -42,7 +42,7 @@ class TestGetTaskStatus:
                 "generations": [{"status": "succeed", "failMsg": None, "url": "https://video.com/out.mp4"}],
             }
         }
-        with patch("img2vid.common.get_task.requests.request", return_value=mock_resp):
+        with patch("web.core.get_task.requests.request", return_value=mock_resp):
             results = get_task_status("task123", "api-key-123")
         assert results[0][3] == 15
 
@@ -58,7 +58,7 @@ class TestGetTaskStatus:
                 ],
             }
         }
-        with patch("img2vid.common.get_task.requests.request", return_value=mock_resp):
+        with patch("web.core.get_task.requests.request", return_value=mock_resp):
             results = get_task_status("task123", "api-key-123")
         assert results[0] == ("succeed", None, "https://cdn.pollo.ai/video.mp4", 21)
 
@@ -68,7 +68,7 @@ class TestGetTaskStatus:
         mock_resp.json.return_value = {
             "data": {"generations": [{"status": "error", "failMsg": "Something broke", "url": None}]}
         }
-        with patch("img2vid.common.get_task.requests.request", return_value=mock_resp):
+        with patch("web.core.get_task.requests.request", return_value=mock_resp):
             results = get_task_status("task123", "api-key-123")
         assert results[0][0] == "error"
         assert results[0][1] == "Something broke"
@@ -79,7 +79,7 @@ class TestGetTaskStatus:
         mock_resp.json.return_value = {
             "data": {"generations": [{"status": "processing", "failMsg": None, "url": None}]}
         }
-        with patch("img2vid.common.get_task.requests.request", return_value=mock_resp):
+        with patch("web.core.get_task.requests.request", return_value=mock_resp):
             results = get_task_status("task123", "api-key-123")
         assert results[0] == ("processing", None, None, None)
 
@@ -87,7 +87,7 @@ class TestGetTaskStatus:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"data": {"generations": []}}
-        with patch("img2vid.common.get_task.requests.request", return_value=mock_resp):
+        with patch("web.core.get_task.requests.request", return_value=mock_resp):
             results = get_task_status("task123", "api-key-123")
         assert results == [("error", "No generations found.", None, None)]
 
@@ -95,7 +95,7 @@ class TestGetTaskStatus:
         mock_resp = MagicMock()
         mock_resp.status_code = 400
         mock_resp.json.return_value = {"data": {"issues": [{"message": "Bad request"}]}}
-        with patch("img2vid.common.get_task.requests.request", return_value=mock_resp):
+        with patch("web.core.get_task.requests.request", return_value=mock_resp):
             results = get_task_status("task123", "api-key-123")
         assert results[0][0] == "error"
         assert results[0][1] == "Bad request"
@@ -104,7 +104,7 @@ class TestGetTaskStatus:
         mock_resp = MagicMock()
         mock_resp.status_code = 400
         mock_resp.json.return_value = {"data": {"issues": []}}
-        with patch("img2vid.common.get_task.requests.request", return_value=mock_resp):
+        with patch("web.core.get_task.requests.request", return_value=mock_resp):
             # No issues means the for-loop doesn't trigger, returns HTTP error fallback
             results = get_task_status("task123", "api-key-123")
         assert results == [("error", "HTTP 400", None, None)]
@@ -120,7 +120,7 @@ class TestGetTaskStatus:
                 ]
             }
         }
-        with patch("img2vid.common.get_task.requests.request", return_value=mock_resp):
+        with patch("web.core.get_task.requests.request", return_value=mock_resp):
             results = get_task_status("task123", "api-key-123")
         assert len(results) == 2
 
@@ -129,8 +129,8 @@ class TestGetTaskStatus:
         mock_resp.status_code = 403
         mock_resp.text = "<html><title>Just a moment...</title>cloudflare</html>"
         with (
-            patch("img2vid.common.get_task.requests.request", return_value=mock_resp),
-            patch("img2vid.common.get_task.is_cloudflare_block", return_value=True),
+            patch("web.core.get_task.requests.request", return_value=mock_resp),
+            patch("web.core.get_task.is_cloudflare_block", return_value=True),
         ):
             results = get_task_status("task123", "api-key-123")
         assert results[0][0] == "cloudflare_blocked"
@@ -140,7 +140,7 @@ class TestGetTaskStatus:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"data": {"generations": [{"status": "succeed", "failMsg": None, "url": "x"}]}}
-        with patch("img2vid.common.get_task.requests.request", return_value=mock_resp) as mock_req:
+        with patch("web.core.get_task.requests.request", return_value=mock_resp) as mock_req:
             get_task_status("task123", "my-key")
         mock_req.assert_called_once_with(
             "GET",
@@ -155,18 +155,18 @@ class TestGetCreditBalance:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"availableCredits": 500, "totalCredits": 1000}
-        with patch("img2vid.common.get_task.requests.get", return_value=mock_resp):
+        with patch("web.core.get_task.requests.get", return_value=mock_resp):
             result = get_credit_balance("api-key-123")
         assert result == {"availableCredits": 500, "totalCredits": 1000}
 
     def test_failure(self):
         mock_resp = MagicMock()
         mock_resp.status_code = 401
-        with patch("img2vid.common.get_task.requests.get", return_value=mock_resp):
+        with patch("web.core.get_task.requests.get", return_value=mock_resp):
             result = get_credit_balance("bad-key")
         assert result is None
 
     def test_network_error(self):
-        with patch("img2vid.common.get_task.requests.get", side_effect=Exception("timeout")):
+        with patch("web.core.get_task.requests.get", side_effect=Exception("timeout")):
             result = get_credit_balance("api-key-123")
         assert result is None

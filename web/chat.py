@@ -67,10 +67,11 @@ from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from img2vid.common import config
-from img2vid.common.metadata import get_db, iso
+from web.core import config
+from web.core.metadata import get_db, iso
 
-from . import characters, media, openrouter, pollo_chat, request_log, venice_chat
+from . import characters, media, request_log
+from .providers import openrouter, pollo_chat, venice_chat
 from .uploads import is_blank_image, read_image_upload, read_video_upload, safe_filename
 from .users import require_user
 

@@ -1,8 +1,8 @@
-"""Tests for img2vid.common.get_inputs — file reading utilities."""
+"""Tests for web.core.get_inputs — file reading utilities."""
 
 import pytest
 
-from img2vid.common.get_inputs import (
+from web.core.get_inputs import (
     get_audio_url,
     get_from_file,
     get_image_path,

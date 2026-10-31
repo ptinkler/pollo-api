@@ -1,10 +1,11 @@
 import uuid
 from time import sleep
 
-from ..common.download import download_image, download_video
-from ..common.get_task import get_task_status
-from ..common.metadata import get_db
-from ..common.spinner import Spinner
+from web.core.download import download_image, download_video
+from web.core.get_task import get_task_status
+from web.core.metadata import get_db
+from web.core.spinner import Spinner
+
 from .generators import (
     ERROR_STATUSES,
     SUCCESS_STATUSES,

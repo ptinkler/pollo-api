@@ -1,11 +1,11 @@
-"""Tests for img2vid.common.download — download, validation, filename utilities."""
+"""Tests for web.core.download — download, validation, filename utilities."""
 
 import struct
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from img2vid.common.download import (
+from web.core.download import (
     _has_moov_atom,
     download_file,
     download_image,
@@ -169,14 +169,14 @@ class TestDownloadFile:
         mock_resp.iter_content.return_value = [b"chunk1", b"chunk2"]
         mock_resp.raise_for_status = MagicMock()
         dest = str(tmp_path / "out.mp4")
-        with patch("img2vid.common.download.requests.get", return_value=mock_resp):
+        with patch("web.core.download.requests.get", return_value=mock_resp):
             download_file("https://example.com/video.mp4", dest)
         assert (tmp_path / "out.mp4").read_bytes() == b"chunk1chunk2"
 
 
 class TestDownloadImage:
     def test_downloads_new_image(self, tmp_path, monkeypatch):
-        import img2vid.common.download as dl_mod
+        import web.core.download as dl_mod
 
         monkeypatch.setattr(dl_mod, "ASSETS_DIR", tmp_path)
 
@@ -185,14 +185,14 @@ class TestDownloadImage:
         mock_resp.raise_for_status = MagicMock()
 
         with (
-            patch("img2vid.common.download.requests.get", return_value=mock_resp),
-            patch("img2vid.common.download.record_download"),
+            patch("web.core.download.requests.get", return_value=mock_resp),
+            patch("web.core.download.record_download"),
         ):
             result = download_image("https://example.com/img.jpg", "testproj")
         assert "image.jpg" in result
 
     def test_skips_existing_image(self, tmp_path, monkeypatch):
-        import img2vid.common.download as dl_mod
+        import web.core.download as dl_mod
 
         monkeypatch.setattr(dl_mod, "ASSETS_DIR", tmp_path)
 
@@ -206,7 +206,7 @@ class TestDownloadImage:
 
 class TestDownloadVideo:
     def test_downloads_and_validates(self, tmp_path, monkeypatch):
-        import img2vid.common.download as dl_mod
+        import web.core.download as dl_mod
 
         monkeypatch.setattr(dl_mod, "ASSETS_DIR", tmp_path)
 
@@ -220,15 +220,15 @@ class TestDownloadVideo:
         mock_db.get_downloads_by_task_id.return_value = []
 
         with (
-            patch("img2vid.common.download.download_file", side_effect=fake_download),
-            patch("img2vid.common.download.record_download"),
-            patch("img2vid.common.download.get_db", return_value=mock_db),
+            patch("web.core.download.download_file", side_effect=fake_download),
+            patch("web.core.download.record_download"),
+            patch("web.core.download.get_db", return_value=mock_db),
         ):
             result = download_video("https://cdn.example.com/video.mp4", "proj", task_id="t1", model="pollodance20")
         assert result.endswith(".mp4")
 
     def test_removes_corrupt_file(self, tmp_path, monkeypatch):
-        import img2vid.common.download as dl_mod
+        import web.core.download as dl_mod
 
         monkeypatch.setattr(dl_mod, "ASSETS_DIR", tmp_path)
 
@@ -240,13 +240,13 @@ class TestDownloadVideo:
                 f.write(b"\x00" * 100)  # Too small
 
         with (
-            patch("img2vid.common.download.download_file", side_effect=fake_download),
+            patch("web.core.download.download_file", side_effect=fake_download),
             pytest.raises(ValueError, match="too small"),
         ):
             download_video("https://cdn.example.com/video.mp4", "proj")
 
     def test_no_record_when_disabled(self, tmp_path, monkeypatch):
-        import img2vid.common.download as dl_mod
+        import web.core.download as dl_mod
 
         monkeypatch.setattr(dl_mod, "ASSETS_DIR", tmp_path)
 
@@ -257,15 +257,15 @@ class TestDownloadVideo:
             _make_mp4_with_moov(dest)
 
         with (
-            patch("img2vid.common.download.download_file", side_effect=fake_download),
-            patch("img2vid.common.download.record_download") as mock_record,
+            patch("web.core.download.download_file", side_effect=fake_download),
+            patch("web.core.download.record_download") as mock_record,
         ):
             download_video("https://cdn.example.com/video.mp4", "proj", record=False)
         mock_record.assert_not_called()
 
     def test_fallback_to_uuid_filename(self, tmp_path, monkeypatch):
         """When URL doesn't yield an mp4 filename, fall back to UUID."""
-        import img2vid.common.download as dl_mod
+        import web.core.download as dl_mod
 
         monkeypatch.setattr(dl_mod, "ASSETS_DIR", tmp_path)
 
@@ -276,8 +276,8 @@ class TestDownloadVideo:
             _make_mp4_with_moov(dest)
 
         with (
-            patch("img2vid.common.download.download_file", side_effect=fake_download),
-            patch("img2vid.common.download.record_download"),
+            patch("web.core.download.download_file", side_effect=fake_download),
+            patch("web.core.download.record_download"),
         ):
             result = download_video("https://cdn.example.com/path/noext", "proj")
         # Should have used UUID filename
@@ -285,7 +285,7 @@ class TestDownloadVideo:
 
     def test_corrupt_file_remove_oserror(self, tmp_path, monkeypatch):
         """When validate_video fails and os.remove also fails, still raises ValueError."""
-        import img2vid.common.download as dl_mod
+        import web.core.download as dl_mod
 
         monkeypatch.setattr(dl_mod, "ASSETS_DIR", tmp_path)
 
@@ -297,7 +297,7 @@ class TestDownloadVideo:
                 f.write(b"\x00" * 100)  # Too small
 
         with (
-            patch("img2vid.common.download.download_file", side_effect=fake_download),
+            patch("web.core.download.download_file", side_effect=fake_download),
             patch("os.remove", side_effect=OSError("perm denied")),
             pytest.raises(ValueError, match="too small"),
         ):
@@ -306,7 +306,7 @@ class TestDownloadVideo:
 
 class TestDownloadImageNoRecord:
     def test_no_record_when_disabled(self, tmp_path, monkeypatch):
-        import img2vid.common.download as dl_mod
+        import web.core.download as dl_mod
 
         monkeypatch.setattr(dl_mod, "ASSETS_DIR", tmp_path)
 
@@ -315,8 +315,8 @@ class TestDownloadImageNoRecord:
         mock_resp.raise_for_status = MagicMock()
 
         with (
-            patch("img2vid.common.download.requests.get", return_value=mock_resp),
-            patch("img2vid.common.download.record_download") as mock_record,
+            patch("web.core.download.requests.get", return_value=mock_resp),
+            patch("web.core.download.record_download") as mock_record,
         ):
             download_image("https://example.com/img.jpg", "testproj", record=False)
         mock_record.assert_not_called()
@@ -383,5 +383,5 @@ class TestHasMoovAtomEdgeCases:
 class TestGetFilenameFromUrlException:
     def test_exception_returns_none(self):
         """When urlparse throws an exception, return None."""
-        with patch("img2vid.common.download.urlparse", side_effect=Exception("parse error")):
+        with patch("web.core.download.urlparse", side_effect=Exception("parse error")):
             assert get_filename_from_url("https://example.com/video.mp4") is None

@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 
-from . import net_guard, request_log, sse
+from .. import net_guard, request_log, sse
 
 # Overridable so a local fake can stand in during manual testing
 OPENROUTER_BASE = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
@@ -76,7 +76,7 @@ def _connection_guard(waiting_for: str):
 
 
 def get_api_key() -> str:
-    from . import keyctx
+    from .. import keyctx
 
     return keyctx.provider_key("openrouter") or ""
 

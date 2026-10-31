@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import getpass
 
-from img2vid.common.metadata import get_db
+from web.core.metadata import get_db
 
 
 def main() -> None:
@@ -46,7 +46,7 @@ def main() -> None:
 
 def _migrate_library(admin_id: str) -> int:
     """Move the shared (legacy) library uploads into the admin's per-user folder."""
-    from img2vid.common import config
+    from web.core import config
 
     base = config.ROOT_DIR / "library"
     if not base.is_dir():

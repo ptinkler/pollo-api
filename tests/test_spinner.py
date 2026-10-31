@@ -1,8 +1,8 @@
-"""Tests for img2vid.common.spinner — CLI spinner utility."""
+"""Tests for web.core.spinner — CLI spinner utility."""
 
 import time
 
-from img2vid.common.spinner import Spinner
+from web.core.spinner import Spinner
 
 
 class TestSpinner:

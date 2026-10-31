@@ -16,7 +16,7 @@ import os
 
 from fastapi import Cookie, HTTPException
 
-from img2vid.common.metadata import get_db
+from web.core.metadata import get_db
 
 from .auth import resolve_user_session
 

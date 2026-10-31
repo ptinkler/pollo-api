@@ -1,4 +1,4 @@
-"""Tests for Seedance 2.5 Draft / Extend and Pollo's price checks (web.pollo_estimate)."""
+"""Tests for Seedance 2.5 Draft / Extend and Pollo's price checks (web.providers.pollo_estimate)."""
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -12,7 +12,7 @@ from img2vid.pollo.generators import (
     Seedance25ExtendVideoGeneratorV1,
     Seedance25VideoGeneratorV1,
 )
-from web import pollo_estimate
+from web.providers import pollo_estimate
 
 V1 = "https://pollo.ai/api/platform/v1/generation"
 LEGACY = "https://pollo.ai/api/platform/generation"
@@ -117,7 +117,7 @@ class TestEstimate:
     def _gen(self, **kw):
         return Seedance25DraftVideoGeneratorV1(api_key="k", project="p", prompt="x", **kw)
 
-    @patch("web.pollo_estimate.requests.post")
+    @patch("web.providers.pollo_estimate.requests.post")
     def test_v1_answer(self, post):
         post.return_value = _response(200, {"code": "SUCCESS", "data": {"cost": 40, "discountCost": 30.0}})
         assert pollo_estimate.estimate(self._gen()) == {"credits": 30, "full_credits": 40}
@@ -126,12 +126,12 @@ class TestEstimate:
         assert kwargs["headers"]["x-api-key"] == "k"
         assert kwargs["json"]["input"]["resolution"] == "480p"
 
-    @patch("web.pollo_estimate.requests.post")
+    @patch("web.providers.pollo_estimate.requests.post")
     def test_legacy_answer_unwrapped(self, post):
         post.return_value = _response(200, {"cost": 10, "totalCost": 20})
         assert pollo_estimate.estimate(self._gen()) == {"credits": 20, "full_credits": 20}
 
-    @patch("web.pollo_estimate.requests.post")
+    @patch("web.providers.pollo_estimate.requests.post")
     def test_cached_per_request(self, post):
         post.return_value = _response(200, {"data": {"cost": 12}})
         assert pollo_estimate.estimate(self._gen(length=5))["credits"] == 12
@@ -140,14 +140,14 @@ class TestEstimate:
         pollo_estimate.estimate(self._gen(length=6))
         assert post.call_count == 2
 
-    @patch("web.pollo_estimate.requests.post")
+    @patch("web.providers.pollo_estimate.requests.post")
     def test_refusal_is_cached(self, post):
         post.return_value = _response(404, {"message": "Not found"})
         assert pollo_estimate.estimate(self._gen()) is None
         assert pollo_estimate.estimate(self._gen()) is None
         assert post.call_count == 1
 
-    @patch("web.pollo_estimate.requests.post")
+    @patch("web.providers.pollo_estimate.requests.post")
     def test_outages_are_not_cached(self, post):
         post.side_effect = requests.ConnectionError("down")
         assert pollo_estimate.estimate(self._gen()) is None
@@ -158,7 +158,7 @@ class TestEstimate:
         assert pollo_estimate.estimate(self._gen())["credits"] == 5
         assert post.call_count == 3
 
-    @patch("web.pollo_estimate.requests.post")
+    @patch("web.providers.pollo_estimate.requests.post")
     def test_answer_without_a_price(self, post):
         post.return_value = _response(200, {"data": {"something": "else"}})
         assert pollo_estimate.estimate(self._gen()) is None
@@ -170,7 +170,7 @@ class TestEstimate:
 @pytest.fixture()
 def client(tmp_path, monkeypatch, provider_keys):
     import web.api as api_mod
-    from img2vid.common.metadata import MetadataDB
+    from web.core.metadata import MetadataDB
 
     provider_keys["pollo"] = "test-key"  # the current user's Pollo key (not from env)
     (tmp_path / "data").mkdir(exist_ok=True)
@@ -189,7 +189,7 @@ def client(tmp_path, monkeypatch, provider_keys):
 
 
 class TestEstimateEndpoint:
-    @patch("web.pollo_estimate.requests.post")
+    @patch("web.providers.pollo_estimate.requests.post")
     def test_asks_pollo_with_placeholders(self, post, client):
         post.return_value = _response(200, {"data": {"cost": 25, "discountCost": 20}})
         resp = client.post(
@@ -203,7 +203,7 @@ class TestEstimateEndpoint:
         assert body["imageTail"] == pollo_estimate.PLACEHOLDERS["image"]
         assert body["duration"] == 6 and body["prompt"] == "estimate"
 
-    @patch("web.pollo_estimate.requests.post")
+    @patch("web.providers.pollo_estimate.requests.post")
     def test_refs_and_extend(self, post, client):
         post.return_value = _response(200, {"data": {"cost": 9}})
         client.post("/api/usage/estimate", json={"model": "seedance25v1", "ref_types": ["image", "video"]})
@@ -215,13 +215,13 @@ class TestEstimateEndpoint:
         assert post.call_args.args[0].endswith("/seedance-2-5/video-extend/estimate")
         assert post.call_args.kwargs["json"]["input"]["video"] == video
 
-    @patch("web.pollo_estimate.requests.post")
+    @patch("web.providers.pollo_estimate.requests.post")
     def test_extend_of_a_project_only_video_isnt_asked(self, post, client):
         resp = client.post("/api/usage/estimate", json={"model": "seedance25extendv1", "video_url": "local:v.mp4"})
         assert resp.json()["source"] is None
         post.assert_not_called()
 
-    @patch("web.pollo_estimate.requests.post")
+    @patch("web.providers.pollo_estimate.requests.post")
     def test_image_models(self, post, client):
         post.return_value = _response(200, {"data": {"cost": 1}})
         resp = client.post("/api/usage/estimate", json={"model": "nanobanana2v1", "image": True, "resolution": "2K"})
@@ -229,7 +229,7 @@ class TestEstimateEndpoint:
         assert post.call_args.args[0].endswith("/google/nano-banana-2/image/estimate")
         assert post.call_args.kwargs["json"]["input"]["images"] == [pollo_estimate.PLACEHOLDERS["image"]]
 
-    @patch("web.pollo_estimate.requests.post")
+    @patch("web.providers.pollo_estimate.requests.post")
     def test_falls_back_to_past_jobs(self, post, client):
         post.return_value = _response(403, {"message": "not enabled"})
         db = client.db
@@ -314,7 +314,7 @@ class TestExtendGenerate:
 
 
 def test_chat_doesnt_offer_extend(monkeypatch):
-    from web import pollo_chat
+    from web.providers import pollo_chat
 
     monkeypatch.setattr(pollo_chat, "is_configured", lambda: True)
     ids = {m["id"] for m in pollo_chat.list_video_models()}

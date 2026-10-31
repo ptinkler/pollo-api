@@ -21,7 +21,7 @@ from typing import Any
 
 import requests
 
-from . import openrouter, pollo_chat, venice_chat
+from .providers import openrouter, pollo_chat, venice_chat
 from .uploads import safe_filename
 
 VIDEO_POLL_INTERVAL = 10  # seconds between polls

@@ -35,19 +35,20 @@ sys.path.insert(0, str(ROOT_DIR))
 os.chdir(ROOT_DIR)
 load_dotenv(override=True)
 
-from img2vid.common.download import download_generated_image, download_image, download_video, get_filename_from_url
-from img2vid.common.get_task import get_credit_balance, get_task_status
-from img2vid.common.metadata import get_db, iso
 from img2vid.pollo.generators import ERROR_STATUSES, SUCCESS_STATUSES
 from img2vid.pollo.pollo_img2vid import GENERATORS, IMAGE_GENERATORS, get_image_generator, get_video_generator
+from web.core.download import download_generated_image, download_image, download_video, get_filename_from_url
+from web.core.get_task import get_credit_balance, get_task_status
+from web.core.metadata import get_db, iso
 
-from . import characters, generate_providers, image_hosts, keyctx, media, pollo_estimate, vpn
+from . import characters, generate_providers, image_hosts, keyctx, media, vpn
 
 # ── Authentication ───────────────────────────────────────────────────
 from .auth import USER_COOKIE, make_user_session
 from .chat import router as chat_router
 from .chat import startup_resume_chat
 from .chatgpt_import import router as chatgpt_import_router
+from .providers import pollo_estimate
 from .uploads import image_media_type, read_image_upload, read_video_upload, safe_filename
 from .users import require_user
 
@@ -120,7 +121,7 @@ class UserContextMiddleware:
 
         from http.cookies import SimpleCookie
 
-        from img2vid.common.metadata import reset_tenant, set_tenant
+        from web.core.metadata import reset_tenant, set_tenant
 
         from . import user_keys
         from .users import resolve_current_user
@@ -145,7 +146,7 @@ class UserContextMiddleware:
 app.add_middleware(UserContextMiddleware)
 
 # ── Constants ───────────────────────────────────────────────────────
-from .pollo_models import MODEL_INFO  # noqa: E402 — after the bootstrap above
+from .providers.pollo_models import MODEL_INFO  # noqa: E402 — after the bootstrap above
 
 # Support external data directory via env var (same as metadata.py)
 _data_dir_env = os.environ.get("POLLO_DATA_DIR")
@@ -2285,7 +2286,7 @@ def api_models(legacy: bool = False):
     """
     # MODEL_INFO holds the native Pollo models (legacy + v1); they're billed to
     # the user's Pollo key, so they're offered only when that key is set.
-    from . import pollo_chat
+    from .providers import pollo_chat
 
     models = (
         {

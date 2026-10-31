@@ -6,7 +6,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from img2vid.common.metadata import MetadataDB
+from web.core.metadata import MetadataDB
 
 # These exercise REAL session resolution (cookie -> user), so opt out of the
 # autouse _tenant fixture that otherwise hardwires resolve_current_user.
