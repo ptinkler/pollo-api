@@ -21,7 +21,7 @@ from typing import Any
 
 import requests
 
-from .providers import openrouter, pollo_chat, venice_chat
+from .providers import openrouter, pollo, venice
 from .uploads import safe_filename
 
 VIDEO_POLL_INTERVAL = 10  # seconds between polls
@@ -38,10 +38,10 @@ def is_provider_model(model: str | None) -> bool:
 
 def _provider(model_or_job: str):
     """The provider module that owns a model id or a job id."""
-    if pollo_chat.is_pollo(model_or_job) or pollo_chat.is_pollo_job(model_or_job):
-        return pollo_chat
-    if venice_chat.is_venice(model_or_job) or venice_chat.is_venice_job(model_or_job):
-        return venice_chat
+    if pollo.is_pollo(model_or_job) or pollo.is_pollo_job(model_or_job):
+        return pollo
+    if venice.is_venice(model_or_job) or venice.is_venice_job(model_or_job):
+        return venice
     return openrouter
 
 
@@ -50,7 +50,7 @@ def _provider(model_or_job: str):
 
 def list_video_models() -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    for fn in (pollo_chat.list_video_models, lambda: venice_chat.list_models("video"), openrouter.list_video_models):
+    for fn in (pollo.list_video_models, lambda: venice.list_models("video"), openrouter.list_video_models):
         # A provider that isn't configured/reachable is just skipped
         with contextlib.suppress(Exception):
             out += fn() or []
@@ -59,7 +59,7 @@ def list_video_models() -> list[dict[str, Any]]:
 
 def list_image_models() -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    for fn in (pollo_chat.list_image_models, lambda: venice_chat.list_models("image"), openrouter.list_image_models):
+    for fn in (pollo.list_image_models, lambda: venice.list_models("image"), openrouter.list_image_models):
         with contextlib.suppress(Exception):  # unconfigured/unreachable provider is skipped
             out += fn() or []
     return out
@@ -110,8 +110,8 @@ def submit_video(
 ) -> dict:
     """Start a video job on the model's provider; returns {"id", "params"}."""
     prompt = prompt or " "  # some generators read a project prompt file on empty
-    if venice_chat.is_venice(model):
-        return venice_chat.submit_video(
+    if venice.is_venice(model):
+        return venice.submit_video(
             model,
             prompt,
             duration=duration,
@@ -122,8 +122,8 @@ def submit_video(
             refs=refs,
             source_video=source_video,
         )
-    if pollo_chat.is_pollo(model):
-        return pollo_chat.submit_video(
+    if pollo.is_pollo(model):
+        return pollo.submit_video(
             model,
             prompt,
             duration=duration,

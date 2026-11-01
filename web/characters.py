@@ -1,11 +1,10 @@
 """
-Characters — reusable people/creatures/mascots shared by chat and the
-Generate page: a name, a description and a few reference images.
+Characters — reusable people/creatures/mascots: a name, a description and a
+few reference images.
 
-Attached to a chat (ChatConversation.character_ids) or a generation
-(`character_ids` on /api/generate and /api/generate-image), a character's
-description is added to the prompt and its images go to the model as
-reference images, so it looks the same from one image to the next.
+Attached to a chat (ChatConversation.character_ids), a character's description
+is added to the prompt and its images go to the model as reference images, so
+it looks the same from one image to the next.
 
 A character made inside a chat is *ad hoc* (Character.conversation_id set):
 it only shows in that chat and is deleted with it, until it's promoted to a
@@ -232,11 +231,6 @@ class CopyFromChat(BaseModel):
     file: str
 
 
-class CopyFromGeneration(BaseModel):
-    project: str
-    filename: str
-
-
 # ── Routes ──────────────────────────────────────────────────────────
 
 
@@ -346,18 +340,6 @@ def api_character_image_from_chat(character_id: int, data: CopyFromChat):
     return add_image_from_file(
         char, config.ROOT_DIR / "chat" / safe_filename(data.conversation_id) / safe_filename(data.file)
     )
-
-
-@router.post("/{character_id}/images/from-generation")
-def api_character_image_from_generation(character_id: int, data: CopyFromGeneration):
-    """Copy a generated image from a project into the character."""
-    from . import api  # web.api imports this module's router, so import it lazily
-
-    char = _require_char(character_id)
-    proj = get_db().get_project_by_slug(data.project)
-    if not proj:
-        raise HTTPException(404, "Project not found")
-    return add_image_from_file(char, api.ASSETS_DIR / proj.assets_folder / safe_filename(data.filename))
 
 
 @router.get("/{character_id}/images/{filename}")

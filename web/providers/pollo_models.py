@@ -4,8 +4,8 @@ lengths, ratios, resolutions and which options each one takes.
 """
 
 # "legacy": True marks a model as living on Pollo's pre-v1 API
-# (POLLO_API_BASE, no "/v1/" in the URL) — see BaseV1VideoGenerator's
-# docstring in img2vid/pollo/generators.py. These are hidden from the model
+# (POLLO_API_BASE, no "/v1/" in the URL) — see the family tables in
+# web/providers/pollo_engine.py. These are hidden from the model
 # dropdown unless the frontend's "legacy mode" toggle is on (GET
 # /api/models filters them out by default; see get_models() in web/api.py).
 # Models with no "legacy" key are on the current v1 API and always shown.

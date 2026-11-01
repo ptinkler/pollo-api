@@ -13,16 +13,28 @@ const KINDS = [
   { id: 'image', label: 'Images' },
   { id: 'video', label: 'Videos' },
 ]
+const SOURCES = [
+  { id: 'all', label: 'All' },
+  { id: 'generated', label: 'Generated' },
+  { id: 'upload', label: 'Uploaded' },
+]
 
 const items = ref([])
 const total = ref(0)
 const kind = ref('all')
+const source = ref('all')
 const q = ref('')
 const loading = ref(false)
 const preview = ref(null)
 
 function params(offset) {
-  return { offset, limit: PAGE, q: q.value || undefined, kind: kind.value === 'all' ? undefined : kind.value }
+  return {
+    offset,
+    limit: PAGE,
+    q: q.value || undefined,
+    kind: kind.value === 'all' ? undefined : kind.value,
+    source: source.value === 'all' ? undefined : source.value,
+  }
 }
 async function load() {
   loading.value = true
@@ -43,6 +55,10 @@ function setKind(k) {
   kind.value = k
   load()
 }
+function setSource(s) {
+  source.value = s
+  load()
+}
 
 onMounted(load)
 </script>
@@ -59,6 +75,11 @@ onMounted(load)
       <div class="kinds">
         <button v-for="k in KINDS" :key="k.id" :class="{ on: kind === k.id }" @click="setKind(k.id)">
           {{ k.label }}
+        </button>
+      </div>
+      <div class="kinds">
+        <button v-for="s in SOURCES" :key="s.id" :class="{ on: source === s.id }" @click="setSource(s.id)">
+          {{ s.label }}
         </button>
       </div>
       <div class="msearch">

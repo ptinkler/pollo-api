@@ -1,10 +1,10 @@
-"""Tests for img2vid.pollo.pollo_img2vid — orchestrator (create_video, get_video_generator)."""
+"""Tests for web.providers.pollo_img2vid — orchestrator (create_video, get_video_generator)."""
 
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from img2vid.pollo.pollo_img2vid import (
+from web.providers.pollo_img2vid import (
     DEFAULT_MODEL,
     GENERATORS,
     GENERATORS_LEGACY,
@@ -74,12 +74,12 @@ class TestGeneratorsMap:
 
 
 class TestGetVideoGenerator:
-    @patch("img2vid.pollo.generators.get_prompt", return_value="p")
-    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
-    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    @patch("web.providers.pollo_engine.get_prompt", return_value="p")
+    @patch("web.providers.pollo_engine.get_image_url", return_value=None)
+    @patch("web.core.get_inputs.get_image_path", return_value=None)
     def test_returns_generator(self, *mocks):
         gen = get_video_generator("pollodance20", api_key="k", project="p", prompt="x")
-        assert gen.__class__.__name__ == "PolloDance20VideoGenerator"
+        assert gen.spec.model_id == "pollodance20"
 
     def test_invalid_model(self):
         with pytest.raises(ValueError, match="Unsupported model"):
@@ -103,15 +103,15 @@ class TestCreateVideo:
         with pytest.raises(ValueError, match="Invalid resolution"):
             create_video(model="pollodance20", resolution="4k")
 
-    @patch("img2vid.pollo.pollo_img2vid.download_video")
-    @patch("img2vid.pollo.pollo_img2vid.download_image")
-    @patch("img2vid.pollo.pollo_img2vid.get_task_status")
-    @patch("img2vid.pollo.pollo_img2vid.get_db")
-    @patch("img2vid.pollo.pollo_img2vid.Spinner")
-    @patch("img2vid.pollo.pollo_img2vid.sleep")
-    @patch("img2vid.pollo.generators.get_prompt", return_value="test prompt")
-    @patch("img2vid.pollo.generators.get_image_url", return_value="https://img.com/i.jpg")
-    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    @patch("web.providers.pollo_img2vid.download_video")
+    @patch("web.providers.pollo_img2vid.download_image")
+    @patch("web.providers.pollo_img2vid.get_task_status")
+    @patch("web.providers.pollo_img2vid.get_db")
+    @patch("web.providers.pollo_img2vid.Spinner")
+    @patch("web.providers.pollo_img2vid.sleep")
+    @patch("web.providers.pollo_engine.get_prompt", return_value="test prompt")
+    @patch("web.providers.pollo_engine.get_image_url", return_value="https://img.com/i.jpg")
+    @patch("web.core.get_inputs.get_image_path", return_value=None)
     def test_successful_generation(
         self,
         mock_path,
@@ -141,7 +141,7 @@ class TestCreateVideo:
         spinner = MagicMock()
         MockSpinner.return_value = spinner
 
-        with patch("img2vid.pollo.generators.requests.request", return_value=mock_response):
+        with patch("web.providers.pollo_engine.requests.request", return_value=mock_response):
             create_video(model="pollodance20", project="testproj")
 
         # Should have downloaded video
@@ -154,10 +154,10 @@ class TestCreateVideo:
         ]
         assert len(done_calls) > 0, "Expected at least one update_job call with status='done'"
 
-    @patch("img2vid.pollo.pollo_img2vid.get_db")
-    @patch("img2vid.pollo.generators.get_prompt", return_value="test prompt")
-    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
-    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    @patch("web.providers.pollo_img2vid.get_db")
+    @patch("web.providers.pollo_engine.get_prompt", return_value="test prompt")
+    @patch("web.providers.pollo_engine.get_image_url", return_value=None)
+    @patch("web.core.get_inputs.get_image_path", return_value=None)
     def test_api_error(self, mock_path, mock_url, mock_prompt, mock_db):
         db_inst = MagicMock()
         mock_db.return_value = db_inst
@@ -166,17 +166,17 @@ class TestCreateVideo:
         mock_response.status_code = 400
         mock_response.json.return_value = {"code": "ERROR", "message": "Bad request"}
 
-        with patch("img2vid.pollo.generators.requests.request", return_value=mock_response):
+        with patch("web.providers.pollo_engine.requests.request", return_value=mock_response):
             create_video(model="pollodance20", project="testproj")
 
         # Should have updated job to error
         calls = [str(c) for c in db_inst.update_job.call_args_list]
         assert any("error" in c for c in calls)
 
-    @patch("img2vid.pollo.pollo_img2vid.get_db")
-    @patch("img2vid.pollo.generators.get_prompt", return_value="test prompt")
-    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
-    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    @patch("web.providers.pollo_img2vid.get_db")
+    @patch("web.providers.pollo_engine.get_prompt", return_value="test prompt")
+    @patch("web.providers.pollo_engine.get_image_url", return_value=None)
+    @patch("web.core.get_inputs.get_image_path", return_value=None)
     def test_no_task_id(self, mock_path, mock_url, mock_prompt, mock_db):
         db_inst = MagicMock()
         mock_db.return_value = db_inst
@@ -185,23 +185,23 @@ class TestCreateVideo:
         mock_response.status_code = 200
         mock_response.json.return_value = {"code": "SUCCESS", "data": {}}
 
-        with patch("img2vid.pollo.generators.requests.request", return_value=mock_response):
+        with patch("web.providers.pollo_engine.requests.request", return_value=mock_response):
             create_video(model="pollodance20", project="testproj")
 
         calls = [str(c) for c in db_inst.update_job.call_args_list]
         assert any("error" in c for c in calls)
 
     # ── Cover all kwargs paths (lines 76-93) ────────────────────
-    @patch("img2vid.pollo.pollo_img2vid.download_video")
-    @patch("img2vid.pollo.pollo_img2vid.download_image")
-    @patch("img2vid.pollo.pollo_img2vid.get_task_status")
-    @patch("img2vid.pollo.pollo_img2vid.get_db")
-    @patch("img2vid.pollo.pollo_img2vid.Spinner")
-    @patch("img2vid.pollo.pollo_img2vid.sleep")
-    @patch("img2vid.pollo.generators.get_prompt", return_value="test prompt")
-    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
-    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
-    @patch("img2vid.pollo.generators.get_subject_url", return_value=None)
+    @patch("web.providers.pollo_img2vid.download_video")
+    @patch("web.providers.pollo_img2vid.download_image")
+    @patch("web.providers.pollo_img2vid.get_task_status")
+    @patch("web.providers.pollo_img2vid.get_db")
+    @patch("web.providers.pollo_img2vid.Spinner")
+    @patch("web.providers.pollo_img2vid.sleep")
+    @patch("web.providers.pollo_engine.get_prompt", return_value="test prompt")
+    @patch("web.providers.pollo_engine.get_image_url", return_value=None)
+    @patch("web.core.get_inputs.get_image_path", return_value=None)
+    @patch("web.core.get_inputs.get_subject_url", return_value=None)
     def test_all_kwargs(self, *mocks):
         """Cover all optional kwargs paths."""
         (
@@ -229,7 +229,7 @@ class TestCreateVideo:
         mock_dl_vid.return_value = "/path/to/video.mp4"
         MockSpinner.return_value = MagicMock()
 
-        with patch("img2vid.pollo.generators.requests.request", return_value=mock_response):
+        with patch("web.providers.pollo_engine.requests.request", return_value=mock_response):
             create_video(
                 model="pollodanceref",
                 project="proj",
@@ -243,16 +243,16 @@ class TestCreateVideo:
         mock_dl_vid.assert_called_once()
 
     # ── Video edit mode (lines 117-119) ────────────────────
-    @patch("img2vid.pollo.pollo_img2vid.download_video")
-    @patch("img2vid.pollo.pollo_img2vid.download_image")
-    @patch("img2vid.pollo.pollo_img2vid.get_task_status")
-    @patch("img2vid.pollo.pollo_img2vid.get_db")
-    @patch("img2vid.pollo.pollo_img2vid.Spinner")
-    @patch("img2vid.pollo.pollo_img2vid.sleep")
-    @patch("img2vid.pollo.generators.get_prompt", return_value="test prompt")
-    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
-    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
-    @patch("img2vid.pollo.generators.get_subject_url", return_value=None)
+    @patch("web.providers.pollo_img2vid.download_video")
+    @patch("web.providers.pollo_img2vid.download_image")
+    @patch("web.providers.pollo_img2vid.get_task_status")
+    @patch("web.providers.pollo_img2vid.get_db")
+    @patch("web.providers.pollo_img2vid.Spinner")
+    @patch("web.providers.pollo_img2vid.sleep")
+    @patch("web.providers.pollo_engine.get_prompt", return_value="test prompt")
+    @patch("web.providers.pollo_engine.get_image_url", return_value=None)
+    @patch("web.core.get_inputs.get_image_path", return_value=None)
+    @patch("web.core.get_inputs.get_subject_url", return_value=None)
     def test_video_edit_mode(self, *mocks):
         """Cover the ref2video mode branch — should NOT download image."""
         (
@@ -280,7 +280,7 @@ class TestCreateVideo:
         MockSpinner.return_value = MagicMock()
 
         refs = [{"type": "image", "name": "char", "image": "https://img.com/a.jpg", "order": 1}]
-        with patch("img2vid.pollo.generators.requests.request", return_value=mock_response):
+        with patch("web.providers.pollo_engine.requests.request", return_value=mock_response):
             create_video(
                 model="pollodanceref",
                 project="proj",
@@ -290,13 +290,13 @@ class TestCreateVideo:
         mock_dl_img.assert_not_called()
 
     # ── Polling error (lines 154-158) ────────────────────
-    @patch("img2vid.pollo.pollo_img2vid.get_task_status")
-    @patch("img2vid.pollo.pollo_img2vid.get_db")
-    @patch("img2vid.pollo.pollo_img2vid.Spinner")
-    @patch("img2vid.pollo.pollo_img2vid.sleep")
-    @patch("img2vid.pollo.generators.get_prompt", return_value="test prompt")
-    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
-    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    @patch("web.providers.pollo_img2vid.get_task_status")
+    @patch("web.providers.pollo_img2vid.get_db")
+    @patch("web.providers.pollo_img2vid.Spinner")
+    @patch("web.providers.pollo_img2vid.sleep")
+    @patch("web.providers.pollo_engine.get_prompt", return_value="test prompt")
+    @patch("web.providers.pollo_engine.get_image_url", return_value=None)
+    @patch("web.core.get_inputs.get_image_path", return_value=None)
     def test_polling_error(self, mock_path, mock_url, mock_prompt, mock_sleep, MockSpinner, mock_db, mock_task):
         db_inst = MagicMock()
         mock_db.return_value = db_inst
@@ -309,19 +309,19 @@ class TestCreateVideo:
         mock_task.return_value = [("failed", "Generation failed", None, None)]
         MockSpinner.return_value = MagicMock()
 
-        with patch("img2vid.pollo.generators.requests.request", return_value=mock_response):
+        with patch("web.providers.pollo_engine.requests.request", return_value=mock_response):
             create_video(model="pollodance20", project="proj")
         err_calls = [str(c) for c in db_inst.update_job.call_args_list]
         assert any("error" in c for c in err_calls)
 
     # ── No URL result (lines 161-164) ────────────────────
-    @patch("img2vid.pollo.pollo_img2vid.get_task_status")
-    @patch("img2vid.pollo.pollo_img2vid.get_db")
-    @patch("img2vid.pollo.pollo_img2vid.Spinner")
-    @patch("img2vid.pollo.pollo_img2vid.sleep")
-    @patch("img2vid.pollo.generators.get_prompt", return_value="test prompt")
-    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
-    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    @patch("web.providers.pollo_img2vid.get_task_status")
+    @patch("web.providers.pollo_img2vid.get_db")
+    @patch("web.providers.pollo_img2vid.Spinner")
+    @patch("web.providers.pollo_img2vid.sleep")
+    @patch("web.providers.pollo_engine.get_prompt", return_value="test prompt")
+    @patch("web.providers.pollo_engine.get_image_url", return_value=None)
+    @patch("web.core.get_inputs.get_image_path", return_value=None)
     def test_no_url_in_result(self, mock_path, mock_url, mock_prompt, mock_sleep, MockSpinner, mock_db, mock_task):
         db_inst = MagicMock()
         mock_db.return_value = db_inst
@@ -334,19 +334,19 @@ class TestCreateVideo:
         mock_task.return_value = [("succeed", None, None, None)]
         MockSpinner.return_value = MagicMock()
 
-        with patch("img2vid.pollo.generators.requests.request", return_value=mock_response):
+        with patch("web.providers.pollo_engine.requests.request", return_value=mock_response):
             create_video(model="pollodance20", project="proj")
         err_calls = [str(c) for c in db_inst.update_job.call_args_list]
         assert any("error" in c for c in err_calls)
 
     # ── Cloudflare block during polling — retries then gives up ────
-    @patch("img2vid.pollo.pollo_img2vid.get_task_status")
-    @patch("img2vid.pollo.pollo_img2vid.get_db")
-    @patch("img2vid.pollo.pollo_img2vid.Spinner")
-    @patch("img2vid.pollo.pollo_img2vid.sleep")
-    @patch("img2vid.pollo.generators.get_prompt", return_value="test prompt")
-    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
-    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    @patch("web.providers.pollo_img2vid.get_task_status")
+    @patch("web.providers.pollo_img2vid.get_db")
+    @patch("web.providers.pollo_img2vid.Spinner")
+    @patch("web.providers.pollo_img2vid.sleep")
+    @patch("web.providers.pollo_engine.get_prompt", return_value="test prompt")
+    @patch("web.providers.pollo_engine.get_image_url", return_value=None)
+    @patch("web.core.get_inputs.get_image_path", return_value=None)
     def test_cloudflare_block_polling_gives_up(
         self, mock_path, mock_url, mock_prompt, mock_sleep, MockSpinner, mock_db, mock_task
     ):
@@ -363,7 +363,7 @@ class TestCreateVideo:
         mock_task.return_value = [("cloudflare_blocked", "Cloudflare blocked the request", None, None)]
         MockSpinner.return_value = MagicMock()
 
-        with patch("img2vid.pollo.generators.requests.request", return_value=mock_response):
+        with patch("web.providers.pollo_engine.requests.request", return_value=mock_response):
             create_video(model="pollodance20", project="proj")
 
         err_calls = [str(c) for c in db_inst.update_job.call_args_list]
@@ -371,15 +371,15 @@ class TestCreateVideo:
         assert any("Cloudflare" in c for c in err_calls)
 
     # ── Cloudflare block during polling — recovers after a few blocks ────
-    @patch("img2vid.pollo.pollo_img2vid.download_video")
-    @patch("img2vid.pollo.pollo_img2vid.download_image")
-    @patch("img2vid.pollo.pollo_img2vid.get_task_status")
-    @patch("img2vid.pollo.pollo_img2vid.get_db")
-    @patch("img2vid.pollo.pollo_img2vid.Spinner")
-    @patch("img2vid.pollo.pollo_img2vid.sleep")
-    @patch("img2vid.pollo.generators.get_prompt", return_value="test prompt")
-    @patch("img2vid.pollo.generators.get_image_url", return_value=None)
-    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    @patch("web.providers.pollo_img2vid.download_video")
+    @patch("web.providers.pollo_img2vid.download_image")
+    @patch("web.providers.pollo_img2vid.get_task_status")
+    @patch("web.providers.pollo_img2vid.get_db")
+    @patch("web.providers.pollo_img2vid.Spinner")
+    @patch("web.providers.pollo_img2vid.sleep")
+    @patch("web.providers.pollo_engine.get_prompt", return_value="test prompt")
+    @patch("web.providers.pollo_engine.get_image_url", return_value=None)
+    @patch("web.core.get_inputs.get_image_path", return_value=None)
     def test_cloudflare_block_polling_recovers(
         self, mock_path, mock_url, mock_prompt, mock_sleep, MockSpinner, mock_db, mock_task, mock_dl_img, mock_dl_vid
     ):
@@ -402,7 +402,7 @@ class TestCreateVideo:
         mock_dl_vid.return_value = "/path/to/video.mp4"
         MockSpinner.return_value = MagicMock()
 
-        with patch("img2vid.pollo.generators.requests.request", return_value=mock_response):
+        with patch("web.providers.pollo_engine.requests.request", return_value=mock_response):
             create_video(model="pollodance20", project="proj")
 
         # Should have downloaded the video successfully
@@ -415,15 +415,15 @@ class TestCreateVideo:
         assert len(done_calls) > 0
 
     # ── Download ValueError (lines 188-191) ────────────────────
-    @patch("img2vid.pollo.pollo_img2vid.download_video", side_effect=ValueError("corrupt"))
-    @patch("img2vid.pollo.pollo_img2vid.download_image")
-    @patch("img2vid.pollo.pollo_img2vid.get_task_status")
-    @patch("img2vid.pollo.pollo_img2vid.get_db")
-    @patch("img2vid.pollo.pollo_img2vid.Spinner")
-    @patch("img2vid.pollo.pollo_img2vid.sleep")
-    @patch("img2vid.pollo.generators.get_prompt", return_value="test prompt")
-    @patch("img2vid.pollo.generators.get_image_url", return_value="https://img.com/i.jpg")
-    @patch("img2vid.pollo.generators.get_image_path", return_value=None)
+    @patch("web.providers.pollo_img2vid.download_video", side_effect=ValueError("corrupt"))
+    @patch("web.providers.pollo_img2vid.download_image")
+    @patch("web.providers.pollo_img2vid.get_task_status")
+    @patch("web.providers.pollo_img2vid.get_db")
+    @patch("web.providers.pollo_img2vid.Spinner")
+    @patch("web.providers.pollo_img2vid.sleep")
+    @patch("web.providers.pollo_engine.get_prompt", return_value="test prompt")
+    @patch("web.providers.pollo_engine.get_image_url", return_value="https://img.com/i.jpg")
+    @patch("web.core.get_inputs.get_image_path", return_value=None)
     def test_download_valueerror(
         self,
         mock_path,
@@ -447,7 +447,7 @@ class TestCreateVideo:
         mock_task.return_value = [("succeed", None, "https://video.com/out.mp4", None)]
         MockSpinner.return_value = MagicMock()
 
-        with patch("img2vid.pollo.generators.requests.request", return_value=mock_response):
+        with patch("web.providers.pollo_engine.requests.request", return_value=mock_response):
             create_video(model="pollodance20", project="proj")
         err_calls = [str(c) for c in db_inst.update_job.call_args_list]
         assert any("error" in c for c in err_calls)
@@ -456,7 +456,7 @@ class TestCreateVideo:
 class TestPolloImg2VidMainGuard:
     def test_name_main_guard(self):
         """Cover the if __name__ == '__main__' guard."""
-        import img2vid.pollo.pollo_img2vid as mod
+        import web.providers.pollo_img2vid as mod
 
         with patch.object(mod, "create_video") as mock_cv, patch.object(mod, "__name__", "__main__"):
             if mod.__name__ == "__main__":

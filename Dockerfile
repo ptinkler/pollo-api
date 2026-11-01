@@ -23,7 +23,6 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY img2vid/ ./img2vid/
 COPY web/*.py ./web/
 COPY alembic/ ./alembic/
 COPY alembic.ini entrypoint.sh ./

@@ -35,8 +35,6 @@ sys.path.insert(0, str(ROOT_DIR))
 os.chdir(ROOT_DIR)
 load_dotenv(override=True)
 
-from img2vid.pollo.generators import ERROR_STATUSES, SUCCESS_STATUSES
-from img2vid.pollo.pollo_img2vid import GENERATORS, IMAGE_GENERATORS, get_image_generator, get_video_generator
 from web.core.download import download_generated_image, download_image, download_video, get_filename_from_url
 from web.core.get_task import get_credit_balance, get_task_status
 from web.core.metadata import get_db, iso
@@ -49,6 +47,8 @@ from .chat import router as chat_router
 from .chat import startup_resume_chat
 from .chatgpt_import import router as chatgpt_import_router
 from .providers import pollo_estimate
+from .providers.pollo_engine import ERROR_STATUSES, SUCCESS_STATUSES
+from .providers.pollo_img2vid import GENERATORS, IMAGE_GENERATORS, get_image_generator, get_video_generator
 from .uploads import image_media_type, read_image_upload, read_video_upload, safe_filename
 from .users import require_user
 
@@ -2286,7 +2286,7 @@ def api_models(legacy: bool = False):
     """
     # MODEL_INFO holds the native Pollo models (legacy + v1); they're billed to
     # the user's Pollo key, so they're offered only when that key is set.
-    from .providers import pollo_chat
+    from .providers import pollo
 
     models = (
         {
@@ -2294,7 +2294,7 @@ def api_models(legacy: bool = False):
             for name, info in MODEL_INFO.items()
             if bool(info.get("legacy")) == legacy or info.get("legacy_only")
         }
-        if pollo_chat.is_configured()
+        if pollo.is_configured()
         else {}
     )
     # Chat providers (Pollo v1, Venice, OpenRouter) — the same models the chat

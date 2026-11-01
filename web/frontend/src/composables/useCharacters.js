@@ -19,8 +19,6 @@ export const promoteCharacter = id => apiPost(`/api/characters/${id}/promote`)
 export const uploadCharacterImage = (id, file) => apiUpload(`/api/characters/${id}/images`, file)
 export const copyChatImageToCharacter = (id, conversationId, file) =>
   apiPost(`/api/characters/${id}/images/from-chat`, { conversation_id: conversationId, file })
-export const copyGenerationImageToCharacter = (id, project, filename) =>
-  apiPost(`/api/characters/${id}/images/from-generation`, { project, filename })
 
 export const characterImageUrl = (id, file) => `/api/characters/${id}/images/${enc(file)}`
 /** The character's main (first) image, or null. */

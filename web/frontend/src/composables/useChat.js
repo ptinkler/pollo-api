@@ -13,6 +13,8 @@ export const fetchConversations = (q = '') => apiGet(`/api/chat/conversations${q
 // What a chat has cost: { usd, credits, inherited_usd, inherited_credits }
 export const fetchConversationSpend = id => apiGet(`/api/chat/conversations/${enc(id)}/spend`)
 export const fetchConversation = id => apiGet(`/api/chat/conversations/${enc(id)}`)
+// Newest image file per conversation id, for gallery cover thumbnails: { thumbs: {id: file} }
+export const fetchConversationThumbs = ids => apiGet(`/api/chat/conversations/thumbs?ids=${enc(ids.join(','))}`)
 export const createConversation = (data = {}) => apiPost('/api/chat/conversations', data)
 export const deleteConversation = id => apiDelete(`/api/chat/conversations/${enc(id)}`)
 export const fetchChatMessage = id => apiGet(`/api/chat/messages/${id}`)

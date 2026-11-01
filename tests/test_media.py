@@ -15,24 +15,6 @@ def _png(color="red") -> bytes:
 
 
 @pytest.fixture()
-def project(db):
-    import web.api as api_mod
-
-    proj = db.create_project(name="Media Proj")
-    folder = api_mod.ASSETS_DIR / proj.assets_folder
-    folder.mkdir(parents=True, exist_ok=True)
-    (folder / "src-abc.png").write_bytes(_png())  # an upload
-    (folder / "thumb.jpg").write_bytes(_png())  # project thumbnail — not media
-    (folder / "vid1.mp4").write_bytes(b"fake mp4")  # a generated video
-    (folder / "gen1.png").write_bytes(_png("blue"))  # a generated image
-    db.create_job(job_id="jv", project=proj.slug, model="seedance20v1", prompt="a fox runs")
-    db.update_job("jv", status="done", video_path=str(folder / "vid1.mp4"))
-    db.create_job(job_id="ji", project=proj.slug, model="seedreamv1", prompt="a fox portrait", job_type="image")
-    db.update_job("ji", status="done", video_path=str(folder / "gen1.png"))
-    return proj
-
-
-@pytest.fixture()
 def conv(db, tmp_path):
     import web.core.config as config
 
@@ -72,16 +54,11 @@ def _items(client):
 
 
 class TestListing:
-    def test_lists_everything_with_sources(self, client, project, conv):
+    def test_lists_everything_with_sources(self, client, conv):
+        client.post("/api/media/upload", files={"file": ("a.png", _png(), "image/png")})
         items = _items(client)
-        slug = project.slug
-        assert items[f"proj:{slug}:src-abc.png"]["source"] == "upload"
-        assert items[f"proj:{slug}:vid1.mp4"]["kind"] == "video"
-        assert items[f"proj:{slug}:vid1.mp4"]["thumb_url"] == f"/api/media/thumb/proj:{slug}:vid1.mp4"
         assert all(i["thumb_url"] for i in items.values())
-        assert items[f"proj:{slug}:gen1.png"]["source"] == "generated"
-        assert items[f"proj:{slug}:gen1.png"]["prompt"] == "a fox portrait"
-        assert f"proj:{slug}:thumb.jpg" not in items
+        assert any(i["origin"] == "library" and i["source"] == "upload" for i in items.values())
         assert items[f"chat:{conv.id}:up_1.png"]["source"] == "upload"
         chat_gen = items[f"chat:{conv.id}:img_1.png"]
         assert chat_gen["source"] == "generated" and chat_gen["conversation_title"] == "Fox chat"
@@ -113,7 +90,7 @@ class TestListing:
         rest = client.get("/api/media?offset=2&limit=2").json()
         assert [i["id"] for i in rest["items"]] == [i["id"] for i in full["items"][2:4]]
 
-    def test_filters_server_side(self, client, project, conv):
+    def test_filters_server_side(self, client, conv):
         images = client.get("/api/media?kind=image").json()
         assert images["items"] and all(i["kind"] == "image" for i in images["items"])
         assert images["total"] == len(images["items"])
@@ -173,33 +150,13 @@ class TestOrphans:
 
 
 class TestImport:
-    def test_into_a_project(self, client, project, conv):
-        import web.api as api_mod
-
-        r = client.post(
-            "/api/media/import",
-            json={
-                "media_id": f"chat:{conv.id}:img_1.png",
-                "target": "project",
-                "project": project.slug,
-                "prefix": "src",
-            },
-        ).json()
-        name = r["image_url"].removeprefix("local:")
-        assert name.startswith("src-") and (api_mod.ASSETS_DIR / project.assets_folder / name).is_file()
-        # An upload already in that project is reused, not copied
-        same = client.post(
-            "/api/media/import",
-            json={"media_id": f"proj:{project.slug}:src-abc.png", "target": "project", "project": project.slug},
-        ).json()
-        assert same == {"image_url": "local:src-abc.png"}
-
-    def test_into_a_chat(self, client, project, conv):
+    def test_into_a_chat(self, client, conv):
         import web.core.config as config
 
+        lib = client.post("/api/media/upload", files={"file": ("a.png", _png(), "image/png")}).json()
         r = client.post(
             "/api/media/import",
-            json={"media_id": f"proj:{project.slug}:gen1.png", "target": "chat", "conversation_id": conv.id},
+            json={"media_id": lib["id"], "target": "chat", "conversation_id": conv.id},
         ).json()
         assert r["file"].startswith("up_") and (config.ROOT_DIR / "chat" / conv.id / r["file"]).is_file()
 
@@ -211,24 +168,18 @@ class TestImport:
         ).json()
         assert len(r["images"]) == 1
 
-    def test_videos_cant_be_imported(self, client, project, conv):
+    def test_videos_cant_be_imported(self, client, conv):
+        import web.core.config as config
+
+        (config.ROOT_DIR / "chat" / conv.id / "vid.mp4").write_bytes(b"fake mp4")
         r = client.post(
             "/api/media/import",
-            json={"media_id": f"proj:{project.slug}:vid1.mp4", "target": "chat", "conversation_id": conv.id},
+            json={"media_id": f"chat:{conv.id}:vid.mp4", "target": "chat", "conversation_id": conv.id},
         )
         assert r.status_code == 400
 
 
 class TestDelete:
-    def test_project_creation_deletes_its_job(self, client, db, project):
-        assert client.delete(f"/api/media/proj:{project.slug}:vid1.mp4").status_code == 200
-        assert db.get_job("jv") is None
-
-    def test_project_upload_clears_the_project_image(self, client, db, project):
-        db.update_project(project.slug, image_url="local:src-abc.png")
-        assert client.delete(f"/api/media/proj:{project.slug}:src-abc.png").status_code == 200
-        assert db.get_project_by_slug(project.slug).image_url is None
-
     def test_chat_item_leaves_its_message(self, client, db, conv):
         import web.core.config as config
 
@@ -370,20 +321,24 @@ class TestThumbnails:
         monkeypatch.setattr(media_mod.Image, "open", lambda *a, **k: pytest.fail("re-encoded"))
         assert client.get(item["thumb_url"]).content == r.content
 
-    def test_video_thumb_uses_the_first_frame(self, client, project, monkeypatch):
+    def test_video_thumb_uses_the_first_frame(self, client, conv, monkeypatch):
         import web.api as api_mod
+        import web.core.config as config
 
+        (config.ROOT_DIR / "chat" / conv.id / "vid.mp4").write_bytes(b"fake mp4")
         buf = io.BytesIO()
         Image.new("RGB", (640, 360), "orange").save(buf, "JPEG")
         monkeypatch.setattr(api_mod, "_extract_first_frame_uncached", lambda p: buf.getvalue())
-        r = client.get(f"/api/media/thumb/proj:{project.slug}:vid1.mp4")
+        r = client.get(f"/api/media/thumb/chat:{conv.id}:vid.mp4")
         assert r.status_code == 200 and Image.open(io.BytesIO(r.content)).size == (569, 320)
 
-    def test_unreadable_file_has_no_thumb(self, client, project, monkeypatch):
+    def test_unreadable_file_has_no_thumb(self, client, conv, monkeypatch):
         import web.api as api_mod
+        import web.core.config as config
 
+        (config.ROOT_DIR / "chat" / conv.id / "vid.mp4").write_bytes(b"fake mp4")
         monkeypatch.setattr(api_mod, "_extract_first_frame_uncached", lambda p: None)
-        assert client.get(f"/api/media/thumb/proj:{project.slug}:vid1.mp4").status_code == 404
+        assert client.get(f"/api/media/thumb/chat:{conv.id}:vid.mp4").status_code == 404
 
     def test_delete_drops_the_cached_thumb(self, client):
         import web.media as media_mod

@@ -1,10 +1,30 @@
 <!-- Studio center pane when a space is opened: its threads as a gallery. -->
 <script setup>
-defineProps({
+import { ref, watch } from 'vue'
+import { fetchConversationThumbs, chatMediaPreviewUrl } from '../../composables/useChat'
+
+const props = defineProps({
   space: { type: Object, required: true },
   threads: { type: Array, default: () => [] },
 })
 defineEmits(['open', 'close', 'new'])
+
+// Cover thumbnail per thread (newest image), loaded lazily; threads without a
+// generated image fall back to the placeholder icon.
+const thumbs = ref({})
+watch(
+  () => props.threads.map(t => t.id).join(','),
+  async ids => {
+    if (!ids) return
+    try {
+      const { thumbs: t } = await fetchConversationThumbs(props.threads.map(x => x.id))
+      thumbs.value = Object.fromEntries(Object.entries(t).map(([id, file]) => [id, chatMediaPreviewUrl(id, file)]))
+    } catch {
+      /* placeholders shown */
+    }
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -26,8 +46,11 @@ defineEmits(['open', 'close', 'new'])
       <div v-if="!threads.length" class="empty">No threads in this space yet.</div>
       <div v-else class="grid">
         <button v-for="t in threads" :key="t.id" class="card" @click="$emit('open', t.id)">
-          <div class="cicon">
-            <svg class="ic"><use href="#s-chat" /></svg>
+          <div class="cthumb">
+            <img v-if="thumbs[t.id]" :src="thumbs[t.id]" alt="" loading="lazy" />
+            <div v-else class="cph">
+              <svg class="ic lg"><use :href="t.kind === 'gallery' ? '#s-image' : '#s-chat'" /></svg>
+            </div>
           </div>
           <span class="ct">{{ t.title || 'Untitled' }}</span>
           <span v-if="t.pinned" class="cfav"
@@ -107,33 +130,49 @@ h1 .ic {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  align-items: flex-start;
-  padding: 16px;
+  gap: 10px;
+  align-items: stretch;
+  padding: 10px;
   border: 1px solid var(--sborder);
   border-radius: 12px;
   background: var(--sbg);
   color: var(--sfg);
   cursor: pointer;
   text-align: left;
-  min-height: 96px;
 }
 .card:hover {
   border-color: var(--sfaint);
   background: var(--spanel2);
 }
-.cicon {
-  width: 32px;
-  height: 32px;
+.cthumb {
+  aspect-ratio: 4 / 3;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--sbg2);
+}
+.cthumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.cph {
+  width: 100%;
+  height: 100%;
   display: grid;
   place-items: center;
-  border-radius: 9px;
+  color: var(--sfaint);
   background: var(--saccent-soft);
+}
+.cph .ic {
+  width: 28px;
+  height: 28px;
   color: var(--saccent);
 }
 .ct {
   font-weight: 550;
   line-height: 1.4;
+  padding: 0 6px 4px;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -141,8 +180,11 @@ h1 .ic {
 }
 .cfav {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 14px;
+  right: 14px;
   color: var(--saccent);
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 6px;
+  padding: 2px;
 }
 </style>

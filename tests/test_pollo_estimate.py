@@ -6,13 +6,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from img2vid.pollo.generators import (
-    Seedance25DraftVideoGenerator,
-    Seedance25DraftVideoGeneratorV1,
-    Seedance25ExtendVideoGeneratorV1,
-    Seedance25VideoGeneratorV1,
-)
-from web.providers import pollo_estimate
+from web.providers import pollo_engine, pollo_estimate
+from web.providers.pollo_img2vid import get_video_generator
 
 V1 = "https://pollo.ai/api/platform/v1/generation"
 LEGACY = "https://pollo.ai/api/platform/generation"
@@ -21,10 +16,8 @@ LEGACY = "https://pollo.ai/api/platform/generation"
 @pytest.fixture(autouse=True)
 def _no_project_files():
     with (
-        patch("img2vid.pollo.generators.get_prompt", return_value="p"),
-        patch("img2vid.pollo.generators.get_image_url", return_value=None),
-        patch("img2vid.pollo.generators.get_image_path", return_value=None),
-        patch("img2vid.pollo.generators.get_video_url", return_value=None),
+        patch("web.providers.pollo_engine.get_prompt", return_value="p"),
+        patch("web.providers.pollo_engine.get_image_url", return_value=None),
     ):
         yield
     pollo_estimate.clear_cache()
@@ -38,7 +31,9 @@ def _response(status: int, body) -> MagicMock:
 
 class TestSeedance25Draft:
     def test_v1_is_480p_only_without_web_search(self):
-        gen = Seedance25DraftVideoGeneratorV1(api_key="k", project="p", prompt="x", resolution="720p", web_search=True)
+        gen = get_video_generator(
+            "seedance25draftv1", api_key="k", project="p", prompt="x", resolution="720p", web_search=True
+        )
         assert gen.model_url == f"{V1}/bytedance/seedance-2-5-draft/video"
         payload = gen.get_payload()["input"]
         assert payload["resolution"] == "480p"
@@ -46,21 +41,27 @@ class TestSeedance25Draft:
         assert payload["aspectRatio"] == "adaptive"
 
     def test_v1_keeps_end_frame_and_refs(self):
-        gen = Seedance25DraftVideoGeneratorV1(
-            api_key="k", project="p", prompt="x", image_url="https://i/a.png", image_tail="https://i/b.png"
+        gen = get_video_generator(
+            "seedance25draftv1",
+            api_key="k",
+            project="p",
+            prompt="x",
+            image_url="https://i/a.png",
+            image_tail="https://i/b.png",
         )
         assert gen.get_payload()["input"]["imageTail"] == "https://i/b.png"
-        assert Seedance25DraftVideoGeneratorV1.MAX_REFS == Seedance25VideoGeneratorV1.MAX_REFS
+        assert pollo_engine._cfg("seedance25draftv1")["MAX_REFS"] == pollo_engine._cfg("seedance25v1")["MAX_REFS"]
 
     def test_legacy(self):
-        gen = Seedance25DraftVideoGenerator(api_key="k", project="p", prompt="x", resolution="720p")
+        gen = get_video_generator("seedance25draft", api_key="k", project="p", prompt="x", resolution="720p")
         assert gen.model_url == f"{LEGACY}/bytedance/seedance-2-5-draft"
         assert gen.get_payload()["input"]["resolution"] == "480p"
 
 
 class TestSeedance25Extend:
     def test_payload(self):
-        gen = Seedance25ExtendVideoGeneratorV1(
+        gen = get_video_generator(
+            "seedance25extendv1",
             api_key="k",
             project="p",
             prompt="keep walking",
@@ -85,37 +86,37 @@ class TestSeedance25Extend:
         }
 
     def test_no_source_image_and_prompt_optional(self):
-        with patch("img2vid.pollo.generators.get_image_url", return_value="https://i/project.png"):
-            gen = Seedance25ExtendVideoGeneratorV1(api_key="k", project="p", prompt="", video_url="https://v/a.mp4")
+        with patch("web.providers.pollo_engine.get_image_url", return_value="https://i/project.png"):
+            gen = get_video_generator(
+                "seedance25extendv1", api_key="k", project="p", prompt="", video_url="https://v/a.mp4"
+            )
         assert gen.image_url is None
         gen.prompt = ""
         assert "prompt" not in gen.get_payload()["input"]
 
     def test_needs_a_video(self):
-        gen = Seedance25ExtendVideoGeneratorV1(api_key="k", project="p", prompt="x")
+        gen = get_video_generator("seedance25extendv1", api_key="k", project="p", prompt="x")
         with pytest.raises(ValueError, match="source video"):
             gen.get_payload()
 
 
 class TestEstimateUrl:
     def test_v1_and_legacy(self):
-        v1 = Seedance25DraftVideoGeneratorV1(api_key="k", project="p", prompt="x")
+        v1 = get_video_generator("seedance25draftv1", api_key="k", project="p", prompt="x")
         assert v1.estimate_url == f"{V1}/bytedance/seedance-2-5-draft/video/estimate"
-        extend = Seedance25ExtendVideoGeneratorV1(api_key="k", project="p", prompt="x", video_url="https://v")
+        extend = get_video_generator("seedance25extendv1", api_key="k", project="p", prompt="x", video_url="https://v")
         assert extend.estimate_url == f"{V1}/bytedance/seedance-2-5/video-extend/estimate"
-        legacy = Seedance25DraftVideoGenerator(api_key="k", project="p", prompt="x")
+        legacy = get_video_generator("seedance25draft", api_key="k", project="p", prompt="x")
         assert legacy.estimate_url == f"{LEGACY}/bytedance/seedance-2-5-draft/validate"
 
     def test_legacy_ref2video_has_none(self):
-        from img2vid.pollo.generators import SeedanceRefVideoGenerator
-
-        gen = SeedanceRefVideoGenerator(api_key="k", project="p", prompt="x", refs=[])
+        gen = get_video_generator("seedanceref", api_key="k", project="p", prompt="x", refs=[])
         assert gen.estimate_url is None
 
 
 class TestEstimate:
     def _gen(self, **kw):
-        return Seedance25DraftVideoGeneratorV1(api_key="k", project="p", prompt="x", **kw)
+        return get_video_generator("seedance25draftv1", api_key="k", project="p", prompt="x", **kw)
 
     @patch("web.providers.pollo_estimate.requests.post")
     def test_v1_answer(self, post):
@@ -314,9 +315,9 @@ class TestExtendGenerate:
 
 
 def test_chat_doesnt_offer_extend(monkeypatch):
-    from web.providers import pollo_chat
+    from web.providers import pollo
 
-    monkeypatch.setattr(pollo_chat, "is_configured", lambda: True)
-    ids = {m["id"] for m in pollo_chat.list_video_models()}
+    monkeypatch.setattr(pollo, "is_configured", lambda: True)
+    ids = {m["id"] for m in pollo.list_video_models()}
     assert "pollo/seedance25draftv1" in ids
     assert "pollo/seedance25extendv1" not in ids

@@ -6,164 +6,34 @@ from web.core.get_task import get_task_status
 from web.core.metadata import get_db
 from web.core.spinner import Spinner
 
-from .generators import (
+from .pollo_engine import (
     ERROR_STATUSES,
+    GENERATORS,
+    GENERATORS_LEGACY,
+    GENERATORS_V1,
+    IMAGE_GENERATORS,
+    IMAGE_GENERATORS_LEGACY,
+    IMAGE_GENERATORS_V1,
     SUCCESS_STATUSES,
-    KlingV3ImageGeneratorV1,
-    KlingV3OmniImageGeneratorV1,
-    KlingV3OmniVideoGeneratorV1,
-    KlingV3TurboVideoGeneratorV1,
-    KlingV3VideoGeneratorV1,
-    KlingV21MasterVideoGeneratorV1,
-    KlingV21VideoGeneratorV1,
-    KlingV25TurboVideoGeneratorV1,
-    KlingV26VideoGeneratorV1,
-    KlingVideoO1VideoGeneratorV1,
-    MinimaxH3MaxVideoGenerator,
-    MinimaxH3VideoGenerator,
-    MinimaxH3VideoGeneratorV1,
-    NanoBanana2ImageGenerator,
-    NanoBanana2ImageGeneratorV1,
-    Pollo20VideoGenerator,
-    Pollo20VideoGeneratorV1,
-    Pollo25VideoGenerator,
-    Pollo25VideoGeneratorV1,
-    Pollo30FastVideoGeneratorV1,
-    Pollo30VideoGeneratorV1,
-    PolloDance20FastVideoGenerator,
-    PolloDance20FastVideoGeneratorV1,
-    PolloDance20VideoGenerator,
-    PolloDance20VideoGeneratorV1,
-    PolloDanceRefFastVideoGenerator,
-    PolloDanceRefVideoGenerator,
-    PolloImage2ImageGenerator,
-    PolloJourneyImageGenerator,
-    PolloJourneyImageGeneratorV1,
-    QwenImage3ImageGeneratorV1,
-    QwenImage3ProImageGeneratorV1,
-    QwenImageFlashImageGeneratorV1,
-    QwenImageImageGenerator,
-    Seedance20FastVideoGenerator,
-    Seedance20FastVideoGeneratorV1,
-    Seedance20MiniVideoGenerator,
-    Seedance20MiniVideoGeneratorV1,
-    Seedance20VideoGenerator,
-    Seedance20VideoGeneratorV1,
-    Seedance25DraftVideoGenerator,
-    Seedance25DraftVideoGeneratorV1,
-    Seedance25ExtendVideoGeneratorV1,
-    Seedance25VideoGenerator,
-    Seedance25VideoGeneratorV1,
-    SeedanceMiniRefVideoGenerator,
-    SeedanceRefFastVideoGenerator,
-    SeedanceRefVideoGenerator,
-    SeedreamFlashImageGeneratorV1,
-    SeedreamImageGenerator,
-    SeedreamImageGeneratorV1,
-    SeedreamProImageGeneratorV1,
-    Wan27VideoGenerator,
-    Wan27VideoGeneratorV1,
-    Wan30PrimeVideoGenerator,
-    Wan30PrimeVideoGeneratorV1,
-    Wan30VideoGenerator,
-    Wan30VideoGeneratorV1,
-    WanAnimateMixVideoGeneratorV1,
 )
+from .pollo_engine import image_generator as get_image_generator
+from .pollo_engine import video_generator as get_video_generator
 
-# Legacy (pre-v1) endpoints — kept as a fallback, only shown in the web UI
-# behind the "legacy mode" toggle. See BaseV1VideoGenerator's docstring in
-# generators.py for why v1 exists and how it differs.
-GENERATORS_LEGACY = {
-    "pollo20": Pollo20VideoGenerator,
-    "pollo25": Pollo25VideoGenerator,
-    "pollodance20": PolloDance20VideoGenerator,
-    "pollodance20fast": PolloDance20FastVideoGenerator,
-    "pollodanceref": PolloDanceRefVideoGenerator,
-    "pollodancereffast": PolloDanceRefFastVideoGenerator,
-    "seedance20": Seedance20VideoGenerator,
-    "seedance20fast": Seedance20FastVideoGenerator,
-    "seedance20mini": Seedance20MiniVideoGenerator,
-    "seedance25": Seedance25VideoGenerator,
-    "seedance25draft": Seedance25DraftVideoGenerator,
-    "seedanceref": SeedanceRefVideoGenerator,
-    "seedancereffast": SeedanceRefFastVideoGenerator,
-    "seedanceminiref": SeedanceMiniRefVideoGenerator,
-    "minimaxh3": MinimaxH3VideoGenerator,
-    "wan27": Wan27VideoGenerator,
-    "wan30": Wan30VideoGenerator,
-    "wan30prime": Wan30PrimeVideoGenerator,
-}
-
-# Current (v1) endpoints — shown by default in the web UI.
-GENERATORS_V1 = {
-    "pollo20v1": Pollo20VideoGeneratorV1,
-    "pollo25v1": Pollo25VideoGeneratorV1,
-    "pollodance20v1": PolloDance20VideoGeneratorV1,
-    "pollodance20fastv1": PolloDance20FastVideoGeneratorV1,
-    "pollo30v1": Pollo30VideoGeneratorV1,
-    "pollo30fastv1": Pollo30FastVideoGeneratorV1,
-    "seedance20v1": Seedance20VideoGeneratorV1,
-    "seedance20fastv1": Seedance20FastVideoGeneratorV1,
-    "seedance20miniv1": Seedance20MiniVideoGeneratorV1,
-    "seedance25v1": Seedance25VideoGeneratorV1,
-    "seedance25draftv1": Seedance25DraftVideoGeneratorV1,
-    "seedance25extendv1": Seedance25ExtendVideoGeneratorV1,  # extends a video; v1-only
-    "minimaxh3v1": MinimaxH3VideoGeneratorV1,
-    "minimaxh3max": MinimaxH3MaxVideoGenerator,  # v1-API-only; no legacy counterpart
-    "wan27v1": Wan27VideoGeneratorV1,
-    "wan30v1": Wan30VideoGeneratorV1,
-    "wan30primev1": Wan30PrimeVideoGeneratorV1,
-    "klingv21v1": KlingV21VideoGeneratorV1,
-    "klingv21masterv1": KlingV21MasterVideoGeneratorV1,
-    "klingv25turbov1": KlingV25TurboVideoGeneratorV1,
-    "klingvideoo1v1": KlingVideoO1VideoGeneratorV1,
-    "klingv26v1": KlingV26VideoGeneratorV1,
-    "klingv3v1": KlingV3VideoGeneratorV1,
-    "klingv3turbov1": KlingV3TurboVideoGeneratorV1,
-    "klingv3omniv1": KlingV3OmniVideoGeneratorV1,
-    "recastv1": WanAnimateMixVideoGeneratorV1,  # Pollo Recast = alibaba/wan-2-2-animate-mix/motion
-}
-
-GENERATORS = {**GENERATORS_LEGACY, **GENERATORS_V1}
+__all__ = [
+    "ERROR_STATUSES",
+    "GENERATORS",
+    "GENERATORS_LEGACY",
+    "GENERATORS_V1",
+    "IMAGE_GENERATORS",
+    "IMAGE_GENERATORS_LEGACY",
+    "IMAGE_GENERATORS_V1",
+    "SUCCESS_STATUSES",
+    "create_video",
+    "get_image_generator",
+    "get_video_generator",
+]
 
 DEFAULT_MODEL = "seedance20fastv1"
-
-IMAGE_GENERATORS_LEGACY = {
-    "pollojourney": PolloJourneyImageGenerator,
-    "seedream": SeedreamImageGenerator,
-    "nanobanana2": NanoBanana2ImageGenerator,
-    "polloimage2": PolloImage2ImageGenerator,
-    "qwenimage": QwenImageImageGenerator,
-}
-
-IMAGE_GENERATORS_V1 = {
-    "pollojourneyv1": PolloJourneyImageGeneratorV1,
-    "seedreamv1": SeedreamImageGeneratorV1,
-    "nanobanana2v1": NanoBanana2ImageGeneratorV1,
-    "klingv3imagev1": KlingV3ImageGeneratorV1,
-    "klingv3omniimagev1": KlingV3OmniImageGeneratorV1,
-    "seedreamprov1": SeedreamProImageGeneratorV1,
-    "seedreamflashv1": SeedreamFlashImageGeneratorV1,
-    "qwenimage3v1": QwenImage3ImageGeneratorV1,
-    "qwenimage3prov1": QwenImage3ProImageGeneratorV1,
-    "qwenimageflashv1": QwenImageFlashImageGeneratorV1,
-}
-
-IMAGE_GENERATORS = {**IMAGE_GENERATORS_LEGACY, **IMAGE_GENERATORS_V1}
-
-
-def get_video_generator(model: str, **kwargs):
-    try:
-        return GENERATORS[model](**kwargs)
-    except KeyError:
-        raise ValueError(f"Unsupported model: {model}. Available: {', '.join(GENERATORS)}") from None
-
-
-def get_image_generator(model: str, **kwargs):
-    try:
-        return IMAGE_GENERATORS[model](**kwargs)
-    except KeyError:
-        raise ValueError(f"Unsupported image model: {model}. Available: {', '.join(IMAGE_GENERATORS)}") from None
 
 
 def _check_choice(gen_cls, attr: str, value, what: str, model: str, default: tuple = ()) -> None:
@@ -200,7 +70,7 @@ def create_video(
     """Generate a video from the command line: send the task, poll it and
     download the result, recording a job like the web interface does."""
     model = model or DEFAULT_MODEL
-    # Validate against the generator class before spending credits
+    # Validate against the generator spec before spending credits
     gen_cls = GENERATORS.get(model)
     if gen_cls is None:
         raise ValueError(f"Unknown model: {model}. Available: {', '.join(GENERATORS)}")

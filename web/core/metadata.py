@@ -1356,6 +1356,31 @@ class MetadataDB:
                 session.expunge(c)
             return convs
 
+    def conversation_thumbs(self, conv_ids: list[str]) -> dict[str, str]:
+        """Newest done image file per conversation, for gallery cover thumbnails
+        (conversations without one are simply absent). One query over the ids."""
+        out: dict[str, str] = {}
+        if not conv_ids:
+            return out
+        with self._session() as session:
+            rows = (
+                session.query(ChatMessage.conversation_id, ChatMessage.media_json)
+                .filter(ChatMessage.conversation_id.in_(conv_ids), ChatMessage.media_json.isnot(None))
+                .order_by(ChatMessage.id.desc())
+            )
+            for conv_id, media_json in rows:
+                if conv_id in out:
+                    continue
+                try:
+                    media = json.loads(media_json)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                for item in media:
+                    if item.get("kind") == "image" and item.get("status") == "done" and item.get("file"):
+                        out[conv_id] = item["file"]
+                        break
+        return out
+
     def search_conversations(self, query: str, limit: int = 100) -> list[tuple[ChatConversation, str | None]]:
         """Chats whose title or any message (on any branch) contains `query`,
         ignoring case, most recently active first. Each comes with the first

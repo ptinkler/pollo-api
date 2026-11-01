@@ -234,14 +234,19 @@ export function useStudio({ models, settings, showToast }) {
     active.value = id
     loading.value = true
     try {
-      activeThread.value = await fetchConversation(id)
-      messages.value = activeThread.value.messages || []
-      applyChat(activeThread.value)
-      instructionIds.value = activeThread.value.instruction_ids || []
-      instructionGroupIds.value = activeThread.value.instruction_group_ids || []
-      characterIds.value = activeThread.value.character_ids || []
-      hiddenDefaults.value = { ...NO_HIDDEN(), ...activeThread.value.hidden_defaults }
-      paused.value = { ...NO_PAUSED(), ...activeThread.value.paused_instructions }
+      // GET returns { conversation, messages }; unwrap so activeThread holds the
+      // conversation itself (its kind/settings/instructions live there, not on
+      // the envelope). showChat does the same during a streamed turn.
+      const data = await fetchConversation(id)
+      const conv = data.conversation || data
+      activeThread.value = conv
+      messages.value = data.messages || []
+      applyChat(conv)
+      instructionIds.value = conv.instruction_ids || []
+      instructionGroupIds.value = conv.instruction_group_ids || []
+      characterIds.value = conv.character_ids || []
+      hiddenDefaults.value = { ...NO_HIDDEN(), ...conv.hidden_defaults }
+      paused.value = { ...NO_PAUSED(), ...conv.paused_instructions }
       refreshSpend(id)
       polling.ensure()
       return true
@@ -437,6 +442,20 @@ export function useStudio({ models, settings, showToast }) {
     } finally {
       forking = false
     }
+  }
+  // "Use settings" (gallery): fill the composer from a past generation so the
+  // user can tweak and press Generate. Fills only — never fires (unlike retry).
+  function applyGenerationSettings(item) {
+    const kind = item.kind === 'video' ? 'video' : 'image'
+    if (item.prompt) draft.value = item.prompt
+    if (item.model) selected[kind] = item.model
+    mode.value = kind
+    const p = item.params || {}
+    const opts = kind === 'video' ? settings.videoOpts : settings.imageOpts
+    if (p.aspect_ratio) opts.aspect_ratio = p.aspect_ratio
+    if (p.resolution) opts.resolution = p.resolution
+    if (kind === 'video' && p.duration != null) settings.videoOpts.duration = p.duration
+    if (kind === 'video' && p.generate_audio != null) settings.videoOpts.generate_audio = p.generate_audio
   }
   async function regenerateMedia(msg, { mediaId, model }) {
     if (!model) {
@@ -649,6 +668,7 @@ export function useStudio({ models, settings, showToast }) {
     switchBranch,
     forkFrom,
     regenerateMedia,
+    applyGenerationSettings,
     pinMedia,
     stop,
     deleteExchange,

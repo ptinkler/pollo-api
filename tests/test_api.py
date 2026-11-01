@@ -2348,14 +2348,9 @@ class TestMainGuards:
         assert hasattr(api_mod, "app")
 
     def test_pollo_img2vid_main_guard(self):
-        import img2vid.pollo.pollo_img2vid as mod
+        import web.providers.pollo_img2vid as mod
 
         assert callable(mod.create_video)
-
-    def test_main_module_guard(self):
-        import img2vid.pollo.__main__ as mod
-
-        assert callable(mod.main)
 
 
 # ── SPA static file serving ──────────────────────────────────────────

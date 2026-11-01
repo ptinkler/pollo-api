@@ -7,13 +7,17 @@ special-casing one by name. `provider_for()` is the first step of that: it maps
 a model id to the module that owns it (OpenRouter is the fallback).
 """
 
-from . import openrouter, pollo_chat, pollo_estimate, pollo_models, venice_chat  # noqa: F401
+from . import openrouter, pollo, pollo_estimate, pollo_models, venice  # noqa: F401
+
+# Dispatch order for the model catalogue (Pollo first, OpenRouter last). Each
+# exposes the uniform surface: NAME, is_configured(), list_models(kind, refresh).
+PROVIDERS = (pollo, venice, openrouter)
 
 
 def provider_for(model_id: str | None):
     """The provider module that owns `model_id` (OpenRouter is the default)."""
-    if pollo_chat.is_pollo(model_id):
-        return pollo_chat
-    if venice_chat.is_venice(model_id):
-        return venice_chat
+    if pollo.is_pollo(model_id):
+        return pollo
+    if venice.is_venice(model_id):
+        return venice
     return openrouter

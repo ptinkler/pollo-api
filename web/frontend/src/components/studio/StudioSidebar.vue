@@ -75,6 +75,8 @@ function matchesKind(t) {
   if (props.filter === 'gallery') return k === 'gallery'
   return true
 }
+// Icon per thread kind: the gallery icon (same as "New gallery") vs the chat icon.
+const threadIcon = t => (t.kind === 'gallery' ? '#s-image' : '#s-chat')
 const filtered = computed(() => {
   const q = props.search.trim().toLowerCase()
   return props.threads.filter(t => matchesKind(t) && (!q || (t.title || '').toLowerCase().includes(q)))
@@ -135,8 +137,16 @@ const bySpace = computed(() => {
           <button :class="{ on: filter === 'all' }" @click="emit('update:filter', 'all')">All</button>
           <button :class="{ on: filter === 'chat' }" @click="emit('update:filter', 'chat')">Chat</button>
           <button :class="{ on: filter === 'gallery' }" @click="emit('update:filter', 'gallery')">Gallery</button>
-          <button :class="{ on: filter === 'favourites' }" @click="emit('update:filter', 'favourites')">
-            <svg class="ic"><use href="#s-star" /></svg> Favourites
+          <button
+            class="ficon"
+            :class="{ on: filter === 'favourites' }"
+            title="Favourites"
+            @click="emit('update:filter', 'favourites')"
+          >
+            <svg class="ic"><use href="#s-star" /></svg>
+          </button>
+          <button class="ficon" title="More filters — coming soon" disabled>
+            <svg class="ic"><use href="#s-filter" /></svg>
           </button>
         </div>
 
@@ -154,7 +164,7 @@ const bySpace = computed(() => {
               @blur="commitRename(t)"
             />
             <button v-else class="nitem" @click="emit('open', t.id)">
-              <svg class="ic"><use href="#s-chat" /></svg><span class="lbl">{{ t.title || 'Untitled' }}</span>
+              <svg class="ic"><use :href="threadIcon(t)" /></svg><span class="lbl">{{ t.title || 'Untitled' }}</span>
             </button>
             <div class="nactions">
               <button class="nact on" title="Unpin" @click.stop="emit('pin', t)">
@@ -223,7 +233,7 @@ const bySpace = computed(() => {
                 @blur="commitRename(t)"
               />
               <button v-else class="nitem" @click="emit('open', t.id)">
-                <svg class="ic"><use href="#s-chat" /></svg><span class="lbl">{{ t.title || 'Untitled' }}</span>
+                <svg class="ic"><use :href="threadIcon(t)" /></svg><span class="lbl">{{ t.title || 'Untitled' }}</span>
               </button>
               <div class="nactions">
                 <button class="nact" :class="{ on: t.pinned }" title="Pin" @click.stop="emit('pin', t)">
@@ -269,7 +279,7 @@ const bySpace = computed(() => {
             @blur="commitRename(t)"
           />
           <button v-else class="nitem" @click="emit('open', t.id)">
-            <svg class="ic"><use href="#s-chat" /></svg><span class="lbl">{{ t.title || 'Untitled' }}</span>
+            <svg class="ic"><use :href="threadIcon(t)" /></svg><span class="lbl">{{ t.title || 'Untitled' }}</span>
           </button>
           <div class="nactions">
             <button class="nact" :class="{ on: t.pinned }" title="Pin" @click.stop="emit('pin', t)">
@@ -460,6 +470,18 @@ const bySpace = computed(() => {
   background: var(--saccent-soft);
   color: var(--saccent);
   border-color: transparent;
+}
+/* Favourites + the filter placeholder are icon-only (text overflowed the rail) */
+.nfilter .ficon {
+  padding: 5px 8px;
+  margin-left: auto;
+}
+.nfilter .ficon + .ficon {
+  margin-left: 0;
+}
+.nfilter .ficon[disabled] {
+  opacity: 0.5;
+  cursor: default;
 }
 .nfilter .ic {
   width: 13px;

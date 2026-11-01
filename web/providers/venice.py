@@ -97,6 +97,9 @@ def is_configured() -> bool:
     return bool(get_api_key())
 
 
+NAME = "venice"
+
+
 def is_venice(model_id: str | None) -> bool:
     return bool(model_id and model_id.startswith(PREFIX))
 
@@ -503,32 +506,23 @@ def model_info(kind: str, model_id: str) -> dict[str, Any]:
     return _public([_entry(kind, model_id)])[0]
 
 
-def get_balance() -> float | None:
-    """The account's USD balance: the billing endpoint if this key may read
-    it, else the balance Venice reported on the latest call."""
-    try:
-        data = _request("GET", "/billing/balance").json()
-        usd = (data.get("balances") or {}).get("usd")
-        if usd is not None:
-            _balance["usd"] = float(usd)
-    except VeniceError:
-        if _balance["usd"] is None:
-            with contextlib.suppress(VeniceError):
-                _request("GET", "/api_keys/rate_limits")  # every response carries the balance header
-    return _balance["usd"]
-
-
-def get_plan_credits() -> float | None:
-    """What's left of the plan's bundled credits (BUNDLED_CREDITS, which
-    Venice spends after DIEM and before USD). Unlike /billing/balance, the
-    rate limits endpoint gives them to inference keys too."""
+def get_balances() -> dict[str, float | None]:
+    """The account's USD balance and the plan's bundled credits (BUNDLED_CREDITS,
+    which Venice spends after DIEM and before USD), both from the rate-limits
+    endpoint in one call. /billing/balance needs an admin key, and the USD figure
+    lives in the body — not a response header, despite older API versions. If the
+    endpoint can't be read, fall back to the balance a prior response's header
+    reported (via _note_balance)."""
     try:
         data = _request("GET", "/api_keys/rate_limits").json()
     except VeniceError:
-        return None
+        return {"usd": _balance["usd"], "credits": None}
     balances = (data.get("data") or data).get("balances") or {}
-    value = balances.get("BUNDLED_CREDITS")
-    return float(value) if value is not None else None
+    usd = balances.get("USD")
+    if usd is not None:
+        _balance["usd"] = float(usd)
+    credits = balances.get("BUNDLED_CREDITS")
+    return {"usd": _balance["usd"], "credits": float(credits) if credits is not None else None}
 
 
 # ── Text ────────────────────────────────────────────────────────────

@@ -24,18 +24,18 @@ from urllib.parse import urlsplit
 import requests
 from PIL import Image
 
-from img2vid.pollo.generators import ERROR_STATUSES, SUCCESS_STATUSES, BaseVideoGenerator
-from img2vid.pollo.pollo_img2vid import (
+from web.core.get_task import get_task_status
+
+from .. import image_hosts, keyctx, request_log
+from .openrouter import OpenRouterError
+from .pollo_engine import ERROR_STATUSES, SUCCESS_STATUSES, closest_aspect_ratio
+from .pollo_img2vid import (
     GENERATORS_V1,
     IMAGE_GENERATORS,
     IMAGE_GENERATORS_V1,
     get_image_generator,
     get_video_generator,
 )
-from web.core.get_task import get_task_status
-
-from .. import image_hosts, keyctx, request_log
-from .openrouter import OpenRouterError
 from .pollo_models import MODEL_INFO
 
 
@@ -56,6 +56,19 @@ DOWNLOAD_TIMEOUT = 120
 
 def is_configured() -> bool:
     return bool(keyctx.provider_key("pollo"))
+
+
+NAME = "pollo"
+
+
+def list_models(kind: str, refresh: bool = False) -> list[dict]:
+    """Uniform provider interface. Pollo has no text models; image/video lists
+    are already key-gated (empty without a Pollo key)."""
+    if kind == "image":
+        return list_image_models()
+    if kind == "video":
+        return list_video_models()
+    return []
 
 
 def is_pollo(model_id: str | None) -> bool:
@@ -278,7 +291,7 @@ def _ratio_for_image(path: Path, ratios: list[str]) -> str | None:
         return None
     with Image.open(path) as img:
         width, height = img.size
-    return BaseVideoGenerator.get_closest_aspect_ratio(width, height, numeric)
+    return closest_aspect_ratio(width, height, numeric)
 
 
 def get_video(job_id: str) -> dict:

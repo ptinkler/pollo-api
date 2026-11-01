@@ -90,6 +90,7 @@ const {
   switchBranch,
   forkFrom,
   regenerateMedia,
+  applyGenerationSettings,
   pinMedia,
   stop,
   deleteExchange,
@@ -165,6 +166,12 @@ async function onGalleryFavourite(item) {
 function regenerateFromModal(item) {
   const msg = messages.value.find(m => m.id === item.message_id)
   if (msg) regenerateMedia(msg, { mediaId: item.id })
+  galleryItem.value = null
+}
+// "Use settings": fill the composer from this generation (model, mode, options,
+// prompt), close the modal, and leave it for the user to tweak and Generate.
+function useSettingsFromModal(item) {
+  applyGenerationSettings(item)
   galleryItem.value = null
 }
 async function deleteFromModal(item) {
@@ -461,8 +468,12 @@ onMounted(() => {
         <div class="top">
           <div class="ttitle">{{ activeTitle }}</div>
           <div class="vtoggle">
-            <button :class="{ on: threadView === 'chat' }" @click="setThreadView('chat')">Chat</button>
-            <button :class="{ on: threadView === 'gallery' }" @click="setThreadView('gallery')">Gallery</button>
+            <button :class="{ on: threadView === 'chat' }" title="Chat view" @click="setThreadView('chat')">
+              <svg class="ic"><use href="#s-chat" /></svg>
+            </button>
+            <button :class="{ on: threadView === 'gallery' }" title="Gallery view" @click="setThreadView('gallery')">
+              <svg class="ic"><use href="#s-image" /></svg>
+            </button>
           </div>
           <button
             class="kindswitch"
@@ -479,7 +490,9 @@ onMounted(() => {
             ></span>
           </button>
           <div class="spacer"></div>
-          <span v-if="spendLabel" class="spend" title="Spent in this thread">{{ spendLabel }}</span>
+          <span v-if="spendLabel" class="spend" title="Total spent generating in this thread">
+            Spent <b>{{ spendLabel }}</b>
+          </span>
           <span class="bal pollo" title="Pollo credits remaining — click for usage" @click="router.push('/usage')">
             Pollo <b>{{ fmtCredits(balances.pollo) }}</b>
           </span>
@@ -586,6 +599,7 @@ onMounted(() => {
       @close="galleryItem = null"
       @favourite="galleryManage ? onGalleryFavourite($event) : onFavUnstar($event)"
       @use-image="useImage"
+      @use-settings="useSettingsFromModal"
       @regenerate="regenerateFromModal"
       @delete="deleteFromModal"
       @open-thread="openThreadFromModal"
@@ -644,6 +658,7 @@ onMounted(() => {
       <circle cx="12" cy="12" r="3" />
       <path d="M12 3v2.5M12 18.5V21M5 5l1.8 1.8M17.2 17.2 19 19M3 12h2.5M18.5 12H21M5 19l1.8-1.8M17.2 6.8 19 5" />
     </symbol>
+    <symbol id="s-filter" viewBox="0 0 24 24"><path d="M4 5h16l-6.3 7.3V19l-3.4-2v-4.7z" /></symbol>
     <symbol id="s-spark" viewBox="0 0 24 24">
       <path d="M12 3.5l1.5 5L18.5 10l-5 1.5L12 16.5l-1.5-5L5.5 10l5-1.5z" />
     </symbol>
@@ -677,7 +692,7 @@ onMounted(() => {
   overflow: hidden;
   background: var(--sbg2);
   color: var(--sfg);
-  font-size: 13.5px;
+  font-size: 15px; /* base for inherited text (item 27: bumped from 13.5px) */
 }
 .center {
   flex: 1;
@@ -723,6 +738,11 @@ onMounted(() => {
   padding: 3px 9px;
   border: 1px solid var(--sborder);
   border-radius: 7px;
+  white-space: nowrap;
+}
+.spend b {
+  color: var(--sfg);
+  font-weight: 600;
 }
 .bal {
   font-size: 12px;
@@ -751,13 +771,19 @@ onMounted(() => {
   padding: 2px;
 }
 .vtoggle button {
+  display: inline-flex;
+  align-items: center;
   font-size: 12px;
-  padding: 3px 10px;
+  padding: 4px 10px;
   border: 0;
   background: transparent;
   color: var(--smuted);
   border-radius: 5px;
   cursor: pointer;
+}
+.vtoggle button .ic {
+  width: 15px;
+  height: 15px;
 }
 .vtoggle button.on {
   background: var(--shover);

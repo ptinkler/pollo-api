@@ -84,6 +84,12 @@ describe('apiPost', () => {
     mockFetch.mockReturnValueOnce(mockErrorResponse(400))
     await expect(apiPost('/api/thing', {})).rejects.toThrow('error')
   })
+
+  it('does NOT retry on 500 (writes are not idempotent — no blind re-generation)', async () => {
+    mockFetch.mockReturnValue(mockErrorResponse(500))
+    await expect(apiPost('/api/thing', {})).rejects.toThrow()
+    expect(mockFetch).toHaveBeenCalledTimes(1) // one attempt, no retry
+  })
 })
 
 // ── apiPut ──────────────────────────────────────────────────────────

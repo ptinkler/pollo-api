@@ -11,7 +11,6 @@ import {
   promoteCharacter,
   uploadCharacterImage,
   copyChatImageToCharacter,
-  copyGenerationImageToCharacter,
   characterImageUrl,
 } from '../../composables/useCharacters'
 import { takeFiles } from '../../utils/files'
@@ -23,7 +22,7 @@ const props = defineProps({
   character: { type: Object, default: null }, // edit this one; null = create
   conversationId: { type: String, default: null }, // create as ad hoc in this chat
   // Images to start a new character with: { kind: 'chat', conversationId, file, preview },
-  // { kind: 'generation', project, filename, preview } or { kind: 'media', mediaId, preview }
+  // { kind: 'chat', conversationId, file } or { kind: 'media', mediaId, preview }
   seed: { type: Array, default: () => [] },
   // Show the "add to chat defaults" toggles (chat view only)
   showDefaults: { type: Boolean, default: false },
@@ -100,7 +99,6 @@ function onDropOn(e, i) {
 
 function addImage(id, p) {
   if (p.kind === 'chat') return copyChatImageToCharacter(id, p.conversationId, p.file)
-  if (p.kind === 'generation') return copyGenerationImageToCharacter(id, p.project, p.filename)
   if (p.kind === 'media') return importMedia(p.mediaId, { target: 'character', character_id: id })
   return uploadCharacterImage(id, p.file)
 }

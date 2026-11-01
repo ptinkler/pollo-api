@@ -3,7 +3,7 @@
      and the cross-thread Favourites gallery — `canManage` gates the actions
      that need the generation's message to be in the open thread. -->
 <script setup>
-import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { shortModel, fmtCost } from '../../utils/format'
 
 const props = defineProps({
@@ -11,9 +11,10 @@ const props = defineProps({
   item: { type: Object, default: null },
   canManage: { type: Boolean, default: false },
 })
-const emit = defineEmits(['close', 'favourite', 'use-image', 'regenerate', 'delete', 'open-thread'])
+const emit = defineEmits(['close', 'favourite', 'use-image', 'use-settings', 'regenerate', 'delete', 'open-thread'])
 
 const isVideo = computed(() => props.item?.kind === 'video')
+const loop = ref(false) // videos don't autoplay; the user opts into looping
 const when = computed(() => {
   const d = props.item?.created_at && new Date(props.item.created_at)
   return d && !isNaN(d) ? d.toLocaleString() : ''
@@ -27,13 +28,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 </script>
 
 <template>
-  <Teleport to="body">
+  <Teleport to=".studio">
     <div v-if="item" class="gm-back" @click="emit('close')">
       <div class="gm-card" @click.stop>
         <button class="gm-x" title="Close" @click="emit('close')">×</button>
 
         <div class="gm-media">
-          <video v-if="isVideo" :src="item.url" controls autoplay loop playsinline></video>
+          <template v-if="isVideo">
+            <video :src="item.url" controls :loop="loop" playsinline></video>
+            <label class="gm-loop"><input v-model="loop" type="checkbox" /> Loop</label>
+          </template>
           <img v-else :src="item.url" alt="" />
         </div>
 
@@ -76,6 +80,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
             </button>
             <button class="gm-btn" @click="emit('use-image', { file: item.file, mode: 'video' })">
               🎬 Video from this
+            </button>
+            <button v-if="canManage" class="gm-btn" @click="emit('use-settings', item)">
+              <svg class="ic"><use href="#s-cog" /></svg>Use settings
             </button>
             <button v-if="canManage" class="gm-btn" @click="emit('regenerate', item)">
               <svg class="ic"><use href="#s-refresh" /></svg>Regenerate
@@ -135,6 +142,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   cursor: pointer;
 }
 .gm-media {
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
   display: grid;
@@ -148,6 +156,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   max-height: calc(90vh - 20px);
   object-fit: contain;
   border-radius: 8px;
+}
+.gm-loop {
+  position: absolute;
+  left: 16px;
+  bottom: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 4px 9px;
+  border-radius: 7px;
+  cursor: pointer;
 }
 .gm-side {
   flex: 0 0 300px;

@@ -93,6 +93,33 @@ class TestConversations:
         assert client.delete(f"/api/chat/conversations/{c['id']}").status_code == 200
         assert client.get(f"/api/chat/conversations/{c['id']}").status_code == 404
 
+    def test_kind_persists_through_create_patch_list_and_fetch(self, client):
+        # Create as a gallery thread → kind sticks on create, list and fetch.
+        g = client.post("/api/chat/conversations", json={"kind": "gallery"}).json()
+        assert g["kind"] == "gallery"
+        # GET returns a { conversation, messages } envelope — kind is on the conversation.
+        assert client.get(f"/api/chat/conversations/{g['id']}").json()["conversation"]["kind"] == "gallery"
+        listed = {c["id"]: c["kind"] for c in client.get("/api/chat/conversations").json()["conversations"]}
+        assert listed[g["id"]] == "gallery"
+        # The "Opens on Chat/Gallery" toggle (PATCH kind) persists too.
+        assert client.patch(f"/api/chat/conversations/{g['id']}", json={"kind": "chat"}).json()["kind"] == "chat"
+        assert client.get(f"/api/chat/conversations/{g['id']}").json()["conversation"]["kind"] == "chat"
+        # An unknown kind falls back to "chat" rather than being stored raw.
+        c = client.post("/api/chat/conversations", json={"kind": "bogus"}).json()
+        assert c["kind"] == "chat"
+
+    def test_conversation_thumbs_returns_newest_image(self, client, db):
+        c = client.post("/api/chat/conversations", json={}).json()
+
+        def img(mid, f):
+            return [{"id": mid, "kind": "image", "status": "done", "file": f}]
+
+        db.add_chat_message(c["id"], "assistant", media=img("m1", "old.png"))
+        db.add_chat_message(c["id"], "assistant", media=img("m2", "new.png"))
+        # Newest image wins; the route isn't shadowed by /conversations/{id}; unknown ids are absent.
+        r = client.get(f"/api/chat/conversations/thumbs?ids={c['id']},nope")
+        assert r.json() == {"thumbs": {c["id"]: "new.png"}}
+
     def test_status_reports_key(self, client, provider_keys):
         assert client.get("/api/chat/status").json() == {"configured": True, "openrouter": True, "venice": False}
         provider_keys["openrouter"] = None
@@ -2220,7 +2247,7 @@ class TestPolloImageModels:
     @pytest.fixture()
     def pollo(self, chat, monkeypatch, provider_keys):
         provider_keys["pollo"] = "pollo-test"
-        monkeypatch.setattr(chat.pollo_chat, "POLL_INTERVAL", 0)
+        monkeypatch.setattr(chat.pollo, "POLL_INTERVAL", 0)
         calls = {"generators": [], "uploads": [], "statuses": iter([])}
 
         class FakeResponse:
@@ -2267,18 +2294,18 @@ class TestPolloImageModels:
                 }
                 return FakeResponse({"code": "SUCCESS", "data": {"taskId": "task-1", "status": "waiting"}})
 
-        monkeypatch.setattr(chat.pollo_chat, "get_image_generator", lambda key, **kw: FakeGenerator(key, **kw))
-        monkeypatch.setattr(chat.pollo_chat, "get_video_generator", lambda key, **kw: FakeGenerator(key, **kw))
-        monkeypatch.setattr(chat.pollo_chat, "get_task_status", lambda task_id, key: next(calls["statuses"]))
+        monkeypatch.setattr(chat.pollo, "get_image_generator", lambda key, **kw: FakeGenerator(key, **kw))
+        monkeypatch.setattr(chat.pollo, "get_video_generator", lambda key, **kw: FakeGenerator(key, **kw))
+        monkeypatch.setattr(chat.pollo, "get_task_status", lambda task_id, key: next(calls["statuses"]))
         monkeypatch.setattr(
-            chat.pollo_chat.requests,
+            chat.pollo.requests,
             "get",
             lambda url, timeout=None, stream=False: FakeResponse(
                 None, b"mp4-bytes" if url.endswith(".mp4") else _png_bytes(), "image/jpeg"
             ),
         )
         monkeypatch.setattr(
-            chat.pollo_chat.image_hosts,
+            chat.pollo.image_hosts,
             "upload_image",
             lambda path: (calls["uploads"].append(path.name), f"https://tmp.example/{path.name}")[1],
         )
@@ -2400,7 +2427,7 @@ class TestPolloImageModels:
                 [("succeed", None, "https://cdn/x.png", 2)],
             ]
         )
-        images, credits, _sent = chat.pollo_chat.generate_image("pollo/nanobanana2v1", "x")
+        images, credits, _sent = chat.pollo.generate_image("pollo/nanobanana2v1", "x")
         assert len(images) == 1 and credits == 2
 
     # ── video ──
@@ -2547,9 +2574,9 @@ class TestPolloImageModels:
         assert videos["pollo/klingv3v1"]["durations"] == list(range(3, 16))
 
     def test_image_only_kling_without_an_image_fails_on_the_card(self, client, conv, chat, db, monkeypatch, pollo):
-        import img2vid.pollo.pollo_img2vid as registry
+        import web.providers.pollo_img2vid as registry
 
-        monkeypatch.setattr(chat.pollo_chat, "get_video_generator", registry.get_video_generator)  # the real one
+        monkeypatch.setattr(chat.pollo, "get_video_generator", registry.get_video_generator)  # the real one
         msg = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages",
@@ -2604,7 +2631,7 @@ class TestPolloImageModels:
             def send_request(self):
                 return NotServed()
 
-        monkeypatch.setattr(chat.pollo_chat, "get_image_generator", lambda key, **kw: Gen())
+        monkeypatch.setattr(chat.pollo, "get_image_generator", lambda key, **kw: Gen())
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
         msg = _events(
             client.post(
@@ -2629,7 +2656,7 @@ class TestPolloImageModels:
             def send_request(self):
                 return Refused()
 
-        monkeypatch.setattr(chat.pollo_chat, "get_image_generator", lambda key, **kw: Gen())
+        monkeypatch.setattr(chat.pollo, "get_image_generator", lambda key, **kw: Gen())
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
         msg = _events(
             client.post(
@@ -2641,7 +2668,7 @@ class TestPolloImageModels:
         assert item["error"] == "Pollo: This model is not enabled for API access." and item["moderated"] is False
 
     def test_pollo_content_rejection_is_still_moderation(self, chat):
-        assert chat._is_moderation_error(chat.pollo_chat.PolloError("Pollo: prompt flagged as sensitive content", 400))
+        assert chat._is_moderation_error(chat.pollo.PolloError("Pollo: prompt flagged as sensitive content", 400))
         assert chat._is_moderation_error(chat.openrouter.OpenRouterError("Forbidden", 403))  # OpenRouter's 403 still is
 
     def test_models_not_enabled_for_the_key_are_flagged_hidden(self, chat, monkeypatch, pollo):
@@ -3244,7 +3271,7 @@ class TestPolloRequestLog:
             def send_request(self):
                 return Resp()
 
-        assert chat.pollo_chat._submit(Gen()) == "t-9"
+        assert chat.pollo._submit(Gen()) == "t-9"
         entry = request_log.recent()[0]
         assert entry["provider"] == "pollo" and entry["model"] == "seedance-2-0" and entry["status"] == 200
         assert entry["path"] == "/api/platform/generation/bytedance/seedance-2-0"

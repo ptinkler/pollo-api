@@ -30,9 +30,9 @@ character from images in the chat when asked (create_character), which
 attaches it. Image mode uses every attached character.
 
 Image and video models come from OpenRouter, plus Pollo's own models
-("pollo/<key>", see web/pollo_chat.py) when the user has a Pollo key, and
+("pollo/<key>", see web/pollo.py) when the user has a Pollo key, and
 Venice's text, image and video models ("venice/<id>", see
-web/venice_chat.py) when the user has a Venice key.
+web/venice.py) when the user has a Venice key.
 
 Messages form a tree (ChatMessage.parent_id): editing a prompt or retrying
 a reply adds a sibling — a new branch — rather than deleting what came after,
@@ -71,7 +71,7 @@ from web.core import config
 from web.core.metadata import get_db, iso
 
 from . import characters, media, request_log
-from .providers import openrouter, pollo_chat, venice_chat
+from .providers import PROVIDERS, openrouter, pollo, venice
 from .uploads import is_blank_image, read_image_upload, read_video_upload, safe_filename
 from .users import require_user
 
@@ -449,7 +449,7 @@ def _shown_branch(conv_id: str) -> list[dict]:
 
 def _require_openrouter():
     """Chat needs a text-model provider: OpenRouter or Venice."""
-    if not (openrouter.is_configured() or venice_chat.is_configured()):
+    if not (openrouter.is_configured() or venice.is_configured()):
         raise HTTPException(503, "No chat provider key set — add an OpenRouter or Venice key in Settings → Keys")
 
 
@@ -464,25 +464,16 @@ def get_models(refresh: bool = False) -> dict[str, Any]:
         if not refresh and _models_cache["data"] and time.time() - _models_cache["at"] < MODELS_CACHE_TTL:
             return _models_cache["data"]
         data: dict[str, Any] = {"errors": {}}
-        for kind, fn in (
-            ("text", openrouter.list_text_models),
-            ("image", openrouter.list_image_models),
-            ("video", openrouter.list_video_models),
-        ):
-            data[kind] = []
-            if not openrouter.is_configured():
-                continue
-            try:
-                data[kind] = fn()
-            except (openrouter.OpenRouterError, Exception) as e:  # noqa: BLE001 — surface any failure per-kind
-                data["errors"][kind] = str(e)
+        # Uniform dispatch: each provider lists its own models per kind (in
+        # PROVIDERS order), so no provider is special-cased here.
         for kind in ("text", "image", "video"):
-            try:
-                data[kind] = venice_chat.list_models(kind, refresh) + data[kind]
-            except Exception as e:  # noqa: BLE001
-                data["errors"][f"venice_{kind}"] = str(e)
-        data["image"] = pollo_chat.list_image_models() + data["image"]
-        data["video"] = pollo_chat.list_video_models() + data["video"]
+            models: list = []
+            for prov in PROVIDERS:
+                try:
+                    models += prov.list_models(kind, refresh)
+                except Exception as e:  # noqa: BLE001 — surface any failure per provider/kind
+                    data["errors"][f"{prov.NAME}_{kind}"] = str(e)
+            data[kind] = models
         # Only cache a complete result, so a transient failure isn't sticky
         if not data["errors"]:
             _models_cache.update(at=time.time(), data=data)
@@ -498,9 +489,9 @@ def _model_info(kind: str, model_id: str | None) -> dict | None:
         return None
     data = _models_cache["data"]
     info = next((m for m in data.get(kind, []) if m["id"] == model_id), None) if data else None
-    if info is None and venice_chat.is_venice(model_id) and venice_chat.is_configured():
+    if info is None and venice.is_venice(model_id) and venice.is_configured():
         try:
-            return venice_chat.model_info(kind, model_id)
+            return venice.model_info(kind, model_id)
         except Exception:  # noqa: BLE001 — unknown model or Venice unreachable: treat as unknown
             return None
     return info
@@ -542,9 +533,9 @@ def _fit_video_params(
 @router.get("/status")
 def api_chat_status():
     return {
-        "configured": openrouter.is_configured() or venice_chat.is_configured(),
+        "configured": openrouter.is_configured() or venice.is_configured(),
         "openrouter": openrouter.is_configured(),
-        "venice": venice_chat.is_configured(),
+        "venice": venice.is_configured(),
     }
 
 
@@ -561,9 +552,9 @@ def api_chat_credits():
 @router.get("/venice-balance")
 def api_venice_balance():
     """Venice balance for the chat header: USD, and the plan's bundled credits."""
-    if not venice_chat.is_configured():
+    if not venice.is_configured():
         raise HTTPException(503, "No Venice API key set — add one in Settings → Keys")
-    return {"usd": venice_chat.get_balance(), "credits": venice_chat.get_plan_credits()}
+    return venice.get_balances()
 
 
 @router.get("/models")
@@ -598,6 +589,15 @@ def api_list_conversations(q: str = ""):
         "conversations": [c.to_dict() for c in convs[:CONVERSATION_LIST_LIMIT]],
         "more": len(convs) > CONVERSATION_LIST_LIMIT,
     }
+
+
+@router.get("/conversations/thumbs")
+def api_conversation_thumbs(ids: str = ""):
+    """Newest image file per conversation id (comma-separated), for gallery
+    cover thumbnails. Declared before /conversations/{conv_id} so "thumbs"
+    isn't read as an id."""
+    conv_ids = [i for i in ids.split(",") if i]
+    return {"thumbs": get_db().conversation_thumbs(conv_ids)}
 
 
 def _snippet(text: str, q: str) -> str:
@@ -1531,7 +1531,7 @@ class Turn:
         finish = None
         if self.content and not self.content.endswith("\n\n"):
             self._append("\n\n")
-        stream_chat = venice_chat.stream_chat if venice_chat.is_venice(self.s.text_model) else openrouter.stream_chat
+        stream_chat = venice.stream_chat if venice.is_venice(self.s.text_model) else openrouter.stream_chat
         for chunk in stream_chat(
             self.s.text_model,
             messages,
@@ -1955,7 +1955,7 @@ class Turn:
             return None
         job: dict[str, Any] = {"prompt": first.content, "title": None, "cost": 0.0, "thread": None}
         model = os.environ.get("CHAT_TITLE_MODEL") or self.s.text_model
-        if model and (venice_chat.is_configured() if venice_chat.is_venice(model) else openrouter.is_configured()):
+        if model and (venice.is_configured() if venice.is_venice(model) else openrouter.is_configured()):
 
             def work():
                 # No title from the model: the prompt stands in
@@ -1990,7 +1990,7 @@ class Turn:
 
 def _generate_title(model: str, prompt: str) -> tuple[str | None, float]:
     """(a short title for a chat starting with `prompt`, its cost in USD)."""
-    stream_chat = venice_chat.stream_chat if venice_chat.is_venice(model) else openrouter.stream_chat
+    stream_chat = venice.stream_chat if venice.is_venice(model) else openrouter.stream_chat
     text, cost = "", 0.0
     for chunk in stream_chat(
         model, [{"role": "user", "content": TITLE_PROMPT.format(prompt=prompt[:2000])}], max_seconds=TITLE_SECONDS
@@ -2322,7 +2322,7 @@ def _is_moderation_error(e: openrouter.OpenRouterError) -> bool:
     content-policy refusals in many ways, so also match on the message.
     Pollo's 403 means "model not enabled for API access", so for Pollo only
     the message counts."""
-    if isinstance(e, pollo_chat.PolloError):
+    if isinstance(e, pollo.PolloError):
         return bool(_MODERATION.search(str(e)))
     return e.status == 403 or bool(_MODERATION.search(str(e)))
 
@@ -2371,12 +2371,12 @@ def _run_image_generation(
     # has one, so it stays automatic instead of falling back to 16:9.
     aspect_ratio = params.get("aspect_ratio") or _auto_ratio("image", model)
     credits, sent = None, {}
-    if venice_chat.is_venice(model):
-        images, cost, sent = venice_chat.generate_image(
+    if venice.is_venice(model):
+        images, cost, sent = venice.generate_image(
             model, prompt, aspect_ratio=aspect_ratio, resolution=params.get("resolution"), ref_paths=refs
         )
-    elif pollo_chat.is_pollo(model):
-        images, credits, sent = pollo_chat.generate_image(
+    elif pollo.is_pollo(model):
+        images, credits, sent = pollo.generate_image(
             model, prompt, aspect_ratio=aspect_ratio, resolution=params.get("resolution"), ref_paths=refs
         )
         cost = None
@@ -2415,9 +2415,9 @@ def _submit_video(conv_id: str, model: str, prompt: str, params: dict[str, Any])
     # An unset ratio uses the model's own auto value when it has one (matching
     # the image path); animating an image still derives the ratio from the frame.
     aspect_ratio = params.get("aspect_ratio") or (None if frame else _auto_ratio("video", model))
-    if venice_chat.is_venice(model):
+    if venice.is_venice(model):
         conv_dir = _conv_dir(conv_id)
-        return venice_chat.submit_video(
+        return venice.submit_video(
             model,
             prompt,
             duration=params.get("duration"),
@@ -2429,8 +2429,8 @@ def _submit_video(conv_id: str, model: str, prompt: str, params: dict[str, Any])
             refs=[_ref_file(conv_id, r) for r in params.get("refs") or []],
             source_video=conv_dir / params["source_video"] if params.get("source_video") else None,
         )
-    if pollo_chat.is_pollo(model):
-        return pollo_chat.submit_video(
+    if pollo.is_pollo(model):
+        return pollo.submit_video(
             model,
             prompt,
             duration=params.get("duration"),
@@ -2610,13 +2610,7 @@ def start_video_poller(conv_id: str, message_id: int, media_id: str, job_id: str
 @_with_owner_keys
 def _poll_video(conv_id: str, message_id: int, media_id: str, job_id: str) -> None:
     db = get_db()
-    source = (
-        pollo_chat
-        if pollo_chat.is_pollo_job(job_id)
-        else venice_chat
-        if venice_chat.is_venice_job(job_id)
-        else openrouter
-    )
+    source = pollo if pollo.is_pollo_job(job_id) else venice if venice.is_venice_job(job_id) else openrouter
     deadline = time.time() + VIDEO_POLL_TIMEOUT
     errors = 0
     while time.time() < deadline:

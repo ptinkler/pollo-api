@@ -1,4 +1,4 @@
-"""Tests for web.providers.venice_chat — Venice text, image and video models in chat (no network)."""
+"""Tests for web.providers.venice — Venice text, image and video models in chat (no network)."""
 
 import base64
 import json
@@ -133,7 +133,7 @@ QUOTES = {
 
 
 class FakeVenice:
-    """Stands in for venice_chat._client; records requests, answers from `routes`."""
+    """Stands in for venice._client; records requests, answers from `routes`."""
 
     def __init__(self):
         self.calls = []
@@ -169,7 +169,7 @@ class FakeVenice:
 
 @pytest.fixture()
 def venice(chat, monkeypatch, tmp_path, provider_keys):
-    import web.providers.venice_chat as v
+    import web.providers.venice as v
 
     provider_keys["venice"] = "v-test"
     fake = FakeVenice()
@@ -655,22 +655,32 @@ class TestText:
         assert "image_url" not in sent and "[user attached an image]" in sent
 
 
-def test_balance_falls_back_to_the_response_header(client, venice):
+def test_balance_reads_usd_from_the_rate_limits_body(client, venice):
     v, fake = venice
-    fake.routes["/billing/balance"] = httpx.Response(401, json={"error": "Admin API key required"})
-    fake.routes["/api_keys/rate_limits"] = httpx.Response(200, json={}, headers={"x-venice-balance-usd": "7.25"})
-    assert client.get("/api/chat/venice-balance").json() == {"usd": 7.25, "credits": None}
+    # Inference keys can't read /billing/balance; the USD figure is in the
+    # rate-limits body under balances.USD (not a response header).
+    fake.routes["/api_keys/rate_limits"] = httpx.Response(
+        200, json={"data": {"balances": {"USD": 4.49725029, "DIEM": 0, "BUNDLED_CREDITS": 0}}}
+    )
+    assert client.get("/api/chat/venice-balance").json() == {"usd": 4.49725029, "credits": 0.0}
 
 
 def test_balance_includes_the_plans_bundled_credits(client, venice):
     v, fake = venice
-    fake.routes["/billing/balance"] = httpx.Response(401, json={"error": "Admin API key required"})
     fake.routes["/api_keys/rate_limits"] = httpx.Response(
-        200,
-        json={"data": {"balances": {"USD": 0, "DIEM": 0, "BUNDLED_CREDITS": 4.7635423}}},
-        headers={"x-venice-balance-usd": "0.76"},
+        200, json={"data": {"balances": {"USD": 0.76, "DIEM": 0, "BUNDLED_CREDITS": 4.7635423}}}
     )
     assert client.get("/api/chat/venice-balance").json() == {"usd": 0.76, "credits": 4.7635423}
+
+
+def test_balance_falls_back_to_the_response_header_when_rate_limits_unreadable(client, venice):
+    v, fake = venice
+    # If the endpoint errors, fall back to the balance a prior response's header
+    # reported (_note_balance runs on the error response too).
+    fake.routes["/api_keys/rate_limits"] = httpx.Response(
+        403, json={"error": "nope"}, headers={"x-venice-balance-usd": "3.5"}
+    )
+    assert client.get("/api/chat/venice-balance").json() == {"usd": 3.5, "credits": None}
 
 
 class TestVideoFamiliesInChat:
