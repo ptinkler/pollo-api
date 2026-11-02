@@ -32,6 +32,9 @@ export const pinChatMedia = (messageId, mediaId, pinned) =>
 // Favourite (★) a generation: a bookmark that surfaces it in the Favourites gallery (images + videos)
 export const favouriteChatMedia = (messageId, mediaId, favourite) =>
   apiPost(`/api/chat/messages/${messageId}/media/${enc(mediaId)}/favourite`, { favourite })
+// In-flight (and tracked) generations across every thread — powers the queue dock.
+// `known` = message ids to resolve even once they've left the pending set.
+export const fetchActiveGenerations = (known = []) => apiPost('/api/chat/generations/active', { known })
 // Every generated image/video across all threads, newest first (see /api/chat/library)
 export const fetchChatLibrary = () => apiGet('/api/chat/library')
 // Delete a prompt's turn (all versions of it and its replies); generated media moves to the library

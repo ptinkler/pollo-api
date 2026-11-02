@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from web.core.metadata import get_db
+from web.core.metadata import get_db, iso
 
 from ..providers import openrouter
 from ..uploads import safe_filename
@@ -235,6 +235,57 @@ def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia):
         name=f"chat-regen-{media_id}",
     ).start()
     return _message_out(msg)
+
+
+class ActiveQuery(BaseModel):
+    # Message ids the client is already tracking, so finished/failed ones get
+    # their final status back even though they've dropped out of the pending set.
+    known: list[int] = []
+
+
+def _gen_descriptor(msg, item: dict, title: str) -> dict:
+    return {
+        "media_id": item["id"],
+        "message_id": msg.id,
+        "conversation_id": msg.conversation_id,
+        "conversation_title": title,
+        "kind": item.get("kind"),
+        "prompt": item.get("prompt"),
+        "model": item.get("model") or msg.model,
+        "status": item.get("status"),
+        "file": item.get("file"),
+        "error": item.get("error"),
+        "moderated": bool(item.get("moderated")),
+        "created_at": iso(msg.created_at),
+    }
+
+
+@router.post("/generations/active")
+def api_active_generations(data: ActiveQuery):
+    """The signed-in user's in-flight (and tracked) generations across every
+    thread — the data behind the always-visible generation queue. Returns every
+    currently-pending generated image/video, plus the current state of any
+    `known` message the client is still tracking (so completions resolve)."""
+    db = get_db()
+    msgs: dict[int, object] = {m.id: m for m in db.get_chat_messages_with_pending_media()}
+    for m in db.get_chat_messages_by_ids([i for i in data.known if i not in msgs]):
+        msgs.setdefault(m.id, m)
+    titles: dict[str, str] = {}
+    items: list[dict] = []
+    seen: set[str] = set()
+    for m in msgs.values():
+        for item in m.media:
+            if item.get("source") != "generated" or item.get("kind") not in ("image", "video"):
+                continue
+            if item["id"] in seen:
+                continue
+            seen.add(item["id"])
+            cid = m.conversation_id
+            if cid not in titles:
+                conv = db.get_conversation(cid)
+                titles[cid] = conv.title if conv else ""
+            items.append(_gen_descriptor(m, item, titles[cid]))
+    return {"items": items}
 
 
 @_with_owner_keys

@@ -10,10 +10,13 @@ const props = defineProps({
   // { url, kind, file, prompt?, model?, cost?, created_at?, favourite?, conversation_title? }
   item: { type: Object, default: null },
   canManage: { type: Boolean, default: false },
+  // Studio theme ('dark' | 'light'), so the body-teleported modal keeps the --s* vars.
+  theme: { type: String, default: '' },
 })
 const emit = defineEmits(['close', 'favourite', 'use-image', 'use-settings', 'regenerate', 'delete', 'open-thread'])
 
 const isVideo = computed(() => props.item?.kind === 'video')
+const isError = computed(() => props.item?.status === 'error')
 const loop = ref(false) // videos don't autoplay; the user opts into looping
 const when = computed(() => {
   const d = props.item?.created_at && new Date(props.item.created_at)
@@ -28,13 +31,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 </script>
 
 <template>
-  <Teleport to=".studio">
-    <div v-if="item" class="gm-back" @click="emit('close')">
+  <!-- Teleport to body (not .studio): .studio is an ancestor of this modal, so it
+       isn't in the DOM yet when the Teleport first mounts — resolving .studio then
+       fails and the modal never opens. The `studio` class + data-theme re-supply the
+       --s* theme vars that would otherwise only cascade from the .studio ancestor. -->
+  <Teleport to="body">
+    <div v-if="item" class="gm-back studio" :data-theme="theme || undefined" @click="emit('close')">
       <div class="gm-card" @click.stop>
         <button class="gm-x" title="Close" @click="emit('close')">×</button>
 
-        <div class="gm-media">
-          <template v-if="isVideo">
+        <div class="gm-media" :class="{ 'is-error': isError }">
+          <div v-if="isError" class="gm-err">
+            <div class="gm-err-title">{{ item.moderated ? 'Blocked by moderation' : 'Generation failed' }}</div>
+            <div class="gm-err-msg">{{ item.error || 'Unknown error' }}</div>
+          </div>
+          <template v-else-if="isVideo">
             <video :src="item.url" controls :loop="loop" playsinline></video>
             <label class="gm-loop"><input v-model="loop" type="checkbox" /> Loop</label>
           </template>
@@ -65,27 +76,27 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           </div>
 
           <div class="gm-actions">
-            <button class="gm-btn" :class="{ on: item.favourite }" @click="emit('favourite', item)">
+            <button v-if="!isError" class="gm-btn" :class="{ on: item.favourite }" @click="emit('favourite', item)">
               <svg class="ic"><use href="#s-star" /></svg>{{ item.favourite ? 'Favourited' : 'Favourite' }}
             </button>
-            <a class="gm-btn" :href="item.url" :download="item.file">
+            <a v-if="!isError" class="gm-btn" :href="item.url" :download="item.file">
               <svg class="ic"><use href="#s-download" /></svg>Download
             </a>
             <button
-              v-if="item.kind === 'image'"
+              v-if="!isError && item.kind === 'image'"
               class="gm-btn"
               @click="emit('use-image', { file: item.file, mode: 'image' })"
             >
               🖼 Picture from this
             </button>
-            <button class="gm-btn" @click="emit('use-image', { file: item.file, mode: 'video' })">
+            <button v-if="!isError" class="gm-btn" @click="emit('use-image', { file: item.file, mode: 'video' })">
               🎬 Video from this
             </button>
             <button v-if="canManage" class="gm-btn" @click="emit('use-settings', item)">
               <svg class="ic"><use href="#s-cog" /></svg>Use settings
             </button>
-            <button v-if="canManage" class="gm-btn" @click="emit('regenerate', item)">
-              <svg class="ic"><use href="#s-refresh" /></svg>Regenerate
+            <button v-if="canManage" class="gm-btn" :class="{ primary: isError }" @click="emit('regenerate', item)">
+              <svg class="ic"><use href="#s-refresh" /></svg>{{ isError ? 'Retry' : 'Regenerate' }}
             </button>
             <button
               v-if="!canManage && item.conversation_id"
@@ -156,6 +167,39 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   max-height: calc(90vh - 20px);
   object-fit: contain;
   border-radius: 8px;
+}
+.gm-media.is-error {
+  background: var(--sbg2);
+}
+.gm-err {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  text-align: center;
+  padding: 32px;
+  max-width: 440px;
+}
+.gm-err-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--sdanger, #e5484d);
+}
+.gm-err-msg {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--smuted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.gm-btn.primary {
+  background: var(--saccent);
+  border-color: var(--saccent);
+  color: #fff;
+}
+.gm-btn.primary:hover {
+  filter: brightness(1.08);
+  background: var(--saccent);
 }
 .gm-loop {
   position: absolute;

@@ -355,3 +355,12 @@ class MessageMixin:
             for m in msgs:
                 session.expunge(m)
             return msgs
+
+    def get_chat_messages_by_ids(self, ids: list[int]) -> list[ChatMessage]:
+        if not ids:
+            return []
+        with self._session() as session:
+            msgs = session.query(ChatMessage).filter(ChatMessage.id.in_(ids)).all()
+            for m in msgs:
+                session.expunge(m)
+            return msgs

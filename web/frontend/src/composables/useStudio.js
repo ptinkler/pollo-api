@@ -304,7 +304,14 @@ export function useStudio({ models, settings, showToast }) {
     },
     media(ev) {
       const m = messages.value[messageIndex(ev.message_id)]
-      if (m) upsert(m.media || (m.media = []), ev.item)
+      if (!m) return
+      const list = m.media || (m.media = [])
+      const prev = list.find(x => x.id === ev.item.id)
+      upsert(list, ev.item)
+      // Flipped pending → done: announce it (the gallery queue has no toast of its own).
+      if (ev.item.status === 'done' && (!prev || prev.status === 'pending')) {
+        showToast(`${ev.item.kind === 'video' ? 'Video' : 'Image'} ready`, 'success')
+      }
     },
     characters(ev) {
       onCharactersUsed(ev.characters || [], ev.character_ids || [])

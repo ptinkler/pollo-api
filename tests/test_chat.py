@@ -3423,3 +3423,60 @@ class TestLargeChats:
         chat.polling._warm_missing_thumbnails()
         for size in (media_mod.THUMB_SIZE, chat.CHAT_PREVIEW_SIZE):
             assert media_mod._thumb_path(folder / "img_a.png", size).is_file()
+
+
+class TestActiveGenerations:
+    """The /generations/active endpoint behind the always-visible queue."""
+
+    def gen(self, mid, kind="image", status="pending", **f):
+        return {"id": mid, "kind": kind, "source": "generated", "status": status, "prompt": "p", **f}
+
+    def test_pending_across_threads_plus_known_completions(self, client, db):
+        a = client.post("/api/chat/conversations", json={"title": "A"}).json()
+        b = client.post("/api/chat/conversations", json={"title": "B"}).json()
+        # One pending in each thread, and a finished one that is NOT pending.
+        db.add_chat_message(a["id"], "assistant", media=[self.gen("p1")], status="done")
+        db.add_chat_message(b["id"], "assistant", media=[self.gen("p2", kind="video")], status="done")
+        done_msg = db.add_chat_message(a["id"], "assistant", media=[self.gen("d1", status="done", file="x.png")])
+
+        # No `known`: only the two pending ones come back, from both threads.
+        r = client.post("/api/chat/generations/active", json={}).json()["items"]
+        by = {i["media_id"]: i for i in r}
+        assert set(by) == {"p1", "p2"}
+        assert by["p1"]["conversation_title"] == "A" and by["p2"]["kind"] == "video"
+
+        # Tracking the finished message resolves it to its done state.
+        r = client.post("/api/chat/generations/active", json={"known": [done_msg.id]}).json()["items"]
+        by = {i["media_id"]: i for i in r}
+        assert set(by) == {"p1", "p2", "d1"}
+        assert by["d1"]["status"] == "done" and by["d1"]["file"] == "x.png"
+
+    def test_reports_failure_and_ignores_non_generated(self, client, db):
+        c = client.post("/api/chat/conversations", json={}).json()
+        m = db.add_chat_message(
+            c["id"],
+            "assistant",
+            media=[
+                self.gen("e1", status="error", error="boom", moderated=True),
+                {"id": "u1", "kind": "image", "source": "upload", "status": "done", "file": "up.png"},
+            ],
+            status="done",
+        )
+        r = client.post("/api/chat/generations/active", json={"known": [m.id]}).json()["items"]
+        by = {i["media_id"]: i for i in r}
+        assert set(by) == {"e1"}  # the uploaded image isn't a generation
+        assert by["e1"]["status"] == "error" and by["e1"]["error"] == "boom" and by["e1"]["moderated"] is True
+
+    def test_scoped_to_the_signed_in_user(self, client, db):
+        from web.core.metadata import reset_tenant, set_tenant
+
+        c = client.post("/api/chat/conversations", json={}).json()
+        tok = set_tenant("someone-else")
+        try:
+            other = db.create_conversation(title="theirs")
+            db.add_chat_message(other.id, "assistant", media=[self.gen("x1")], status="done")
+        finally:
+            reset_tenant(tok)
+        db.add_chat_message(c["id"], "assistant", media=[self.gen("mine")], status="done")
+        items = client.post("/api/chat/generations/active", json={}).json()["items"]
+        assert {i["media_id"] for i in items} == {"mine"}  # never the other user's

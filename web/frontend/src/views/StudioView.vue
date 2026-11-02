@@ -6,7 +6,7 @@
   components. Route: /studio — runs alongside the existing app during the build.
 -->
 <script setup>
-import { ref, reactive, computed, provide, inject, onMounted, watch } from 'vue'
+import { ref, reactive, computed, provide, inject, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
 import { useComposerSettings, MODES } from '../composables/useComposerSettings'
@@ -19,6 +19,8 @@ import StudioFeed from '../components/studio/StudioFeed.vue'
 import StudioGenerations from '../components/studio/StudioGenerations.vue'
 import GenerationGrid from '../components/studio/GenerationGrid.vue'
 import GenerationModal from '../components/studio/GenerationModal.vue'
+import GenerationQueueDock from '../components/studio/GenerationQueueDock.vue'
+import { useGenQueue } from '../composables/useGenQueue'
 import { chatMediaUrl, chatMediaPreviewUrl } from '../composables/useChat'
 import StudioSpace from '../components/studio/StudioSpace.vue'
 import StudioMedia from '../components/studio/StudioMedia.vue'
@@ -164,9 +166,33 @@ function openGeneration(item) {
 async function onGalleryFavourite(item) {
   await favouriteMedia({ id: item.message_id }, { mediaId: item.id, favourite: !item.favourite })
 }
+// Always-visible generation queue (polls across all threads; survives navigation).
+const genQueue = useGenQueue()
+const { entries: queueItems, pending: queuePending, done: queueDone } = genQueue
+onMounted(() => genQueue.start())
+onUnmounted(() => genQueue.stop())
+// Generate from the composer, then refresh the queue so the new tile shows at once.
+function onGenerate() {
+  send()
+  genQueue.refresh()
+}
+// Clicking a queued item jumps to that thread's gallery (where its tile lives).
+function openQueueItem(e) {
+  router.push(`/${e.conversation_id}/gallery`)
+}
+
+// Modal "Retry" / "Regenerate". A failed item retries in place (backend only
+// allows regenerating errored media); a successful one re-rolls as a fresh
+// generation with the same settings (apply + send), leaving the original.
 function regenerateFromModal(item) {
-  const msg = messages.value.find(m => m.id === item.message_id)
-  if (msg) regenerateMedia(msg, { mediaId: item.id })
+  if (item.status === 'error') {
+    const msg = messages.value.find(m => m.id === item.message_id)
+    if (msg) regenerateMedia(msg, { mediaId: item.id })
+  } else {
+    applyGenerationSettings(item)
+    send()
+  }
+  genQueue.refresh()
   galleryItem.value = null
 }
 // "Use settings": fill the composer from this generation (model, mode, options,
@@ -458,6 +484,7 @@ onMounted(() => {
         </div>
         <GenerationGrid
           :items="favItems"
+          :fav-filter="false"
           empty="No favourites yet — star a generation to add it here."
           @open="openFavourite"
           @favourite="onFavUnstar"
@@ -544,7 +571,7 @@ onMounted(() => {
           :can-send="canSend"
           :attachments="attachments"
           :uploading="uploading"
-          @send="send"
+          @send="onGenerate"
           @files="addFiles"
           @remove="removeAttachment"
         />
@@ -596,6 +623,7 @@ onMounted(() => {
     <GenerationModal
       :item="galleryItem"
       :can-manage="galleryManage"
+      :theme="dataTheme"
       @close="galleryItem = null"
       @favourite="galleryManage ? onGalleryFavourite($event) : onFavUnstar($event)"
       @use-image="useImage"
@@ -603,6 +631,15 @@ onMounted(() => {
       @regenerate="regenerateFromModal"
       @delete="deleteFromModal"
       @open-thread="openThreadFromModal"
+    />
+
+    <GenerationQueueDock
+      :entries="queueItems"
+      :pending="queuePending"
+      :done="queueDone"
+      @open="openQueueItem"
+      @clear="genQueue.clearDone"
+      @clear-one="genQueue.clearOne"
     />
 
     <CharacterEditor
