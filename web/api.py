@@ -66,7 +66,26 @@ async def lifespan(app: FastAPI):
     # Shutdown: nothing to do
 
 
-app = FastAPI(title="Pollo Studio API", lifespan=lifespan)
+def _bool_env(name: str, default: bool = False) -> bool:
+    val = os.getenv(name, "").strip().lower()
+    if val in {"1", "true", "yes", "on"}:
+        return True
+    if val in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+# The interactive API docs (/docs, /redoc, /openapi.json) expose the whole API
+# surface unauthenticated, so they're off by default — enable with ENABLE_API_DOCS
+# (or in dev, where DEV_LOGIN is set).
+_docs_on = _bool_env("ENABLE_API_DOCS") or _bool_env("DEV_LOGIN")
+app = FastAPI(
+    title="Pollo Studio API",
+    lifespan=lifespan,
+    docs_url="/docs" if _docs_on else None,
+    redoc_url="/redoc" if _docs_on else None,
+    openapi_url="/openapi.json" if _docs_on else None,
+)
 
 # CORS - allow frontend dev server
 app.add_middleware(
@@ -83,12 +102,19 @@ app.add_middleware(
 )
 
 # Session middleware holds Authlib's transient OAuth state across the redirect.
-# SameSite=lax so the state cookie survives the return hop from the provider.
+# SameSite=lax so the state cookie survives the return hop from the provider;
+# Secure (https_only) by default, matching the login cookie — disable only for
+# plain-HTTP LAN dev via COOKIE_SECURE=false.
 from starlette.middleware.sessions import SessionMiddleware  # noqa: E402
 
 from .auth import _user_secret  # noqa: E402
 
-app.add_middleware(SessionMiddleware, secret_key=_user_secret().hex(), same_site="lax", https_only=False)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=_user_secret().hex(),
+    same_site="lax",
+    https_only=_bool_env("COOKIE_SECURE", default=True),
+)
 
 
 class UserContextMiddleware:
@@ -183,19 +209,27 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def _login_rate_limited(request: Request) -> bool:
-    """Record a login attempt for the client IP; True if it's over the limit."""
-    client = _client_ip(request)
+def _record_attempt(key: str, now: float) -> bool:
+    """Append an attempt under `key` (caller holds the lock); True if over the limit."""
+    attempts = [t for t in _login_attempts.get(key, []) if now - t < LOGIN_WINDOW_SECONDS]
+    attempts.append(now)
+    _login_attempts[key] = attempts
+    return len(attempts) > LOGIN_MAX_ATTEMPTS
+
+
+def _login_rate_limited(request: Request, email: str) -> bool:
+    """Record this login attempt and report whether the client IP OR the target
+    account is over the limit. Keying on the email too means spoofing the
+    X-Forwarded-For / X-Real-IP headers can't lift the per-account cap."""
     now = time.time()
     with _login_lock:
-        attempts = [t for t in _login_attempts.get(client, []) if now - t < LOGIN_WINDOW_SECONDS]
-        attempts.append(now)
-        _login_attempts[client] = attempts
-        # Opportunistically drop idle clients so the map can't grow unbounded.
-        if len(_login_attempts) > 1024:
-            for ip in [ip for ip, ts in _login_attempts.items() if all(now - t >= LOGIN_WINDOW_SECONDS for t in ts)]:
-                _login_attempts.pop(ip, None)
-        return len(attempts) > LOGIN_MAX_ATTEMPTS
+        over_ip = _record_attempt(f"ip:{_client_ip(request)}", now)
+        over_email = _record_attempt(f"email:{email}", now)
+        # Opportunistically drop idle keys so the map can't grow unbounded.
+        if len(_login_attempts) > 2048:
+            for k in [k for k, ts in _login_attempts.items() if all(now - t >= LOGIN_WINDOW_SECONDS for t in ts)]:
+                _login_attempts.pop(k, None)
+        return over_ip or over_email
 
 
 def _set_user_cookie(response: Response, request: Request, user_id: str) -> None:
@@ -211,11 +245,11 @@ def _set_user_cookie(response: Response, request: Request, user_id: str) -> None
 
 @app.post("/api/auth/login")
 async def api_auth_login(data: LoginRequest, response: Response, request: Request):
-    if _login_rate_limited(request):
+    email = data.email.strip().lower()
+    if _login_rate_limited(request, email):
         raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
     from .passwords import needs_rehash, verify_password
 
-    email = data.email.strip().lower()
     db = get_db()
     user = db.get_user_by_email(email)
     if not user or not user.password_hash or not verify_password(user.password_hash, data.password):

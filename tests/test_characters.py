@@ -489,8 +489,8 @@ class TestReferenceCaps:
         char_refs = [r for r in refs if r.startswith("char:")]
         assert len(char_refs) == 9  # all 5 + 4
         assert char_refs[:2] == [f"char:{linh['id']}/{linh['images'][0]}", f"char:{bao['id']}/{bao['images'][0]}"]
-        assert len(refs) - len(char_refs) == chat.DEFAULT_IMAGE_LIMIT
-        assert len(got["input_images"]) == 9 + chat.DEFAULT_IMAGE_LIMIT
+        assert len(refs) - len(char_refs) == chat.constants.DEFAULT_IMAGE_LIMIT
+        assert len(got["input_images"]) == 9 + chat.constants.DEFAULT_IMAGE_LIMIT
 
     def test_slider_raises_the_chat_image_cap(self, client, conv, chat, db, monkeypatch):
         db.add_chat_message(conv["id"], "user", "pics")
@@ -547,14 +547,16 @@ class TestReferenceCaps:
         )
 
     def _send_image(self, client, conv, chat, monkeypatch, max_refs, **settings):
-        real = chat._model_info
-        monkeypatch.setattr(
-            chat,
-            "_model_info",
-            lambda kind, mid: (
-                {"input_modalities": ["text", "image"], "max_refs": max_refs} if kind == "image" else real(kind, mid)
-            ),
-        )
+        real = chat.catalogue._model_info
+
+        def fake_info(kind, mid):
+            if kind == "image":
+                return {"input_modalities": ["text", "image"], "max_refs": max_refs}
+            return real(kind, mid)
+
+        # _model_info is read in both the turn (ref caps) and generation (modality) modules
+        monkeypatch.setattr(chat.turn, "_model_info", fake_info)
+        monkeypatch.setattr(chat.generation, "_model_info", fake_info)
         monkeypatch.setattr(
             chat.openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
         )

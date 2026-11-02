@@ -126,3 +126,20 @@ class TestStaticFile:
         from web.api import _static_file
 
         assert _static_file(path, static) == static / "index.html"
+
+
+class TestLoginThrottle:
+    def test_throttle_is_per_account_despite_ip_spoofing(self, client):
+        """Rotating the client-IP headers must not lift the per-email cap: a
+        brute-force against one account trips the throttle even from fresh IPs."""
+        import web.api as api_mod
+
+        api_mod._login_attempts.clear()
+        last = None
+        for i in range(api_mod.LOGIN_MAX_ATTEMPTS + 2):
+            last = client.post(
+                "/api/auth/login",
+                json={"email": "victim@example.com", "password": "wrong"},
+                headers={"X-Real-IP": f"10.0.0.{i}"},  # a different IP each attempt
+            )
+        assert last.status_code == 429

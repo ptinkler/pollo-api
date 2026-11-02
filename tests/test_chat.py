@@ -62,9 +62,9 @@ def chat(monkeypatch, db, provider_keys):
             monkeypatch.setattr(mod, "get_db", lambda: db)
     provider_keys["openrouter"] = "sk-test"
     provider_keys["venice"] = None  # tests never reach the real Venice
-    monkeypatch.setattr(chat_mod, "VIDEO_POLL_INTERVAL", 0)
-    monkeypatch.setattr(chat_mod, "start_video_poller", lambda *a: None)
-    monkeypatch.setattr(chat_mod, "_generate_title", lambda model, prompt: (None, 0.0))  # tests opt in
+    monkeypatch.setattr(chat_mod.polling, "VIDEO_POLL_INTERVAL", 0)
+    monkeypatch.setattr(chat_mod.polling, "start_video_poller", lambda *a: None)
+    monkeypatch.setattr(chat_mod.generation, "_generate_title", lambda model, prompt: (None, 0.0))  # tests opt in
     chat_mod._models_cache.update(at=0.0, data=None)
     return chat_mod
 
@@ -272,7 +272,7 @@ class TestTurns:
         assert done["content"] == "Once upon a time, a cat."
         assert done["media"][0]["file"].startswith("img_")
         assert done["cost"] == pytest.approx(0.043)  # LLM round + image
-        path = chat._chat_root() / conv["id"] / done["media"][0]["file"]
+        path = chat.helpers._chat_root() / conv["id"] / done["media"][0]["file"]
         assert path.read_bytes() == _png_bytes()
 
     def test_image_models_own_auto_beats_the_chat_models_ratio_pick(self, client, conv, chat, monkeypatch):
@@ -476,7 +476,7 @@ class TestTurns:
 
     def test_video_mode_submits_and_polls(self, client, conv, chat, monkeypatch, db):
         started = []
-        monkeypatch.setattr(chat, "start_video_poller", lambda *a: started.append(a))
+        monkeypatch.setattr(chat.polling, "start_video_poller", lambda *a: started.append(a))
         monkeypatch.setattr(
             chat.openrouter, "submit_video", lambda model, prompt, **kw: {"id": "gen-vid-1", "status": "pending"}
         )
@@ -508,7 +508,7 @@ class TestTurns:
         statuses = iter([{"status": "in_progress"}, {"status": "completed", "usage": {"cost": 0.5}}])
         monkeypatch.setattr(chat.openrouter, "get_video", lambda j: next(statuses))
         monkeypatch.setattr(chat.openrouter, "download_video", lambda j, dest, index=0: dest.write_bytes(b"mp4"))
-        chat._poll_video(conv_id, msg_id, media_id, job_id)
+        chat.polling._poll_video(conv_id, msg_id, media_id, job_id)
         msg = client.get(f"/api/chat/messages/{msg_id}").json()
         assert msg["media"][0]["status"] == "done" and msg["media"][0]["file"].endswith(".mp4")
         assert msg["cost"] == 0.5
@@ -516,7 +516,7 @@ class TestTurns:
     def test_video_failure_marks_item(self, chat, db, conv, monkeypatch):
         msg = db.add_chat_message(conv["id"], "assistant", media=[{"id": "m1", "kind": "video", "status": "pending"}])
         monkeypatch.setattr(chat.openrouter, "get_video", lambda j: {"status": "failed", "error": "nsfw"})
-        chat._poll_video(conv["id"], msg.id, "m1", "gen-vid-x")
+        chat.polling._poll_video(conv["id"], msg.id, "m1", "gen-vid-x")
         assert db.get_chat_message(msg.id).media[0] == {
             "id": "m1",
             "kind": "video",
@@ -653,7 +653,7 @@ class TestTurns:
         assert m[3] == {
             "role": "tool",
             "tool_call_id": "call_a",
-            "content": json.dumps({"ok": True, "result": chat.IMAGE_TOOL_RESULT}),
+            "content": json.dumps({"ok": True, "result": chat.tools.IMAGE_TOOL_RESULT}),
         }
         assert m[4] == {
             "role": "tool",
@@ -698,7 +698,7 @@ class TestTurns:
 class TestStartupResume:
     def test_resumes_pending_videos_and_fails_orphans(self, chat, db, conv, monkeypatch):
         started = []
-        monkeypatch.setattr(chat, "start_video_poller", lambda *a: started.append(a))
+        monkeypatch.setattr(chat.polling, "start_video_poller", lambda *a: started.append(a))
         m1 = db.add_chat_message(
             conv["id"],
             "assistant",
@@ -1024,13 +1024,13 @@ class TestEditAndLibrary:
         assert db.get_chat_message(msg.id) is None
         monkeypatch.setattr(chat.openrouter, "get_video", lambda j: {"status": "completed", "usage": {"cost": 0.3}})
         monkeypatch.setattr(chat.openrouter, "download_video", lambda j, dest, index=0: dest.write_bytes(b"mp4"))
-        chat._poll_video(conv["id"], msg.id, "v1", "gen-vid-1")
+        chat.polling._poll_video(conv["id"], msg.id, "v1", "gen-vid-1")
         item = db.get_chat_library_item("v1").item
         assert item["status"] == "done" and item["file"].endswith(".mp4") and item["cost"] == 0.3
 
     def test_startup_resumes_library_videos(self, chat, db, conv, monkeypatch):
         started = []
-        monkeypatch.setattr(chat, "start_video_poller", lambda *a: started.append(a))
+        monkeypatch.setattr(chat.polling, "start_video_poller", lambda *a: started.append(a))
         msg = db.add_chat_message(
             conv["id"],
             "assistant",
@@ -1117,7 +1117,7 @@ class TestModerationAndRegenerate:
         ],
     )
     def test_moderation_detection(self, chat, status, msg, expected):
-        assert chat._is_moderation_error(chat.openrouter.OpenRouterError(msg, status)) is expected
+        assert chat.generation._is_moderation_error(chat.openrouter.OpenRouterError(msg, status)) is expected
 
     def _failed_image(self, db, conv, **extra):
         db.add_chat_message(conv["id"], "user", "draw")
@@ -1220,7 +1220,7 @@ class TestModerationAndRegenerate:
         )
         self._run_worker_inline(chat, monkeypatch)
         started = []
-        monkeypatch.setattr(chat, "start_video_poller", lambda *a: started.append(a))
+        monkeypatch.setattr(chat.polling, "start_video_poller", lambda *a: started.append(a))
         got = {}
         monkeypatch.setattr(
             chat.openrouter,
@@ -1288,7 +1288,7 @@ class TestContext:
         )
 
     def test_only_most_recent_images_as_pixels(self, client, conv, chat, db, monkeypatch):
-        assert self._pixels_sent(client, conv, chat, db, monkeypatch) == chat.DEFAULT_IMAGE_LIMIT == 6
+        assert self._pixels_sent(client, conv, chat, db, monkeypatch) == chat.constants.DEFAULT_IMAGE_LIMIT == 6
 
     @pytest.mark.parametrize("limit,expected", [(2, 2), (0, 0), (None, 8)])
     def test_image_slider_sets_how_many(self, client, conv, chat, db, monkeypatch, limit, expected):
@@ -1590,7 +1590,7 @@ class TestConsistencyReferences:
         assert json.loads(call["function"]["arguments"]) == {"prompt": "Linh", "keep_consistent": True}
         assert json.loads(seen["msgs"][3]["content"]) == {
             "ok": True,
-            "result": chat.IMAGE_TOOL_RESULT,
+            "result": chat.tools.IMAGE_TOOL_RESULT,
             "reference_images": 2,
         }
 
@@ -1639,7 +1639,8 @@ class TestModelDecides:
         )
         from datetime import datetime
 
-        assert seen["msgs"][0]["content"] == chat.SYSTEM_PROMPT.format(today=datetime.now().strftime("%A %d %B %Y"))
+        today = datetime.now().strftime("%A %d %B %Y")
+        assert seen["msgs"][0]["content"] == chat.tools.SYSTEM_PROMPT.format(today=today)
 
 
 class TestConversationalImageModels:
@@ -2009,10 +2010,10 @@ class TestCustomInstructions:
         made = client.post("/api/chat/conversations", json={}).json()
         # Nothing is copied in: the defaults apply on top of the chat's own (none here)
         assert made["instruction_ids"] == [] and made["instruction_group_ids"] == []
-        assert chat._conversation_instructions(made["id"]) == "x\n\ny"  # D once, though in G too
+        assert chat.generation._conversation_instructions(made["id"]) == "x\n\ny"  # D once, though in G too
         # Changing the defaults changes the chat
         client.put("/api/chat/settings", json={"default_instruction_ids": [e["id"]]})
-        assert chat._conversation_instructions(made["id"]) == "y"
+        assert chat.generation._conversation_instructions(made["id"]) == "y"
         assert client.post("/api/chat/conversations", json={"instruction_ids": [999]}).status_code == 400
 
     def test_global_settings_crud_and_validation(self, client):
@@ -2189,10 +2190,10 @@ class TestChatSpaces:
         conv = client.post("/api/chat/conversations", json={"space_id": sp["id"]}).json()
         assert conv["space_id"] == sp["id"] and conv["instruction_ids"] == []
         # Global first, then the space's own, each snippet once (shared de-duped)
-        assert chat._conversation_instructions(conv["id"]) == "x\n\nboth.\n\nBe warm."
+        assert chat.generation._conversation_instructions(conv["id"]) == "x\n\nboth.\n\nBe warm."
         # Out of the space, only the global defaults apply
         client.patch(f"/api/chat/conversations/{conv['id']}", json={"space_id": None})
-        assert chat._conversation_instructions(conv["id"]) == "x\n\nboth."
+        assert chat.generation._conversation_instructions(conv["id"]) == "x\n\nboth."
 
     def test_chat_without_space_uses_only_global_defaults(self, client, chat, db):
         glob = client.post("/api/chat/instructions", json={"name": "Glob", "content": "x"}).json()
@@ -2207,7 +2208,7 @@ class TestChatSpaces:
         sp = client.post("/api/chat/spaces", json={"name": "Novel", "default_character_ids": [c1.id]}).json()
         conv = client.post("/api/chat/conversations", json={"space_id": sp["id"], "character_ids": [c2.id]}).json()
         assert conv["character_ids"] == [c2.id]  # its own
-        assert chat._effective_ids(db.get_conversation(conv["id"]), "character") == [c1.id, c2.id]
+        assert chat.helpers._effective_ids(db.get_conversation(conv["id"]), "character") == [c1.id, c2.id]
 
     def test_deleting_a_character_clears_it_from_global_and_space_defaults(self, client, db):
         c1 = db.create_character("Alice")
@@ -2542,10 +2543,10 @@ class TestPolloImageModels:
                 [("succeed", None, "https://cdn/v.mp4", 40)],
             ]
         )  # re-read for the download
-        chat._poll_video(conv["id"], msg.id, "pv1", "pollo:task-9")
+        chat.polling._poll_video(conv["id"], msg.id, "pv1", "pollo:task-9")
         item = db.get_chat_message(msg.id).media[0]
         assert item["status"] == "done" and item["credits"] == 40 and not item.get("cost")
-        assert (chat._chat_root() / conv["id"] / item["file"]).read_bytes() == b"mp4-bytes"
+        assert (chat.helpers._chat_root() / conv["id"] / item["file"]).read_bytes() == b"mp4-bytes"
 
     def test_failed_pollo_video_marks_the_item(self, chat, db, conv, monkeypatch, pollo):
         msg = db.add_chat_message(
@@ -2556,7 +2557,7 @@ class TestPolloImageModels:
             ],
         )
         pollo["statuses"] = iter([[("failed", "Your prompt violates our content policy", None, None)]])
-        chat._poll_video(conv["id"], msg.id, "pv2", "pollo:task-8")
+        chat.polling._poll_video(conv["id"], msg.id, "pv2", "pollo:task-8")
         item = db.get_chat_message(msg.id).media[0]
         assert item["status"] == "error" and item["moderated"] is True and item["error"].startswith("Pollo:")
 
@@ -2669,8 +2670,9 @@ class TestPolloImageModels:
         assert item["error"] == "Pollo: This model is not enabled for API access." and item["moderated"] is False
 
     def test_pollo_content_rejection_is_still_moderation(self, chat):
-        assert chat._is_moderation_error(chat.pollo.PolloError("Pollo: prompt flagged as sensitive content", 400))
-        assert chat._is_moderation_error(chat.openrouter.OpenRouterError("Forbidden", 403))  # OpenRouter's 403 still is
+        is_mod = chat.generation._is_moderation_error
+        assert is_mod(chat.pollo.PolloError("Pollo: prompt flagged as sensitive content", 400))
+        assert is_mod(chat.openrouter.OpenRouterError("Forbidden", 403))  # OpenRouter's 403 still counts
 
     def test_models_not_enabled_for_the_key_are_flagged_hidden(self, chat, monkeypatch, pollo):
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
@@ -3207,7 +3209,7 @@ class TestTitles:
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok", cost=0.001))
         seen = {}
         monkeypatch.setattr(
-            chat,
+            chat.generation,
             "_generate_title",
             lambda model, prompt: (seen.update(model=model, prompt=prompt), ("Winter Foxes", 0.0005))[1],
         )
@@ -3226,7 +3228,7 @@ class TestTitles:
         def boom(model, prompt):
             raise chat.openrouter.OpenRouterError("nope")
 
-        monkeypatch.setattr(chat, "_generate_title", boom)
+        monkeypatch.setattr(chat.generation, "_generate_title", boom)
         ev = self._send(client, conv)
         assert {"type": "title", "title": "tell me about foxes in winter"} in ev
 
@@ -3234,7 +3236,9 @@ class TestTitles:
         monkeypatch.setenv("CHAT_TITLE_MODEL", "cheap/model")
         monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
         seen = {}
-        monkeypatch.setattr(chat, "_generate_title", lambda model, prompt: (seen.update(model=model), ("T", 0))[1])
+        monkeypatch.setattr(
+            chat.generation, "_generate_title", lambda model, prompt: (seen.update(model=model), ("T", 0))[1]
+        )
         self._send(client, conv)
         assert seen["model"] == "cheap/model"
 
@@ -3246,11 +3250,11 @@ class TestTitles:
             "stream_chat",
             lambda model, msgs, **kw: _text_chunks('<think>hmm</think>**Title:** "Winter Foxes."\nextra', cost=0.0002),
         )
-        assert chat_mod._generate_title("t/model", "foxes") == ("Winter Foxes", 0.0002)
+        assert chat_mod.generation._generate_title("t/model", "foxes") == ("Winter Foxes", 0.0002)
 
     def test_clean_title_rejects_rambling(self, chat):
-        assert chat._clean_title("x" * 100) is None
-        assert chat._clean_title("   ") is None
+        assert chat.generation._clean_title("x" * 100) is None
+        assert chat.generation._clean_title("   ") is None
 
 
 class TestPolloRequestLog:
@@ -3292,17 +3296,17 @@ class TestHiddenDefaults:
             f"/api/chat/conversations/{one['id']}", json={"hidden_defaults": {"instruction": [a["id"]]}}
         ).json()
         assert hidden["hidden_defaults"]["instruction"] == [a["id"]]
-        assert chat._conversation_instructions(one["id"]) == "bb"
-        assert chat._conversation_instructions(two["id"]) == "aa\n\nbb"
+        assert chat.generation._conversation_instructions(one["id"]) == "bb"
+        assert chat.generation._conversation_instructions(two["id"]) == "aa\n\nbb"
         # Shown again
         client.patch(f"/api/chat/conversations/{one['id']}", json={"hidden_defaults": {}})
-        assert chat._conversation_instructions(one["id"]) == "aa\n\nbb"
+        assert chat.generation._conversation_instructions(one["id"]) == "aa\n\nbb"
 
     def test_a_new_chat_can_start_with_some_hidden(self, client, chat, db):
         c1 = db.create_character("Alice")
         client.put("/api/chat/settings", json={"default_character_ids": [c1.id]})
         conv = client.post("/api/chat/conversations", json={"hidden_defaults": {"character": [c1.id]}}).json()
-        assert chat._effective_ids(db.get_conversation(conv["id"]), "character") == []
+        assert chat.helpers._effective_ids(db.get_conversation(conv["id"]), "character") == []
 
     def test_a_branch_keeps_what_was_hidden(self, client, chat, db, monkeypatch):
         a = client.post("/api/chat/instructions", json={"name": "A", "content": "aa"}).json()
@@ -3332,23 +3336,23 @@ class TestPausedInstructions:
             f"/api/chat/conversations/{conv['id']}",
             json={"instruction_group_ids": [g["id"]], "instruction_ids": [tone["id"], lang["id"]]},
         )
-        assert chat._conversation_instructions(conv["id"]) == "Be warm.\n\nUse markdown.\n\nIn French."
+        assert chat.generation._conversation_instructions(conv["id"]) == "Be warm.\n\nUse markdown.\n\nIn French."
         # Pause the group: its Fmt drops, but Tone stays (attached individually too)
         r = client.patch(
             f"/api/chat/conversations/{conv['id']}", json={"paused_instructions": {"instruction_group": [g["id"]]}}
         ).json()
         assert r["paused_instructions"]["instruction_group"] == [g["id"]]
         assert r["instruction_group_ids"] == [g["id"]]  # still attached, just paused
-        assert chat._conversation_instructions(conv["id"]) == "Be warm.\n\nIn French."
+        assert chat.generation._conversation_instructions(conv["id"]) == "Be warm.\n\nIn French."
         # Also pause the Tone snippet → only Lang is left
         client.patch(
             f"/api/chat/conversations/{conv['id']}",
             json={"paused_instructions": {"instruction_group": [g["id"]], "instruction": [tone["id"]]}},
         )
-        assert chat._conversation_instructions(conv["id"]) == "In French."
+        assert chat.generation._conversation_instructions(conv["id"]) == "In French."
         # Resume everything
         client.patch(f"/api/chat/conversations/{conv['id']}", json={"paused_instructions": {}})
-        assert chat._conversation_instructions(conv["id"]) == "Be warm.\n\nUse markdown.\n\nIn French."
+        assert chat.generation._conversation_instructions(conv["id"]) == "Be warm.\n\nUse markdown.\n\nIn French."
 
     def test_an_inherited_default_can_be_paused(self, client, chat):
         a = client.post("/api/chat/instructions", json={"name": "A", "content": "aa"}).json()
@@ -3357,15 +3361,15 @@ class TestPausedInstructions:
         one = client.post("/api/chat/conversations", json={}).json()
         two = client.post("/api/chat/conversations", json={}).json()
         client.patch(f"/api/chat/conversations/{one['id']}", json={"paused_instructions": {"instruction": [a["id"]]}})
-        assert chat._conversation_instructions(one["id"]) == "bb"  # paused here
-        assert chat._conversation_instructions(two["id"]) == "aa\n\nbb"  # unaffected elsewhere
+        assert chat.generation._conversation_instructions(one["id"]) == "bb"  # paused here
+        assert chat.generation._conversation_instructions(two["id"]) == "aa\n\nbb"  # unaffected elsewhere
 
     def test_a_new_chat_can_start_with_some_paused(self, client, chat):
         a = client.post("/api/chat/instructions", json={"name": "A", "content": "aa"}).json()
         client.put("/api/chat/settings", json={"default_instruction_ids": [a["id"]]})
         conv = client.post("/api/chat/conversations", json={"paused_instructions": {"instruction": [a["id"]]}}).json()
         assert conv["paused_instructions"]["instruction"] == [a["id"]]
-        assert chat._conversation_instructions(conv["id"]) is None
+        assert chat.generation._conversation_instructions(conv["id"]) is None
 
     def test_a_branch_keeps_what_was_paused(self, client, db):
         a = client.post("/api/chat/instructions", json={"name": "A", "content": "aa"}).json()
@@ -3417,6 +3421,6 @@ class TestLargeChats:
         folder = tmp_path / "chat" / "c1"
         folder.mkdir(parents=True)
         Image.new("RGB", (1200, 1600), "blue").save(folder / "img_a.png")
-        chat._warm_missing_thumbnails()
+        chat.polling._warm_missing_thumbnails()
         for size in (media_mod.THUMB_SIZE, chat.CHAT_PREVIEW_SIZE):
             assert media_mod._thumb_path(folder / "img_a.png", size).is_file()
