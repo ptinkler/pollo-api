@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from tests.test_chat import SETTINGS, _events, _png_bytes, chat, client, conv, db  # noqa: F401
+from web.providers import openrouter
 
 MODELS = {
     "text": [
@@ -243,9 +244,9 @@ class TestCatalogue:
         assert by_id["venice/ovi-image-to-video"]["uncensored"] is True and wan["uncensored"] is None
 
     def test_chat_catalogue_includes_venice_alongside_openrouter(self, client, chat, venice, monkeypatch):
-        monkeypatch.setattr(chat.openrouter, "list_text_models", lambda: [{"id": "or/text", "name": "OR"}])
-        monkeypatch.setattr(chat.openrouter, "list_image_models", lambda: [])
-        monkeypatch.setattr(chat.openrouter, "list_video_models", lambda: [])
+        monkeypatch.setattr(openrouter, "list_text_models", lambda: [{"id": "or/text", "name": "OR"}])
+        monkeypatch.setattr(openrouter, "list_image_models", lambda: [])
+        monkeypatch.setattr(openrouter, "list_video_models", lambda: [])
         data = client.get("/api/chat/models").json()
         assert [m["id"] for m in data["text"]] == ["venice/venice-uncensored", "venice/llama-big", "or/text"]
         assert any(m["id"] == "venice/seedream-v5-pro" for m in data["image"])
@@ -388,7 +389,7 @@ class TestImages:
     def test_chat_image_mode_runs_on_venice(self, client, conv, chat, venice, monkeypatch):
         v, fake = venice
         fake.routes["/image/generate"] = httpx.Response(200, json={"images": [base64.b64encode(_png_bytes()).decode()]})
-        monkeypatch.setattr(chat.openrouter, "generate_image", lambda *a, **k: pytest.fail("not OpenRouter"))
+        monkeypatch.setattr(openrouter, "generate_image", lambda *a, **k: pytest.fail("not OpenRouter"))
         ev = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages",
@@ -620,7 +621,7 @@ class TestText:
     def test_chat_turn_uses_venice_for_a_venice_text_model(self, client, conv, chat, venice, monkeypatch):
         v, fake = venice
         fake.routes["/chat/completions"] = self._sse({"choices": [{"delta": {"content": "From Venice"}}]})
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("not OpenRouter"))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: pytest.fail("not OpenRouter"))
         ev = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages",
@@ -634,7 +635,7 @@ class TestText:
         Venice's own catalogue that the model can't see images."""
         v, fake = venice
         fake.routes["/chat/completions"] = self._sse({"choices": [{"delta": {"content": "ok"}}]})
-        assert chat._models_cache["data"] is None
+        assert chat.catalogue._models_cache["data"] is None
         up = client.post(
             f"/api/chat/conversations/{conv['id']}/attachments", files={"file": ("a.png", _png_bytes(), "image/png")}
         ).json()["file"]
@@ -688,7 +689,7 @@ class TestVideoFamiliesInChat:
 
     def _load_catalogue(self, client, chat, monkeypatch):
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
-            monkeypatch.setattr(chat.openrouter, fn, lambda: [])
+            monkeypatch.setattr(openrouter, fn, lambda: [])
         client.get("/api/chat/models")
 
     def _queue(self, fake, queue_id="q"):

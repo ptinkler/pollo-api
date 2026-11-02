@@ -33,21 +33,22 @@ This package is pure wiring. The pieces live in their own modules:
     routes_turns  the SSE turn routes + pin/favourite/regenerate media routes
 """
 
-import threading as threading  # tests patch web.chat.threading.Thread (the stdlib module)
+# Importing the route modules registers their endpoints on the shared router.
+from . import routes, routes_turns  # noqa: F401 — imported for the route-registration side effect
+from .constants import CHAT_PREVIEW_SIZE, IMAGE_EXTS
+from .deps import router
+from .helpers import _conv_dir
+from .models import ConversationCreate
+from .polling import startup_resume_chat
+from .routes import api_create_conversation
 
-# Importing the route modules registers their endpoints on the shared router;
-# the rest are re-exports used by other modules and the tests (web.chat.<name>).
-from ..providers import openrouter as openrouter  # tests patch web.chat.openrouter.*
-from ..providers import pollo as pollo  # tests patch web.chat.pollo.*
-from . import routes as routes  # noqa: F401 — CRUD + catalogue/media/messages routes
-from . import routes_turns as routes_turns  # noqa: F401 — SSE turn + media-gen routes
-from .catalogue import _models_cache as _models_cache  # tests mutate web.chat._models_cache
-from .catalogue import get_models as get_models
-from .constants import CHAT_PREVIEW_SIZE as CHAT_PREVIEW_SIZE  # chatgpt_import
-from .constants import IMAGE_EXTS as IMAGE_EXTS  # chatgpt_import
-from .deps import router as router  # web.api mounts this
-from .helpers import _conv_dir as _conv_dir  # chatgpt_import
-from .helpers import _inherited as _inherited  # tests call web.chat._inherited
-from .models import ConversationCreate as ConversationCreate  # chatgpt_import
-from .polling import startup_resume_chat as startup_resume_chat  # web.api lifespan
-from .routes import api_create_conversation as api_create_conversation  # chatgpt_import
+# The package's public surface (used by web.api and web.chatgpt_import).
+__all__ = [
+    "router",
+    "startup_resume_chat",
+    "ConversationCreate",
+    "IMAGE_EXTS",
+    "CHAT_PREVIEW_SIZE",
+    "_conv_dir",
+    "api_create_conversation",
+]

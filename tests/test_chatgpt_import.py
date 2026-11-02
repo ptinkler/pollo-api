@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 import pytest
 
 from tests.test_chat import SETTINGS, _png_bytes, _text_chunks, chat, client, db  # noqa: F401
+from web.providers import openrouter
 
 T0 = 1_790_000_000.0  # the first prompt's time
 
@@ -219,7 +220,7 @@ class TestImportingAgain:
     ):
         imp.run_import(story_zip)
         conv = _imported(client)[0]
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("Sure."))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: _text_chunks("Sure."))
         client.post(
             f"/api/chat/conversations/{conv['id']}/messages", json={"content": "continue", "mode": "text", **SETTINGS}
         )

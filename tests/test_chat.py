@@ -2,6 +2,7 @@
 
 import io
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -10,6 +11,8 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from web.core.metadata import MetadataDB
+from web.providers import openrouter
+from web.providers import pollo as pollo_provider
 
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 
@@ -65,7 +68,7 @@ def chat(monkeypatch, db, provider_keys):
     monkeypatch.setattr(chat_mod.polling, "VIDEO_POLL_INTERVAL", 0)
     monkeypatch.setattr(chat_mod.polling, "start_video_poller", lambda *a: None)
     monkeypatch.setattr(chat_mod.generation, "_generate_title", lambda model, prompt: (None, 0.0))  # tests opt in
-    chat_mod._models_cache.update(at=0.0, data=None)
+    chat_mod.catalogue._models_cache.update(at=0.0, data=None)
     return chat_mod
 
 
@@ -130,7 +133,7 @@ class TestConversations:
 
     def test_openrouter_balance(self, client, chat, monkeypatch):
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "_get",
             lambda path, params=None: (
                 {"data": {"total_credits": 60, "total_usage": 52.78926312}} if path == "/credits" else pytest.fail(path)
@@ -144,9 +147,9 @@ class TestConversations:
 
     def test_openrouter_balance_error_is_502(self, client, chat, monkeypatch):
         def boom(path, params=None):
-            raise chat.openrouter.OpenRouterError("nope", 500)
+            raise openrouter.OpenRouterError("nope", 500)
 
-        monkeypatch.setattr(chat.openrouter, "_get", boom)
+        monkeypatch.setattr(openrouter, "_get", boom)
         assert client.get("/api/chat/credits").status_code == 502
 
     def test_send_without_key_is_503(self, client, conv, provider_keys):
@@ -183,7 +186,7 @@ class TestMedia:
         (chat._conv_dir(conv["id"]) / "img_old.png").write_bytes(_png_bytes())
         submitted = {}
         monkeypatch.setattr(
-            chat.openrouter, "submit_video", lambda model, prompt, **kw: (submitted.update(kw), {"id": "vid-1"})[1]
+            openrouter, "submit_video", lambda model, prompt, **kw: (submitted.update(kw), {"id": "vid-1"})[1]
         )
         _events(
             client.post(
@@ -209,7 +212,7 @@ class TestTurns:
             seen.update(model=model, messages=messages, tools=tools)
             return _text_chunks("Hel", "lo!")
 
-        monkeypatch.setattr(chat.openrouter, "stream_chat", fake_stream)
+        monkeypatch.setattr(openrouter, "stream_chat", fake_stream)
 
         r = client.post(
             f"/api/chat/conversations/{conv['id']}/messages", json={"content": "Say hello", "mode": "text", **SETTINGS}
@@ -240,14 +243,14 @@ class TestTurns:
             calls.append((messages, tools))
             return next(rounds)
 
-        monkeypatch.setattr(chat.openrouter, "stream_chat", fake_stream)
+        monkeypatch.setattr(openrouter, "stream_chat", fake_stream)
         img_args = {}
 
         def fake_image(model, prompt, **kw):
             img_args.update(model=model, prompt=prompt, **kw)
             return [(_png_bytes(), "image/png")], 0.04
 
-        monkeypatch.setattr(chat.openrouter, "generate_image", fake_image)
+        monkeypatch.setattr(openrouter, "generate_image", fake_image)
 
         ev = _events(
             client.post(
@@ -278,15 +281,15 @@ class TestTurns:
     def test_image_models_own_auto_beats_the_chat_models_ratio_pick(self, client, conv, chat, monkeypatch):
         # With the composer ratio left unset and the image model offering its
         # own "auto", that wins over whatever ratio the chat model guessed.
-        chat._models_cache.update(
+        chat.catalogue._models_cache.update(
             at=9e18,
             data={"text": [], "video": [], "image": [{"id": "i/model", "aspect_ratios": ["auto", "16:9", "1:1"]}]},
         )
         rounds = iter([_tool_chunks("generate_image", {"prompt": "a cat", "aspect_ratio": "16:9"}, text="A cat.")])
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(rounds))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(rounds))
         img_args = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "generate_image",
             lambda model, prompt, **kw: (
                 img_args.update(aspect_ratio=kw.get("aspect_ratio")),
@@ -312,9 +315,7 @@ class TestTurns:
                 _text_chunks("Arr, done!"),
             ]
         )
-        monkeypatch.setattr(
-            chat.openrouter, "stream_chat", lambda m, msgs, tools=None, session_id=None, **kw: next(rounds)
-        )
+        monkeypatch.setattr(openrouter, "stream_chat", lambda m, msgs, tools=None, session_id=None, **kw: next(rounds))
 
         ev = _events(
             client.post(
@@ -344,7 +345,7 @@ class TestTurns:
         )
         calls = []
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "stream_chat",
             lambda m, msgs, tools=None, session_id=None, **kw: (calls.append(msgs), next(rounds))[1],
         )
@@ -368,15 +369,15 @@ class TestTurns:
         )
         calls = []
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "stream_chat",
             lambda m, msgs, tools=None, session_id=None, **kw: (calls.append(msgs), next(rounds))[1],
         )
 
         def boom(*a, **k):
-            raise chat.openrouter.OpenRouterError("[Seed] overloaded")
+            raise openrouter.OpenRouterError("[Seed] overloaded")
 
-        monkeypatch.setattr(chat.openrouter, "generate_image", boom)
+        monkeypatch.setattr(openrouter, "generate_image", boom)
 
         ev = _events(
             client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "draw a cat", **SETTINGS})
@@ -408,13 +409,13 @@ class TestTurns:
         ]
         calls = []
         replies = iter([iter(chunks), _text_chunks("Done.")])
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: (calls.append(1), next(replies))[1])
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: (calls.append(1), next(replies))[1])
         monkeypatch.setattr(
-            chat.openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
+            openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
         )
         submitted = {}
         monkeypatch.setattr(
-            chat.openrouter, "submit_video", lambda model, prompt, **kw: (submitted.update(kw), {"id": "gen-vid-1"})[1]
+            openrouter, "submit_video", lambda model, prompt, **kw: (submitted.update(kw), {"id": "gen-vid-1"})[1]
         )
         ev = _events(
             client.post(
@@ -436,10 +437,10 @@ class TestTurns:
                 _text_chunks("Done."),
             ]
         )
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(rounds))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(rounds))
         got = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "generate_image",
             lambda model, prompt, **kw: (got.update(kw), ([(_png_bytes(), "image/png")], None))[1],
         )
@@ -452,10 +453,10 @@ class TestTurns:
         assert got["input_images"][0].startswith("data:image/png;base64,")
 
     def test_image_mode_skips_text_model(self, client, conv, chat, monkeypatch):
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
         got = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "generate_image",
             lambda model, prompt, **kw: (got.update(prompt=prompt, **kw), ([(_png_bytes(), "image/png")] * 2, 0.02))[1],
         )
@@ -478,9 +479,9 @@ class TestTurns:
         started = []
         monkeypatch.setattr(chat.polling, "start_video_poller", lambda *a: started.append(a))
         monkeypatch.setattr(
-            chat.openrouter, "submit_video", lambda model, prompt, **kw: {"id": "gen-vid-1", "status": "pending"}
+            openrouter, "submit_video", lambda model, prompt, **kw: {"id": "gen-vid-1", "status": "pending"}
         )
-        chat._models_cache.update(
+        chat.catalogue._models_cache.update(
             at=9e18,
             data={
                 "text": [],
@@ -506,8 +507,8 @@ class TestTurns:
 
         # Now run the poller for real against mocked status/download
         statuses = iter([{"status": "in_progress"}, {"status": "completed", "usage": {"cost": 0.5}}])
-        monkeypatch.setattr(chat.openrouter, "get_video", lambda j: next(statuses))
-        monkeypatch.setattr(chat.openrouter, "download_video", lambda j, dest, index=0: dest.write_bytes(b"mp4"))
+        monkeypatch.setattr(openrouter, "get_video", lambda j: next(statuses))
+        monkeypatch.setattr(openrouter, "download_video", lambda j, dest, index=0: dest.write_bytes(b"mp4"))
         chat.polling._poll_video(conv_id, msg_id, media_id, job_id)
         msg = client.get(f"/api/chat/messages/{msg_id}").json()
         assert msg["media"][0]["status"] == "done" and msg["media"][0]["file"].endswith(".mp4")
@@ -515,7 +516,7 @@ class TestTurns:
 
     def test_video_failure_marks_item(self, chat, db, conv, monkeypatch):
         msg = db.add_chat_message(conv["id"], "assistant", media=[{"id": "m1", "kind": "video", "status": "pending"}])
-        monkeypatch.setattr(chat.openrouter, "get_video", lambda j: {"status": "failed", "error": "nsfw"})
+        monkeypatch.setattr(openrouter, "get_video", lambda j: {"status": "failed", "error": "nsfw"})
         chat.polling._poll_video(conv["id"], msg.id, "m1", "gen-vid-x")
         assert db.get_chat_message(msg.id).media[0] == {
             "id": "m1",
@@ -527,15 +528,15 @@ class TestTurns:
 
     def test_openrouter_error_marks_message(self, client, conv, chat, monkeypatch):
         def boom(*a, **k):
-            raise chat.openrouter.OpenRouterError("Insufficient credits", 402)
+            raise openrouter.OpenRouterError("Insufficient credits", 402)
 
-        monkeypatch.setattr(chat.openrouter, "stream_chat", boom)
+        monkeypatch.setattr(openrouter, "stream_chat", boom)
         ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", **SETTINGS}))
         assert {"type": "error", "message": "Insufficient credits"} in ev
         assert ev[-1]["message"]["status"] == "error"
 
     def test_tools_withheld_for_models_without_tool_support(self, client, conv, chat, monkeypatch):
-        chat._models_cache.update(
+        chat.catalogue._models_cache.update(
             at=9e18,
             data={
                 "image": [],
@@ -545,7 +546,7 @@ class TestTurns:
         )
         seen = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "stream_chat",
             lambda m, msgs, tools=None, session_id=None, **kw: (
                 seen.update(tools=tools, msgs=msgs),
@@ -561,7 +562,7 @@ class TestTurns:
 
     def test_retry_replaces_assistant_message(self, client, conv, chat, monkeypatch):
         replies = iter([_text_chunks("first"), _text_chunks("second")])
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(replies))
         first = _events(
             client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", **SETTINGS})
         )[-1]["message"]
@@ -581,7 +582,7 @@ class TestTurns:
             offered.append(bool(tools))
             return _text_chunks("ok")
 
-        monkeypatch.setattr(chat.openrouter, "stream_chat", stream)
+        monkeypatch.setattr(openrouter, "stream_chat", stream)
         first = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", **SETTINGS, "mode": "text"}
@@ -625,7 +626,7 @@ class TestTurns:
         )
         seen = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "stream_chat",
             lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1],
         )
@@ -682,7 +683,7 @@ class TestTurns:
         )
         seen = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "stream_chat",
             lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1],
         )
@@ -843,7 +844,7 @@ class TestEditAndLibrary:
         replies = iter([_text_chunks("one"), _text_chunks("two"), _text_chunks("edited reply")])
         seen = []
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "stream_chat",
             lambda m, msgs, tools=None, session_id=None, **kw: (seen.append(msgs), next(replies))[1],
         )
@@ -874,7 +875,7 @@ class TestEditAndLibrary:
     def test_messages_remember_their_mode(self, client, conv, chat, monkeypatch):
         """The UI reruns an edit/retry in the message's own mode, so it must be recorded."""
         monkeypatch.setattr(
-            chat.openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
+            openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
         )
         ev = self._send(client, conv, "a dog", mode="image")
         assert ev[0]["user_message"]["mode"] == "image" and ev[-1]["message"]["mode"] == "image"
@@ -891,7 +892,7 @@ class TestEditAndLibrary:
         replies = iter([_text_chunks("a1"), _text_chunks("a2"), _text_chunks("b1"), _text_chunks("a3")])
         seen = []
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "stream_chat",
             lambda m, msgs, tools=None, session_id=None, **kw: (seen.append(msgs), next(replies))[1],
         )
@@ -921,7 +922,7 @@ class TestEditAndLibrary:
         assert self._switch(client, conv, user.id).status_code == 409
 
     def test_edit_keeps_attachments(self, client, conv, chat, monkeypatch):
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
         up = client.post(
             f"/api/chat/conversations/{conv['id']}/attachments", files={"file": ("a.png", _png_bytes(), "image/png")}
         ).json()["file"]
@@ -942,9 +943,9 @@ class TestEditAndLibrary:
                 _text_chunks("No image this time."),
             ]
         )
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(rounds))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(rounds))
         monkeypatch.setattr(
-            chat.openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], 0.04)
+            openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], 0.04)
         )
         ev = self._send(client, conv, "draw a cat")
         user_id = ev[0]["user_message"]["id"]
@@ -963,9 +964,9 @@ class TestEditAndLibrary:
         assert old[1]["media"][0]["id"] == img["id"]
 
     def test_retry_adds_a_sibling_reply(self, client, conv, chat, monkeypatch):
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
         monkeypatch.setattr(
-            chat.openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
+            openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
         )
         first = self._send(client, conv, "a dog", mode="image")[-1]["message"]
         second = _events(
@@ -984,7 +985,7 @@ class TestEditAndLibrary:
         assert [m["id"] for m in shown][-1] == first["id"]
 
     def test_uploads_are_not_kept_in_library(self, client, conv, chat, db, monkeypatch):
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
         up = client.post(
             f"/api/chat/conversations/{conv['id']}/attachments", files={"file": ("a.png", _png_bytes(), "image/png")}
         ).json()["file"]
@@ -1022,8 +1023,8 @@ class TestEditAndLibrary:
         )
         db.truncate_chat(conv["id"], after_id=msg.id - 1)
         assert db.get_chat_message(msg.id) is None
-        monkeypatch.setattr(chat.openrouter, "get_video", lambda j: {"status": "completed", "usage": {"cost": 0.3}})
-        monkeypatch.setattr(chat.openrouter, "download_video", lambda j, dest, index=0: dest.write_bytes(b"mp4"))
+        monkeypatch.setattr(openrouter, "get_video", lambda j: {"status": "completed", "usage": {"cost": 0.3}})
+        monkeypatch.setattr(openrouter, "download_video", lambda j, dest, index=0: dest.write_bytes(b"mp4"))
         chat.polling._poll_video(conv["id"], msg.id, "v1", "gen-vid-1")
         item = db.get_chat_library_item("v1").item
         assert item["status"] == "done" and item["file"].endswith(".mp4") and item["cost"] == 0.3
@@ -1068,7 +1069,7 @@ class TestEditAndLibrary:
 def test_resend_same_prompt_gets_fresh_reply(client, conv, chat, monkeypatch):
     """Retry on a prompt = edit with unchanged text: a new branch with a fresh reply."""
     replies = iter([_text_chunks("a"), _text_chunks("b"), _text_chunks("c")])
-    monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+    monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(replies))
     first = _events(
         client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "tell me a joke", **SETTINGS})
     )[0]["user_message"]
@@ -1086,15 +1087,15 @@ def test_resend_same_prompt_gets_fresh_reply(client, conv, chat, monkeypatch):
 class TestModerationAndRegenerate:
     def _blocked(self, chat, status=403, msg="Your input was flagged by moderation"):
         def boom(*a, **k):
-            raise chat.openrouter.OpenRouterError(msg, status)
+            raise openrouter.OpenRouterError(msg, status)
 
         return boom
 
     def test_moderation_block_ends_turn_without_retry(self, client, conv, chat, monkeypatch):
         rounds = iter([_tool_chunks("generate_image", {"prompt": "risky", "aspect_ratio": "9:16"}, text="Here goes.")])
         calls = []
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: (calls.append(1), next(rounds))[1])
-        monkeypatch.setattr(chat.openrouter, "generate_image", self._blocked(chat))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: (calls.append(1), next(rounds))[1])
+        monkeypatch.setattr(openrouter, "generate_image", self._blocked(chat))
         ev = _events(
             client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "draw it", **SETTINGS})
         )
@@ -1117,7 +1118,7 @@ class TestModerationAndRegenerate:
         ],
     )
     def test_moderation_detection(self, chat, status, msg, expected):
-        assert chat.generation._is_moderation_error(chat.openrouter.OpenRouterError(msg, status)) is expected
+        assert chat.generation._is_moderation_error(openrouter.OpenRouterError(msg, status)) is expected
 
     def _failed_image(self, db, conv, **extra):
         db.add_chat_message(conv["id"], "user", "draw")
@@ -1150,14 +1151,14 @@ class TestModerationAndRegenerate:
             def start(self):
                 self.target(*self.args)
 
-        monkeypatch.setattr(chat.threading, "Thread", Inline)
+        monkeypatch.setattr(threading, "Thread", Inline)
 
     def test_retry_same_model(self, client, conv, chat, db, monkeypatch):
         msg = self._failed_image(db, conv)
         self._run_worker_inline(chat, monkeypatch)
         got = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "generate_image",
             lambda model, prompt, **kw: (
                 got.update(model=model, prompt=prompt, **kw),
@@ -1176,7 +1177,7 @@ class TestModerationAndRegenerate:
         self._run_worker_inline(chat, monkeypatch)
         got = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "generate_image",
             lambda model, prompt, **kw: (got.update(model=model), ([(_png_bytes(), "image/png")], None))[1],
         )
@@ -1187,7 +1188,7 @@ class TestModerationAndRegenerate:
     def test_retry_blocked_again_stays_failed(self, client, conv, chat, db, monkeypatch):
         msg = self._failed_image(db, conv)
         self._run_worker_inline(chat, monkeypatch)
-        monkeypatch.setattr(chat.openrouter, "generate_image", self._blocked(chat))
+        monkeypatch.setattr(openrouter, "generate_image", self._blocked(chat))
         client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={})
         item = db.get_chat_message(msg.id).media[0]
         assert item["status"] == "error" and item["moderated"] is True
@@ -1210,7 +1211,7 @@ class TestModerationAndRegenerate:
                 }
             ],
         )
-        chat._models_cache.update(
+        chat.catalogue._models_cache.update(
             at=9e18,
             data={
                 "text": [],
@@ -1223,7 +1224,7 @@ class TestModerationAndRegenerate:
         monkeypatch.setattr(chat.polling, "start_video_poller", lambda *a: started.append(a))
         got = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "submit_video",
             lambda model, prompt, **kw: (got.update(model=model, **kw), {"id": "gen-vid-9"})[1],
         )
@@ -1243,7 +1244,7 @@ class TestContext:
     def _capture(self, chat, monkeypatch):
         seen = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "stream_chat",
             lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1],
         )
@@ -1295,7 +1296,7 @@ class TestContext:
         assert self._pixels_sent(client, conv, chat, db, monkeypatch, image_limit=limit) == expected
 
     def test_no_pixels_for_text_only_models(self, client, conv, chat, db, monkeypatch):
-        chat._models_cache.update(
+        chat.catalogue._models_cache.update(
             at=9e18,
             data={
                 "image": [],
@@ -1366,20 +1367,20 @@ class TestStallProtection:
             yield ": OPENROUTER PROCESSING"
 
     def test_deadline_breaks_a_keepalive_only_stream(self, chat, monkeypatch):
-        monkeypatch.setattr(chat.openrouter._client, "stream", lambda *a, **k: self._FakeStream(self._keepalives()))
-        with pytest.raises(chat.openrouter.OpenRouterError) as e:
-            list(chat.openrouter.stream_chat("m", [], max_seconds=0.2))
+        monkeypatch.setattr(openrouter._client, "stream", lambda *a, **k: self._FakeStream(self._keepalives()))
+        with pytest.raises(openrouter.OpenRouterError) as e:
+            list(openrouter.stream_chat("m", [], max_seconds=0.2))
         assert e.value.status == 504
 
     def test_stop_is_noticed_during_keepalives(self, chat, monkeypatch):
         import threading
         import time as _t
 
-        monkeypatch.setattr(chat.openrouter._client, "stream", lambda *a, **k: self._FakeStream(self._keepalives()))
+        monkeypatch.setattr(openrouter._client, "stream", lambda *a, **k: self._FakeStream(self._keepalives()))
         stop = threading.Event()
         threading.Timer(0.1, stop.set).start()
         t0 = _t.monotonic()
-        assert list(chat.openrouter.stream_chat("m", [], should_stop=stop.is_set)) == []
+        assert list(openrouter.stream_chat("m", [], should_stop=stop.is_set)) == []
         assert _t.monotonic() - t0 < 2
 
 
@@ -1407,10 +1408,10 @@ class TestConsistencyReferences:
 
     def _run(self, client, conv, chat, monkeypatch, tool_args):
         replies = iter([_tool_chunks("generate_image", tool_args, text="Next scene."), _text_chunks("Done.")])
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(replies))
         got = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "generate_image",
             lambda model, prompt, **kw: (got.update(kw), ([(_png_bytes(), "image/png")], None))[1],
         )
@@ -1436,10 +1437,10 @@ class TestConsistencyReferences:
                 _text_chunks("Done."),
             ]
         )
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(replies))
         got = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "generate_image",
             lambda model, prompt, **kw: (got.update(prompt=prompt, **kw), ([(_png_bytes(), "image/png")], None))[1],
         )
@@ -1457,7 +1458,7 @@ class TestConsistencyReferences:
         assert got.get("input_images") is None
 
     def test_skipped_for_image_models_without_reference_support(self, client, conv, chat, db, monkeypatch):
-        chat._models_cache.update(
+        chat.catalogue._models_cache.update(
             at=9e18, data={"text": [], "video": [], "image": [{"id": "i/model", "input_modalities": ["text"]}]}
         )
         self._prior_images(chat, db, conv, 1)
@@ -1526,7 +1527,7 @@ class TestConsistencyReferences:
         self._pin(client, db, conv, "u1")
         got = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "generate_image",
             lambda model, prompt, **kw: (got.update(kw), ([(_png_bytes(), "image/png")], None))[1],
         )
@@ -1539,7 +1540,7 @@ class TestConsistencyReferences:
         assert ev[-1]["message"]["media"][0]["params"]["refs"] == ["u.png"]
 
     def test_pins_ignored_for_image_models_without_reference_support(self, client, conv, chat, db, monkeypatch):
-        chat._models_cache.update(
+        chat.catalogue._models_cache.update(
             at=9e18, data={"text": [], "video": [], "image": [{"id": "i/model", "input_modalities": ["text"]}]}
         )
         self._prior_images(chat, db, conv, 1)
@@ -1581,7 +1582,7 @@ class TestConsistencyReferences:
         )
         seen = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "stream_chat",
             lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1],
         )
@@ -1601,7 +1602,7 @@ class TestModelDecides:
     def test_no_extra_call_when_model_skips_the_tool(self, client, conv, chat, monkeypatch):
         calls = []
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "stream_chat",
             lambda *a, **k: (calls.append(k), _text_chunks("A story, and here's the photo."))[1],
         )
@@ -1618,7 +1619,7 @@ class TestModelDecides:
         for i in range(4):
             db.add_chat_message(conv["id"], "user", f"q{i}")
             db.add_chat_message(conv["id"], "assistant", f"a{i}")
-        chat._models_cache.update(
+        chat.catalogue._models_cache.update(
             at=9e18,
             data={
                 "image": [],
@@ -1628,7 +1629,7 @@ class TestModelDecides:
         )
         seen = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "stream_chat",
             lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1],
         )
@@ -1653,7 +1654,7 @@ class TestConversationalImageModels:
     }
 
     def _setup(self, chat, db, conv, with_prior_image=True):
-        chat._models_cache.update(at=9e18, data=self.CATALOGUE)
+        chat.catalogue._models_cache.update(at=9e18, data=self.CATALOGUE)
         db.add_chat_message(conv["id"], "user", "write a story about Linh, with a photo")
         media = []
         if with_prior_image:
@@ -1673,14 +1674,14 @@ class TestConversationalImageModels:
     def _fake_chat_image(self, chat, monkeypatch):
         got = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "generate_image_chat",
             lambda model, messages, **kw: (
                 got.update(model=model, messages=messages, **kw),
                 ([(_png_bytes(), "image/png")], 0.04),
             )[1],
         )
-        monkeypatch.setattr(chat.openrouter, "generate_image", lambda *a, **k: pytest.fail("Images API not used"))
+        monkeypatch.setattr(openrouter, "generate_image", lambda *a, **k: pytest.fail("Images API not used"))
         return got
 
     def test_auto_mode_sends_conversation_reply_and_prompt(self, client, conv, chat, db, monkeypatch):
@@ -1693,7 +1694,7 @@ class TestConversationalImageModels:
                 _text_chunks("Done."),
             ]
         )
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(replies))
         got = self._fake_chat_image(chat, monkeypatch)
         ev = _events(
             client.post(
@@ -1742,7 +1743,7 @@ class TestConversationalImageModels:
         assert [m["role"] for m in got["messages"]] == ["user", "assistant", "user"]
 
     def test_non_conversational_models_still_use_images_api(self, client, conv, chat, db, monkeypatch):
-        chat._models_cache.update(
+        chat.catalogue._models_cache.update(
             at=9e18,
             data={
                 "text": [],
@@ -1750,9 +1751,9 @@ class TestConversationalImageModels:
                 "image": [{"id": "i/model", "input_modalities": ["text", "image"], "conversational": False}],
             },
         )
-        monkeypatch.setattr(chat.openrouter, "generate_image_chat", lambda *a, **k: pytest.fail("chat path not used"))
+        monkeypatch.setattr(openrouter, "generate_image_chat", lambda *a, **k: pytest.fail("chat path not used"))
         monkeypatch.setattr(
-            chat.openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
+            openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
         )
         ev = _events(
             client.post(
@@ -1762,7 +1763,7 @@ class TestConversationalImageModels:
         assert "context" not in ev[-1]["message"]["media"][0]["params"]
 
     def test_retry_of_failed_image_rebuilds_context(self, client, conv, chat, db, monkeypatch):
-        chat._models_cache.update(at=9e18, data=self.CATALOGUE)
+        chat.catalogue._models_cache.update(at=9e18, data=self.CATALOGUE)
         db.add_chat_message(conv["id"], "user", "story please, with a photo")
         msg = db.add_chat_message(
             conv["id"],
@@ -1789,7 +1790,7 @@ class TestConversationalImageModels:
             def start(self):
                 self.target(*self.args)
 
-        monkeypatch.setattr(chat.threading, "Thread", Inline)
+        monkeypatch.setattr(threading, "Thread", Inline)
         got = self._fake_chat_image(chat, monkeypatch)
         client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={})
         assert [m["role"] for m in got["messages"]] == ["user", "assistant", "user"]
@@ -1810,7 +1811,7 @@ class TestOpenRouterChatImages:
         sent = {}
         b64 = base64.b64encode(_png_bytes()).decode()
         monkeypatch.setattr(
-            chat.openrouter._client,
+            openrouter._client,
             "post",
             lambda url, **kw: (
                 sent.update(kw["json"]),
@@ -1831,20 +1832,18 @@ class TestOpenRouterChatImages:
                 ),
             )[1],
         )
-        images, cost = chat.openrouter.generate_image_chat(
-            "g/img", [{"role": "user", "content": "hi"}], aspect_ratio="16:9"
-        )
+        images, cost = openrouter.generate_image_chat("g/img", [{"role": "user", "content": "hi"}], aspect_ratio="16:9")
         assert sent["modalities"] == ["image", "text"] and sent["image_config"] == {"aspect_ratio": "16:9"}
         assert images == [(_png_bytes(), "image/png")] and cost == 0.039
 
     def test_no_image_reports_models_text(self, chat, monkeypatch):
         monkeypatch.setattr(
-            chat.openrouter._client,
+            openrouter._client,
             "post",
             lambda url, **kw: self._resp({"choices": [{"message": {"content": "I can't draw that."}}]}),
         )
-        with pytest.raises(chat.openrouter.OpenRouterError) as e:
-            chat.openrouter.generate_image_chat("g/img", [])
+        with pytest.raises(openrouter.OpenRouterError) as e:
+            openrouter.generate_image_chat("g/img", [])
         assert "I can't draw that." in str(e.value)
 
     def test_catalogue_marks_and_adds_conversational_models(self, chat, monkeypatch):
@@ -1863,8 +1862,8 @@ class TestOpenRouterChatImages:
                 ]
             }
 
-        monkeypatch.setattr(chat.openrouter, "_get", fake_get)
-        models = {m["id"]: m for m in chat.openrouter.list_image_models()}
+        monkeypatch.setattr(openrouter, "_get", fake_get)
+        models = {m["id"]: m for m in openrouter.list_image_models()}
         assert models["google/gem-img"]["conversational"] is True
         assert models["seed/dream"]["conversational"] is False
         assert models["openai/gpt-img"]["conversational"] is True and models["openai/gpt-img"]["name"] == "GPT Image"
@@ -1875,12 +1874,12 @@ class TestFollowUpRounds:
         calls = []
         rounds = iter(rounds)
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "stream_chat",
             lambda m, msgs, tools=None, session_id=None, **kw: (calls.append(tools), next(rounds))[1],
         )
         monkeypatch.setattr(
-            chat.openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
+            openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
         )
         ev = _events(
             client.post(
@@ -1923,7 +1922,7 @@ class TestFollowUpRounds:
         def image(model, prompt, **kw):
             attempts.append(prompt)
             if len(attempts) == 1:
-                raise chat.openrouter.OpenRouterError("Upstream timed out", 502)
+                raise openrouter.OpenRouterError("Upstream timed out", 502)
             return [(_png_bytes(), "image/png")], None
 
         rounds = iter(
@@ -1934,11 +1933,11 @@ class TestFollowUpRounds:
         )
         calls = []
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "stream_chat",
             lambda m, msgs, tools=None, session_id=None, **kw: (calls.append(tools), next(rounds))[1],
         )
-        monkeypatch.setattr(chat.openrouter, "generate_image", image)
+        monkeypatch.setattr(openrouter, "generate_image", image)
         ev = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages", json={"content": "story and a picture", **SETTINGS}
@@ -1952,7 +1951,7 @@ class TestFollowUpRounds:
 def test_attribution_is_generic_and_hidden(chat, monkeypatch):
     """The app is named but not linkable: generic localhost URL, hidden from public rankings."""
     monkeypatch.setenv("OPENROUTER_REFERER", "https://example.com/should-be-ignored")
-    assert chat.openrouter._headers() == {
+    assert openrouter._headers() == {
         "Authorization": "Bearer sk-test",
         "HTTP-Referer": "http://localhost",
         "X-OpenRouter-Title": "Pollo Chat",
@@ -2062,7 +2061,7 @@ class TestCustomInstructions:
         )
         seen = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "stream_chat",
             lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1],
         )
@@ -2073,7 +2072,7 @@ class TestCustomInstructions:
     def test_not_sent_when_none_attached(self, client, conv, chat, monkeypatch):
         seen = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "stream_chat",
             lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1],
         )
@@ -2081,7 +2080,7 @@ class TestCustomInstructions:
         assert [m["role"] for m in seen["msgs"]] == ["system", "user"]
 
     def test_conversational_image_models_get_them_too(self, client, conv, chat, monkeypatch):
-        chat._models_cache.update(
+        chat.catalogue._models_cache.update(
             at=9e18,
             data={
                 "text": [],
@@ -2093,7 +2092,7 @@ class TestCustomInstructions:
         client.patch(f"/api/chat/conversations/{conv['id']}", json={"instruction_ids": [i["id"]]})
         got = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "generate_image_chat",
             lambda model, messages, **kw: (got.update(messages=messages), ([(_png_bytes(), "image/png")], None))[1],
         )
@@ -2200,7 +2199,7 @@ class TestChatSpaces:
         client.put("/api/chat/settings", json={"default_instruction_ids": [glob["id"]]})
         conv = client.post("/api/chat/conversations", json={}).json()
         assert conv["space_id"] is None
-        assert chat._inherited(db.get_conversation(conv["id"]))["instruction"] == [glob["id"]]
+        assert chat.helpers._inherited(db.get_conversation(conv["id"]))["instruction"] == [glob["id"]]
 
     def test_space_character_defaults_apply_to_its_chats(self, client, chat, db):
         c1 = db.create_character("Alice")
@@ -2249,7 +2248,7 @@ class TestPolloImageModels:
     @pytest.fixture()
     def pollo(self, chat, monkeypatch, provider_keys):
         provider_keys["pollo"] = "pollo-test"
-        monkeypatch.setattr(chat.pollo, "POLL_INTERVAL", 0)
+        monkeypatch.setattr(pollo_provider, "POLL_INTERVAL", 0)
         calls = {"generators": [], "uploads": [], "statuses": iter([])}
 
         class FakeResponse:
@@ -2296,18 +2295,18 @@ class TestPolloImageModels:
                 }
                 return FakeResponse({"code": "SUCCESS", "data": {"taskId": "task-1", "status": "waiting"}})
 
-        monkeypatch.setattr(chat.pollo, "get_image_generator", lambda key, **kw: FakeGenerator(key, **kw))
-        monkeypatch.setattr(chat.pollo, "get_video_generator", lambda key, **kw: FakeGenerator(key, **kw))
-        monkeypatch.setattr(chat.pollo, "get_task_status", lambda task_id, key: next(calls["statuses"]))
+        monkeypatch.setattr(pollo_provider, "get_image_generator", lambda key, **kw: FakeGenerator(key, **kw))
+        monkeypatch.setattr(pollo_provider, "get_video_generator", lambda key, **kw: FakeGenerator(key, **kw))
+        monkeypatch.setattr(pollo_provider, "get_task_status", lambda task_id, key: next(calls["statuses"]))
         monkeypatch.setattr(
-            chat.pollo.requests,
+            pollo_provider.requests,
             "get",
             lambda url, timeout=None, stream=False: FakeResponse(
                 None, b"mp4-bytes" if url.endswith(".mp4") else _png_bytes(), "image/jpeg"
             ),
         )
         monkeypatch.setattr(
-            chat.pollo.image_hosts,
+            pollo_provider.image_hosts,
             "upload_image",
             lambda path: (calls["uploads"].append(path.name), f"https://tmp.example/{path.name}")[1],
         )
@@ -2316,8 +2315,8 @@ class TestPolloImageModels:
     def _draw(self, client, conv, chat, monkeypatch, args, statuses, pollo):
         pollo["statuses"] = iter(statuses)
         rounds = iter([_tool_chunks("generate_image", args, text="Here you go."), _text_chunks("unused")])
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(rounds))
-        monkeypatch.setattr(chat.openrouter, "generate_image", lambda *a, **k: pytest.fail("should run on Pollo"))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(rounds))
+        monkeypatch.setattr(openrouter, "generate_image", lambda *a, **k: pytest.fail("should run on Pollo"))
         return _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages", json={"content": "draw", "mode": "auto", **self.POLLO}
@@ -2326,8 +2325,8 @@ class TestPolloImageModels:
 
     def test_listed_in_the_image_catalogue_when_key_is_set(self, chat, monkeypatch, pollo, provider_keys):
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
-            monkeypatch.setattr(chat.openrouter, fn, lambda: [])
-        models = {m["id"]: m for m in chat.get_models(refresh=True)["image"]}
+            monkeypatch.setattr(openrouter, fn, lambda: [])
+        models = {m["id"]: m for m in chat.catalogue.get_models(refresh=True)["image"]}
         assert models["pollo/seedreamv1"]["name"] == "Pollo: Seedream 5.0 Lite"
         assert models["pollo/seedreamprov1"]["name"] == "Pollo: Seedream 5.0 Pro"
         assert "21:9" in models["pollo/seedreamv1"]["aspect_ratios"]
@@ -2335,7 +2334,7 @@ class TestPolloImageModels:
         assert models["pollo/polloimage2"]["name"] == "Pollo: Pollo Image 2.0"
         assert "pollo/polloimage2v1" not in models and "pollo/seedream" not in models
         provider_keys["pollo"] = None
-        assert not any(m["id"].startswith("pollo/") for m in chat.get_models(refresh=True)["image"])
+        assert not any(m["id"].startswith("pollo/") for m in chat.catalogue.get_models(refresh=True)["image"])
 
     def test_tool_call_runs_on_pollo(self, client, conv, chat, monkeypatch, pollo):
         msg = self._draw(
@@ -2404,7 +2403,7 @@ class TestPolloImageModels:
 
         pollo["statuses"] = iter([[("succeed", None, "https://cdn/y.png", 3)]])
         monkeypatch.setattr(
-            chat.threading, "Thread", lambda target, args, **kw: type("T", (), {"start": lambda self: target(*args)})()
+            threading, "Thread", lambda target, args, **kw: type("T", (), {"start": lambda self: target(*args)})()
         )
         client.post(f"/api/chat/messages/{msg['id']}/media/{item['id']}/regenerate", json={})
         fixed = db.get_chat_message(msg["id"]).media[0]
@@ -2412,7 +2411,7 @@ class TestPolloImageModels:
 
     def test_legacy_only_model_generates_on_its_legacy_key(self, client, conv, chat, monkeypatch, pollo):
         pollo["statuses"] = iter([[("succeed", None, "https://cdn/x.png", 4)]])
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
         _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages",
@@ -2429,7 +2428,7 @@ class TestPolloImageModels:
                 [("succeed", None, "https://cdn/x.png", 2)],
             ]
         )
-        images, credits, _sent = chat.pollo.generate_image("pollo/nanobanana2v1", "x")
+        images, credits, _sent = pollo_provider.generate_image("pollo/nanobanana2v1", "x")
         assert len(images) == 1 and credits == 2
 
     # ── video ──
@@ -2437,8 +2436,8 @@ class TestPolloImageModels:
 
     def test_video_models_listed_without_deprecated_ones(self, chat, monkeypatch, pollo):
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
-            monkeypatch.setattr(chat.openrouter, fn, lambda: [])
-        models = {m["id"]: m for m in chat.get_models(refresh=True)["video"]}
+            monkeypatch.setattr(openrouter, fn, lambda: [])
+        models = {m["id"]: m for m in chat.catalogue.get_models(refresh=True)["video"]}
         fast = models["pollo/seedance20fastv1"]
         assert fast["name"] == "Pollo: Seedance 2.0 Fast"
         assert fast["durations"] == list(range(4, 16)) and fast["resolutions"] == ["480p", "720p"]
@@ -2446,8 +2445,8 @@ class TestPolloImageModels:
         assert "pollo/wan27v1" not in models  # marked deprecated on the Generate page
 
     def test_video_mode_submits_to_pollo_with_first_frame(self, client, conv, chat, monkeypatch, pollo):
-        monkeypatch.setattr(chat.openrouter, "submit_video", lambda *a, **k: pytest.fail("should run on Pollo"))
-        chat._models_cache.update(
+        monkeypatch.setattr(openrouter, "submit_video", lambda *a, **k: pytest.fail("should run on Pollo"))
+        chat.catalogue._models_cache.update(
             at=0.0, data={"video": [{"id": "pollo/seedance20fastv1", "durations": list(range(4, 16))}]}
         )
         up = client.post(
@@ -2517,7 +2516,7 @@ class TestPolloImageModels:
                 _text_chunks("x"),
             ]
         )
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(rounds))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(rounds))
         _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages",
@@ -2527,7 +2526,7 @@ class TestPolloImageModels:
         assert pollo["generators"][0][1]["aspect_ratio"] == "3:4"
 
     def test_poller_finishes_a_pollo_video(self, chat, db, conv, monkeypatch, pollo):
-        monkeypatch.setattr(chat.openrouter, "get_video", lambda *a: pytest.fail("should ask Pollo"))
+        monkeypatch.setattr(openrouter, "get_video", lambda *a: pytest.fail("should ask Pollo"))
         msg = db.add_chat_message(
             conv["id"],
             "assistant",
@@ -2563,8 +2562,8 @@ class TestPolloImageModels:
 
     def test_kling_and_qwen_models_offered_in_chat(self, chat, monkeypatch, pollo):
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
-            monkeypatch.setattr(chat.openrouter, fn, lambda: [])
-        data = chat.get_models(refresh=True)
+            monkeypatch.setattr(openrouter, fn, lambda: [])
+        data = chat.catalogue.get_models(refresh=True)
         images = {m["id"]: m for m in data["image"]}
         videos = {m["id"]: m for m in data["video"]}
         # Qwen Image runs on its legacy endpoint (its v1 one 404s)
@@ -2578,7 +2577,7 @@ class TestPolloImageModels:
     def test_image_only_kling_without_an_image_fails_on_the_card(self, client, conv, chat, db, monkeypatch, pollo):
         import web.providers.pollo_engine as registry
 
-        monkeypatch.setattr(chat.pollo, "get_video_generator", registry.video_generator)  # the real one
+        monkeypatch.setattr(pollo_provider, "get_video_generator", registry.video_generator)  # the real one
         msg = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages",
@@ -2591,7 +2590,7 @@ class TestPolloImageModels:
     def test_auto_mode_uses_composer_video_settings_and_records_what_was_sent(
         self, client, conv, chat, monkeypatch, pollo
     ):
-        chat._models_cache.update(
+        chat.catalogue._models_cache.update(
             at=0.0,
             data={
                 "video": [
@@ -2602,7 +2601,7 @@ class TestPolloImageModels:
         rounds = iter(
             [_tool_chunks("generate_video", {"prompt": "waves", "duration": 6}, text="Rolling."), _text_chunks("x")]
         )
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(rounds))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(rounds))
         msg = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages",
@@ -2633,8 +2632,8 @@ class TestPolloImageModels:
             def send_request(self):
                 return NotServed()
 
-        monkeypatch.setattr(chat.pollo, "get_image_generator", lambda key, **kw: Gen())
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
+        monkeypatch.setattr(pollo_provider, "get_image_generator", lambda key, **kw: Gen())
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
         msg = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages",
@@ -2658,8 +2657,8 @@ class TestPolloImageModels:
             def send_request(self):
                 return Refused()
 
-        monkeypatch.setattr(chat.pollo, "get_image_generator", lambda key, **kw: Gen())
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
+        monkeypatch.setattr(pollo_provider, "get_image_generator", lambda key, **kw: Gen())
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
         msg = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages",
@@ -2671,13 +2670,13 @@ class TestPolloImageModels:
 
     def test_pollo_content_rejection_is_still_moderation(self, chat):
         is_mod = chat.generation._is_moderation_error
-        assert is_mod(chat.pollo.PolloError("Pollo: prompt flagged as sensitive content", 400))
-        assert is_mod(chat.openrouter.OpenRouterError("Forbidden", 403))  # OpenRouter's 403 still counts
+        assert is_mod(pollo_provider.PolloError("Pollo: prompt flagged as sensitive content", 400))
+        assert is_mod(openrouter.OpenRouterError("Forbidden", 403))  # OpenRouter's 403 still counts
 
     def test_models_not_enabled_for_the_key_are_flagged_hidden(self, chat, monkeypatch, pollo):
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
-            monkeypatch.setattr(chat.openrouter, fn, lambda: [])
-        images = {m["id"]: m for m in chat.get_models(refresh=True)["image"]}
+            monkeypatch.setattr(openrouter, fn, lambda: [])
+        images = {m["id"]: m for m in chat.catalogue.get_models(refresh=True)["image"]}
         hidden = {k for k, m in images.items() if m["hidden"]}
         assert hidden == {
             "pollo/seedreamprov1",
@@ -2694,7 +2693,7 @@ class TestOpenRouterConnection:
     def test_connections_use_tcp_keepalive(self, chat):
         import socket
 
-        opts = chat.openrouter._keepalive_socket_options()
+        opts = openrouter._keepalive_socket_options()
         assert (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1) in opts
         if hasattr(socket, "TCP_KEEPIDLE"):
             assert (socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 5) in opts
@@ -2706,8 +2705,8 @@ class TestOpenRouterConnection:
         def drop(*a, **k):
             raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
 
-        monkeypatch.setattr(chat.openrouter._client, "stream", drop)
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
+        monkeypatch.setattr(openrouter._client, "stream", drop)
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
         msg = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages", json={"content": "a fox", "mode": "image", **SETTINGS}
@@ -2763,11 +2762,11 @@ class TestOpenRouterImageStream:
             "data: [DONE]",
         ]
         monkeypatch.setattr(
-            chat.openrouter._client,
+            openrouter._client,
             "stream",
             lambda method, url, **kw: (sent.update(kw["json"]), self._Stream(lines))[1],
         )
-        images, cost = chat.openrouter.generate_image("x/img", "a fox")
+        images, cost = openrouter.generate_image("x/img", "a fox")
         assert sent["stream"] is True
         assert images == [(_png_bytes(), "image/png")] and cost == 0.03
 
@@ -2775,7 +2774,7 @@ class TestOpenRouterImageStream:
         from web import request_log
 
         lines = ["event: error", "data: " + json.dumps({"error": {"message": "flagged by moderation"}}), ""]
-        monkeypatch.setattr(chat.openrouter._client, "stream", lambda *a, **k: self._Stream(lines))
+        monkeypatch.setattr(openrouter._client, "stream", lambda *a, **k: self._Stream(lines))
         ev = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages",
@@ -2792,9 +2791,9 @@ class TestOpenRouterImageStream:
         from web import request_log
 
         lines = ["event: image_generation.completed", "data: " + json.dumps({"b64_json": self._b64()}), ""]
-        monkeypatch.setattr(chat.openrouter._client, "stream", lambda *a, **k: self._Stream(lines))
+        monkeypatch.setattr(openrouter._client, "stream", lambda *a, **k: self._Stream(lines))
         request_log.forget_last()
-        chat.openrouter.generate_image("x/img", "a fox", input_images=["data:image/png;base64," + "A" * 4096])
+        openrouter.generate_image("x/img", "a fox", input_images=["data:image/png;base64," + "A" * 4096])
         last = request_log.take_last()
         assert last["response"] == {"images": ["image/png"], "cost": None}
         refs = last["request"]["input_references"]
@@ -2802,30 +2801,30 @@ class TestOpenRouterImageStream:
 
     def test_event_name_alone_identifies_the_final_image(self, chat, monkeypatch):
         lines = ["event: image_generation.completed", "data: " + json.dumps({"b64_json": self._b64()}), ""]
-        monkeypatch.setattr(chat.openrouter._client, "stream", lambda *a, **k: self._Stream(lines))
-        images, _ = chat.openrouter.generate_image("x/img", "a fox")
+        monkeypatch.setattr(openrouter._client, "stream", lambda *a, **k: self._Stream(lines))
+        images, _ = openrouter.generate_image("x/img", "a fox")
         assert len(images) == 1
 
     def test_error_event_raises(self, chat, monkeypatch):
         lines = ["event: error", "data: " + json.dumps({"error": {"message": "flagged by moderation"}}), ""]
-        monkeypatch.setattr(chat.openrouter._client, "stream", lambda *a, **k: self._Stream(lines))
-        with pytest.raises(chat.openrouter.OpenRouterError, match="flagged"):
-            chat.openrouter.generate_image("x/img", "a fox")
+        monkeypatch.setattr(openrouter._client, "stream", lambda *a, **k: self._Stream(lines))
+        with pytest.raises(openrouter.OpenRouterError, match="flagged"):
+            openrouter.generate_image("x/img", "a fox")
 
     def test_plain_json_answer_still_works(self, chat, monkeypatch):
         body = {"data": [{"b64_json": self._b64(), "media_type": "image/png"}], "usage": {"cost": 0.01}}
         monkeypatch.setattr(
-            chat.openrouter._client,
+            openrouter._client,
             "stream",
             lambda *a, **k: self._Stream([], content_type="application/json", body=body),
         )
-        images, cost = chat.openrouter.generate_image("x/img", "a fox")
+        images, cost = openrouter.generate_image("x/img", "a fox")
         assert len(images) == 1 and cost == 0.01
 
     def test_stream_without_an_image_raises(self, chat, monkeypatch):
-        monkeypatch.setattr(chat.openrouter._client, "stream", lambda *a, **k: self._Stream(["data: [DONE]"]))
-        with pytest.raises(chat.openrouter.OpenRouterError, match="no images"):
-            chat.openrouter.generate_image("x/img", "a fox")
+        monkeypatch.setattr(openrouter._client, "stream", lambda *a, **k: self._Stream(["data: [DONE]"]))
+        with pytest.raises(openrouter.OpenRouterError, match="no images"):
+            openrouter.generate_image("x/img", "a fox")
 
 
 class TestDeleteExchange:
@@ -2875,7 +2874,7 @@ class TestDeleteExchange:
         # The models no longer see it
         seen = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "stream_chat",
             lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1],
         )
@@ -3174,7 +3173,7 @@ class TestConversationList:
 
 class TestRememberedSettings:
     def test_turn_settings_are_kept_on_the_chat_and_copied_to_branches(self, client, conv, chat, db, monkeypatch):
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
         ev = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages",
@@ -3206,7 +3205,7 @@ class TestTitles:
         )
 
     def test_model_title_and_its_cost(self, client, conv, chat, monkeypatch):
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok", cost=0.001))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok", cost=0.001))
         seen = {}
         monkeypatch.setattr(
             chat.generation,
@@ -3223,10 +3222,10 @@ class TestTitles:
         assert seen["prompt"] == "tell me about foxes in winter"
 
     def test_falls_back_to_the_prompt(self, client, conv, chat, monkeypatch):
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
 
         def boom(model, prompt):
-            raise chat.openrouter.OpenRouterError("nope")
+            raise openrouter.OpenRouterError("nope")
 
         monkeypatch.setattr(chat.generation, "_generate_title", boom)
         ev = self._send(client, conv)
@@ -3234,7 +3233,7 @@ class TestTitles:
 
     def test_title_model_override(self, client, conv, chat, monkeypatch):
         monkeypatch.setenv("CHAT_TITLE_MODEL", "cheap/model")
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
         seen = {}
         monkeypatch.setattr(
             chat.generation, "_generate_title", lambda model, prompt: (seen.update(model=model), ("T", 0))[1]
@@ -3246,7 +3245,7 @@ class TestTitles:
         import web.chat as chat_mod  # not the `chat` fixture: that stubs _generate_title out
 
         monkeypatch.setattr(
-            chat_mod.openrouter,
+            openrouter,
             "stream_chat",
             lambda model, msgs, **kw: _text_chunks('<think>hmm</think>**Title:** "Winter Foxes."\nextra', cost=0.0002),
         )
@@ -3276,7 +3275,7 @@ class TestPolloRequestLog:
             def send_request(self):
                 return Resp()
 
-        assert chat.pollo._submit(Gen()) == "t-9"
+        assert pollo_provider._submit(Gen()) == "t-9"
         entry = request_log.recent()[0]
         assert entry["provider"] == "pollo" and entry["model"] == "seedance-2-0" and entry["status"] == 200
         assert entry["path"] == "/api/platform/generation/bytedance/seedance-2-0"

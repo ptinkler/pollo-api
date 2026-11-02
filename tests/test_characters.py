@@ -13,6 +13,7 @@ from tests.test_chat import (  # noqa: F401
     conv,
     db,
 )
+from web.providers import openrouter
 
 
 def _make(client, name="Linh", description="Short black hair, red scarf", images=1, **extra):
@@ -108,7 +109,7 @@ class TestInChat:
     def _capture(self, chat, monkeypatch):
         got = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "generate_image",
             lambda model, prompt, **kw: (got.update(prompt=prompt, **kw), ([(_png_bytes(), "image/png")], None))[1],
         )
@@ -123,7 +124,7 @@ class TestInChat:
             seen.update(messages=messages, tools=tools)
             return _text_chunks("Hi")
 
-        monkeypatch.setattr(chat.openrouter, "stream_chat", stream)
+        monkeypatch.setattr(openrouter, "stream_chat", stream)
         _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", **SETTINGS}))
         system = " ".join(m["content"] for m in seen["messages"] if m["role"] == "system")
         assert "Linh: Short black hair, red scarf" in system
@@ -139,7 +140,7 @@ class TestInChat:
                 _text_chunks("Done."),
             ]
         )
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(replies))
         got = self._capture(chat, monkeypatch)
         ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "go", **SETTINGS}))
         item = ev[-1]["message"]["media"][0]
@@ -167,7 +168,7 @@ class TestInChat:
                 _text_chunks("Done."),
             ]
         )
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(replies))
         got = self._capture(chat, monkeypatch)
         ev = _events(
             client.post(
@@ -185,7 +186,7 @@ class TestInChat:
         replies = iter(
             [_tool_chunks("generate_image", {"prompt": "Chloe waving", "characters": ["Chloe"]}), _text_chunks("Done.")]
         )
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(replies))
         self._capture(chat, monkeypatch)
         ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "go", **SETTINGS}))
         assert "characters" not in ev[-1]["message"]["media"][0]["params"]
@@ -194,7 +195,7 @@ class TestInChat:
         chloe, muscle = _make(client, name="Chloe"), _make(client, name="Chloe Muscle")
         self._attach(client, conv, chloe, muscle)
         replies = iter([_tool_chunks("generate_image", {"prompt": "Chloe Muscle at the gym"}), _text_chunks("Done.")])
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(replies))
         self._capture(chat, monkeypatch)
         ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "go", **SETTINGS}))
         assert ev[-1]["message"]["media"][0]["params"]["characters"] == [muscle["id"]]
@@ -232,7 +233,7 @@ class TestInChat:
         )
         client.post(f"/api/chat/messages/{msg.id}/media/g/pin", json={"pinned": True})
         replies = iter([_tool_chunks("generate_image", {"prompt": "Linh", "characters": ["Linh"]}), _text_chunks("ok")])
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(replies))
         self._capture(chat, monkeypatch)
         ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "go", **SETTINGS}))
         assert ev[-1]["message"]["media"][0]["params"]["refs"] == [f"char:{linh['id']}/{linh['images'][0]}", "g.png"]
@@ -253,7 +254,7 @@ class TestInChat:
         self._attach(client, conv, linh)
         sent = {}
         monkeypatch.setattr(
-            chat.openrouter, "submit_video", lambda model, prompt, **kw: (sent.update(prompt=prompt), {"id": "job1"})[1]
+            openrouter, "submit_video", lambda model, prompt, **kw: (sent.update(prompt=prompt), {"id": "job1"})[1]
         )
         _events(
             client.post(
@@ -264,7 +265,7 @@ class TestInChat:
         assert sent["prompt"] == "Linh dancing"
 
     def test_image_model_without_references_does_not_use_characters(self, client, conv, chat, db, monkeypatch):
-        chat._models_cache.update(
+        chat.catalogue._models_cache.update(
             at=9e18, data={"text": [], "video": [], "image": [{"id": "i/model", "input_modalities": ["text"]}]}
         )
         linh = _make(client)
@@ -281,7 +282,7 @@ class TestInChat:
         assert db.get_conversation(conv["id"]).character_ids == [linh["id"]]
 
     def test_chat_model_without_tools_is_not_told_in_auto(self, client, conv, chat, monkeypatch):
-        chat._models_cache.update(
+        chat.catalogue._models_cache.update(
             at=9e18,
             data={
                 "image": [],
@@ -292,7 +293,7 @@ class TestInChat:
         self._attach(client, conv, _make(client))
         seen = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "stream_chat",
             lambda model, messages, tools=None, **kw: (seen.update(m=messages), _text_chunks("Hi"))[1],
         )
@@ -303,7 +304,7 @@ class TestInChat:
         self._attach(client, conv, _make(client))
         seen = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "stream_chat",
             lambda model, messages, tools=None, **kw: (seen.update(m=messages), _text_chunks("Hi"))[1],
         )
@@ -321,7 +322,7 @@ class TestUseByName:
     def _capture(self, chat, monkeypatch):
         got = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "generate_image",
             lambda model, prompt, **kw: (got.update(prompt=prompt, **kw), ([(_png_bytes(), "image/png")], None))[1],
         )
@@ -335,7 +336,7 @@ class TestUseByName:
             seen.update(messages=messages, tools=tools)
             return _text_chunks("Hi")
 
-        monkeypatch.setattr(chat.openrouter, "stream_chat", stream)
+        monkeypatch.setattr(openrouter, "stream_chat", stream)
         _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", **SETTINGS}))
         assert "Linh" not in json.dumps(seen["messages"]) and "Linh" not in json.dumps(seen["tools"])
 
@@ -347,7 +348,7 @@ class TestUseByName:
                 _text_chunks("Here she is."),
             ]
         )
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(replies))
         got = self._capture(chat, monkeypatch)
         ev = _events(
             client.post(
@@ -374,7 +375,7 @@ class TestUseByName:
         linh = _make(client)
         client.patch(f"/api/chat/conversations/{conv['id']}", json={"character_ids": [linh["id"]]})
         replies = iter([_tool_chunks("generate_image", {"prompt": "Linh reading in a café"}), _text_chunks("Done.")])
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: next(replies))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(replies))
         self._capture(chat, monkeypatch)
         ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "go", **SETTINGS}))
         assert ev[-1]["message"]["media"][0]["params"]["characters"] == [linh["id"]]
@@ -410,7 +411,7 @@ class TestUseByName:
                 _text_chunks("Here's Mai again."),
             ]
         )
-        monkeypatch.setattr(chat.openrouter, "stream_chat", stream)
+        monkeypatch.setattr(openrouter, "stream_chat", stream)
         got = self._capture(chat, monkeypatch)
         ev = _events(
             client.post(
@@ -441,7 +442,7 @@ class TestUseByName:
             results.extend(json.loads(m["content"]) for m in messages if m["role"] == "tool")
             return next(replies)
 
-        monkeypatch.setattr(chat.openrouter, "stream_chat", stream)
+        monkeypatch.setattr(openrouter, "stream_chat", stream)
         _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "go", **SETTINGS}))
         assert "no image" in results[0]["error"]
         assert "already a character called linh" in results[-1]["error"]
@@ -476,7 +477,7 @@ class TestReferenceCaps:
         )
         got = {}
         monkeypatch.setattr(
-            chat.openrouter,
+            openrouter,
             "generate_image",
             lambda model, prompt, **kw: (got.update(kw), ([(_png_bytes(), "image/png")], None))[1],
         )
@@ -514,7 +515,7 @@ class TestReferenceCaps:
             ],
         )
         monkeypatch.setattr(
-            chat.openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
+            openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
         )
         ev = _events(
             client.post(
@@ -558,7 +559,7 @@ class TestReferenceCaps:
         monkeypatch.setattr(chat.turn, "_model_info", fake_info)
         monkeypatch.setattr(chat.generation, "_model_info", fake_info)
         monkeypatch.setattr(
-            chat.openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
+            openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
         )
         ev = _events(
             client.post(
