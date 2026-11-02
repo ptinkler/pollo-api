@@ -14,7 +14,7 @@ from web.core.metadata import get_db, iso
 
 from .. import characters, media, request_log
 from ..providers import openrouter, venice
-from ..uploads import read_image_upload, read_video_upload, safe_filename
+from ..uploads import read_image_upload, read_video_upload, safe_filename, store_deduped
 from .catalogue import get_models
 from .constants import (
     _KINDS,
@@ -541,9 +541,7 @@ def _empty_trash() -> None:
 async def api_upload_attachment(conv_id: str, file: UploadFile = File(...)):
     _require_conv(conv_id)
     content, ext = await read_image_upload(file)
-    name = f"up_{uuid.uuid4().hex[:12]}{ext}"
-    (_conv_dir(conv_id) / name).write_bytes(content)
-    return {"file": name}
+    return {"file": store_deduped(_conv_dir(conv_id), "up_", content, ext)}
 
 
 @router.post("/conversations/{conv_id}/attachments/video")
@@ -552,9 +550,26 @@ async def api_upload_video_attachment(conv_id: str, file: UploadFile = File(...)
     message endpoint records it as a video (not image) media item."""
     _require_conv(conv_id)
     content, ext = await read_video_upload(file)
-    name = f"upv_{uuid.uuid4().hex[:12]}{ext}"
-    (_conv_dir(conv_id) / name).write_bytes(content)
-    return {"file": name}
+    return {"file": store_deduped(_conv_dir(conv_id), "upv_", content, ext)}
+
+
+@router.delete("/conversations/{conv_id}/attachments/{filename}")
+def api_discard_attachment(conv_id: str, filename: str):
+    """Drop an attachment that was uploaded but never sent (removed from the
+    composer). Files any message or library entry still uses are kept."""
+    _require_conv(conv_id)
+    name = safe_filename(filename)
+    if not name.startswith(("up_", "upv_")):
+        return {"deleted": False}
+    db = get_db()
+    in_use = any(name in media._referenced_files(i) for m in db.get_chat_messages(conv_id) for i in m.media) or any(
+        lib.conversation_id == conv_id and name in media._referenced_files(lib.item) for lib in db.list_chat_library()
+    )
+    path = _conv_dir(conv_id) / name
+    if in_use or not path.is_file():
+        return {"deleted": False}
+    path.unlink()
+    return {"deleted": True}
 
 
 @router.get("/media/{conv_id}/{filename}")
@@ -605,6 +620,8 @@ def api_chat_library():
                     }
                 )
     for lib in db.list_chat_library():
+        if lib.item.get("source") == "upload":
+            continue
         items.append(
             {
                 **lib.item,

@@ -91,8 +91,11 @@ def _shown_branch(conv_id: str) -> list[dict]:
     ]
 
 
-def _require_openrouter():
-    """Chat needs a text-model provider: OpenRouter or Venice."""
+def _require_openrouter(mode: str | None = None):
+    """Chat needs a text-model provider: OpenRouter or Venice. Image and Video
+    modes send the prompt straight to the media model, so they don't."""
+    if mode in ("image", "video"):
+        return
     if not (openrouter.is_configured() or venice.is_configured()):
         raise HTTPException(503, "No chat provider key set — add an OpenRouter or Venice key in Settings → Keys")
 

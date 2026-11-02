@@ -24,10 +24,8 @@ import contextlib
 import hashlib
 import io
 import json
-import shutil
 import threading
 import time
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -43,7 +41,7 @@ from web.core import config
 from web.core.metadata import get_db, iso
 
 from . import characters
-from .uploads import image_media_type, is_blank_image, read_image_upload, safe_filename
+from .uploads import image_media_type, is_blank_image, read_image_upload, safe_filename, store_deduped
 from .users import require_user
 
 router = APIRouter(prefix="/api/media", dependencies=[Depends(require_user)])
@@ -389,10 +387,7 @@ def api_library_file(filename: str):
 async def api_upload_media(file: UploadFile = File(...)):
     """Upload an image straight to the library."""
     content, ext = await read_image_upload(file)
-    d = library_dir()
-    d.mkdir(parents=True, exist_ok=True)
-    name = f"up_{uuid.uuid4().hex[:12]}{ext}"
-    (d / name).write_bytes(content)
+    name = store_deduped(library_dir(), "up_", content, ext)
     _invalidate_list()
     return next(i for i in _library_items() if i["name"] == name)
 
@@ -551,10 +546,7 @@ def api_import_media(data: ImportMedia):
             raise HTTPException(404, "Conversation not found")
         if origin == "chat" and parts["conversation_id"] == conv_id:
             return {"file": path.name}  # already in this chat
-        d = _chat_dir(conv_id)
-        d.mkdir(parents=True, exist_ok=True)
-        name = f"up_{uuid.uuid4().hex[:12]}{ext}"
-        shutil.copyfile(path, d / name)
+        name = store_deduped(_chat_dir(conv_id), "up_", path.read_bytes(), ext)
         _invalidate_list()
         return {"file": name}
 

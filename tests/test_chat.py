@@ -3480,3 +3480,20 @@ class TestActiveGenerations:
         db.add_chat_message(c["id"], "assistant", media=[self.gen("mine")], status="done")
         items = client.post("/api/chat/generations/active", json={}).json()["items"]
         assert {i["media_id"] for i in items} == {"mine"}  # never the other user's
+
+
+class TestEnhancePrompt:
+    def test_rewrites_only_on_request(self, client, monkeypatch):
+        def fake_stream(model, messages, **kw):
+            assert "a cat" in messages[0]["content"]
+            yield {"choices": [{"delta": {"content": "A fluffy cat, golden hour"}}], "usage": {"cost": 0.001}}
+
+        monkeypatch.setattr(openrouter, "stream_chat", fake_stream)
+        r = client.post("/api/chat/enhance-prompt", json={"prompt": "a cat", "model": "x/y", "kind": "image"})
+        assert r.status_code == 200
+        assert r.json() == {"prompt": "A fluffy cat, golden hour", "cost": 0.001}
+
+    def test_empty_reply_is_an_error(self, client, monkeypatch):
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: iter([]))
+        r = client.post("/api/chat/enhance-prompt", json={"prompt": "a cat", "model": "x/y"})
+        assert r.status_code == 502

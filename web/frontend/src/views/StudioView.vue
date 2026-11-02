@@ -11,7 +11,6 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
 import { useComposerSettings, MODES } from '../composables/useComposerSettings'
 import { useStudio } from '../composables/useStudio'
-import { fmtCost } from '../utils/format'
 import StudioSidebar from '../components/studio/StudioSidebar.vue'
 import StudioInspector from '../components/studio/StudioInspector.vue'
 import StudioComposer from '../components/studio/StudioComposer.vue'
@@ -31,6 +30,8 @@ import StudioRequestLog from '../components/studio/StudioRequestLog.vue'
 import StudioSettings from '../components/studio/StudioSettings.vue'
 import StudioTools from '../components/studio/StudioTools.vue'
 import StudioIconSprite from '../components/studio/StudioIconSprite.vue'
+import StudioBalances from '../components/studio/StudioBalances.vue'
+import MediaPicker from '../components/media/MediaPicker.vue'
 import MediaLightbox from '../components/chat/MediaLightbox.vue'
 import CharacterEditor from '../components/characters/CharacterEditor.vue'
 import InstructionEditor from '../components/chat/InstructionEditor.vue'
@@ -97,6 +98,9 @@ const {
   pinMedia,
   stop,
   deleteExchange,
+  addFromLibrary,
+  enhancing,
+  enhanceDraft,
   useImage,
   useText,
   toggleFav,
@@ -140,9 +144,6 @@ const {
   balances,
 } = studio
 
-const fmtCredits = v => (v == null ? '—' : Math.round(v).toLocaleString())
-const fmtBal = v => (v == null ? '—' : `$${v.toFixed(2)}`)
-
 // Every thread has two views: the chat conversation and its generations
 // gallery. A thread's `kind` ('chat' | 'gallery') only picks which it opens on,
 // unless the URL pins a tab (/studio/:id/chat|gallery).
@@ -155,8 +156,23 @@ watch(
   { immediate: true },
 )
 
+// A gallery is for straight generations: only Image and Video modes (no
+// Auto/Text — the chat model is never involved), sent exactly as written.
+const inGallery = computed(() => threadView.value === 'gallery')
+const composerModes = computed(() =>
+  inGallery.value ? MODES.filter(m => m.id === 'image' || m.id === 'video') : MODES,
+)
+watch(
+  [inGallery, mode],
+  () => {
+    if (inGallery.value && mode.value !== 'image' && mode.value !== 'video') mode.value = 'image'
+  },
+  { immediate: true },
+)
+
 // The generation shown in the big-view card modal, and whether its message is
 // in the open thread (so manage actions — regenerate/delete — are available).
+const pickerOpen = ref(false)
 const galleryItem = ref(null)
 const galleryManage = ref(false)
 function openGeneration(item) {
@@ -201,6 +217,11 @@ function useSettingsFromModal(item) {
   applyGenerationSettings(item)
   galleryItem.value = null
 }
+// "Picture/Video from this": attach the image, switch mode, and close the modal.
+function useImageFromModal(e) {
+  galleryItem.value = null
+  useImage(e)
+}
 async function deleteFromModal(item) {
   const msg = messages.value.find(m => m.id === item.message_id)
   galleryItem.value = null
@@ -228,17 +249,6 @@ function openThreadFromModal(convId) {
   galleryItem.value = null
   openThreadView(convId)
 }
-
-const spendLabel = computed(() => {
-  const s = spend.value
-  if (!s) return ''
-  const usd = (s.usd || 0) + (s.inherited_usd || 0)
-  const cr = (s.credits || 0) + (s.inherited_credits || 0)
-  const parts = []
-  if (usd) parts.push(fmtCost(usd))
-  if (cr) parts.push(`${cr} cr`)
-  return parts.join(' · ')
-})
 
 const leftCollapsed = ref(false)
 const rightCollapsed = ref(false)
@@ -517,18 +527,7 @@ onMounted(() => {
             ></span>
           </button>
           <div class="spacer"></div>
-          <span v-if="spendLabel" class="spend" title="Total spent generating in this thread">
-            Spent <b>{{ spendLabel }}</b>
-          </span>
-          <span class="bal pollo" title="Pollo credits remaining — click for usage" @click="router.push('/usage')">
-            Pollo <b>{{ fmtCredits(balances.pollo) }}</b>
-          </span>
-          <span class="bal" title="OpenRouter balance remaining">
-            OpenRouter <b>{{ fmtBal(balances.openrouter) }}</b>
-          </span>
-          <span class="bal venice" title="Venice balance remaining">
-            Venice <b>{{ fmtBal(balances.venice) }}</b>
-          </span>
+          <StudioBalances :balances="balances" :spend="spend" :messages="messages" @usage="router.push('/usage')" />
           <button class="iconbtn" title="Inspector" @click="rightCollapsed = !rightCollapsed">
             <svg class="ic"><use href="#s-cog" /></svg>
           </button>
@@ -565,15 +564,18 @@ onMounted(() => {
         <StudioComposer
           v-model:draft="draft"
           v-model:mode="mode"
-          :modes="MODES"
+          :modes="composerModes"
           :hint="currentMode.hint"
           :sending="sending"
           :can-send="canSend"
           :attachments="attachments"
           :uploading="uploading"
+          :enhancing="enhancing"
           @send="onGenerate"
           @files="addFiles"
           @remove="removeAttachment"
+          @library="pickerOpen = true"
+          @enhance="enhanceDraft"
         />
       </template>
     </main>
@@ -618,6 +620,8 @@ onMounted(() => {
       @char-unhide="setDefaultHidden({ kind: 'character', id: $event }, false)"
     />
 
+    <MediaPicker :open="pickerOpen" title="Attach images" @pick="addFromLibrary" @close="pickerOpen = false" />
+
     <MediaLightbox :item="lightbox" @close="lightbox = null" @use-image="useImage" />
 
     <GenerationModal
@@ -626,7 +630,7 @@ onMounted(() => {
       :theme="dataTheme"
       @close="galleryItem = null"
       @favourite="galleryManage ? onGalleryFavourite($event) : onFavUnstar($event)"
-      @use-image="useImage"
+      @use-image="useImageFromModal"
       @use-settings="useSettingsFromModal"
       @regenerate="regenerateFromModal"
       @delete="deleteFromModal"

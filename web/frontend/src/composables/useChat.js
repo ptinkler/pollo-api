@@ -11,6 +11,7 @@ export const fetchVeniceBalance = () => apiGet('/api/chat/venice-balance')
 export const fetchConversations = (q = '') => apiGet(`/api/chat/conversations${q ? `?q=${enc(q)}` : ''}`)
 // What a chat has cost: { usd, credits, inherited_usd, inherited_credits }
 export const fetchConversationSpend = id => apiGet(`/api/chat/conversations/${enc(id)}/spend`)
+export const enhanceChatPrompt = data => apiPost('/api/chat/enhance-prompt', data)
 export const fetchConversation = id => apiGet(`/api/chat/conversations/${enc(id)}`)
 // Newest image file per conversation id, for gallery cover thumbnails: { thumbs: {id: file} }
 export const fetchConversationThumbs = ids => apiGet(`/api/chat/conversations/thumbs?ids=${enc(ids.join(','))}`)
@@ -79,6 +80,10 @@ export function sendChatGptUploadChunk(id, offset, blob) {
 export const cancelChatGptUpload = id => apiDelete(`/api/chat/import/chatgpt/uploads/${enc(id)}`)
 export const uploadChatAttachment = (convId, file) =>
   apiUpload(`/api/chat/conversations/${enc(convId)}/attachments`, file)
+
+// Drop an uploaded-but-unsent attachment's file (the server keeps any still in use)
+export const discardChatAttachment = (convId, file) =>
+  apiDelete(`/api/chat/conversations/${enc(convId)}/attachments/${enc(file)}`)
 
 export const chatMediaUrl = (convId, file) => `/api/chat/media/${enc(convId)}/${enc(file)}`
 // A chat image scaled down for showing in the chat (the full file is for the lightbox)

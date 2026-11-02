@@ -23,6 +23,7 @@ from .constants import DEFAULT_IMAGE_LIMIT
 from .deps import router
 from .generation import (
     _conversation_instructions,
+    _enhance_prompt,
     _exchange,
     _failure_fields,
     _image_context,
@@ -44,13 +45,24 @@ from .helpers import (
     _require_openrouter,
     _saved_media,
 )
-from .models import EditMessage, RetryMessage, SendMessage, TurnSettings
+from .models import EditMessage, EnhancePrompt, RetryMessage, SendMessage, TurnSettings
 from .turn import Turn
 from .workers import _ctx_thread, _with_owner_keys
 
 # Live turns' cancel flags, keyed by the assistant message id (set by the
 # cancel route, checked by the running Turn).
 _cancel_events: dict[int, threading.Event] = {}
+
+
+@router.post("/enhance-prompt")
+def api_enhance_prompt(data: EnhancePrompt):
+    """Rewrite a prompt with the chat model. Only ever called by the user's
+    Enhance button — generations themselves always use the prompt as written."""
+    try:
+        prompt, cost = _enhance_prompt(data.model, data.prompt, "video" if data.kind == "video" else "image")
+    except (openrouter.OpenRouterError, ValueError) as e:
+        raise HTTPException(502, str(e)) from e
+    return {"prompt": prompt, "cost": cost}
 
 
 @router.post("/messages/{message_id}/cancel")
@@ -63,7 +75,7 @@ def api_cancel_message(message_id: int):
 
 @router.post("/conversations/{conv_id}/messages")
 def api_send_message(conv_id: str, data: SendMessage):
-    _require_openrouter()
+    _require_openrouter(data.mode)
     conv = _require_conv(conv_id)
     content = data.content.strip()
     if not content and not data.attachments:
@@ -87,7 +99,7 @@ def api_send_message(conv_id: str, data: SendMessage):
 def api_retry(conv_id: str, data: RetryMessage):
     """Generate another version of an assistant reply, as a new branch
     beside it. The old reply and everything after it stay on their branch."""
-    _require_openrouter()
+    _require_openrouter(data.mode)
     conv = _require_conv(conv_id)
     _require_idle(conv_id)
     msg = get_db().get_chat_message(data.message_id)
@@ -105,7 +117,7 @@ def api_edit(conv_id: str, data: EditMessage):
     """Resend a user message with new text, as a new branch beside it (same
     attachments), and stream a fresh reply. The original prompt and
     everything after it stay on their branch."""
-    _require_openrouter()
+    _require_openrouter(data.mode)
     conv = _require_conv(conv_id)
     _require_idle(conv_id)
     db = get_db()
@@ -210,7 +222,6 @@ class RegenerateMedia(BaseModel):
 def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia):
     """Retry a failed image/video in place, optionally on a different model.
     Runs in the background; the UI polls the message like a rendering video."""
-    _require_openrouter()
     db = get_db()
     msg = db.get_chat_message(message_id)
     if not msg:
