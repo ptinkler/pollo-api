@@ -50,15 +50,16 @@ def db(tmp_path):
 
 @pytest.fixture()
 def chat(monkeypatch, db, provider_keys):
+    import sys
+
+    import web.api  # noqa: F401 — load the whole app graph so every web.* module is importable
     import web.chat as chat_mod
 
-    monkeypatch.setattr(chat_mod, "get_db", lambda: db)
-    import web.characters as characters_mod
-
-    monkeypatch.setattr(characters_mod, "get_db", lambda: db)
-    import web.media as media_mod
-
-    monkeypatch.setattr(media_mod, "get_db", lambda: db)
+    # Patch get_db wherever it was imported (chat is a package now: routes,
+    # helpers and catalogue each resolve their own get_db).
+    for name, mod in list(sys.modules.items()):
+        if name.startswith("web.") and getattr(mod, "get_db", None) is not None:
+            monkeypatch.setattr(mod, "get_db", lambda: db)
     provider_keys["openrouter"] = "sk-test"
     provider_keys["venice"] = None  # tests never reach the real Venice
     monkeypatch.setattr(chat_mod, "VIDEO_POLL_INTERVAL", 0)
@@ -174,7 +175,7 @@ class TestMedia:
         from fastapi import HTTPException
 
         with pytest.raises(HTTPException) as e:
-            chat.api_chat_media(conv_id, name)
+            chat.routes.api_chat_media(conv_id, name)
         assert e.value.status_code == 400
 
     def test_an_image_already_in_the_chat_can_be_attached(self, client, conv, chat, db, monkeypatch):
@@ -2574,9 +2575,9 @@ class TestPolloImageModels:
         assert videos["pollo/klingv3v1"]["durations"] == list(range(3, 16))
 
     def test_image_only_kling_without_an_image_fails_on_the_card(self, client, conv, chat, db, monkeypatch, pollo):
-        import web.providers.pollo_img2vid as registry
+        import web.providers.pollo_engine as registry
 
-        monkeypatch.setattr(chat.pollo, "get_video_generator", registry.get_video_generator)  # the real one
+        monkeypatch.setattr(chat.pollo, "get_video_generator", registry.video_generator)  # the real one
         msg = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages",
@@ -3141,7 +3142,7 @@ class TestConversationList:
         assert titles() == ["C", "B", "A"]
 
     def test_says_when_older_chats_are_left_out(self, client, chat, monkeypatch):
-        monkeypatch.setattr(chat, "CONVERSATION_LIST_LIMIT", 2)
+        monkeypatch.setattr(chat.routes, "CONVERSATION_LIST_LIMIT", 2)
         for t in "ABC":
             client.post("/api/chat/conversations", json={"title": t})
         data = client.get("/api/chat/conversations").json()

@@ -39,8 +39,15 @@ MAX_TEXT = 4000  # a non-JSON response body is kept up to this many characters
 
 
 def log_path() -> Path:
-    # Read config at call time so tests can redirect ROOT_DIR
-    return config.ROOT_DIR / "logs" / "requests.jsonl"
+    # Read config at call time so tests can redirect ROOT_DIR. Per-tenant
+    # (<data>/logs/<user_id>/) so one user's provider calls never surface in
+    # another's Request log; calls made outside a request (startup) fall back
+    # to the shared base file.
+    from web.core.metadata import current_tenant
+
+    base = config.ROOT_DIR / "logs"
+    uid = current_tenant()
+    return base / uid / "requests.jsonl" if uid else base / "requests.jsonl"
 
 
 def redact(value: Any) -> Any:

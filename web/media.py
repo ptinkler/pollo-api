@@ -107,6 +107,15 @@ def resolve(media_id: str) -> tuple[str, Path, dict[str, str]]:
         path, parts = library_dir() / safe_filename(rest), {}
     elif origin == "chat":
         conv_id, _, file = rest.partition(":")
+        # Multi-tenant guard: chat files live under a global <data>/chat/<id>/,
+        # so the id alone must not reach another user's files. Allow it only
+        # when the chat is the current user's (get_conversation is tenant-
+        # scoped) or no conversation row exists anywhere (a truly orphaned
+        # folder — e.g. a deleted chat's leftovers, which anyone may clean up).
+        # A row owned by a DIFFERENT user reads as not-mine here → 404.
+        db = get_db()
+        if not db.get_conversation(conv_id) and db.conversation_exists_any_tenant(conv_id):
+            raise HTTPException(404, "Media not found")
         path, parts = (
             _chat_dir(safe_filename(conv_id)) / safe_filename(file),
             {"conversation_id": conv_id, "file": file},

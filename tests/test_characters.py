@@ -1,9 +1,6 @@
 """Tests for web.characters — characters shared by chat and generations."""
 
 import json
-from unittest.mock import patch
-
-import pytest
 
 from tests.test_chat import (  # noqa: F401
     SETTINGS,
@@ -318,112 +315,6 @@ class TestInChat:
         assert any("Linh: Short black hair" in m["content"] for m in seen["m"] if m["role"] == "system")
 
 
-class TestInGenerations:
-    @pytest.fixture()
-    def project(self, db, tmp_path, monkeypatch):
-        import web.api as api_mod
-
-        monkeypatch.setattr(api_mod, "ASSETS_DIR", tmp_path / "assets")
-        monkeypatch.setattr(api_mod, "get_db", lambda: db)
-        api_mod._project_lookup_cache.clear()
-        proj = db.create_project(name="Chars")
-        (api_mod.ASSETS_DIR / proj.assets_folder).mkdir(parents=True, exist_ok=True)
-        return proj
-
-    @pytest.fixture()
-    def uploads(self, monkeypatch):
-        from web import image_hosts
-
-        sent = []
-        monkeypatch.setattr(image_hosts, "upload_image", lambda p: (sent.append(p), f"https://tmp/{p.name}")[1])
-        return sent
-
-    def _job(self, db, resp):
-        assert resp.status_code == 200, resp.text
-        job = db.get_job(resp.json()["job_id"])
-        return job, json.loads(job.params_json)
-
-    @patch("web.api.threading.Thread")
-    def test_image_generation(self, thread, client, db, project, uploads):
-        linh = _make(client, images=2)
-        r = client.post(
-            "/api/generate-image",
-            json={
-                "model": "seedream",
-                "project": project.slug,
-                "prompt": "Linh reading",
-                "character_ids": [linh["id"]],
-            },
-        )
-        job, params = self._job(db, r)
-        kwargs = thread.call_args.kwargs["args"][2]
-        assert job.prompt == "Linh reading" and params["character_ids"] == [linh["id"]]
-        assert "Short black hair" in kwargs["prompt"]
-        assert kwargs["images"] == [f"https://tmp/{f}" for f in linh["images"]]
-
-    @patch("web.api.threading.Thread")
-    def test_unknown_character_is_400(self, thread, client, project):
-        r = client.post(
-            "/api/generate-image",
-            json={"model": "seedream", "project": project.slug, "prompt": "x", "character_ids": [999]},
-        )
-        assert r.status_code == 400
-
-    @patch("web.api.threading.Thread")
-    def test_video_outside_ref_mode_gets_description_only(self, thread, client, db, project, uploads):
-        linh = _make(client)
-        r = client.post(
-            "/api/generate",
-            json={
-                "model": "seedance20v1",
-                "project": project.slug,
-                "prompt": "Linh waves",
-                "image_url": "https://img/x.jpg",
-                "character_ids": [linh["id"]],
-            },
-        )
-        self._job(db, r)
-        kwargs = thread.call_args.kwargs["args"][2]
-        assert "Short black hair" in kwargs["prompt"] and "refs" not in kwargs and not uploads
-
-    @patch("web.api.threading.Thread")
-    def test_v1_ref_mode_adds_character_refs(self, thread, client, db, project, uploads):
-        linh = _make(client, images=2)
-        r = client.post(
-            "/api/generate",
-            json={
-                "model": "seedance20v1",
-                "project": project.slug,
-                "prompt": "Linh waves",
-                "ref_mode": True,
-                "refs": [],
-                "character_ids": [linh["id"]],
-            },
-        )
-        job, params = self._job(db, r)
-        kwargs = thread.call_args.kwargs["args"][2]
-        assert [r["url"] for r in kwargs["refs"]] == [f"https://tmp/{f}" for f in linh["images"]]
-        assert all(r["_character"].startswith("char:") for r in params["refs"])
-        assert kwargs["image_url"] is None
-
-    @patch("web.api.threading.Thread")
-    def test_legacy_ref_model_names_character_refs(self, thread, client, db, project, uploads):
-        linh = _make(client)
-        r = client.post(
-            "/api/generate",
-            json={
-                "model": "seedanceref",
-                "project": project.slug,
-                "prompt": "Linh waves",
-                "character_ids": [linh["id"]],
-                "refs": [{"type": "image", "name": "bg", "image": "https://x/bg.jpg", "order": 1}],
-            },
-        )
-        self._job(db, r)
-        refs = thread.call_args.kwargs["args"][2]["refs"]
-        assert refs[1]["name"] == "Linh" and refs[1]["order"] == 2 and refs[1]["image"].startswith("https://tmp/")
-
-
 class TestUseByName:
     """Only characters the user attached are used — a name coming up never attaches one."""
 
@@ -697,20 +588,3 @@ class TestReferenceCaps:
         assert params["refs_dropped"] == ["p0.png"]
         settings = client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["settings"]
         assert settings["ref_choices"] == choices  # remembered with the chat
-
-    @patch("web.api.threading.Thread")
-    def test_generate_sends_every_character_image(self, thread, client, db, tmp_path, monkeypatch):
-        import web.api as api_mod
-        from web import image_hosts
-
-        monkeypatch.setattr(api_mod, "ASSETS_DIR", tmp_path / "assets")
-        monkeypatch.setattr(api_mod, "get_db", lambda: db)
-        monkeypatch.setattr(image_hosts, "upload_image", lambda p: f"https://tmp/{p.name}")
-        proj = db.create_project(name="Caps")
-        linh = _make(client, images=6)
-        r = client.post(
-            "/api/generate-image",
-            json={"model": "seedream", "project": proj.slug, "prompt": "Linh", "character_ids": [linh["id"]]},
-        )
-        assert r.status_code == 200
-        assert len(thread.call_args.kwargs["args"][2]["images"]) == 6

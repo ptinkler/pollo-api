@@ -7,7 +7,7 @@ special-casing one by name. `provider_for()` is the first step of that: it maps
 a model id to the module that owns it (OpenRouter is the fallback).
 """
 
-from . import openrouter, pollo, pollo_estimate, pollo_models, venice  # noqa: F401
+from . import openrouter, pollo, pollo_models, venice  # noqa: F401
 
 # Dispatch order for the model catalogue (Pollo first, OpenRouter last). Each
 # exposes the uniform surface: NAME, is_configured(), list_models(kind, refresh).

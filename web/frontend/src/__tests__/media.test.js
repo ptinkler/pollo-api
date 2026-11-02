@@ -15,17 +15,6 @@ const ITEMS = [
     created_at: '2026-10-07',
   },
   {
-    id: 'proj:p:v.mp4',
-    kind: 'video',
-    source: 'generated',
-    origin: 'project',
-    name: 'v.mp4',
-    url: '/v',
-    project: 'p',
-    project_name: 'Trailer',
-    prompt: 'a fox runs',
-  },
-  {
     id: 'chat:c:g.png',
     kind: 'image',
     source: 'generated',
@@ -40,19 +29,19 @@ const ITEMS = [
 describe('useMediaFilters', () => {
   it('filters by kind, source, origin and search', () => {
     const { filters, filtered } = useMediaFilters(ref(ITEMS))
-    expect(filtered.value).toHaveLength(3)
+    expect(filtered.value).toHaveLength(2)
     filters.kind = 'image'
     expect(filtered.value.map(i => i.id)).toEqual(['lib:a.png', 'chat:c:g.png'])
     filters.source = 'generated'
     expect(filtered.value.map(i => i.id)).toEqual(['chat:c:g.png'])
     filters.kind = 'all'
     filters.source = 'all'
-    filters.q = 'trailer' // matches where it's from
-    expect(filtered.value.map(i => i.id)).toEqual(['proj:p:v.mp4'])
+    filters.q = 'fox chat' // matches where it's from
+    expect(filtered.value.map(i => i.id)).toEqual(['chat:c:g.png'])
   })
 
   it('names where an item is from', () => {
-    expect(ITEMS.map(mediaOrigin)).toEqual(['Library', 'Trailer', 'Fox chat'])
+    expect(ITEMS.map(mediaOrigin)).toEqual(['Library', 'Fox chat'])
     expect(mediaOrigin({ origin: 'orphan', conversation_title: 'Old chat' })).toBe('Old chat (orphaned)')
     expect(mediaOrigin({ origin: 'orphan' })).toBe('Orphaned')
   })

@@ -80,6 +80,32 @@ class TestListing:
     def test_bad_ids(self, client, media_id):
         assert client.delete(f"/api/media/{media_id}").status_code in (400, 404)
 
+    def test_another_users_chat_media_is_not_reachable(self, client, db):
+        """Chat files live under a global folder keyed only by the (random)
+        conversation id. Knowing another user's id must not let you view,
+        delete, or copy their files — only the owning user, or anyone for a
+        truly orphaned folder with no conversation row (see test_delete)."""
+        import web.core.config as config
+        from web.core import metadata
+
+        token = metadata.set_tenant("other-user")  # a conversation someone else owns
+        try:
+            other = db.create_conversation(title="Not yours")
+        finally:
+            metadata.reset_tenant(token)
+        d = config.ROOT_DIR / "chat" / other.id
+        d.mkdir(parents=True)
+        secret = d / "img_secret.png"
+        secret.write_bytes(_png("blue"))
+        mid = f"chat:{other.id}:img_secret.png"
+
+        assert client.get(f"/api/media/thumb/{mid}").status_code == 404  # can't view
+        assert client.delete(f"/api/media/{mid}").status_code == 404  # can't delete
+        assert secret.is_file()  # left untouched
+        mine = db.create_conversation(title="Mine")
+        copy = client.post("/api/media/import", json={"media_id": mid, "target": "chat", "conversation_id": mine.id})
+        assert copy.status_code == 404  # can't copy it out either
+
     def test_paginates_with_total(self, client):
         for n in range(5):
             client.post("/api/media/upload", files={"file": (f"a{n}.png", _png(), "image/png")})

@@ -18,7 +18,6 @@ const SOURCES = [
 const ORIGINS = [
   ['all', 'Everywhere'],
   ['library', 'Library'],
-  ['project', 'Projects'],
   ['chat', 'Chats'],
   ['orphan', 'Orphaned'],
 ]

@@ -28,14 +28,16 @@ from web.core.get_task import get_task_status
 
 from .. import image_hosts, keyctx, request_log
 from .openrouter import OpenRouterError
-from .pollo_engine import ERROR_STATUSES, SUCCESS_STATUSES, closest_aspect_ratio
-from .pollo_img2vid import (
+from .pollo_engine import (
+    ERROR_STATUSES,
     GENERATORS_V1,
     IMAGE_GENERATORS,
     IMAGE_GENERATORS_V1,
-    get_image_generator,
-    get_video_generator,
+    SUCCESS_STATUSES,
+    closest_aspect_ratio,
 )
+from .pollo_engine import image_generator as get_image_generator
+from .pollo_engine import video_generator as get_video_generator
 from .pollo_models import MODEL_INFO
 
 
