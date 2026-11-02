@@ -54,7 +54,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
         <div class="gm-side">
           <div class="gm-scroll">
-            <div class="gm-prompt">{{ item.prompt || 'No prompt' }}</div>
+            <div class="gm-prompt">{{ item.original_prompt || item.prompt || 'No prompt' }}</div>
+            <details v-if="item.original_prompt && item.prompt && item.prompt !== item.original_prompt" class="gm-sent">
+              <summary>Prompt sent to the model</summary>
+              <div class="gm-prompt">{{ item.prompt }}</div>
+            </details>
             <dl class="gm-meta">
               <template v-if="item.model">
                 <dt>Model</dt>
@@ -116,6 +120,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 </template>
 
 <style scoped>
+.gm-sent {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--smuted, inherit);
+}
+.gm-sent summary {
+  cursor: pointer;
+}
 .gm-back {
   position: fixed;
   inset: 0;

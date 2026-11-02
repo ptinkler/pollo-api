@@ -1,5 +1,5 @@
 import { computed, reactive, ref } from 'vue'
-import { chatMediaUrl, uploadChatAttachment } from './useChat'
+import { chatMediaUrl, discardChatAttachment, uploadChatAttachment } from './useChat'
 import { importMedia } from './useMedia'
 
 export const MAX_ATTACHMENTS = 8
@@ -22,6 +22,8 @@ export function useChatAttachments({ convId, ensureConversation, showToast }) {
   function remove(att) {
     if (att.preview.startsWith('blob:')) URL.revokeObjectURL(att.preview)
     attachments.value = attachments.value.filter(a => a !== att)
+    // Removed before sending: don't leave the upload behind (no-op if still in use)
+    if (att.file && convId.value) discardChatAttachment(convId.value, att.file).catch(() => {})
   }
 
   function clear() {

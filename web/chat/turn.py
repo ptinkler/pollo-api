@@ -628,7 +628,8 @@ class Turn:
             return None
         job: dict[str, Any] = {"prompt": first.content, "title": None, "cost": 0.0, "thread": None}
         model = os.environ.get("CHAT_TITLE_MODEL") or self.s.text_model
-        if model and (venice.is_configured() if venice.is_venice(model) else openrouter.is_configured()):
+        direct = self.s.mode in ("image", "video")  # no text model involved: the prompt titles the chat
+        if model and not direct and (venice.is_configured() if venice.is_venice(model) else openrouter.is_configured()):
 
             def work():
                 # No title from the model: the prompt stands in

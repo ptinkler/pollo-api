@@ -16,6 +16,7 @@ import {
   retryChatMessage,
   editChatMessage,
   regenerateChatMedia,
+  enhanceChatPrompt,
   pinChatMedia,
   favouriteChatMedia,
   fetchChatLibrary,
@@ -60,7 +61,15 @@ export function useStudio({ models, settings, showToast }) {
 
   // Image attachments (image-edit refs / video first frame) — reused chat layer
   const attach = useChatAttachments({ convId: active, ensureConversation: ensureThread, showToast })
-  const { attachments, addFiles, addChatImage, remove: removeAttachment, clear: clearAttachments, uploading } = attach
+  const {
+    attachments,
+    addFiles,
+    addFromLibrary,
+    addChatImage,
+    remove: removeAttachment,
+    clear: clearAttachments,
+    uploading,
+  } = attach
 
   // Defaults (global + space) a thread inherits, less any hidden here, plus pauses
   const defaults = useChatDefaults()
@@ -415,11 +424,14 @@ export function useStudio({ models, settings, showToast }) {
     const extra = removes.length ? ` This also removes ${removes.join(' and ')}${after ? where : ''}.` : ''
     return `Delete this prompt and its reply?${extra} Images and videos stay in Media.`
   }
+  // Deleting works on the prompt; given a reply (the gallery hands us the
+  // message holding the media) it deletes the prompt that produced it.
   async function deleteExchange(msg) {
     if (sending.value) return
+    const promptId = msg.role === 'assistant' && msg.parent_id ? msg.parent_id : msg.id
     try {
-      if (!confirm(deleteQuestion(await fetchDeleteInfo(msg.id)))) return
-      showChat(await deleteChatExchange(msg.id))
+      if (!confirm(deleteQuestion(await fetchDeleteInfo(promptId)))) return
+      showChat(await deleteChatExchange(promptId))
     } catch (e) {
       showToast(e.message, 'error')
     }
@@ -452,15 +464,48 @@ export function useStudio({ models, settings, showToast }) {
   // user can tweak and press Generate. Fills only — never fires (unlike retry).
   function applyGenerationSettings(item) {
     const kind = item.kind === 'video' ? 'video' : 'image'
-    if (item.prompt) draft.value = item.prompt
-    if (item.model) selected[kind] = item.model
+    const text = item.original_prompt || item.prompt
+    if (text) draft.value = text
+    const model = item.model || item.params?.model
+    if (model) selected[kind] = model
     mode.value = kind
-    const p = item.params || {}
+    applyOptions(kind, item.params || {})
+    restoreRefs(item)
+  }
+  function applyOptions(kind, p) {
     const opts = kind === 'video' ? settings.videoOpts : settings.imageOpts
-    if (p.aspect_ratio) opts.aspect_ratio = p.aspect_ratio
-    if (p.resolution) opts.resolution = p.resolution
-    if (kind === 'video' && p.duration != null) settings.videoOpts.duration = p.duration
-    if (kind === 'video' && p.generate_audio != null) settings.videoOpts.generate_audio = p.generate_audio
+    for (const k of ['aspect_ratio', 'resolution']) if (p[k]) opts[k] = p[k]
+    if (kind !== 'video') return
+    for (const k of ['duration', 'generate_audio']) if (p[k] != null) opts[k] = p[k]
+  }
+  // Put a generation's reference images back as attachments (character refs
+  // come back with the characters, not as files)
+  function restoreRefs(item) {
+    clearAttachments()
+    const p = item.params || {}
+    const files = [...(p.refs || []), p.first_frame, p.last_frame].filter(f => f && !f.startsWith('char:'))
+    for (const f of new Set(files)) addChatImage(f)
+  }
+  // Enhance button: rewrite the draft with the text model. Only on request —
+  // sending never alters the prompt.
+  const enhancing = ref(false)
+  async function enhanceDraft() {
+    const prompt = draft.value.trim()
+    if (!prompt || enhancing.value) return
+    if (!selected.text) return showToast('Pick a text model to enhance prompts', 'error')
+    enhancing.value = true
+    try {
+      const r = await enhanceChatPrompt({
+        prompt,
+        model: selected.text,
+        kind: mode.value === 'video' ? 'video' : 'image',
+      })
+      draft.value = r.prompt
+    } catch (e) {
+      showToast(e.message, 'error')
+    } finally {
+      enhancing.value = false
+    }
   }
   async function regenerateMedia(msg, { mediaId, model }) {
     if (!model) {
@@ -612,6 +657,9 @@ export function useStudio({ models, settings, showToast }) {
     attachments,
     uploading,
     addFiles,
+    addFromLibrary,
+    enhancing,
+    enhanceDraft,
     removeAttachment,
     lastAssistantId,
     canSend,

@@ -108,7 +108,7 @@ class TestListing:
 
     def test_paginates_with_total(self, client):
         for n in range(5):
-            client.post("/api/media/upload", files={"file": (f"a{n}.png", _png(), "image/png")})
+            client.post("/api/media/upload", files={"file": (f"a{n}.png", _png((n, 0, 0)), "image/png")})
         full = client.get("/api/media").json()
         assert full["total"] == 5 and len(full["items"]) == 5  # no limit → everything
         page = client.get("/api/media?offset=0&limit=2").json()
@@ -383,7 +383,9 @@ class TestThumbnails:
         import web.media as media_mod
 
         ids = [
-            client.post("/api/media/upload", files={"file": (f"{n}.png", _png(), "image/png")}).json()["thumb_url"]
+            client.post("/api/media/upload", files={"file": (f"{n}.png", _png((n, 0, 0)), "image/png")}).json()[
+                "thumb_url"
+            ]
             for n in range(8)
         ]
         real, lock, state = media_mod.make_thumb, threading.Lock(), {"now": 0, "peak": 0}
@@ -403,3 +405,14 @@ class TestThumbnails:
         with ThreadPoolExecutor(8) as pool:
             codes = list(pool.map(lambda u: client.get(u).status_code, ids))
         assert codes == [200] * 8 and state["peak"] <= media_mod.THUMB_WORKERS
+
+
+class TestUploadDedupe:
+    def test_same_image_is_stored_once_and_unsent_one_can_be_discarded(self, client, conv, db):
+        c = db.create_conversation(title="Dup")
+        url = f"/api/chat/conversations/{c.id}/attachments"
+        a = client.post(url, files={"file": ("a.png", _png(), "image/png")}).json()["file"]
+        b = client.post(url, files={"file": ("b.png", _png(), "image/png")}).json()["file"]
+        assert a == b  # identical bytes → one file
+        assert client.delete(f"{url}/{a}").json() == {"deleted": True}
+        assert client.delete(f"{url}/{a}").json() == {"deleted": False}  # already gone

@@ -719,7 +719,8 @@ class TestVideoFamiliesInChat:
         client.post(f"/api/chat/messages/{msg.id}/media/p/pin", json={"pinned": True})
         ups = [
             client.post(
-                f"/api/chat/conversations/{conv['id']}/attachments", files={"file": (n, _png_bytes(), "image/png")}
+                f"/api/chat/conversations/{conv['id']}/attachments",
+                files={"file": (n, _png_bytes(color=n[0] == "a" and "red" or "blue"), "image/png")},
             ).json()["file"]
             for n in ("a.png", "b.png")
         ]
@@ -746,7 +747,8 @@ class TestVideoFamiliesInChat:
         self._queue(fake)
         ups = [
             client.post(
-                f"/api/chat/conversations/{conv['id']}/attachments", files={"file": (n, _png_bytes(), "image/png")}
+                f"/api/chat/conversations/{conv['id']}/attachments",
+                files={"file": (n, _png_bytes(color=n[0] == "a" and "red" or "blue"), "image/png")},
             ).json()["file"]
             for n in ("s.png", "e.png")
         ]

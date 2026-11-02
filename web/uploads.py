@@ -3,6 +3,7 @@ Image upload and filename helpers shared by the Generate page (web/api.py)
 and chat (web/chat.py).
 """
 
+import hashlib
 import io
 import mimetypes
 from pathlib import Path
@@ -75,3 +76,15 @@ async def read_video_upload(file: UploadFile) -> tuple[bytes, str]:
     if b"ftyp" not in content[:64]:
         raise HTTPException(400, "File is not a valid MP4 video")
     return content, ext
+
+
+def store_deduped(directory: Path, prefix: str, content: bytes, ext: str) -> str:
+    """Save `content` as `<prefix><content hash><ext>` in `directory` and return
+    the name. The same bytes always get the same name, so re-uploading or
+    re-importing an image reuses the file instead of storing another copy."""
+    name = f"{prefix}{hashlib.sha256(content).hexdigest()[:16]}{ext}"
+    path = directory / name
+    if not path.is_file():
+        directory.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    return name

@@ -12,10 +12,10 @@ const props = defineProps({
   canSend: { type: Boolean, default: false },
   attachments: { type: Array, default: () => [] },
   uploading: { type: Boolean, default: false },
+  enhancing: { type: Boolean, default: false },
 })
-const emit = defineEmits(['update:draft', 'update:mode', 'send', 'files', 'remove'])
+const emit = defineEmits(['update:draft', 'update:mode', 'send', 'files', 'remove', 'library', 'enhance'])
 
-const fileInput = ref(null)
 const drag = ref(false)
 const ta = ref(null)
 
@@ -45,12 +45,12 @@ function onKey(e) {
     emit('send')
   }
 }
-function pick() {
-  fileInput.value?.click()
-}
-function onPick(e) {
-  emit('files', e.target.files)
-  e.target.value = ''
+// Pasted screenshots / copied images become attachments (text pastes pass through)
+function onPaste(e) {
+  const imgs = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith('image/'))
+  if (!imgs.length) return
+  e.preventDefault()
+  emit('files', imgs)
 }
 function onDrop(e) {
   drag.value = false
@@ -88,17 +88,25 @@ function onDrop(e) {
         :disabled="sending"
         @input="onInput"
         @keydown="onKey"
+        @paste="onPaste"
       ></textarea>
 
       <div class="cbar">
-        <button class="clip" title="Attach image" @click="pick">
+        <button class="clip" title="Attach images — pick from Media or upload" @click="emit('library')">
           <svg class="ic"><use href="#s-clip" /></svg>
+        </button>
+        <button
+          v-if="mode === 'image' || mode === 'video'"
+          class="clip enh"
+          :disabled="!draft.trim() || enhancing"
+          title="Enhance the prompt with the text model (optional — sending uses the prompt exactly as written)"
+          @click="emit('enhance')"
+        >
+          {{ enhancing ? '…' : '✨' }}
         </button>
         <span class="note">{{ uploading ? 'Uploading…' : hint }}</span>
         <button class="sendbtn" :disabled="!canSend" @click="emit('send')">{{ sending ? 'Sending…' : 'Send' }}</button>
       </div>
-
-      <input ref="fileInput" type="file" accept="image/*" multiple hidden @change="onPick" />
     </div>
   </div>
 </template>

@@ -42,6 +42,33 @@ def _generate_title(model: str, prompt: str) -> tuple[str | None, float]:
     return _clean_title(text), cost
 
 
+ENHANCE_SECONDS = 45
+ENHANCE_PROMPT = (
+    "Rewrite the user's {kind} prompt into a richer, more specific one for an {kind} generation model: "
+    "keep their intent, subjects and any style they named, and add concrete detail about composition, "
+    "lighting, setting and mood. Reply with ONLY the improved prompt - no preamble, quotes or notes.\n\n"
+    "Prompt: {prompt}"
+)
+
+
+def _enhance_prompt(model: str, prompt: str, kind: str) -> tuple[str, float]:
+    """(the prompt rewritten by the chat model, its cost in USD). Raises
+    ValueError when the model returns nothing usable."""
+    stream_chat = venice.stream_chat if venice.is_venice(model) else openrouter.stream_chat
+    messages = [{"role": "user", "content": ENHANCE_PROMPT.format(kind=kind, prompt=prompt[:4000])}]
+    text, cost = "", 0.0
+    for chunk in stream_chat(model, messages, max_seconds=ENHANCE_SECONDS):
+        usage = chunk.get("usage")
+        if usage and usage.get("cost"):
+            cost += float(usage["cost"])
+        for choice in chunk.get("choices") or []:
+            text += (choice.get("delta") or {}).get("content") or ""
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip().strip("\"'`").strip()
+    if not text:
+        raise ValueError("The model returned no prompt")
+    return text, cost
+
+
 def _clean_title(text: str) -> str | None:
     """The model's reply as a title: its first line, without a "Title:" label,
     quotes, markdown or a full stop. None if nothing usable is left."""

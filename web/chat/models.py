@@ -107,3 +107,9 @@ class SwitchBranch(BaseModel):
 
 class ForkConversation(BaseModel):
     message_id: int  # a prompt (the new chat ends with it and its reply) or a reply
+
+
+class EnhancePrompt(BaseModel):
+    prompt: str = Field(min_length=1, max_length=8000)
+    model: str  # the chat model that rewrites it
+    kind: str = "image"  # "image" or "video"
