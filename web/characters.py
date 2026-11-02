@@ -1,11 +1,10 @@
 """
-Characters — reusable people/creatures/mascots shared by chat and the
-Generate page: a name, a description and a few reference images.
+Characters — reusable people/creatures/mascots: a name, a description and a
+few reference images.
 
-Attached to a chat (ChatConversation.character_ids) or a generation
-(`character_ids` on /api/generate and /api/generate-image), a character's
-description is added to the prompt and its images go to the model as
-reference images, so it looks the same from one image to the next.
+Attached to a chat (ChatConversation.character_ids), a character's description
+is added to the prompt and its images go to the model as reference images, so
+it looks the same from one image to the next.
 
 A character made inside a chat is *ad hoc* (Character.conversation_id set):
 it only shows in that chat and is deleted with it, until it's promoted to a
@@ -24,8 +23,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from img2vid.common import config
-from img2vid.common.metadata import get_db
+from web.core import config
+from web.core.metadata import get_db
 
 from .uploads import image_media_type, read_image_upload, safe_filename
 from .users import require_user
@@ -34,9 +33,6 @@ router = APIRouter(prefix="/api/characters", dependencies=[Depends(require_user)
 
 MAX_IMAGES = 6  # stored per character
 REF_PREFIX = "char:"
-
-
-# ── Storage ─────────────────────────────────────────────────────────
 
 
 def char_dir(character_id: int) -> Path:
@@ -56,9 +52,6 @@ def ref_path(ref: str) -> Path | None:
     if not cid.isdigit() or not file or Path(file).name != file or file.startswith("."):
         return None
     return char_dir(int(cid)) / file
-
-
-# ── Helpers for chat and generations ───────────────────────────────
 
 
 def load(ids: list[int] | None, db=None) -> list:
@@ -212,9 +205,6 @@ def _delete(character_id: int, db) -> None:
             db.update_conversation(conv.id, character_ids=[i for i in conv.character_ids if i != character_id])
 
 
-# ── Request models ──────────────────────────────────────────────────
-
-
 class CharacterIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(default="", max_length=4000)
@@ -230,14 +220,6 @@ class CharacterUpdate(BaseModel):
 class CopyFromChat(BaseModel):
     conversation_id: str
     file: str
-
-
-class CopyFromGeneration(BaseModel):
-    project: str
-    filename: str
-
-
-# ── Routes ──────────────────────────────────────────────────────────
 
 
 def _require_char(character_id: int):
@@ -346,18 +328,6 @@ def api_character_image_from_chat(character_id: int, data: CopyFromChat):
     return add_image_from_file(
         char, config.ROOT_DIR / "chat" / safe_filename(data.conversation_id) / safe_filename(data.file)
     )
-
-
-@router.post("/{character_id}/images/from-generation")
-def api_character_image_from_generation(character_id: int, data: CopyFromGeneration):
-    """Copy a generated image from a project into the character."""
-    from . import api  # web.api imports this module's router, so import it lazily
-
-    char = _require_char(character_id)
-    proj = get_db().get_project_by_slug(data.project)
-    if not proj:
-        raise HTTPException(404, "Project not found")
-    return add_image_from_file(char, api.ASSETS_DIR / proj.assets_folder / safe_filename(data.filename))
 
 
 @router.get("/{character_id}/images/{filename}")

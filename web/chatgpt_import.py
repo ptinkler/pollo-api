@@ -42,8 +42,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
-from img2vid.common import config
-from img2vid.common.metadata import get_db
+from web.core import config
+from web.core.metadata import get_db
 
 from . import media
 from .chat import CHAT_PREVIEW_SIZE, IMAGE_EXTS, ConversationCreate, _conv_dir, api_create_conversation
@@ -69,10 +69,13 @@ _TITLE_ATTR = re.compile(r'title="([^"]*)"')
 
 
 def _import_dir() -> Path:
-    return config.ROOT_DIR / "imports"
+    # Per-tenant (<data>/imports/<uid>/) so one user can't import another user's
+    # uploaded export by guessing its filename.
+    from web.core.metadata import current_tenant
 
-
-# ── Reading the export ──────────────────────────────────────────────
+    base = config.ROOT_DIR / "imports"
+    uid = current_tenant()
+    return base / uid if uid else base
 
 
 @dataclass
@@ -221,9 +224,6 @@ def _ext(raw: bytes, mime: str | None) -> str:
     if raw[4:8] == b"ftyp":
         return ".mp4"
     return ".png"
-
-
-# ── Importing ───────────────────────────────────────────────────────
 
 
 class _ChatMedia:
@@ -426,10 +426,20 @@ def _warm_thumbnails(paths: list[Path]) -> None:
             media.make_thumb(path, size)
 
 
-# ── Routes ──────────────────────────────────────────────────────────
-
-_job: dict[str, Any] = {"state": "idle"}
+# Per-tenant import progress, keyed by user id (so one user's import status and
+# single-flight don't leak into or block another's).
+_jobs: dict[str, dict[str, Any]] = {}
 _job_lock = threading.Lock()
+
+
+def _job_key() -> str:
+    from web.core.metadata import current_tenant
+
+    return current_tenant() or ""
+
+
+def _current_job() -> dict[str, Any]:
+    return _jobs.get(_job_key(), {"state": "idle"})
 
 
 class StartImport(BaseModel):
@@ -438,7 +448,7 @@ class StartImport(BaseModel):
 
 @router.get("/chatgpt")
 def api_import_status():
-    """The exports in the imports folder (newest first) and the last import's progress."""
+    """The exports in the imports folder (newest first) and this user's last import's progress."""
     folder = _import_dir()
     files = sorted(folder.glob("*.zip"), key=lambda p: p.stat().st_mtime, reverse=True) if folder.is_dir() else []
     return {
@@ -451,7 +461,7 @@ def api_import_status():
             }
             for p in files
         ],
-        "job": dict(_job),
+        "job": dict(_current_job()),
     }
 
 
@@ -461,26 +471,26 @@ def api_start_import(data: StartImport):
     path = _import_dir() / safe_filename(data.file)
     if not path.is_file() or not zipfile.is_zipfile(path):
         raise HTTPException(404, "That export isn't in the imports folder")
+    key = _job_key()
     with _job_lock:
-        if _job.get("state") == "running":
+        if _jobs.get(key, {}).get("state") == "running":
             raise HTTPException(409, "An import is already running")
-        _job.clear()
-        _job.update(state="running", file=path.name, started_at=datetime.now().isoformat())
+        job = {"state": "running", "file": path.name, "started_at": datetime.now().isoformat()}
+        _jobs[key] = job
     # Copy the request context so imported rows belong to the signed-in user
     ctx = contextvars.copy_context()
-    threading.Thread(target=lambda: ctx.run(_run_job, path), daemon=True).start()
-    return dict(_job)
+    threading.Thread(target=lambda: ctx.run(_run_job, path, job), daemon=True).start()
+    return dict(job)
 
 
-def _run_job(path: Path) -> None:
+def _run_job(path: Path, job: dict[str, Any]) -> None:
     try:
-        run_import(path, _job)
-        _job["state"] = "done"
+        run_import(path, job)
+        job["state"] = "done"
     except Exception as e:  # noqa: BLE001 — reported to the UI
-        _job.update(state="error", error=str(e))
+        job.update(state="error", error=str(e))
 
 
-# ── Uploading an export ─────────────────────────────────────────────
 # In chunks: start an upload, send each chunk with its offset (resending one
 # replaces what was there from that offset), and the last one turns the
 # upload into <name>.zip in the imports folder.

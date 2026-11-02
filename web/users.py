@@ -16,7 +16,7 @@ import os
 
 from fastapi import Cookie, HTTPException
 
-from img2vid.common.metadata import get_db
+from web.core.metadata import get_db
 
 from .auth import resolve_user_session
 
@@ -91,9 +91,6 @@ def resolve_current_user(user_cookie: str | None):
     """The current User, resolved from the signed user-session cookie, or None.
     Email+password (local admin) and OAuth both mint that same cookie."""
     return current_user(user_cookie)
-
-
-# ── FastAPI dependencies ─────────────────────────────────────────────
 
 
 def current_user_dep(user_session: str | None = Cookie(None)):

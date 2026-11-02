@@ -34,7 +34,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Query", "f
 "tests/test_venice.py" = ["F811"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["img2vid", "web", "tests"]
+known-first-party = ["web", "tests"]
 known-third-party = ["alembic"]   # not the migrations folder of the same name
 
 [tool.ruff.format]

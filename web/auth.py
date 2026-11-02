@@ -18,9 +18,6 @@ SESSION_TTL = 60 * 60 * 24 * 30  # 30 days — matches the login cookie's max-ag
 USER_COOKIE = "user_session"
 
 
-# ── base64url helpers ────────────────────────────────────────────────
-
-
 def _b64(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
@@ -29,7 +26,6 @@ def _unb64(text: str) -> bytes:
     return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
 
 
-# ── Signed user-session tokens ───────────────────────────────────────
 #
 # The cookie holds a signed, expiring user id — not a raw credential — so a
 # leaked cookie isn't a permanent password and sessions expire on their own.

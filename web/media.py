@@ -4,22 +4,19 @@ Media library — one place for every upload and creation in the app.
 It's an index over files that already live elsewhere, not a store of its own:
 
   • library  — images uploaded straight to the library (<data>/library/)
-  • project  — a Generate project's uploads (src-/ref-/image.* files) and
-               creations (generated videos/images), in its assets folder
   • chat     — a chat's uploads and generated images/videos (<data>/chat/<id>/)
   • orphan   — files in a chat's folder that nothing records any more: an
                attachment that was never sent, a file a message dropped, or
                the folder of a chat that's gone
 
-Item ids say where a file is: "lib:<file>", "proj:<slug>:<file>",
-"chat:<conversation id>:<file>".
+Item ids say where a file is: "lib:<file>", "chat:<conversation id>:<file>".
 
 Every item has a small cached thumbnail (/api/media/thumb/<id>) for the
 grids, so they don't load full-size images or videos.
 
-Using an item (as a character image, a Generate source/ref image or a chat
-attachment) copies the file to that destination — the way uploads already
-work there — so deleting it from the library never breaks what used it.
+Using an item (as a character image or a chat attachment) copies the file to
+that destination — the way uploads already work there — so deleting it from
+the library never breaks what used it.
 """
 
 import asyncio
@@ -42,8 +39,8 @@ from fastapi.responses import FileResponse
 from PIL import Image, ImageOps
 from pydantic import BaseModel
 
-from img2vid.common import config
-from img2vid.common.metadata import get_db, iso
+from web.core import config
+from web.core.metadata import get_db, iso
 
 from . import characters
 from .uploads import image_media_type, is_blank_image, read_image_upload, safe_filename
@@ -54,7 +51,6 @@ router = APIRouter(prefix="/api/media", dependencies=[Depends(require_user)])
 VIDEO_EXTS = {".mp4"}
 THUMB_SIZE = 320  # px, the thumbnail's shorter side (grid tiles are square, cropped to fill)
 THUMB_WORKERS = 2  # thumbnails made at once — a grid asks for many together, and a NAS CPU is slow
-PROJECT_SKIP = {"thumb.jpg"}  # generated project thumbnail, not media
 # A new chat file isn't orphaned until it's this old (s): attachments wait in
 # the composer, and generations are written before their message records them
 ORPHAN_GRACE = 3600
@@ -72,7 +68,7 @@ def library_dir() -> Path:
     # Read config at call time so tests can redirect ROOT_DIR. Per-user
     # (<data>/library/<user_id>/) so one user's uploads never show to another;
     # the shared legacy folder is the admin's, migrated by provision_admin.
-    from img2vid.common.metadata import current_tenant
+    from web.core.metadata import current_tenant
 
     base = config.ROOT_DIR / "library"
     uid = current_tenant()
@@ -100,29 +96,23 @@ def _mtime_iso(path: Path) -> str | None:
         return None
 
 
-def _is_project_upload(name: str) -> bool:
-    return name.startswith(("src-", "ref-")) or Path(name).stem == "image"
-
-
-# ── Locating items ──────────────────────────────────────────────────
-
-
 def resolve(media_id: str) -> tuple[str, Path, dict[str, str]]:
     """(origin, file path, location parts) for an item id; 400/404 if it's
     malformed or gone."""
     origin, _, rest = media_id.partition(":")
-    db = get_db()
     if origin == "lib":
         path, parts = library_dir() / safe_filename(rest), {}
-    elif origin == "proj":
-        slug, _, file = rest.partition(":")
-        proj = db.get_project_by_slug(slug)
-        if not proj:
-            raise HTTPException(404, "Project not found")
-        path = _web_api().ASSETS_DIR / proj.assets_folder / safe_filename(file)
-        parts = {"project": slug, "file": file, "assets_folder": proj.assets_folder}
     elif origin == "chat":
         conv_id, _, file = rest.partition(":")
+        # Multi-tenant guard: chat files live under a global <data>/chat/<id>/,
+        # so the id alone must not reach another user's files. Allow it only
+        # when the chat is the current user's (get_conversation is tenant-
+        # scoped) or no conversation row exists anywhere (a truly orphaned
+        # folder — e.g. a deleted chat's leftovers, which anyone may clean up).
+        # A row owned by a DIFFERENT user reads as not-mine here → 404.
+        db = get_db()
+        if not db.get_conversation(conv_id) and db.conversation_exists_any_tenant(conv_id):
+            raise HTTPException(404, "Media not found")
         path, parts = (
             _chat_dir(safe_filename(conv_id)) / safe_filename(file),
             {"conversation_id": conv_id, "file": file},
@@ -132,9 +122,6 @@ def resolve(media_id: str) -> tuple[str, Path, dict[str, str]]:
     if not path.is_file():
         raise HTTPException(404, "Media not found")
     return origin, path, parts
-
-
-# ── Thumbnails ──────────────────────────────────────────────────────
 
 
 def _thumb_url(media_id: str) -> str:
@@ -206,9 +193,6 @@ async def api_media_thumb(media_id: str):
     return await thumb_response(path)
 
 
-# ── Listing ─────────────────────────────────────────────────────────
-
-
 def _library_items() -> list[dict[str, Any]]:
     d = library_dir()
     if not d.is_dir():
@@ -227,44 +211,6 @@ def _library_items() -> list[dict[str, Any]]:
         for p in d.iterdir()
         if p.is_file() and _kind(p)
     ]
-
-
-def _project_items(db) -> list[dict[str, Any]]:
-    api = _web_api()
-    items = []
-    for proj in db.get_all_projects():
-        folder = api.ASSETS_DIR / proj.assets_folder
-        if not folder.is_dir():
-            continue
-        jobs = {}
-        for job in db.get_jobs_by_project(proj.slug):
-            for name in api._job_files(job):
-                jobs.setdefault(name, job)
-        for p in folder.iterdir():
-            kind = _kind(p) if p.is_file() and p.name not in PROJECT_SKIP else None
-            if not kind:
-                continue
-            job = jobs.get(p.name)
-            upload = _is_project_upload(p.name) and not job
-            items.append(
-                {
-                    "id": f"proj:{proj.slug}:{p.name}",
-                    "kind": kind,
-                    "source": "upload" if upload else "generated",
-                    "origin": "project",
-                    "name": p.name,
-                    "created_at": _mtime_iso(p),
-                    "url": f"/video/{proj.slug}/{p.name}"
-                    if not upload
-                    else f"/api/projects/{proj.slug}/source-image?f={p.name}",
-                    "thumb_url": _thumb_url(f"proj:{proj.slug}:{p.name}"),
-                    "project": proj.slug,
-                    "project_name": proj.name,
-                    "prompt": job.prompt if job else None,
-                    "model": job.model if job else None,
-                }
-            )
-    return items
 
 
 def _chat_records(msgs, lib_items, titles: dict[str, str]) -> list[dict[str, Any]]:
@@ -358,12 +304,7 @@ def _build_items(db) -> list[dict[str, Any]]:
     msgs = db.get_chat_messages_with_media()  # newest first (id desc)
     lib_items = db.list_chat_library()
     titles = {c.id: c.title for c in db.list_conversations(limit=100000)}
-    items = (
-        _library_items()
-        + _project_items(db)
-        + _chat_records(msgs, lib_items, titles)
-        + _chat_orphans(msgs, lib_items, titles)
-    )
+    items = _library_items() + _chat_records(msgs, lib_items, titles) + _chat_orphans(msgs, lib_items, titles)
     items.sort(key=lambda i: i["created_at"] or "", reverse=True)
     return items
 
@@ -378,7 +319,7 @@ _list_cache: dict[tuple, dict] = {}
 
 
 def _all_items() -> list[dict[str, Any]]:
-    from img2vid.common.metadata import current_tenant
+    from web.core.metadata import current_tenant
 
     key = (config.ROOT_DIR, current_tenant())
     now = time.monotonic()
@@ -396,8 +337,6 @@ def _invalidate_list() -> None:
 def _origin_label(item: dict[str, Any]) -> str:
     """Where an item is from, for search — mirrors mediaOrigin in the frontend."""
     origin = item.get("origin")
-    if origin == "project":
-        return item.get("project_name") or item.get("project") or ""
     if origin == "chat":
         return item.get("conversation_title") or "Chat"
     if origin == "orphan":
@@ -458,9 +397,6 @@ async def api_upload_media(file: UploadFile = File(...)):
     return next(i for i in _library_items() if i["name"] == name)
 
 
-# ── Deleting ────────────────────────────────────────────────────────
-
-
 @router.delete("/{media_id:path}")
 def api_delete_media(media_id: str):
     """Delete an item's file — and what records it: a generation's job, or
@@ -471,18 +407,6 @@ def api_delete_media(media_id: str):
     db = get_db()
     if origin == "lib":
         path.unlink()
-    elif origin == "proj":
-        api = _web_api()
-        if _is_project_upload(path.name) and not any(
-            path.name in api._job_files(j) for j in db.get_jobs_by_project(parts["project"])
-        ):
-            path.unlink()
-            proj = db.get_project_by_slug(parts["project"])
-            if proj.image_url == f"local:{path.name}":
-                db.update_project(parts["project"], image_url=None)
-            api._invalidate_project_caches()
-        else:
-            api.api_delete_video(parts["project"], path.name)  # also its job, favourite and the thumbnail
     else:
         conv_id, file = parts["conversation_id"], parts["file"]
         for msg in db.get_chat_messages(conv_id):
@@ -495,8 +419,6 @@ def api_delete_media(media_id: str):
     _invalidate_list()
     return {"deleted": media_id}
 
-
-# ── Clearing blocked generations ────────────────────────────────────
 
 # Which saved images are solid black, per file version, kept on disk: the
 # Media page asks on every load, and decoding every chat image again after
@@ -605,14 +527,9 @@ def api_clear_blocked():
     return {"cleared": len(found)}
 
 
-# ── Using an item elsewhere ─────────────────────────────────────────
-
-
 class ImportMedia(BaseModel):
     media_id: str
-    target: Literal["project", "chat", "character"]
-    project: str | None = None  # target "project": its slug
-    prefix: Literal["src", "ref"] = "ref"  # …as a source image (src) or a reference (ref)
+    target: Literal["chat", "character"]
     conversation_id: str | None = None  # target "chat"
     character_id: int | None = None  # target "character"
 
@@ -620,7 +537,6 @@ class ImportMedia(BaseModel):
 @router.post("/import")
 def api_import_media(data: ImportMedia):
     """Copy an image from the library to where it's being used:
-    project   → {"image_url": "local:<file>"} for a Generate source/ref image
     chat      → {"file": "<file>"} to attach to the next message
     character → the character, with the image added"""
     origin, path, parts = resolve(data.media_id)
@@ -628,19 +544,6 @@ def api_import_media(data: ImportMedia):
         raise HTTPException(400, "Only images can be used here")
     db = get_db()
     ext = path.suffix.lower()
-
-    if data.target == "project":
-        proj = db.get_project_by_slug(data.project or "")
-        if not proj:
-            raise HTTPException(404, "Project not found")
-        if origin == "proj" and parts["project"] == proj.slug and _is_project_upload(path.name):
-            return {"image_url": f"local:{path.name}"}  # already one of this project's uploads
-        folder = _web_api().ASSETS_DIR / proj.assets_folder
-        folder.mkdir(parents=True, exist_ok=True)
-        name = f"{data.prefix}-{uuid.uuid4().hex[:12]}{ext}"
-        shutil.copyfile(path, folder / name)
-        _invalidate_list()
-        return {"image_url": f"local:{name}"}
 
     if data.target == "chat":
         conv_id = data.conversation_id or ""

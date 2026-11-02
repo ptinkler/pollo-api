@@ -54,7 +54,10 @@ async function apiSend(method, endpoint, data) {
     options.body = isForm ? data : JSON.stringify(data)
     if (!isForm) options.headers = { 'Content-Type': 'application/json' }
   }
-  const response = await fetchWithRetry(`${BASE_URL}${endpoint}`, options)
+  // No retries on writes: POST/PUT/PATCH/DELETE aren't idempotent, and a 5xx or
+  // network hiccup on a generation submit would otherwise silently re-fire it —
+  // billing (and showing) several images when one failed. GET retries below.
+  const response = await fetchWithRetry(`${BASE_URL}${endpoint}`, options, 0)
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     throw new Error(body.detail || `API error: ${response.status}`)

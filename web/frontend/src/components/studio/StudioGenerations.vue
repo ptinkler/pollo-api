@@ -1,5 +1,6 @@
 <!-- A thread's Generations gallery: flattens the thread's message media into
-     cards (newest first) and hands them to GenerationGrid. -->
+     cards (newest first) and hands them to GenerationGrid. Includes in-progress
+     (pending) and failed tiles too, so it doubles as the live generation queue. -->
 <script setup>
 import { computed } from 'vue'
 import { chatMediaUrl, chatMediaPreviewUrl } from '../../composables/useChat'
@@ -15,21 +16,22 @@ const items = computed(() => {
   const out = []
   for (const m of props.messages) {
     for (const item of m.media || []) {
-      if (item.file && (item.kind === 'image' || item.kind === 'video') && item.status !== 'error') {
-        out.push({
-          ...item,
-          message_id: m.id,
-          conversation_id: props.convId,
-          model: item.model || m.model,
-          cost: m.cost,
-          created_at: m.created_at,
-          url: chatMediaUrl(props.convId, item.file),
-          preview:
-            item.kind === 'image'
-              ? chatMediaPreviewUrl(props.convId, item.file)
-              : chatMediaUrl(props.convId, item.file),
-        })
-      }
+      if (item.kind !== 'image' && item.kind !== 'video') continue
+      const hasFile = !!item.file
+      out.push({
+        ...item,
+        message_id: m.id,
+        conversation_id: props.convId,
+        model: item.model || m.model,
+        cost: m.cost,
+        created_at: m.created_at,
+        url: hasFile ? chatMediaUrl(props.convId, item.file) : '',
+        preview: hasFile
+          ? item.kind === 'image'
+            ? chatMediaPreviewUrl(props.convId, item.file)
+            : chatMediaUrl(props.convId, item.file)
+          : '',
+      })
     }
   }
   return out.reverse()

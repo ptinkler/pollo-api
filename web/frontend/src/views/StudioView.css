@@ -1,0 +1,162 @@
+.studio {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  overflow: hidden;
+  background: var(--sbg2);
+  color: var(--sfg);
+  font-size: 15px; /* base for inherited text (item 27: bumped from 13.5px) */
+}
+.center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--sborder2);
+}
+.ttitle {
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.top .spacer {
+  flex: 1;
+}
+.iconbtn {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--smuted);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.iconbtn:hover {
+  background: var(--shover);
+  color: var(--sfg);
+}
+.spend {
+  font-size: 12px;
+  color: var(--smuted);
+  padding: 3px 9px;
+  border: 1px solid var(--sborder);
+  border-radius: 7px;
+  white-space: nowrap;
+}
+.spend b {
+  color: var(--sfg);
+  font-weight: 600;
+}
+.bal {
+  font-size: 12px;
+  color: var(--smuted);
+  padding: 3px 9px;
+  border: 1px solid var(--sborder);
+  border-radius: 7px;
+  white-space: nowrap;
+}
+.bal b {
+  color: var(--sfg);
+  font-weight: 600;
+}
+.bal.pollo {
+  cursor: pointer;
+}
+.bal.pollo:hover {
+  border-color: var(--saccent);
+}
+.vtoggle {
+  display: inline-flex;
+  gap: 2px;
+  background: var(--sbg2);
+  border: 1px solid var(--sborder);
+  border-radius: 7px;
+  padding: 2px;
+}
+.vtoggle button {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--smuted);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.vtoggle button .ic {
+  width: 15px;
+  height: 15px;
+}
+.vtoggle button.on {
+  background: var(--shover);
+  color: var(--sfg);
+}
+/* Sliding switch for the thread's default view: chat ◄► gallery */
+.kindswitch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 58px;
+  height: 28px;
+  padding: 3px;
+  border: 1px solid var(--sborder);
+  border-radius: 999px;
+  background: var(--sbg2);
+  cursor: pointer;
+}
+.kindswitch:hover {
+  border-color: var(--saccent);
+}
+.kindswitch .knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 24px;
+  height: 20px;
+  border-radius: 999px;
+  /* A bright thumb so the active icon (accent, below) reads clearly in both
+     themes — white-on-accent washed out at this size. */
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: transform 0.16s ease;
+}
+.kindswitch[data-on='gallery'] .knob {
+  transform: translateX(24px);
+}
+.kindswitch .kopt {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: grid;
+  place-items: center;
+  color: var(--smuted);
+  transition: color 0.16s ease;
+}
+.kindswitch .kopt .ic {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2;
+}
+/* The icon sitting on the thumb: accent on white = high contrast. */
+.kindswitch[data-on='chat'] .kopt:first-of-type,
+.kindswitch[data-on='gallery'] .kopt:last-of-type {
+  color: var(--saccent);
+}
+.gcount {
+  font-size: 12px;
+  color: var(--smuted);
+}
+.sprite {
+  position: absolute;
+}

@@ -14,7 +14,7 @@ import os
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
-from img2vid.common.metadata import get_db
+from web.core.metadata import get_db
 
 router = APIRouter(prefix="/api/auth")
 

@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 import pytest
 
 from tests.test_chat import SETTINGS, _png_bytes, _text_chunks, chat, client, db  # noqa: F401
+from web.providers import openrouter
 
 T0 = 1_790_000_000.0  # the first prompt's time
 
@@ -101,8 +102,7 @@ def imp(chat, db, monkeypatch):
     import web.chatgpt_import as imp_mod
 
     monkeypatch.setattr(imp_mod, "get_db", lambda: db)
-    imp_mod._job.clear()
-    imp_mod._job["state"] = "idle"
+    imp_mod._jobs.clear()  # per-tenant import progress, reset between tests
     return imp_mod
 
 
@@ -220,7 +220,7 @@ class TestImportingAgain:
     ):
         imp.run_import(story_zip)
         conv = _imported(client)[0]
-        monkeypatch.setattr(chat.openrouter, "stream_chat", lambda *a, **k: _text_chunks("Sure."))
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: _text_chunks("Sure."))
         client.post(
             f"/api/chat/conversations/{conv['id']}/messages", json={"content": "continue", "mode": "text", **SETTINGS}
         )
@@ -261,7 +261,7 @@ class TestSpace:
         snippet = client.post("/api/chat/instructions", json={"name": "Style", "content": "Be brief."}).json()
         client.put("/api/chat/settings", json={"default_instruction_ids": [snippet["id"]]})
         imp.run_import(story_zip)
-        assert chat._conversation_instructions(_imported(client)[0]["id"]) == "Be brief."
+        assert chat.generation._conversation_instructions(_imported(client)[0]["id"]) == "Be brief."
 
     def test_a_chat_moved_out_keeps_getting_imports_where_it_is(self, imp, client, story_zip, tmp_path):
         imp.run_import(story_zip)
@@ -282,8 +282,8 @@ class TestSpace:
 
 class TestRoutes:
     def test_lists_exports_and_runs_an_import(self, imp, client, story_zip, tmp_path):
-        (tmp_path / "imports").mkdir()
-        story_zip.rename(tmp_path / "imports" / "export1.zip")
+        (tmp_path / "imports" / "test-user").mkdir(parents=True)
+        story_zip.rename(tmp_path / "imports" / "test-user" / "export1.zip")
         data = client.get("/api/chat/import/chatgpt").json()
         assert [f["name"] for f in data["files"]] == ["export1.zip"] and data["job"]["state"] == "idle"
         assert client.post("/api/chat/import/chatgpt", json={"file": "export1.zip"}).status_code == 200
@@ -298,6 +298,14 @@ class TestRoutes:
     def test_only_exports_in_the_imports_folder(self, imp, client):
         assert client.post("/api/chat/import/chatgpt", json={"file": "nope.zip"}).status_code == 404
         assert client.post("/api/chat/import/chatgpt", json={"file": "../x.zip"}).status_code == 400
+
+    def test_another_users_export_is_not_importable(self, imp, client, story_zip, tmp_path):
+        """The imports folder is per-tenant, so a user can't list or import an
+        export another user uploaded (even knowing its filename)."""
+        (tmp_path / "imports" / "other-user").mkdir(parents=True)
+        story_zip.rename(tmp_path / "imports" / "other-user" / "export1.zip")
+        assert client.get("/api/chat/import/chatgpt").json()["files"] == []  # not listed
+        assert client.post("/api/chat/import/chatgpt", json={"file": "export1.zip"}).status_code == 404
 
 
 class TestUpload:
@@ -326,10 +334,10 @@ class TestUpload:
         assert len(raw) > 2000  # several chunks
         resp = self._upload(client, raw)
         assert resp.json() == {"received": len(raw), "file": "export1.zip"}
-        assert (tmp_path / "imports" / "export1.zip").read_bytes() == raw
+        assert (tmp_path / "imports" / "test-user" / "export1.zip").read_bytes() == raw
         files = client.get("/api/chat/import/chatgpt").json()["files"]
         assert [f["name"] for f in files] == ["export1.zip"]  # the upload's own files aren't listed
-        assert sorted(p.name for p in (tmp_path / "imports").iterdir()) == ["export1.zip"]
+        assert sorted(p.name for p in (tmp_path / "imports" / "test-user").iterdir()) == ["export1.zip"]
 
     def test_a_resent_chunk_replaces_itself(self, small_chunks, client, story_zip, tmp_path):
         raw = story_zip.read_bytes()
@@ -340,7 +348,7 @@ class TestUpload:
         for offset in range(1000, len(raw), 1000):
             resp = self._send(client, up["id"], offset, raw[offset : offset + 1000])
         assert resp.json()["file"] == "export1.zip"
-        assert (tmp_path / "imports" / "export1.zip").read_bytes() == raw
+        assert (tmp_path / "imports" / "test-user" / "export1.zip").read_bytes() == raw
 
     def test_the_same_name_twice_is_kept_apart(self, small_chunks, client, story_zip):
         raw = story_zip.read_bytes()
@@ -354,7 +362,7 @@ class TestUpload:
         with zipfile.ZipFile(other, "w") as zf:
             zf.writestr("readme.txt", "hi")
         assert "conversations.json" in self._upload(client, other.read_bytes()).json()["detail"]
-        assert list((tmp_path / "imports").iterdir()) == []
+        assert list((tmp_path / "imports" / "test-user").iterdir()) == []
 
     def test_chunks_past_the_end_or_too_big(self, small_chunks, client):
         up = self._start(client, b"x" * 1500)
@@ -364,6 +372,6 @@ class TestUpload:
     def test_cancel_and_unknown_uploads(self, small_chunks, client, tmp_path):
         up = self._start(client, b"x" * 1500)
         client.delete(f"/api/chat/import/chatgpt/uploads/{up['id']}")
-        assert list((tmp_path / "imports").iterdir()) == []
+        assert list((tmp_path / "imports" / "test-user").iterdir()) == []
         assert self._send(client, up["id"], 0, b"x").status_code == 404
         assert self._send(client, "not-an-id", 0, b"x").status_code == 404

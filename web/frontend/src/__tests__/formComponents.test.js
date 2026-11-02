@@ -5,8 +5,6 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 
-// ── SleekInput ──────────────────────────────────────────────────────
-
 import SleekInput from '../components/form/SleekInput.vue'
 
 describe('SleekInput', () => {
@@ -85,8 +83,6 @@ describe('SleekInput', () => {
   })
 })
 
-// ── SleekSelect ─────────────────────────────────────────────────────
-
 import SleekSelect from '../components/form/SleekSelect.vue'
 
 describe('SleekSelect', () => {
@@ -159,8 +155,6 @@ describe('SleekSelect', () => {
   })
 })
 
-// ── SleekTextarea ───────────────────────────────────────────────────
-
 import SleekTextarea from '../components/form/SleekTextarea.vue'
 
 describe('SleekTextarea', () => {
@@ -215,8 +209,6 @@ describe('SleekTextarea', () => {
     expect(wrapper.find('.sleek-textarea').classes()).toContain('has-value')
   })
 })
-
-// ── form/index.js barrel export ─────────────────────────────────────
 
 describe('form/index.js exports', () => {
   it('exports all form components', async () => {

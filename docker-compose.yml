@@ -6,7 +6,7 @@ name: pollo-api
 
 services:
 
-  # ── No-VPN stack ────────────────────────────────────────────────────
+  # No-VPN stack
   app:
     profiles: [novpn]
     image: ghcr.io/ptinkler/pollo-api:latest
@@ -29,7 +29,7 @@ services:
       app:
         condition: service_started
 
-  # ── VPN stack (via gluetun) ─────────────────────────────────────────
+  # VPN stack (via gluetun)
   gluetun:
     profiles: [vpn]
     image: qmcgaw/gluetun

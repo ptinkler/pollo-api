@@ -6,7 +6,7 @@
   components. Route: /studio — runs alongside the existing app during the build.
 -->
 <script setup>
-import { ref, reactive, computed, provide, inject, onMounted, watch } from 'vue'
+import { ref, reactive, computed, provide, inject, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
 import { useComposerSettings, MODES } from '../composables/useComposerSettings'
@@ -19,6 +19,8 @@ import StudioFeed from '../components/studio/StudioFeed.vue'
 import StudioGenerations from '../components/studio/StudioGenerations.vue'
 import GenerationGrid from '../components/studio/GenerationGrid.vue'
 import GenerationModal from '../components/studio/GenerationModal.vue'
+import GenerationQueueDock from '../components/studio/GenerationQueueDock.vue'
+import { useGenQueue } from '../composables/useGenQueue'
 import { chatMediaUrl, chatMediaPreviewUrl } from '../composables/useChat'
 import StudioSpace from '../components/studio/StudioSpace.vue'
 import StudioMedia from '../components/studio/StudioMedia.vue'
@@ -28,6 +30,7 @@ import StudioInstructionsPage from '../components/studio/StudioInstructionsPage.
 import StudioRequestLog from '../components/studio/StudioRequestLog.vue'
 import StudioSettings from '../components/studio/StudioSettings.vue'
 import StudioTools from '../components/studio/StudioTools.vue'
+import StudioIconSprite from '../components/studio/StudioIconSprite.vue'
 import MediaLightbox from '../components/chat/MediaLightbox.vue'
 import CharacterEditor from '../components/characters/CharacterEditor.vue'
 import InstructionEditor from '../components/chat/InstructionEditor.vue'
@@ -90,6 +93,7 @@ const {
   switchBranch,
   forkFrom,
   regenerateMedia,
+  applyGenerationSettings,
   pinMedia,
   stop,
   deleteExchange,
@@ -162,9 +166,39 @@ function openGeneration(item) {
 async function onGalleryFavourite(item) {
   await favouriteMedia({ id: item.message_id }, { mediaId: item.id, favourite: !item.favourite })
 }
+// Always-visible generation queue (polls across all threads; survives navigation).
+const genQueue = useGenQueue()
+const { entries: queueItems, pending: queuePending, done: queueDone } = genQueue
+onMounted(() => genQueue.start())
+onUnmounted(() => genQueue.stop())
+// Generate from the composer, then refresh the queue so the new tile shows at once.
+function onGenerate() {
+  send()
+  genQueue.refresh()
+}
+// Clicking a queued item jumps to that thread's gallery (where its tile lives).
+function openQueueItem(e) {
+  router.push(`/${e.conversation_id}/gallery`)
+}
+
+// Modal "Retry" / "Regenerate". A failed item retries in place (backend only
+// allows regenerating errored media); a successful one re-rolls as a fresh
+// generation with the same settings (apply + send), leaving the original.
 function regenerateFromModal(item) {
-  const msg = messages.value.find(m => m.id === item.message_id)
-  if (msg) regenerateMedia(msg, { mediaId: item.id })
+  if (item.status === 'error') {
+    const msg = messages.value.find(m => m.id === item.message_id)
+    if (msg) regenerateMedia(msg, { mediaId: item.id })
+  } else {
+    applyGenerationSettings(item)
+    send()
+  }
+  genQueue.refresh()
+  galleryItem.value = null
+}
+// "Use settings": fill the composer from this generation (model, mode, options,
+// prompt), close the modal, and leave it for the user to tweak and Generate.
+function useSettingsFromModal(item) {
+  applyGenerationSettings(item)
   galleryItem.value = null
 }
 async function deleteFromModal(item) {
@@ -250,7 +284,6 @@ async function deleteSpaceView(space) {
   if (activeSpace.value?.id === space.id) goThread()
 }
 
-// ── Theme (System / Light / Dark) ────────────────────────────────────────
 const THEME_KEY = 'studio.theme'
 const readTheme = () => {
   try {
@@ -273,7 +306,7 @@ function setTheme(t) {
   }
 }
 
-// ── Navigation: center panes are real routes so the back button works ──────
+// Navigation: center panes are real routes so the back button works
 let pendingKind = 'chat' // the kind a brand-new thread (/) opens on
 function goThread() {
   router.push(active.value ? `/${active.value}` : '/')
@@ -451,6 +484,7 @@ onMounted(() => {
         </div>
         <GenerationGrid
           :items="favItems"
+          :fav-filter="false"
           empty="No favourites yet — star a generation to add it here."
           @open="openFavourite"
           @favourite="onFavUnstar"
@@ -461,8 +495,12 @@ onMounted(() => {
         <div class="top">
           <div class="ttitle">{{ activeTitle }}</div>
           <div class="vtoggle">
-            <button :class="{ on: threadView === 'chat' }" @click="setThreadView('chat')">Chat</button>
-            <button :class="{ on: threadView === 'gallery' }" @click="setThreadView('gallery')">Gallery</button>
+            <button :class="{ on: threadView === 'chat' }" title="Chat view" @click="setThreadView('chat')">
+              <svg class="ic"><use href="#s-chat" /></svg>
+            </button>
+            <button :class="{ on: threadView === 'gallery' }" title="Gallery view" @click="setThreadView('gallery')">
+              <svg class="ic"><use href="#s-image" /></svg>
+            </button>
           </div>
           <button
             class="kindswitch"
@@ -479,7 +517,9 @@ onMounted(() => {
             ></span>
           </button>
           <div class="spacer"></div>
-          <span v-if="spendLabel" class="spend" title="Spent in this thread">{{ spendLabel }}</span>
+          <span v-if="spendLabel" class="spend" title="Total spent generating in this thread">
+            Spent <b>{{ spendLabel }}</b>
+          </span>
           <span class="bal pollo" title="Pollo credits remaining — click for usage" @click="router.push('/usage')">
             Pollo <b>{{ fmtCredits(balances.pollo) }}</b>
           </span>
@@ -531,7 +571,7 @@ onMounted(() => {
           :can-send="canSend"
           :attachments="attachments"
           :uploading="uploading"
-          @send="send"
+          @send="onGenerate"
           @files="addFiles"
           @remove="removeAttachment"
         />
@@ -583,12 +623,23 @@ onMounted(() => {
     <GenerationModal
       :item="galleryItem"
       :can-manage="galleryManage"
+      :theme="dataTheme"
       @close="galleryItem = null"
       @favourite="galleryManage ? onGalleryFavourite($event) : onFavUnstar($event)"
       @use-image="useImage"
+      @use-settings="useSettingsFromModal"
       @regenerate="regenerateFromModal"
       @delete="deleteFromModal"
       @open-thread="openThreadFromModal"
+    />
+
+    <GenerationQueueDock
+      :entries="queueItems"
+      :pending="queuePending"
+      :done="queueDone"
+      @open="openQueueItem"
+      @clear="genQueue.clearDone"
+      @clear-one="genQueue.clearOne"
     />
 
     <CharacterEditor
@@ -623,202 +674,7 @@ onMounted(() => {
     <ImportChatsModal :visible="importOpen" @close="importOpen = false" @imported="onImported" />
   </div>
 
-  <svg width="0" height="0" class="sprite" aria-hidden="true">
-    <symbol id="s-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
-    <symbol id="s-chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /></symbol>
-    <symbol id="s-chevL" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6" /></symbol>
-    <symbol id="s-search" viewBox="0 0 24 24">
-      <circle cx="11" cy="11" r="7" />
-      <path d="m21 21-4.3-4.3" />
-    </symbol>
-    <symbol id="s-chat" viewBox="0 0 24 24">
-      <path d="M20.5 11.5a7.5 7.5 0 0 1-10.9 6.7L4.5 19.5l1.3-5A7.5 7.5 0 1 1 20.5 11.5z" />
-    </symbol>
-    <symbol id="s-folder" viewBox="0 0 24 24">
-      <path d="M4 7.5a2 2 0 0 1 2-2h3.2l1.8 2H18a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
-    </symbol>
-    <symbol id="s-star" viewBox="0 0 24 24">
-      <path d="M12 4.5l2.2 4.5 4.9.5-3.7 3.3 1.1 4.8L12 15.7l-4.5 2.4 1.1-4.8L4.9 9.5l4.9-.5z" />
-    </symbol>
-    <symbol id="s-cog" viewBox="0 0 24 24">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M12 3v2.5M12 18.5V21M5 5l1.8 1.8M17.2 17.2 19 19M3 12h2.5M18.5 12H21M5 19l1.8-1.8M17.2 6.8 19 5" />
-    </symbol>
-    <symbol id="s-spark" viewBox="0 0 24 24">
-      <path d="M12 3.5l1.5 5L18.5 10l-5 1.5L12 16.5l-1.5-5L5.5 10l5-1.5z" />
-    </symbol>
-    <symbol id="s-pencil" viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16z M13.5 6.5l4 4" /></symbol>
-    <symbol id="s-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13" /></symbol>
-    <symbol id="s-clip" viewBox="0 0 24 24">
-      <path d="M21 11l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 6" />
-    </symbol>
-    <symbol id="s-image" viewBox="0 0 24 24">
-      <rect x="4" y="5" width="16" height="14" rx="2" />
-      <circle cx="9" cy="10" r="1.6" />
-      <path d="M5 17l4.5-4.5L13 16l2.5-2.5L19 17" />
-    </symbol>
-    <symbol id="s-pin" viewBox="0 0 24 24">
-      <path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6zM12 14v7" />
-    </symbol>
-    <symbol id="s-download" viewBox="0 0 24 24">
-      <path d="M12 4v10m0 0 4-4m-4 4-4-4M5 19h14" />
-    </symbol>
-    <symbol id="s-refresh" viewBox="0 0 24 24">
-      <path d="M20 11a8 8 0 1 0-.9 4.5M20 5v5h-5" />
-    </symbol>
-  </svg>
+  <StudioIconSprite />
 </template>
 
-<style scoped>
-.studio {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  overflow: hidden;
-  background: var(--sbg2);
-  color: var(--sfg);
-  font-size: 13.5px;
-}
-.center {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-.top {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--sborder2);
-}
-.ttitle {
-  font-weight: 600;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.top .spacer {
-  flex: 1;
-}
-.iconbtn {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  color: var(--smuted);
-  background: none;
-  border: none;
-  cursor: pointer;
-}
-.iconbtn:hover {
-  background: var(--shover);
-  color: var(--sfg);
-}
-.spend {
-  font-size: 12px;
-  color: var(--smuted);
-  padding: 3px 9px;
-  border: 1px solid var(--sborder);
-  border-radius: 7px;
-}
-.bal {
-  font-size: 12px;
-  color: var(--smuted);
-  padding: 3px 9px;
-  border: 1px solid var(--sborder);
-  border-radius: 7px;
-  white-space: nowrap;
-}
-.bal b {
-  color: var(--sfg);
-  font-weight: 600;
-}
-.bal.pollo {
-  cursor: pointer;
-}
-.bal.pollo:hover {
-  border-color: var(--saccent);
-}
-.vtoggle {
-  display: inline-flex;
-  gap: 2px;
-  background: var(--sbg2);
-  border: 1px solid var(--sborder);
-  border-radius: 7px;
-  padding: 2px;
-}
-.vtoggle button {
-  font-size: 12px;
-  padding: 3px 10px;
-  border: 0;
-  background: transparent;
-  color: var(--smuted);
-  border-radius: 5px;
-  cursor: pointer;
-}
-.vtoggle button.on {
-  background: var(--shover);
-  color: var(--sfg);
-}
-/* Sliding switch for the thread's default view: chat ◄► gallery */
-.kindswitch {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  width: 58px;
-  height: 28px;
-  padding: 3px;
-  border: 1px solid var(--sborder);
-  border-radius: 999px;
-  background: var(--sbg2);
-  cursor: pointer;
-}
-.kindswitch:hover {
-  border-color: var(--saccent);
-}
-.kindswitch .knob {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 24px;
-  height: 20px;
-  border-radius: 999px;
-  /* A bright thumb so the active icon (accent, below) reads clearly in both
-     themes — white-on-accent washed out at this size. */
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
-  transition: transform 0.16s ease;
-}
-.kindswitch[data-on='gallery'] .knob {
-  transform: translateX(24px);
-}
-.kindswitch .kopt {
-  position: relative;
-  z-index: 1;
-  flex: 1;
-  display: grid;
-  place-items: center;
-  color: var(--smuted);
-  transition: color 0.16s ease;
-}
-.kindswitch .kopt .ic {
-  width: 14px;
-  height: 14px;
-  stroke-width: 2;
-}
-/* The icon sitting on the thumb: accent on white = high contrast. */
-.kindswitch[data-on='chat'] .kopt:first-of-type,
-.kindswitch[data-on='gallery'] .kopt:last-of-type {
-  color: var(--saccent);
-}
-.gcount {
-  font-size: 12px;
-  color: var(--smuted);
-}
-.sprite {
-  position: absolute;
-}
-</style>
+<style scoped src="./StudioView.css"></style>

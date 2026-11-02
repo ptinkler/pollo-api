@@ -17,6 +17,9 @@ __pycache__/
 .coverage
 # Data
 data/
+# …but committed test fixtures under tests/data/ must not be ignored (CI needs them)
+!tests/data/
+!tests/data/**
 
 # Projects
 projects/

@@ -83,7 +83,6 @@ describe('ModelPicker favourites', () => {
   })
 })
 
-// ── ChatMessage user actions ────────────────────────────────────────
 import ChatMessage from '../components/chat/ChatMessage.vue'
 
 describe('ChatMessage user actions', () => {
@@ -352,7 +351,7 @@ describe('ModelPicker uncensored filter', () => {
     const w = mount(ModelPicker, { attachTo: document.body, props: { models: MODELS, label: 'Image', kind: 'image' } })
     await w.find('.picker-btn').trigger('click')
     const toggle = w.find('.uncensored-only input')
-    expect(w.find('.uncensored-only').text()).toContain('(1)')
+    expect(w.find('.uncensored-only .fchip-n').text()).toBe('1')
     await toggle.setValue(true)
     expect(w.findAll('.picker-tab')).toHaveLength(0) // only Venice is left
     expect(
@@ -445,7 +444,7 @@ describe('ModelPicker hidden models', () => {
   it('hides them until "Show hidden" is ticked, then badges them', async () => {
     const w = await openPicker({ models: WITH_HIDDEN, modelValue: 'pollo/seedreamv1' })
     expect(modelNames(w)).toEqual(['Pollo: Seedream 5.0 Lite'])
-    expect(w.find('.show-hidden').text()).toBe('Show hidden (1)')
+    expect(w.find('.show-hidden .fchip-n').text()).toBe('1')
     await w.find('.show-hidden input').setValue(true)
     expect(modelNames(w)).toEqual(['Pollo: Seedream 5.0 Lite', 'Pollo: Seedream 5.0 Pro'])
     const badge = w.findAll('.item-badge').find(b => b.text() === 'hidden')

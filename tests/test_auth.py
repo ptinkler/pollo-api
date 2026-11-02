@@ -3,7 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from img2vid.common.metadata import MetadataDB
+from web.core.metadata import MetadataDB
 
 
 @pytest.fixture()

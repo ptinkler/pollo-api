@@ -27,12 +27,11 @@ export const deleteMedia = id => apiDelete(`/api/media/${enc(id)}`)
 export const fetchBlockedCounts = () => apiGet('/api/media/blocked')
 export const clearBlocked = () => apiPost('/api/media/blocked/clear', {})
 
-/** Copy an image to a project ({ image_url: "local:…" }), a chat ({ file }) or a character (the character). */
+/** Copy an image to a chat ({ file }) or a character (the character). */
 export const importMedia = (mediaId, target) => apiPost('/api/media/import', { media_id: mediaId, ...target })
 
 /** Where an item came from, for display. */
 export function mediaOrigin(item) {
-  if (item.origin === 'project') return item.project_name || item.project
   if (item.origin === 'chat') return item.conversation_title || 'Chat'
   if (item.origin === 'orphan') return item.conversation_title ? `${item.conversation_title} (orphaned)` : 'Orphaned'
   return 'Library'

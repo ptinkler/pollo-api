@@ -187,7 +187,6 @@ export function useStudio({ models, settings, showToast }) {
 
   const polling = useMessagePolling({ messages, streamingId, replace: replaceMessage, onFinished: () => loadLists() })
 
-  // ── Loading ────────────────────────────────────────────────────────────
   async function loadModels() {
     modelsLoading.value = true
     try {
@@ -234,14 +233,19 @@ export function useStudio({ models, settings, showToast }) {
     active.value = id
     loading.value = true
     try {
-      activeThread.value = await fetchConversation(id)
-      messages.value = activeThread.value.messages || []
-      applyChat(activeThread.value)
-      instructionIds.value = activeThread.value.instruction_ids || []
-      instructionGroupIds.value = activeThread.value.instruction_group_ids || []
-      characterIds.value = activeThread.value.character_ids || []
-      hiddenDefaults.value = { ...NO_HIDDEN(), ...activeThread.value.hidden_defaults }
-      paused.value = { ...NO_PAUSED(), ...activeThread.value.paused_instructions }
+      // GET returns { conversation, messages }; unwrap so activeThread holds the
+      // conversation itself (its kind/settings/instructions live there, not on
+      // the envelope). showChat does the same during a streamed turn.
+      const data = await fetchConversation(id)
+      const conv = data.conversation || data
+      activeThread.value = conv
+      messages.value = data.messages || []
+      applyChat(conv)
+      instructionIds.value = conv.instruction_ids || []
+      instructionGroupIds.value = conv.instruction_group_ids || []
+      characterIds.value = conv.character_ids || []
+      hiddenDefaults.value = { ...NO_HIDDEN(), ...conv.hidden_defaults }
+      paused.value = { ...NO_PAUSED(), ...conv.paused_instructions }
       refreshSpend(id)
       polling.ensure()
       return true
@@ -284,7 +288,7 @@ export function useStudio({ models, settings, showToast }) {
     }
   }
 
-  // ── Sending (same streamed-turn protocol as ChatView) ────────────────────
+  // Sending (same streamed-turn protocol as ChatView)
   const TURN_EVENTS = {
     start(ev, tempUser) {
       if (ev.user_message) {
@@ -300,7 +304,14 @@ export function useStudio({ models, settings, showToast }) {
     },
     media(ev) {
       const m = messages.value[messageIndex(ev.message_id)]
-      if (m) upsert(m.media || (m.media = []), ev.item)
+      if (!m) return
+      const list = m.media || (m.media = [])
+      const prev = list.find(x => x.id === ev.item.id)
+      upsert(list, ev.item)
+      // Flipped pending → done: announce it (the gallery queue has no toast of its own).
+      if (ev.item.status === 'done' && (!prev || prev.status === 'pending')) {
+        showToast(`${ev.item.kind === 'video' ? 'Video' : 'Image'} ready`, 'success')
+      }
     },
     characters(ev) {
       onCharactersUsed(ev.characters || [], ev.character_ids || [])
@@ -382,7 +393,6 @@ export function useStudio({ models, settings, showToast }) {
     await runTurn(sendChatMessage, id, { ...turnSettings(), content, attachments: sent.map(a => a.file) }, tempUser)
   }
 
-  // ── Message actions ──────────────────────────────────────────────────────
   async function retry(msg) {
     const i = messageIndex(msg.id)
     if (sending.value || i === -1) return
@@ -437,6 +447,20 @@ export function useStudio({ models, settings, showToast }) {
     } finally {
       forking = false
     }
+  }
+  // "Use settings" (gallery): fill the composer from a past generation so the
+  // user can tweak and press Generate. Fills only — never fires (unlike retry).
+  function applyGenerationSettings(item) {
+    const kind = item.kind === 'video' ? 'video' : 'image'
+    if (item.prompt) draft.value = item.prompt
+    if (item.model) selected[kind] = item.model
+    mode.value = kind
+    const p = item.params || {}
+    const opts = kind === 'video' ? settings.videoOpts : settings.imageOpts
+    if (p.aspect_ratio) opts.aspect_ratio = p.aspect_ratio
+    if (p.resolution) opts.resolution = p.resolution
+    if (kind === 'video' && p.duration != null) settings.videoOpts.duration = p.duration
+    if (kind === 'video' && p.generate_audio != null) settings.videoOpts.generate_audio = p.generate_audio
   }
   async function regenerateMedia(msg, { mediaId, model }) {
     if (!model) {
@@ -503,7 +527,6 @@ export function useStudio({ models, settings, showToast }) {
     if (target) mode.value = target
   }
 
-  // ── Thread management ────────────────────────────────────────────────────
   async function toggleFav(t) {
     const next = !t.pinned
     try {
@@ -544,7 +567,6 @@ export function useStudio({ models, settings, showToast }) {
     }
   }
 
-  // ── Space management ─────────────────────────────────────────────────────
   async function addSpace() {
     const name = prompt('New space name')
     if (!name?.trim()) return
@@ -649,6 +671,7 @@ export function useStudio({ models, settings, showToast }) {
     switchBranch,
     forkFrom,
     regenerateMedia,
+    applyGenerationSettings,
     pinMedia,
     stop,
     deleteExchange,

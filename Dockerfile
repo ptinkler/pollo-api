@@ -22,9 +22,10 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY img2vid/ ./img2vid/
-COPY web/*.py ./web/
+# Copy application code (the whole web/ tree so every subpackage — core,
+# providers, chat — is included; node_modules and static are .dockerignored and
+# static is re-copied from the frontend build below)
+COPY web/ ./web/
 COPY alembic/ ./alembic/
 COPY alembic.ini entrypoint.sh ./
 

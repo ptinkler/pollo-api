@@ -17,7 +17,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from img2vid.common.metadata import get_db
+from web.core.metadata import get_db
 
 from .auth import _user_secret
 from .dev_login import store_keys_plaintext

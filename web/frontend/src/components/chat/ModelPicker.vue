@@ -42,7 +42,7 @@ const visibleModels = computed(() =>
   ),
 )
 
-// ── Provider tabs: Pollo ("pollo/…", billed in Pollo credits), Venice
+// Provider tabs: Pollo ("pollo/…", billed in Pollo credits), Venice
 // ("venice/…", billed to the Venice account) and OpenRouter. Only shown when
 // the catalogue has more than one; each tab only when it has models.
 const ALL_PROVIDERS = {
@@ -311,18 +311,26 @@ function onKeydown(e) {
           {{ p.label }} <span class="tab-count">{{ tabCounts[id] }}</span>
         </button>
       </div>
-      <label v-if="uncensoredCount" class="show-hidden uncensored-only" title="Only list models marked uncensored">
-        <input v-model="uncensoredOnly" type="checkbox" @change="searchInput?.focus()" />
-        🔞 Uncensored only ({{ uncensoredCount }})
-      </label>
-      <label
-        v-if="hiddenCount"
-        class="show-hidden"
-        title="Models left out of the list: not enabled for this API key, or retired"
-      >
-        <input v-model="showHidden" type="checkbox" @change="searchInput?.focus()" />
-        Show hidden ({{ hiddenCount }})
-      </label>
+      <div v-if="uncensoredCount || hiddenCount" class="picker-filters">
+        <label
+          v-if="uncensoredCount"
+          class="fchip uncensored-only"
+          :class="{ on: uncensoredOnly }"
+          title="Only list models marked uncensored"
+        >
+          <input v-model="uncensoredOnly" type="checkbox" @change="searchInput?.focus()" />
+          🔞 Uncensored <span class="fchip-n">{{ uncensoredCount }}</span>
+        </label>
+        <label
+          v-if="hiddenCount"
+          class="fchip show-hidden"
+          :class="{ on: showHidden }"
+          title="Models left out of the list: not enabled for this API key, or retired"
+        >
+          <input v-model="showHidden" type="checkbox" @change="searchInput?.focus()" />
+          Show hidden <span class="fchip-n">{{ hiddenCount }}</span>
+        </label>
+      </div>
       <div class="picker-list">
         <template v-for="section in sections" :key="section.id">
           <div v-if="section.label" class="picker-section">{{ section.label }}</div>
@@ -468,8 +476,7 @@ function onKeydown(e) {
 }
 
 .picker-search,
-.picker-tabs,
-.show-hidden {
+.picker-tabs {
   flex-shrink: 0;
 }
 
@@ -550,19 +557,49 @@ function onKeydown(e) {
   cursor: pointer;
 }
 
-.uncensored-only {
-  color: #ff8a6e;
-}
-
-.show-hidden {
+/* Filter chips row (uncensored / show-hidden), replacing the old stacked
+   bare-checkbox lines. */
+.picker-filters {
   display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.fchip {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
   font-size: 0.75rem;
   color: var(--text2);
+  background: var(--surface2);
   cursor: pointer;
+  user-select: none;
+}
+.fchip:hover {
+  color: var(--text);
+}
+.fchip input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.fchip.on {
+  color: var(--text);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.fchip.uncensored-only.on {
+  color: #ff8a6e;
+  border-color: #ff8a6e;
+  background: color-mix(in srgb, #ff8a6e 14%, transparent);
+}
+.fchip-n {
+  font-weight: 600;
+  opacity: 0.8;
 }
 
 .picker-list {

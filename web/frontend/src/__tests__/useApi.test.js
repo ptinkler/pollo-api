@@ -29,8 +29,6 @@ function mockErrorResponse(status) {
   })
 }
 
-// ── apiGet ──────────────────────────────────────────────────────────
-
 describe('apiGet', () => {
   it('fetches data from endpoint', async () => {
     mockFetch.mockReturnValueOnce(mockOkResponse({ result: 'ok' }))
@@ -67,8 +65,6 @@ describe('apiGet', () => {
   })
 })
 
-// ── apiPost ─────────────────────────────────────────────────────────
-
 describe('apiPost', () => {
   it('posts data with JSON content type', async () => {
     mockFetch.mockReturnValueOnce(mockOkResponse({ created: true }))
@@ -84,9 +80,13 @@ describe('apiPost', () => {
     mockFetch.mockReturnValueOnce(mockErrorResponse(400))
     await expect(apiPost('/api/thing', {})).rejects.toThrow('error')
   })
-})
 
-// ── apiPut ──────────────────────────────────────────────────────────
+  it('does NOT retry on 500 (writes are not idempotent — no blind re-generation)', async () => {
+    mockFetch.mockReturnValue(mockErrorResponse(500))
+    await expect(apiPost('/api/thing', {})).rejects.toThrow()
+    expect(mockFetch).toHaveBeenCalledTimes(1) // one attempt, no retry
+  })
+})
 
 describe('apiPut', () => {
   it('sends PUT request', async () => {
@@ -96,8 +96,6 @@ describe('apiPut', () => {
     expect(mockFetch.mock.calls[0][1].method).toBe('PUT')
   })
 })
-
-// ── apiDelete ───────────────────────────────────────────────────────
 
 describe('apiDelete', () => {
   it('sends DELETE request', async () => {

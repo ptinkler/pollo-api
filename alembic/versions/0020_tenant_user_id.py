@@ -62,6 +62,8 @@ def upgrade() -> None:
     insp = sa.inspect(bind)
     admin_id = _admin_id(bind)
     for table in TENANT_TABLES:
+        if not insp.has_table(table):  # legacy generation tables were removed
+            continue
         cols = {c["name"] for c in insp.get_columns(table)}
         if "user_id" not in cols:
             with op.batch_alter_table(table) as batch_op:
@@ -72,7 +74,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    insp = sa.inspect(op.get_bind())
     for table in TENANT_TABLES:
+        if not insp.has_table(table):
+            continue
         with op.batch_alter_table(table) as batch_op:
             batch_op.drop_index(f"ix_{table}_user_id")
             batch_op.drop_column("user_id")
