@@ -187,7 +187,6 @@ export function useStudio({ models, settings, showToast }) {
 
   const polling = useMessagePolling({ messages, streamingId, replace: replaceMessage, onFinished: () => loadLists() })
 
-  // ── Loading ────────────────────────────────────────────────────────────
   async function loadModels() {
     modelsLoading.value = true
     try {
@@ -289,7 +288,7 @@ export function useStudio({ models, settings, showToast }) {
     }
   }
 
-  // ── Sending (same streamed-turn protocol as ChatView) ────────────────────
+  // Sending (same streamed-turn protocol as ChatView)
   const TURN_EVENTS = {
     start(ev, tempUser) {
       if (ev.user_message) {
@@ -387,7 +386,6 @@ export function useStudio({ models, settings, showToast }) {
     await runTurn(sendChatMessage, id, { ...turnSettings(), content, attachments: sent.map(a => a.file) }, tempUser)
   }
 
-  // ── Message actions ──────────────────────────────────────────────────────
   async function retry(msg) {
     const i = messageIndex(msg.id)
     if (sending.value || i === -1) return
@@ -522,7 +520,6 @@ export function useStudio({ models, settings, showToast }) {
     if (target) mode.value = target
   }
 
-  // ── Thread management ────────────────────────────────────────────────────
   async function toggleFav(t) {
     const next = !t.pinned
     try {
@@ -563,7 +560,6 @@ export function useStudio({ models, settings, showToast }) {
     }
   }
 
-  // ── Space management ─────────────────────────────────────────────────────
   async function addSpace() {
     const name = prompt('New space name')
     if (!name?.trim()) return

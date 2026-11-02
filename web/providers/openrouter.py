@@ -148,9 +148,6 @@ def get_credits() -> dict[str, float]:
     return {"total_credits": total, "total_usage": used, "remaining": round(total - used, 4)}
 
 
-# ── Model catalogues ────────────────────────────────────────────────
-
-
 def list_text_models() -> list[dict[str, Any]]:
     data = _get("/models", {"output_modalities": "text"}).get("data", [])
     models = []
@@ -240,9 +237,6 @@ def list_video_models() -> list[dict[str, Any]]:
     return models
 
 
-# ── Text ────────────────────────────────────────────────────────────
-
-
 def stream_chat(
     model: str,
     messages: list[dict],
@@ -283,9 +277,6 @@ def stream_chat(
             _raise_for_response(resp)
         chunks = sse.chat_chunks(resp.iter_lines(), OpenRouterError, max_seconds, should_stop)
         yield from request_log.chat_reply(chunks, outcome)
-
-
-# ── Image ───────────────────────────────────────────────────────────
 
 
 def generate_image(
@@ -425,9 +416,6 @@ def generate_image_chat(
         said = (message.get("content") or "").strip()
         raise OpenRouterError("The image model returned no image" + (f": {said[:300]}" if said else ""))
     return images, (data.get("usage") or {}).get("cost")
-
-
-# ── Video ───────────────────────────────────────────────────────────
 
 
 def submit_video(

@@ -36,9 +36,6 @@ def _bool_env(name: str, default: bool) -> bool:
     return os.getenv(name, str(default)).lower() in ("1", "true", "yes")
 
 
-# ── Aspect ratio from image dimensions (legacy local-file path) ──────
-
-
 def _image_dimensions(image_path) -> tuple[int, int]:
     from PIL import Image  # local import: only the CLI-era local-file path needs it
 

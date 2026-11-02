@@ -43,7 +43,6 @@ const current = computed(() =>
 )
 const title = computed(() => `${editingId.value == null ? 'New' : 'Edit'} ${isGroup.value ? 'group' : 'snippet'}`)
 
-// ── Group members ────────────────────────────────────────────────────
 const snippetById = computed(() => new Map(props.instructions.map(s => [s.id, s])))
 const members = computed(() => memberIds.value.map(id => snippetById.value.get(id)).filter(Boolean))
 const addable = computed(() => {
@@ -60,7 +59,6 @@ function removeMember(s) {
   memberIds.value = memberIds.value.filter(id => id !== s.id)
 }
 
-// ── Editing ──────────────────────────────────────────────────────────
 const fieldsDirty = computed(() => {
   const cur = current.value
   if (!cur) return !!(name.value.trim() || content.value.trim() || memberIds.value.length)

@@ -83,7 +83,6 @@ describe('ModelPicker favourites', () => {
   })
 })
 
-// ── ChatMessage user actions ────────────────────────────────────────
 import ChatMessage from '../components/chat/ChatMessage.vue'
 
 describe('ChatMessage user actions', () => {

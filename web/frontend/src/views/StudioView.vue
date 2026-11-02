@@ -258,7 +258,6 @@ async function deleteSpaceView(space) {
   if (activeSpace.value?.id === space.id) goThread()
 }
 
-// ── Theme (System / Light / Dark) ────────────────────────────────────────
 const THEME_KEY = 'studio.theme'
 const readTheme = () => {
   try {
@@ -281,7 +280,7 @@ function setTheme(t) {
   }
 }
 
-// ── Navigation: center panes are real routes so the back button works ──────
+// Navigation: center panes are real routes so the back button works
 let pendingKind = 'chat' // the kind a brand-new thread (/) opens on
 function goThread() {
   router.push(active.value ? `/${active.value}` : '/')

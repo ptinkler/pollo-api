@@ -42,7 +42,7 @@ const visibleModels = computed(() =>
   ),
 )
 
-// ── Provider tabs: Pollo ("pollo/…", billed in Pollo credits), Venice
+// Provider tabs: Pollo ("pollo/…", billed in Pollo credits), Venice
 // ("venice/…", billed to the Venice account) and OpenRouter. Only shown when
 // the catalogue has more than one; each tab only when it has models.
 const ALL_PROVIDERS = {

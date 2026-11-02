@@ -29,8 +29,6 @@ function mockErrorResponse(status) {
   })
 }
 
-// ── apiGet ──────────────────────────────────────────────────────────
-
 describe('apiGet', () => {
   it('fetches data from endpoint', async () => {
     mockFetch.mockReturnValueOnce(mockOkResponse({ result: 'ok' }))
@@ -67,8 +65,6 @@ describe('apiGet', () => {
   })
 })
 
-// ── apiPost ─────────────────────────────────────────────────────────
-
 describe('apiPost', () => {
   it('posts data with JSON content type', async () => {
     mockFetch.mockReturnValueOnce(mockOkResponse({ created: true }))
@@ -92,8 +88,6 @@ describe('apiPost', () => {
   })
 })
 
-// ── apiPut ──────────────────────────────────────────────────────────
-
 describe('apiPut', () => {
   it('sends PUT request', async () => {
     mockFetch.mockReturnValueOnce(mockOkResponse({ updated: true }))
@@ -102,8 +96,6 @@ describe('apiPut', () => {
     expect(mockFetch.mock.calls[0][1].method).toBe('PUT')
   })
 })
-
-// ── apiDelete ───────────────────────────────────────────────────────
 
 describe('apiDelete', () => {
   it('sends DELETE request', async () => {

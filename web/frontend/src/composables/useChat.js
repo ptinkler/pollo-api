@@ -3,7 +3,6 @@ import { useAuth } from './useAuth'
 
 const enc = encodeURIComponent
 
-// ── REST ─────────────────────────────────────────────────────────────
 export const fetchChatStatus = () => apiGet('/api/chat/status')
 export const fetchChatModels = (refresh = false) => apiGet(`/api/chat/models${refresh ? '?refresh=true' : ''}`)
 export const fetchOpenRouterCredits = () => apiGet('/api/chat/credits')
@@ -81,8 +80,6 @@ export const uploadChatAttachment = (convId, file) =>
 export const chatMediaUrl = (convId, file) => `/api/chat/media/${enc(convId)}/${enc(file)}`
 // A chat image scaled down for showing in the chat (the full file is for the lightbox)
 export const chatMediaPreviewUrl = (convId, file) => `${chatMediaUrl(convId, file)}/preview`
-
-// ── Streaming turns ──────────────────────────────────────────────────
 
 /**
  * POST a turn and feed each SSE event to `onEvent`. Resolves when the

@@ -298,6 +298,14 @@ class TestRoutes:
         assert client.post("/api/chat/import/chatgpt", json={"file": "nope.zip"}).status_code == 404
         assert client.post("/api/chat/import/chatgpt", json={"file": "../x.zip"}).status_code == 400
 
+    def test_another_users_export_is_not_importable(self, imp, client, story_zip, tmp_path):
+        """The imports folder is per-tenant, so a user can't list or import an
+        export another user uploaded (even knowing its filename)."""
+        (tmp_path / "imports" / "other-user").mkdir(parents=True)
+        story_zip.rename(tmp_path / "imports" / "other-user" / "export1.zip")
+        assert client.get("/api/chat/import/chatgpt").json()["files"] == []  # not listed
+        assert client.post("/api/chat/import/chatgpt", json={"file": "export1.zip"}).status_code == 404
+
 
 class TestUpload:
     @pytest.fixture()

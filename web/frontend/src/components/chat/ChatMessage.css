@@ -233,7 +233,6 @@
   border: 1px solid var(--border);
 }
 
-/* ── Markdown ─────────────────────────── */
 .markdown {
   line-height: 1.65;
   word-break: break-word;
@@ -348,7 +347,6 @@
   animation-delay: 0.4s;
 }
 
-/* ── Media ────────────────────────────── */
 .media-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));

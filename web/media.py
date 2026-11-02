@@ -96,9 +96,6 @@ def _mtime_iso(path: Path) -> str | None:
         return None
 
 
-# ── Locating items ──────────────────────────────────────────────────
-
-
 def resolve(media_id: str) -> tuple[str, Path, dict[str, str]]:
     """(origin, file path, location parts) for an item id; 400/404 if it's
     malformed or gone."""
@@ -125,9 +122,6 @@ def resolve(media_id: str) -> tuple[str, Path, dict[str, str]]:
     if not path.is_file():
         raise HTTPException(404, "Media not found")
     return origin, path, parts
-
-
-# ── Thumbnails ──────────────────────────────────────────────────────
 
 
 def _thumb_url(media_id: str) -> str:
@@ -197,9 +191,6 @@ async def api_media_thumb(media_id: str):
     """A library item's thumbnail (see thumb_response)."""
     _, path, _ = await anyio.to_thread.run_sync(resolve, media_id)
     return await thumb_response(path)
-
-
-# ── Listing ─────────────────────────────────────────────────────────
 
 
 def _library_items() -> list[dict[str, Any]]:
@@ -406,9 +397,6 @@ async def api_upload_media(file: UploadFile = File(...)):
     return next(i for i in _library_items() if i["name"] == name)
 
 
-# ── Deleting ────────────────────────────────────────────────────────
-
-
 @router.delete("/{media_id:path}")
 def api_delete_media(media_id: str):
     """Delete an item's file — and what records it: a generation's job, or
@@ -431,8 +419,6 @@ def api_delete_media(media_id: str):
     _invalidate_list()
     return {"deleted": media_id}
 
-
-# ── Clearing blocked generations ────────────────────────────────────
 
 # Which saved images are solid black, per file version, kept on disk: the
 # Media page asks on every load, and decoding every chat image again after
@@ -539,9 +525,6 @@ def api_clear_blocked():
             db.update_chat_message(msg_id, media=[i for i in msg.media if i.get("id") not in ids])
     _invalidate_list()
     return {"cleared": len(found)}
-
-
-# ── Using an item elsewhere ─────────────────────────────────────────
 
 
 class ImportMedia(BaseModel):

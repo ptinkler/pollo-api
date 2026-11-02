@@ -35,9 +35,6 @@ MAX_IMAGES = 6  # stored per character
 REF_PREFIX = "char:"
 
 
-# ── Storage ─────────────────────────────────────────────────────────
-
-
 def char_dir(character_id: int) -> Path:
     # Read config at call time so tests can redirect ROOT_DIR
     return config.ROOT_DIR / "characters" / str(character_id)
@@ -55,9 +52,6 @@ def ref_path(ref: str) -> Path | None:
     if not cid.isdigit() or not file or Path(file).name != file or file.startswith("."):
         return None
     return char_dir(int(cid)) / file
-
-
-# ── Helpers for chat and generations ───────────────────────────────
 
 
 def load(ids: list[int] | None, db=None) -> list:
@@ -211,9 +205,6 @@ def _delete(character_id: int, db) -> None:
             db.update_conversation(conv.id, character_ids=[i for i in conv.character_ids if i != character_id])
 
 
-# ── Request models ──────────────────────────────────────────────────
-
-
 class CharacterIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(default="", max_length=4000)
@@ -229,9 +220,6 @@ class CharacterUpdate(BaseModel):
 class CopyFromChat(BaseModel):
     conversation_id: str
     file: str
-
-
-# ── Routes ──────────────────────────────────────────────────────────
 
 
 def _require_char(character_id: int):

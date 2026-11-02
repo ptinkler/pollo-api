@@ -175,9 +175,6 @@ def _data_url(path: Path) -> str:
     return f"data:{media_type};base64,{base64.b64encode(path.read_bytes()).decode()}"
 
 
-# ── Catalogue ───────────────────────────────────────────────────────
-
-
 def _fetch_models(kind: str) -> list[dict]:
     return [
         m
@@ -525,9 +522,6 @@ def get_balances() -> dict[str, float | None]:
     return {"usd": _balance["usd"], "credits": float(credits) if credits is not None else None}
 
 
-# ── Text ────────────────────────────────────────────────────────────
-
-
 def stream_chat(
     model_id: str,
     messages: list[dict],
@@ -592,9 +586,6 @@ def _chat_cost(model_id: str, usage: dict, top_level_cost=None) -> float | None:
         + (usage.get("completion_tokens") or 0) * info["completion_price"],
         6,
     )
-
-
-# ── Image ───────────────────────────────────────────────────────────
 
 
 def _check_violation(resp: httpx.Response) -> None:
@@ -665,8 +656,6 @@ def _new_image(info: dict, prompt: str, size: dict) -> tuple[list[tuple[bytes, s
     key, pricing, default_res = info["_pricing"]
     return images, _image_price(pricing, key, size.get("resolution"), default_res)
 
-
-# ── Video ───────────────────────────────────────────────────────────
 
 MAX_VIDEO_REFS = 30
 QUOTED_FIELDS = ("model", "duration", "aspect_ratio", "resolution", "audio", "upscale_factor")

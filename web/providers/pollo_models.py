@@ -213,7 +213,7 @@ MODEL_INFO = {
         "legacy": True,
         "legacy_only": True,  # its v1 endpoint isn't enabled for API access — offered in both modes
     },
-    # ── v1 API (current — https://docs.pollo.ai) ─────────────────────
+    # v1 API (current — https://docs.pollo.ai)
     "pollo20v1": {
         "label": "Pollo 2.0",
         "type": "img2vid",

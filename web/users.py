@@ -93,9 +93,6 @@ def resolve_current_user(user_cookie: str | None):
     return current_user(user_cookie)
 
 
-# ── FastAPI dependencies ─────────────────────────────────────────────
-
-
 def current_user_dep(user_session: str | None = Cookie(None)):
     """The signed-in User for this request, or None."""
     return resolve_current_user(user_session)

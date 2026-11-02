@@ -39,7 +39,7 @@ function toggleSpace(id) {
   openSpaces.value = new Set(s)
 }
 
-// ── Inline rename (no modal / prompt) ──────────────────────────────────
+// Inline rename (no modal / prompt)
 const renamingId = ref(null)
 const renameText = ref('')
 const vFocusSelect = { mounted: el => (el.focus(), el.select()) }

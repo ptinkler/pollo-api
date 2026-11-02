@@ -6,8 +6,6 @@ from .models import ChatConversation, ChatInstruction, ChatInstructionGroup, Cha
 
 
 class InstructionMixin:
-    # ── Instruction snippets ─────────────────────────────────────────
-
     def list_instructions(self) -> list[ChatInstruction]:
         with self._session() as session:
             items = session.query(ChatInstruction).order_by(ChatInstruction.name).all()
@@ -77,8 +75,6 @@ class InstructionMixin:
             session.commit()
             return True
 
-    # ── Instruction groups ───────────────────────────────────────────
-
     def list_instruction_groups(self) -> list[ChatInstructionGroup]:
         with self._session() as session:
             items = session.query(ChatInstructionGroup).order_by(ChatInstructionGroup.name).all()
@@ -142,7 +138,6 @@ class InstructionMixin:
             session.commit()
             return True
 
-    # ── Per-user defaults ─────────────────────────────────────────────
     # One ChatSettings row per user. The ORM tenant filter scopes the query to
     # the current user, so each person has their own defaults (the admin keeps
     # the pre-login global row, backfilled to them in 0020).
@@ -170,8 +165,6 @@ class InstructionMixin:
             session.refresh(item)
             session.expunge(item)
             return item
-
-    # ── Spaces ───────────────────────────────────────────────────────
 
     def list_spaces(self) -> list[ChatSpace]:
         with self._session() as session:

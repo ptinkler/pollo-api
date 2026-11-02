@@ -20,7 +20,6 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# ── Bootstrap ───────────────────────────────────────────────────────
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 WEB_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(ROOT_DIR))
@@ -31,8 +30,6 @@ from web.core.get_task import get_credit_balance
 from web.core.metadata import get_db
 
 from . import characters, keyctx, media, vpn
-
-# ── Authentication ───────────────────────────────────────────────────
 from .auth import USER_COOKIE, make_user_session
 from .chat import router as chat_router
 from .chat import startup_resume_chat
@@ -157,15 +154,10 @@ class UserContextMiddleware:
 app.add_middleware(UserContextMiddleware)
 
 
-# ── Pydantic Models ─────────────────────────────────────────────────
-
-
 class LoginRequest(BaseModel):
     email: str
     password: str
 
-
-# ── Auth Routes ─────────────────────────────────────────────────────
 
 COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
 
@@ -306,9 +298,6 @@ _recovering_lock = threading.Lock()
 IMMUTABLE_CACHE = {"Cache-Control": "public, max-age=31536000, immutable"}
 
 
-# ── Usage / Credit tracking ─────────────────────────────────────────
-
-
 @app.get("/api/usage/balance")
 def api_usage_balance(_api_key: str = Depends(require_user)):
     """Fetch current credit balance from the Pollo API."""
@@ -323,7 +312,6 @@ def api_usage_balance(_api_key: str = Depends(require_user)):
     return balance
 
 
-# ── Chat mode (OpenRouter) — see web/chat.py ─────────────────────────
 # Must be registered before the SPA catch-all below.
 from .dev_login import router as dev_login_router  # noqa: E402
 from .oauth_routes import router as oauth_router  # noqa: E402
@@ -339,7 +327,6 @@ app.include_router(media.router)
 app.include_router(vpn.router)
 
 
-# ── Serve Vue frontend (production build) ────────────────────────────
 STATIC_DIR = WEB_DIR / "static"
 
 

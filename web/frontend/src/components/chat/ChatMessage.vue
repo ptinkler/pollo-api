@@ -159,7 +159,7 @@ const pinTitle = item =>
 
 const useText = mode => emit('use-text', { text: replyText(), mode })
 
-// ── Branches: other versions of this turn (from edits/retries) ──
+// Branches: other versions of this turn (from edits/retries)
 const siblings = computed(() => props.message.siblings || [])
 const branchIndex = computed(() => siblings.value.indexOf(props.message.id))
 function goBranch(step) {
@@ -167,7 +167,6 @@ function goBranch(step) {
   if (id != null) emit('branch', id)
 }
 
-// ── Inline edit (user messages) ──
 const editing = ref(false)
 const editText = ref('')
 const editBox = ref(null)

@@ -5,8 +5,6 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 
-// ── ToastContainer ──────────────────────────────────────────────────
-
 import ToastContainer from '../components/ToastContainer.vue'
 
 describe('ToastContainer', () => {
@@ -55,8 +53,6 @@ describe('ToastContainer', () => {
     expect(icons[2].text()).toBe('ℹ')
   })
 })
-
-// ── LengthSlider ────────────────────────────────────────────────────
 
 import LengthSlider from '../components/form/LengthSlider.vue'
 
@@ -107,8 +103,6 @@ describe('LengthSlider', () => {
   })
 })
 
-// ── RatioPicker ─────────────────────────────────────────────────────
-
 import RatioPicker from '../components/form/RatioPicker.vue'
 
 describe('RatioPicker', () => {
@@ -143,8 +137,6 @@ describe('RatioPicker', () => {
     expect(wrapper.text()).toContain('16:9')
   })
 })
-
-// ── ToggleSwitch ────────────────────────────────────────────────────
 
 import ToggleSwitch from '../components/form/ToggleSwitch.vue'
 

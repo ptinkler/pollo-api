@@ -78,9 +78,6 @@ def _import_dir() -> Path:
     return base / uid if uid else base
 
 
-# ── Reading the export ──────────────────────────────────────────────
-
-
 @dataclass
 class _Turn:
     """A prompt and the replies to it (no prompt: replies before the first one)."""
@@ -227,9 +224,6 @@ def _ext(raw: bytes, mime: str | None) -> str:
     if raw[4:8] == b"ftyp":
         return ".mp4"
     return ".png"
-
-
-# ── Importing ───────────────────────────────────────────────────────
 
 
 class _ChatMedia:
@@ -432,8 +426,6 @@ def _warm_thumbnails(paths: list[Path]) -> None:
             media.make_thumb(path, size)
 
 
-# ── Routes ──────────────────────────────────────────────────────────
-
 # Per-tenant import progress, keyed by user id (so one user's import status and
 # single-flight don't leak into or block another's).
 _jobs: dict[str, dict[str, Any]] = {}
@@ -499,7 +491,6 @@ def _run_job(path: Path, job: dict[str, Any]) -> None:
         job.update(state="error", error=str(e))
 
 
-# ── Uploading an export ─────────────────────────────────────────────
 # In chunks: start an upload, send each chunk with its offset (resending one
 # replaces what was there from that offset), and the last one turns the
 # upload into <name>.zip in the imports folder.

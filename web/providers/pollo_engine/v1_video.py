@@ -282,8 +282,8 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "MAX_REFS": 22,
         "DEFAULT_RATIO": "adaptive",
     },
-    # ── Kling video (builder reuses the generic payload, then remaps the
-    # resolution tier to a mode and applies end-frame rules) ──
+    # Kling video: reuses the generic payload, then remaps the resolution
+    # tier to a mode and applies end-frame rules
     "klingv21v1": {
         "V1_MODEL": "kling-v2-1",
         "VALID_RESOLUTIONS": ("std", "pro"),
@@ -333,7 +333,6 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "RESOLUTION_IS_MODE": True,
         "builder": "kling",
     },
-    # ── Bespoke V1 video shapes ──
     "seedance25extendv1": {
         "V1_PROVIDER": "bytedance",
         "V1_MODEL": "seedance-2-5",
