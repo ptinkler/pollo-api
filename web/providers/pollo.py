@@ -27,6 +27,7 @@ from PIL import Image
 from web.core.get_task import get_task_status
 
 from .. import image_hosts, keyctx, request_log
+from . import pollo_estimate
 from .openrouter import OpenRouterError
 from .pollo_engine import (
     ERROR_STATUSES,
@@ -296,6 +297,51 @@ def submit_video(
     )
     task_id = _submit(generator)
     return {"id": JOB_PREFIX + task_id, "params": _sent_params(generator)}
+
+
+def estimate_cost(
+    model_id: str,
+    kind: str,
+    duration: int | None = None,
+    aspect_ratio: str | None = None,
+    resolution: str | None = None,
+    generate_audio: bool | None = None,
+    n_images: int = 0,
+) -> dict | None:
+    """Pollo's own price for a request ({"credits", "full_credits"}), or None if
+    it can't say (a ref2video model has no estimate endpoint; errors). Free, and
+    nothing is uploaded: stand-in URLs are priced the same as real ones."""
+    try:
+        if kind == "image":
+            generators = _image_generators()
+            key = _generator_key(model_id, generators)
+            generator = get_image_generator(
+                key,
+                api_key=keyctx.provider_key("pollo"),
+                project="chat",
+                prompt="estimate",
+                image_url=None,
+                aspect_ratio=aspect_ratio if aspect_ratio in generators[key].VALID_RATIOS else None,
+                resolution=resolution,
+                images=[pollo_estimate.PLACEHOLDERS["image"]] * n_images or None,
+            )
+        else:
+            key = _generator_key(model_id, _video_generators())
+            ratios = MODEL_INFO.get(key, {}).get("ratios") or list(_video_generators()[key].VALID_RATIOS)
+            generator = get_video_generator(
+                key,
+                api_key=keyctx.provider_key("pollo"),
+                project="chat",
+                prompt="estimate",
+                image_url=pollo_estimate.PLACEHOLDERS["image"] if n_images else None,
+                aspect_ratio=aspect_ratio if aspect_ratio in ratios else None,
+                resolution=resolution,
+                length=duration,
+                generate_audio=generate_audio,
+            )
+        return pollo_estimate.estimate(generator)
+    except Exception:  # noqa: BLE001 — an estimate is a nicety; never fail the composer over it
+        return None
 
 
 def _sent_params(generator) -> dict[str, Any]:

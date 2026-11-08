@@ -87,6 +87,16 @@ class TurnSettings(BaseModel):
     ref_choices: RefChoices = RefChoices()
 
 
+class EstimateRequest(BaseModel):
+    model: str
+    kind: str  # image | video
+    duration: int | None = None
+    aspect_ratio: str | None = None
+    resolution: str | None = None
+    generate_audio: bool | None = None
+    n_images: int = 0
+
+
 class SendMessage(TurnSettings):
     content: str = ""
     attachments: list[str] = []  # filenames returned by the attachments endpoint

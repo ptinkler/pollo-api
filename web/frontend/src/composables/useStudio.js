@@ -17,6 +17,7 @@ import {
   editChatMessage,
   regenerateChatMedia,
   enhanceChatPrompt,
+  estimateChatCost,
   pinChatMedia,
   favouriteChatMedia,
   fetchChatLibrary,
@@ -545,6 +546,40 @@ export function useStudio({ models, settings, showToast }) {
     const files = [...(p.refs || []), p.first_frame, p.last_frame].filter(f => f && !f.startsWith('char:'))
     for (const f of new Set(files)) addChatImage(f, item.conversation_id)
   }
+  // Pollo's own price for what's set up in the composer (Pollo models only)
+  const estimate = ref(null)
+  let estimateTimer = null
+  let estimateSeq = 0
+  async function refreshEstimate() {
+    const kind = mode.value
+    const model = kind === 'image' || kind === 'video' ? selected[kind] : null
+    const seq = ++estimateSeq
+    if (!model?.startsWith('pollo/')) {
+      estimate.value = null
+      return
+    }
+    const t = turnSettings()
+    const o = kind === 'video' ? t.video_options : t.image_options
+    try {
+      const r = await estimateChatCost({
+        model,
+        kind,
+        ...o,
+        n_images: attachments.value.filter(a => !a.video).length,
+      })
+      if (seq === estimateSeq) estimate.value = r.estimate
+    } catch {
+      if (seq === estimateSeq) estimate.value = null
+    }
+  }
+  watch(
+    () => JSON.stringify([mode.value, selected.image, selected.video, turnSettings(), attachments.value.length]),
+    () => {
+      clearTimeout(estimateTimer)
+      estimateTimer = setTimeout(refreshEstimate, 400)
+    },
+    { immediate: true },
+  )
   // Enhance button: rewrite the draft with the text model. Only on request —
   // sending never alters the prompt.
   const enhancing = ref(false)
@@ -709,6 +744,7 @@ export function useStudio({ models, settings, showToast }) {
     messages,
     loading,
     sending,
+    estimate,
     lane,
     streamingId,
     draft,

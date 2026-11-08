@@ -71,6 +71,7 @@ const {
   sending,
   draft,
   lane,
+  estimate,
   lightbox,
   activeKind,
   favourites,
@@ -584,6 +585,7 @@ onMounted(() => {
           :attachments="attachments"
           :uploading="uploading"
           :enhancing="enhancing"
+          :estimate="estimate"
           :video-input="!!settings.videoInfo.value?.video_input"
           @send="onGenerate"
           @files="addFiles"

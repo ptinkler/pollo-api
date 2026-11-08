@@ -3557,3 +3557,26 @@ class TestEnhancePrompt:
         monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: iter([]))
         r = client.post("/api/chat/enhance-prompt", json={"prompt": "a cat", "model": "x/y"})
         assert r.status_code == 502
+
+
+class TestEstimate:
+    def test_pollo_estimate_asks_pollo_and_others_get_none(self, client, provider_keys, monkeypatch):
+        from web.providers import pollo_estimate
+
+        provider_keys["pollo"] = "pk-test"
+        seen = {}
+
+        def fake_ask(url, payload, api_key):
+            seen.update(url=url, payload=payload, key=api_key)
+            return {"credits": 8, "full_credits": 10}, True
+
+        monkeypatch.setattr(pollo_estimate, "_ask", fake_ask)
+        pollo_estimate.clear_cache()
+        body = {"model": "pollo/seedance20fastv1", "kind": "video", "duration": 5, "resolution": "480p"}
+        got = client.post("/api/chat/estimate", json=body).json()
+        assert got == {"estimate": {"credits": 8, "full_credits": 10}}
+        assert seen["url"].endswith("/estimate") and seen["key"] == "pk-test"
+        # a Ref model (legacy ref2video) has no estimate endpoint; other providers aren't priced here
+        ref = client.post("/api/chat/estimate", json={**body, "model": "pollo/seedancereffast"}).json()
+        assert ref == {"estimate": None}
+        assert client.post("/api/chat/estimate", json={**body, "model": "venice/x"}).json() == {"estimate": None}

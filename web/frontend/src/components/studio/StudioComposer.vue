@@ -13,6 +13,8 @@ const props = defineProps({
   attachments: { type: Array, default: () => [] },
   uploading: { type: Boolean, default: false },
   enhancing: { type: Boolean, default: false },
+  // Pollo's price for the current setup: { credits, full_credits } or null
+  estimate: { type: Object, default: null },
   // The selected video model takes a source video (Recast / motion models)
   videoInput: { type: Boolean, default: false },
 })
@@ -158,6 +160,16 @@ function onDrop(e) {
           {{ enhancing ? '…' : '✨' }}
         </button>
         <span class="note">{{ uploading ? 'Uploading…' : hint }}</span>
+        <span
+          v-if="estimate && mediaMode"
+          class="est"
+          :title="
+            estimate.full_credits > estimate.credits
+              ? `Pollo's estimate (${estimate.full_credits} before discount)`
+              : 'Pollo\'s estimate for these settings'
+          "
+          >≈ {{ estimate.credits }} cr</span
+        >
         <button class="sendbtn" :disabled="!canSend" @click="emit('send')">{{ sending ? 'Sending…' : 'Send' }}</button>
       </div>
     </div>
@@ -187,6 +199,11 @@ function onDrop(e) {
 .clearall:hover {
   color: var(--sdanger, #e5484d);
   border-color: var(--sdanger, #e5484d);
+}
+.est {
+  font-size: 12.5px;
+  color: var(--saccent);
+  white-space: nowrap;
 }
 .peek {
   position: fixed;

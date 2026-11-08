@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from web.core.metadata import get_db, iso
 
-from ..providers import openrouter
+from ..providers import openrouter, pollo
 from ..uploads import safe_filename
 from . import polling
 from .catalogue import _fit_video_params
@@ -45,7 +45,7 @@ from .helpers import (
     _require_openrouter,
     _saved_media,
 )
-from .models import EditMessage, EnhancePrompt, RetryMessage, SendMessage, TurnSettings
+from .models import EditMessage, EnhancePrompt, EstimateRequest, RetryMessage, SendMessage, TurnSettings
 from .turn import Turn
 from .workers import _ctx_thread, _with_owner_keys
 
@@ -63,6 +63,28 @@ def api_enhance_prompt(data: EnhancePrompt):
     except (openrouter.OpenRouterError, ValueError) as e:
         raise HTTPException(502, str(e)) from e
     return {"prompt": prompt, "cost": cost}
+
+
+@router.post("/estimate")
+def api_estimate(data: EstimateRequest):
+    """What Pollo says a generation would cost (credits), for the composer's
+    price hint. {"estimate": null} for other providers or when Pollo can't say."""
+    if not pollo.is_pollo(data.model):
+        return {"estimate": None}
+    duration, ratio, resolution = data.duration, data.aspect_ratio, data.resolution
+    if data.kind == "video":
+        duration, ratio, resolution = _fit_video_params(data.model, duration, ratio, resolution)
+    return {
+        "estimate": pollo.estimate_cost(
+            data.model,
+            "video" if data.kind == "video" else "image",
+            duration,
+            ratio,
+            resolution,
+            data.generate_audio,
+            data.n_images,
+        )
+    }
 
 
 @router.post("/messages/{message_id}/cancel")
