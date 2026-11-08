@@ -346,7 +346,9 @@ MODEL_INFO = {
         },
     },
     # "type": "extend" continues a source video (video_url) instead of
-    # animating an image; picked from a video's "Extend" button
+    # animating an image. Selectable like Recast: the source video rides in on
+    # video_input (the chat's latest video, or an uploaded one) — no reference
+    # image. The user picks how many seconds to add (duration) and a resolution.
     "seedance25extendv1": {
         "label": "Seedance 2.5 Extend",
         "hidden": "Not enabled for API access on this key (403)",  # checked with real requests 2026-10-18
@@ -355,7 +357,14 @@ MODEL_INFO = {
         "resolutions": ["480p", "720p", "1080p"],
         "ratios": [],
         "options": ["generate_audio", "seed"],
+        "video_input": True,
     },
+    # lengths/resolutions fall back to the engine config (v1_video.py).
+    "pollov2extenderv1": {"label": "Pollo 2 Extender", "type": "extend", "options": [], "video_input": True},
+    "geminiomniextendv1": {"label": "Gemini Omni Extend", "type": "extend", "options": [], "video_input": True},
+    "flux3extendv1": {"label": "Flux 3 Extend", "type": "extend", "options": ["generate_audio"], "video_input": True},
+    "viduq2proextendv1": {"label": "Vidu Q2 Pro Extend", "type": "extend", "options": [], "video_input": True},
+    "viduq2turboextendv1": {"label": "Vidu Q2 Turbo Extend", "type": "extend", "options": [], "video_input": True},
     # "type": "recast" = Pollo Recast (wan-2-2-animate-mix): replaces the
     # subject in a source video with one reference image, keeping the motion.
     # A selectable model (unlike "extend"): the source video rides in on
@@ -433,6 +442,29 @@ MODEL_INFO = {
             "exclusive": ["file", "link"],
         },
     },
+    # --- Newer frontier models (added 2026-11). lengths/ratios/resolutions
+    # fall back to the engine config (v1_video.py), so they live in one place. ---
+    "sora2v1": {"label": "Sora 2", "type": "img2vid", "options": []},
+    "sora2prov1": {"label": "Sora 2 Pro", "type": "img2vid", "options": []},
+    "veo31v1": {"label": "Veo 3.1", "type": "img2vid", "options": ["generate_audio", "image_tail"]},
+    "veo31fastv1": {"label": "Veo 3.1 Fast", "type": "img2vid", "options": ["generate_audio", "image_tail"]},
+    "veo31litev1": {"label": "Veo 3.1 Lite", "type": "img2vid", "options": ["image_tail"]},
+    "hailuo23v1": {"label": "Hailuo 2.3", "type": "img2vid", "options": []},
+    "hailuo03v1": {"label": "Hailuo 03", "type": "img2vid", "options": ["image_tail"]},
+    "pollo26v1": {
+        "label": "Pollo 2.6",
+        "type": "img2vid",
+        "options": ["generate_audio", "web_search", "seed", "image_tail"],
+    },
+    "pollo26fastv1": {
+        "label": "Pollo 2.6 Fast",
+        "type": "img2vid",
+        "options": ["generate_audio", "web_search", "seed", "image_tail"],
+    },
+    "wan25v1": {"label": "Wan 2.5", "type": "img2vid", "options": ["generate_audio", "seed"]},
+    "wan26v1": {"label": "Wan 2.6", "type": "img2vid", "options": ["generate_audio", "seed"]},
+    "grokvideo15v1": {"label": "Grok Imagine Video 1.5", "type": "img2vid", "options": []},
+    "klingv4v1": {"label": "Kling 4.0", "type": "img2vid", "options": ["image_tail"]},
     "klingv21v1": {
         "label": "Kling 2.1",
         "type": "img2vid",
@@ -581,4 +613,17 @@ MODEL_INFO = {
         "ratios": ["1:1", "3:4", "4:3", "16:9", "9:16"],
         "options": [],
     },
+    # --- Newer frontier image models (added 2026-11). Ratios/resolutions live
+    # in the engine config (v1_image.py). ---
+    "nanobananaprov1": {"label": "Nano Banana Pro", "type": "image", "options": ["images"]},
+    "nanobanana21v1": {"label": "Nano Banana 2.1", "type": "image", "options": ["images"]},
+    "fluxkontextprov1": {"label": "Flux Kontext Pro", "type": "image", "options": ["images"]},
+    "fluxkontextmaxv1": {"label": "Flux Kontext Max", "type": "image", "options": ["images"]},
+    "flux2maxv1": {"label": "Flux 2 Max", "type": "image", "options": ["images"]},
+    "gptimage25v1": {"label": "GPT Image 2.5", "type": "image", "options": ["images"]},
+    "seedream45v1": {"label": "Seedream 4.5", "type": "image", "options": ["images"]},
+    "midjourneyv82v1": {"label": "Midjourney v8.2", "type": "image", "options": ["images"]},
+    "grokimage20v1": {"label": "Grok Imagine Image 2.0", "type": "image", "options": ["images"]},
+    "recraftv3v1": {"label": "Recraft v3", "type": "image", "options": []},
+    "ideogramv2turbov1": {"label": "Ideogram v2 Turbo", "type": "image", "options": []},
 }

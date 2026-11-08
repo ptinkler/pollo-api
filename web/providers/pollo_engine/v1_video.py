@@ -282,6 +282,126 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "MAX_REFS": 22,
         "DEFAULT_RATIO": "adaptive",
     },
+    # --- Newer frontier models (added 2026-11) ---
+    "sora2v1": {
+        "V1_PROVIDER": "openai",
+        "V1_MODEL": "sora-2",
+        "VALID_LENGTHS": (4, 8, 12, 16, 20),
+        "VALID_RESOLUTIONS": (),
+        "VALID_RATIOS": ("16:9", "9:16"),
+        "DEFAULT_LENGTH": 8,
+    },
+    "sora2prov1": {
+        "V1_PROVIDER": "openai",
+        "V1_MODEL": "sora-2-pro",
+        "VALID_LENGTHS": (4, 8, 12, 16, 20),
+        "VALID_RESOLUTIONS": ("720p", "1024p", "1080p"),
+        "VALID_RATIOS": ("16:9", "9:16"),
+        "DEFAULT_RESOLUTION": "720p",
+        "DEFAULT_LENGTH": 8,
+    },
+    "veo31v1": {
+        "V1_PROVIDER": "google",
+        "V1_MODEL": "veo-3-1",
+        "VALID_LENGTHS": (8,),
+        "VALID_RESOLUTIONS": ("720p", "1080p"),
+        "VALID_RATIOS": ("16:9", "9:16"),
+        "DEFAULT_RESOLUTION": "720p",
+        "DEFAULT_LENGTH": 8,
+        "HAS_GENERATE_AUDIO": True,
+        "HAS_IMAGE_TAIL": True,
+    },
+    "veo31fastv1": {
+        "V1_PROVIDER": "google",
+        "V1_MODEL": "veo-3-1-fast",
+        "VALID_LENGTHS": (4, 6, 8),
+        "VALID_RESOLUTIONS": ("720p", "1080p", "4K"),
+        "VALID_RATIOS": ("16:9", "9:16"),
+        "DEFAULT_RESOLUTION": "720p",
+        "DEFAULT_LENGTH": 8,
+        "HAS_GENERATE_AUDIO": True,
+        "HAS_IMAGE_TAIL": True,
+    },
+    "veo31litev1": {
+        "V1_PROVIDER": "google",
+        "V1_MODEL": "veo3-1-lite",
+        "VALID_LENGTHS": (4, 6, 8),
+        "VALID_RESOLUTIONS": ("720p", "1080p"),
+        "VALID_RATIOS": ("16:9", "9:16"),
+        "DEFAULT_RESOLUTION": "720p",
+        "DEFAULT_LENGTH": 8,
+        "HAS_IMAGE_TAIL": True,
+    },
+    "hailuo23v1": {
+        "V1_PROVIDER": "minimax",
+        "V1_MODEL": "hailuo-2-3",
+        "VALID_LENGTHS": (6, 10),
+        "VALID_RESOLUTIONS": ("768p", "1080p"),
+        "VALID_RATIOS": (),
+        "DEFAULT_RESOLUTION": "768p",
+        "DEFAULT_LENGTH": 6,
+    },
+    "hailuo03v1": {
+        "V1_PROVIDER": "minimax",
+        "V1_MODEL": "hailuo-03",
+        "VALID_LENGTHS": tuple(range(4, 16)),
+        "VALID_RESOLUTIONS": ("480p", "768p", "2K"),
+        "VALID_RATIOS": ("auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"),
+        "DEFAULT_RESOLUTION": "768p",
+        "HAS_IMAGE_TAIL": True,
+    },
+    "pollo26v1": {
+        "V1_PROVIDER": "pollo-ai",
+        "V1_MODEL": "pollo-v2-6",
+        "VALID_LENGTHS": tuple(range(4, 16)),
+        "VALID_RESOLUTIONS": ("480p", "720p", "1080p", "4K"),
+        "VALID_RATIOS": ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9"),
+        "DEFAULT_RESOLUTION": "480p",
+        "HAS_GENERATE_AUDIO": True,
+        "HAS_WEB_SEARCH": True,
+        "HAS_SEED": True,
+        "HAS_IMAGE_TAIL": True,
+    },
+    "pollo26fastv1": {
+        "V1_PROVIDER": "pollo-ai",
+        "V1_MODEL": "pollo-v2-6-fast",
+        "VALID_LENGTHS": tuple(range(4, 16)),
+        "VALID_RESOLUTIONS": ("480p", "720p"),
+        "VALID_RATIOS": ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9"),
+        "DEFAULT_RESOLUTION": "480p",
+        "HAS_GENERATE_AUDIO": True,
+        "HAS_WEB_SEARCH": True,
+        "HAS_SEED": True,
+        "HAS_IMAGE_TAIL": True,
+    },
+    "wan25v1": {
+        "V1_PROVIDER": "alibaba",
+        "V1_MODEL": "wan-v2-5",
+        "VALID_LENGTHS": (5, 10),
+        "VALID_RESOLUTIONS": ("480p", "720p", "1080p"),
+        "VALID_RATIOS": ("16:9", "1:1", "4:3", "3:4", "9:16"),
+        "DEFAULT_RESOLUTION": "720p",
+        "HAS_GENERATE_AUDIO": True,
+        "HAS_SEED": True,
+    },
+    "wan26v1": {
+        "V1_PROVIDER": "alibaba",
+        "V1_MODEL": "wan-v2-6",
+        "VALID_LENGTHS": (5, 10),
+        "VALID_RESOLUTIONS": ("720p", "1080p"),
+        "VALID_RATIOS": ("1:1", "4:3", "3:4", "16:9", "9:16"),
+        "DEFAULT_RESOLUTION": "720p",
+        "HAS_GENERATE_AUDIO": True,
+        "HAS_SEED": True,
+    },
+    "grokvideo15v1": {
+        "V1_PROVIDER": "xai",
+        "V1_MODEL": "grok-imagine-video-1-5",
+        "VALID_LENGTHS": tuple(range(1, 16)),
+        "VALID_RESOLUTIONS": ("480p", "720p", "1080p"),
+        "VALID_RATIOS": (),
+        "DEFAULT_RESOLUTION": "720p",
+    },
     # Kling video: reuses the generic payload, then remaps the resolution
     # tier to a mode and applies end-frame rules
     "klingv21v1": {
@@ -333,6 +453,15 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "RESOLUTION_IS_MODE": True,
         "builder": "kling",
     },
+    "klingv4v1": {
+        "V1_MODEL": "kling-v4",
+        "VALID_LENGTHS": tuple(range(3, 31)),
+        "VALID_RESOLUTIONS": ("720p", "1080p"),  # real resolutions, not std/pro tiers
+        "VALID_RATIOS": ("21:9", "16:9", "9:16", "1:1", "adaptive"),
+        "DEFAULT_RESOLUTION": "720p",
+        "HAS_IMAGE_TAIL": True,
+        "builder": "kling",
+    },
     "seedance25extendv1": {
         "V1_PROVIDER": "bytedance",
         "V1_MODEL": "seedance-2-5",
@@ -342,6 +471,56 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "DEFAULT_RESOLUTION": "480p",
         "HAS_SEED": True,
         "HAS_GENERATE_AUDIO": True,
+        "builder": "extend",
+    },
+    # Video-extend models (added 2026-11): continue a source video instead of
+    # animating an image. All take the `_extend_payload` shape (video + prompt +
+    # duration + resolution, plus generateAudio/seed where offered). Sora 2's and
+    # Runway's extend endpoints use a different request shape and are left out.
+    "pollov2extenderv1": {
+        "V1_PROVIDER": "pollo-ai",
+        "V1_MODEL": "pollo-v2-extender",
+        "endpoint": "video-extend",
+        "VALID_LENGTHS": (4, 5, 6, 7, 8, 9, 10),
+        "VALID_RESOLUTIONS": ("540p", "720p", "1080p"),
+        "DEFAULT_RESOLUTION": "720p",
+        "builder": "extend",
+    },
+    "geminiomniextendv1": {
+        "V1_PROVIDER": "google",
+        "V1_MODEL": "gemini-omni-1-1-flash",
+        "endpoint": "video-extend",
+        "VALID_LENGTHS": (4, 5, 6, 7, 8, 9, 10),
+        "VALID_RESOLUTIONS": ("360p", "720p", "1080p", "4K"),
+        "DEFAULT_RESOLUTION": "720p",
+        "builder": "extend",
+    },
+    "flux3extendv1": {
+        "V1_PROVIDER": "flux",
+        "V1_MODEL": "flux-3",
+        "endpoint": "video-extend",
+        "VALID_LENGTHS": (4, 5, 6, 7, 8, 9, 10),
+        "VALID_RESOLUTIONS": ("720p", "1080p"),
+        "DEFAULT_RESOLUTION": "720p",
+        "HAS_GENERATE_AUDIO": True,
+        "builder": "extend",
+    },
+    "viduq2proextendv1": {
+        "V1_PROVIDER": "vidu",
+        "V1_MODEL": "viduq2-pro",
+        "endpoint": "video-extend",
+        "VALID_LENGTHS": (4, 5, 6, 7, 8, 9, 10),
+        "VALID_RESOLUTIONS": ("540p", "720p", "1080p"),
+        "DEFAULT_RESOLUTION": "720p",
+        "builder": "extend",
+    },
+    "viduq2turboextendv1": {
+        "V1_PROVIDER": "vidu",
+        "V1_MODEL": "viduq2-turbo",
+        "endpoint": "video-extend",
+        "VALID_LENGTHS": (4, 5, 6, 7, 8, 9, 10),
+        "VALID_RESOLUTIONS": ("540p", "720p", "1080p"),
+        "DEFAULT_RESOLUTION": "720p",
         "builder": "extend",
     },
     "recastv1": {
@@ -454,8 +633,11 @@ def _generic_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: d
     elif not is_text_only:
         attrs["image"] = image_url
     attrs["duration"] = s["length"]
-    attrs["resolution"] = s["resolution"]
-    if refs or is_text_only or c["HAS_ASPECT_RATIO_ON_IMAGE"]:
+    if s["resolution"]:  # some models (Sora 2) have no resolution field
+        attrs["resolution"] = s["resolution"]
+    # Only send aspectRatio when the model actually offers one (a few, e.g.
+    # Hailuo 2.3, take none and derive it from the image).
+    if (refs or is_text_only or c["HAS_ASPECT_RATIO_ON_IMAGE"]) and c["VALID_RATIOS"]:
         attrs["aspectRatio"] = s["aspect_ratio"]
 
     has_refs = bool(refs)

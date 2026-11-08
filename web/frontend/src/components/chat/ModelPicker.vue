@@ -4,6 +4,7 @@ import { useDropdown } from '../../composables/useDropdown'
 import { useModelFavourites } from '../../composables/useModelFavourites'
 import { useShowHidden } from '../../composables/useShowHidden'
 import { useUncensoredOnly } from '../../composables/useUncensoredOnly'
+import { useModelFilters } from '../../composables/useModelFilters'
 import { chatImageModelTakesCharacters } from '../../composables/useCharacters'
 
 const props = defineProps({
@@ -42,9 +43,8 @@ const visibleModels = computed(() =>
   ),
 )
 
-// Provider tabs: Pollo ("pollo/…", billed in Pollo credits), Venice
-// ("venice/…", billed to the Venice account) and OpenRouter. Only shown when
-// the catalogue has more than one; each tab only when it has models.
+// Providers: Pollo ("pollo/…", billed in Pollo credits), Venice ("venice/…",
+// billed to the Venice account) and OpenRouter (everything else).
 const ALL_PROVIDERS = {
   pollo: { label: 'Pollo', title: 'Runs on your Pollo account (billed in Pollo credits)' },
   venice: { label: 'Venice', title: 'Runs on your Venice account (billed in Venice credit)' },
@@ -54,40 +54,87 @@ const providerOf = id => {
   const prefix = (id || '').split('/')[0]
   return prefix === 'pollo' || prefix === 'venice' ? prefix : 'openrouter'
 }
-const PROVIDERS = computed(() =>
-  Object.fromEntries(
-    Object.entries(ALL_PROVIDERS).filter(([id]) => visibleModels.value.some(m => providerOf(m.id) === id)),
-  ),
+
+// Capability-tag labels (mirrors web/providers/model_tags.py TAGS, same order).
+// The backend sends each model's `tags` slugs; these name the filter chips.
+const TAG_LABELS = {
+  img2vid: 'Image→Video',
+  text2vid: 'Text→Video',
+  ref2vid: 'References→Video',
+  first_last: 'First+Last frame',
+  video_edit: 'Video edit',
+  video_extend: 'Video extend',
+  motion: 'Motion / act',
+  lipsync: 'Lip sync',
+  upscale: 'Upscale',
+  audio: 'Makes audio',
+  text2img: 'Text→Image',
+  image_edit: 'Image edit',
+  tools: 'Image tools',
+  vision: 'Vision',
+  functions: 'Tools / functions',
+}
+
+const { filters, toggleProvider, toggleTag, clear: clearFilters, hasActive } = useModelFilters()
+
+// Provider facet: which providers the list spans, with counts. Chips are only
+// offered when more than one provider is present.
+const providerCounts = computed(() => {
+  const c = {}
+  for (const m of visibleModels.value) {
+    const p = providerOf(m.id)
+    c[p] = (c[p] || 0) + 1
+  }
+  return c
+})
+const providersPresent = computed(() => Object.keys(ALL_PROVIDERS).filter(id => providerCounts.value[id]))
+const showProviders = computed(() => providersPresent.value.length > 1)
+
+// Tag facet: the capability tags present across this kind's models, with counts.
+const tagCounts = computed(() => {
+  const c = {}
+  for (const m of visibleModels.value) for (const t of m.tags || []) c[t] = (c[t] || 0) + 1
+  return c
+})
+const tagsPresent = computed(() =>
+  Object.keys(TAG_LABELS)
+    .filter(s => tagCounts.value[s])
+    .map(s => ({ slug: s, label: TAG_LABELS[s], n: tagCounts.value[s] })),
 )
-const showTabs = computed(() => Object.keys(PROVIDERS.value).length > 1)
-const tab = ref(Object.keys(ALL_PROVIDERS)[0])
+
+const selProviders = computed(() => filters[props.kind].providers)
+const selTags = computed(() => filters[props.kind].tags)
+// Something other than search/show-hidden is narrowing the list
+const anyFilter = computed(() => hasActive(props.kind) || uncensoredOnly.value)
+
+// Facets AND together (provider ∧ tag); within the tag facet a model needs
+// only one of the selected tags. The current pick always stays.
+function passesFilters(m) {
+  if (m.id === props.modelValue) return true
+  if (selProviders.value.length && !selProviders.value.includes(providerOf(m.id))) return false
+  if (selTags.value.length && !(m.tags || []).some(t => selTags.value.includes(t))) return false
+  return true
+}
 
 const searched = computed(() => {
+  const faceted = visibleModels.value.filter(passesFilters)
   const q = query.value.trim().toLowerCase()
-  return q
-    ? visibleModels.value.filter(m => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
-    : visibleModels.value
+  return q ? faceted.filter(m => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)) : faceted
 })
-const matches = computed(() =>
-  showTabs.value ? searched.value.filter(m => providerOf(m.id) === tab.value) : searched.value,
-)
-const tabCounts = computed(() => {
-  const counts = Object.fromEntries(Object.keys(ALL_PROVIDERS).map(id => [id, 0]))
-  for (const m of searched.value) counts[providerOf(m.id)]++
-  return counts
-})
-// Where a search that found nothing here does find something
-const otherTab = computed(
-  () => Object.keys(PROVIDERS.value).find(id => id !== tab.value && tabCounts.value[id]) || null,
-)
+
+function clearAll() {
+  clearFilters(props.kind)
+  uncensoredOnly.value = false
+  searchInput.value?.focus()
+}
 
 // Favourites keep the order they were starred in; models that have left
 // the catalogue are skipped rather than shown broken
 const favouriteModels = computed(() => {
-  const byId = new Map(matches.value.map(m => [m.id, m]))
+  const byId = new Map(searched.value.map(m => [m.id, m]))
   return (favourites[props.kind] || []).map(id => byId.get(id)).filter(Boolean)
 })
-const otherModels = computed(() => matches.value.filter(m => !isFavourite(props.kind, m.id)).slice(0, 200))
+const otherModels = computed(() => searched.value.filter(m => !isFavourite(props.kind, m.id)).slice(0, 200))
 const filtered = computed(() => [...favouriteModels.value, ...otherModels.value])
 
 const sections = computed(() => {
@@ -214,9 +261,6 @@ const { open, root, toggle, close } = useDropdown({
   focus: searchInput,
   onOpen() {
     query.value = ''
-    // Open on the tab holding the current pick, so it's in view
-    if (props.modelValue) tab.value = providerOf(props.modelValue)
-    else if (!PROVIDERS.value[tab.value]) tab.value = Object.keys(PROVIDERS.value)[0] || tab.value
     place()
     window.addEventListener('resize', place)
     window.addEventListener('scroll', place, true) // any scrolling ancestor moves the button
@@ -231,11 +275,6 @@ const { open, root, toggle, close } = useDropdown({
 function pick(m) {
   emit('update:modelValue', m?.id ?? '')
   close()
-}
-
-function showTab(id) {
-  tab.value = id
-  searchInput.value?.focus()
 }
 
 function onKeydown(e) {
@@ -262,7 +301,7 @@ function onKeydown(e) {
         <span class="picker-label"
           >{{ label
           }}<span
-            v-if="showTabs && modelValue"
+            v-if="showProviders && modelValue"
             class="provider-tag"
             :class="providerOf(modelValue)"
             :title="ALL_PROVIDERS[providerOf(modelValue)].title"
@@ -296,22 +335,41 @@ function onKeydown(e) {
         :placeholder="`Search ${visibleModels.length} ${label.toLowerCase()} models…`"
         @keydown="onKeydown"
       />
-      <div v-if="showTabs" class="picker-tabs" role="tablist">
-        <button
-          v-for="(p, id) in PROVIDERS"
-          :key="id"
-          type="button"
-          role="tab"
-          class="picker-tab"
-          :class="[id, { active: tab === id }]"
-          :aria-selected="tab === id"
-          :title="p.title"
-          @click="showTab(id)"
+      <div v-if="showProviders || tagsPresent.length || uncensoredCount || hiddenCount" class="picker-filters">
+        <!-- Provider chips (only when the list spans more than one provider) -->
+        <template v-if="showProviders">
+          <label
+            v-for="id in providersPresent"
+            :key="`prov-${id}`"
+            class="fchip provider"
+            :class="[id, { on: selProviders.includes(id) }]"
+            :title="ALL_PROVIDERS[id].title"
+          >
+            <input
+              type="checkbox"
+              :checked="selProviders.includes(id)"
+              @change="toggleProvider(kind, id)"
+              @click="searchInput?.focus()"
+            />
+            {{ ALL_PROVIDERS[id].label }} <span class="fchip-n">{{ providerCounts[id] }}</span>
+          </label>
+        </template>
+        <!-- Capability-tag chips -->
+        <label
+          v-for="t in tagsPresent"
+          :key="`tag-${t.slug}`"
+          class="fchip tag"
+          :class="{ on: selTags.includes(t.slug) }"
+          :title="`Only ${t.label} models`"
         >
-          {{ p.label }} <span class="tab-count">{{ tabCounts[id] }}</span>
-        </button>
-      </div>
-      <div v-if="uncensoredCount || hiddenCount" class="picker-filters">
+          <input
+            type="checkbox"
+            :checked="selTags.includes(t.slug)"
+            @change="toggleTag(kind, t.slug)"
+            @click="searchInput?.focus()"
+          />
+          {{ t.label }} <span class="fchip-n">{{ t.n }}</span>
+        </label>
         <label
           v-if="uncensoredCount"
           class="fchip uncensored-only"
@@ -330,6 +388,8 @@ function onKeydown(e) {
           <input v-model="showHidden" type="checkbox" @change="searchInput?.focus()" />
           Show hidden <span class="fchip-n">{{ hiddenCount }}</span>
         </label>
+        <!-- Clears providers, tags and uncensored-only (not search / show-hidden) -->
+        <button v-if="anyFilter" type="button" class="fchip filters-clear" @click="clearAll">Clear ✕</button>
       </div>
       <div class="picker-list">
         <template v-for="section in sections" :key="section.id">
@@ -356,6 +416,13 @@ function onKeydown(e) {
           >
             <span class="item-row">
               <span class="item-name">{{ m.name }}</span>
+              <span
+                v-if="showProviders"
+                class="row-provider"
+                :class="providerOf(m.id)"
+                :title="ALL_PROVIDERS[providerOf(m.id)].title"
+                >{{ ALL_PROVIDERS[providerOf(m.id)].label }}</span
+              >
               <span class="item-badges">
                 <span v-for="b in badges(m)" :key="b.t" class="item-badge" :class="b.cls" :title="b.title">{{
                   b.t
@@ -377,14 +444,10 @@ function onKeydown(e) {
           </div>
         </template>
         <div v-if="!filtered.length" class="picker-empty">
-          <template v-if="query"
-            >No {{ showTabs ? ALL_PROVIDERS[tab].label + ' ' : '' }}models match “{{ query }}”</template
-          >
+          <template v-if="query">No models match “{{ query }}”</template>
+          <template v-else-if="anyFilter">No models match the current filters</template>
           <template v-else>No models available</template>
-          <button v-if="query && showTabs && otherTab" type="button" class="tab-hint" @click="tab = otherTab">
-            {{ tabCounts[otherTab] }} match{{ tabCounts[otherTab] === 1 ? '' : 'es' }} in
-            {{ ALL_PROVIDERS[otherTab].label }} →
-          </button>
+          <button v-if="anyFilter" type="button" class="tab-hint" @click="clearAll">Clear filters →</button>
         </div>
       </div>
     </div>
@@ -475,8 +538,7 @@ function onKeydown(e) {
   overflow: hidden;
 }
 
-.picker-search,
-.picker-tabs {
+.picker-search {
   flex-shrink: 0;
 }
 
@@ -487,50 +549,6 @@ function onKeydown(e) {
   border-radius: 0;
   padding: 10px 12px;
   background: var(--surface);
-}
-
-.picker-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 6px 6px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.picker-tab {
-  flex: 1;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  padding: 6px 8px 8px;
-  color: var(--text2);
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.picker-tab:hover {
-  color: var(--text);
-}
-
-.picker-tab.active.pollo {
-  color: var(--accent2);
-  border-bottom-color: var(--accent2);
-}
-
-.picker-tab.active.venice {
-  color: #e8a33d;
-  border-bottom-color: #e8a33d;
-}
-
-.picker-tab.active.openrouter {
-  color: var(--text);
-  border-bottom-color: var(--text);
-}
-
-.tab-count {
-  font-weight: 400;
-  font-size: 0.7rem;
-  opacity: 0.7;
 }
 
 .provider-tag {
@@ -547,6 +565,28 @@ function onKeydown(e) {
   color: #e8a33d;
 }
 
+/* Provider colour on the closed-picker tag reused by the row provider label */
+.row-provider {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0 5px;
+  line-height: 1.5;
+}
+.row-provider.pollo {
+  color: var(--accent2);
+  border-color: color-mix(in srgb, var(--accent2) 45%, transparent);
+}
+.row-provider.venice {
+  color: #e8a33d;
+  border-color: color-mix(in srgb, #e8a33d 45%, transparent);
+}
+
 .tab-hint {
   display: block;
   margin: 8px auto 0;
@@ -557,8 +597,7 @@ function onKeydown(e) {
   cursor: pointer;
 }
 
-/* Filter chips row (uncensored / show-hidden), replacing the old stacked
-   bare-checkbox lines. */
+/* Filter chips row: providers, capability tags, uncensored, show-hidden, clear. */
 .picker-filters {
   display: flex;
   flex-wrap: wrap;
@@ -566,6 +605,8 @@ function onKeydown(e) {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  max-height: 148px;
+  overflow-y: auto;
 }
 .fchip {
   display: inline-flex;
@@ -596,6 +637,26 @@ function onKeydown(e) {
   color: #ff8a6e;
   border-color: #ff8a6e;
   background: color-mix(in srgb, #ff8a6e 14%, transparent);
+}
+.fchip.provider.pollo.on {
+  color: var(--accent2);
+  border-color: var(--accent2);
+  background: color-mix(in srgb, var(--accent2) 14%, transparent);
+}
+.fchip.provider.venice.on {
+  color: #e8a33d;
+  border-color: #e8a33d;
+  background: color-mix(in srgb, #e8a33d 14%, transparent);
+}
+/* The Clear button is a chip too, but an action rather than a toggle */
+.fchip.filters-clear {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--text2);
+}
+.fchip.filters-clear:hover {
+  color: var(--text);
+  border-color: var(--accent);
 }
 .fchip-n {
   font-weight: 600;

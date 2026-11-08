@@ -126,8 +126,11 @@ def list_video_models() -> list[dict[str, Any]]:
     out = []
     for key, cls, meta in _catalogue(_video_generators()):
         # Recast works on a source video + one reference image, so it has no
-        # duration/resolution/aspect ratio (the source video sets those).
+        # duration/resolution/aspect ratio (the source video sets those). Extend
+        # continues a source video too, but the user picks the added duration
+        # and resolution — it takes no image and no aspect ratio.
         recast = meta.get("type") == "recast"
+        extend = meta.get("type") == "extend"
         out.append(
             {
                 "id": PREFIX + key,
@@ -135,8 +138,9 @@ def list_video_models() -> list[dict[str, Any]]:
                 "type": meta.get("type"),
                 "durations": None if recast else (meta.get("lengths") or list(cls.VALID_LENGTHS) or None),
                 "resolutions": None if recast else (meta.get("resolutions") or list(cls.VALID_RESOLUTIONS) or None),
-                "aspect_ratios": None if recast else (meta.get("ratios") or list(cls.VALID_RATIOS) or None),
-                "frame_images": ["first_frame"],  # recast: the reference image rides on first_frame
+                "aspect_ratios": None if (recast or extend) else (meta.get("ratios") or list(cls.VALID_RATIOS) or None),
+                # recast: the reference image rides on first_frame; extend takes none
+                "frame_images": [] if extend else ["first_frame"],
                 # ref2video models take several named reference images
                 "reference_images": meta.get("type") == "ref",
                 "max_refs": REF_MAX_IMAGES if meta.get("type") == "ref" else None,
@@ -151,10 +155,10 @@ def list_video_models() -> list[dict[str, Any]]:
 
 
 def _video_generators() -> dict:
-    """The v1 video models that make a video from a prompt (and maybe a
-    first frame) — not the ones that extend an existing video."""
+    """The v1 video models selectable in the picker — text/image-to-video plus
+    the source-video families (recast, extend) — and legacy ref2video."""
     return {
-        **{key: cls for key, cls in GENERATORS_V1.items() if MODEL_INFO.get(key, {}).get("type") != "extend"},
+        **GENERATORS_V1,
         # ref2video (several reference images) only exists on the legacy API
         **{key: cls for key, cls in GENERATORS_LEGACY.items() if MODEL_INFO.get(key, {}).get("type") == "ref"},
     }
@@ -253,6 +257,25 @@ def submit_video(
             image_url=_upload(first_frame),
             video_url=_upload_video(source_video),
             mode=mode,
+        )
+        task_id = _submit(generator)
+        return {"id": JOB_PREFIX + task_id, "params": _sent_params(generator)}
+    if MODEL_INFO.get(key, {}).get("type") == "extend":
+        # Video Extend: continue a source video (no reference image). The source
+        # video is uploaded to a public URL; the model adds `duration` seconds at
+        # the chosen resolution.
+        if not source_video:
+            raise PolloError("Extending needs a source video")
+        generator = get_video_generator(
+            key,
+            api_key=keyctx.provider_key("pollo"),
+            project="chat",
+            prompt=prompt,
+            image_url=None,
+            video_url=_upload_video(source_video),
+            resolution=resolution,
+            length=duration,
+            generate_audio=generate_audio,
         )
         task_id = _submit(generator)
         return {"id": JOB_PREFIX + task_id, "params": _sent_params(generator)}

@@ -2304,6 +2304,402 @@
   }
  },
  "v1_image": {
+  "flux2maxv1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "prompt": "a fox",
+      "resolution": "2K",
+      "seed": 7
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "images": [
+        "https://img.example/a.png"
+       ],
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "images": [
+       "https://img.example/b.png",
+       "https://img.example/c.png"
+      ],
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "images": [
+        "https://img.example/a.png",
+        "https://img.example/b.png",
+        "https://img.example/c.png"
+       ],
+       "prompt": "a fox"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/flux/flux-2-max/image"
+  },
+  "fluxkontextmaxv1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "prompt": "a fox",
+      "resolution": "2K",
+      "seed": 7
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "images": [
+        "https://img.example/a.png"
+       ],
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "images": [
+       "https://img.example/b.png",
+       "https://img.example/c.png"
+      ],
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "images": [
+        "https://img.example/a.png"
+       ],
+       "prompt": "a fox"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/flux/flux-kontext-max/image"
+  },
+  "fluxkontextprov1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "prompt": "a fox",
+      "resolution": "2K",
+      "seed": 7
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "images": [
+        "https://img.example/a.png"
+       ],
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "images": [
+       "https://img.example/b.png",
+       "https://img.example/c.png"
+      ],
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "images": [
+        "https://img.example/a.png"
+       ],
+       "prompt": "a fox"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/flux/flux-kontext-pro/image"
+  },
+  "gptimage25v1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "prompt": "a fox",
+      "resolution": "2K",
+      "seed": 7
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "prompt": "a fox",
+       "resolution": "2K"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "images": [
+        "https://img.example/a.png"
+       ],
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "images": [
+       "https://img.example/b.png",
+       "https://img.example/c.png"
+      ],
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "images": [
+        "https://img.example/a.png",
+        "https://img.example/b.png",
+        "https://img.example/c.png"
+       ],
+       "prompt": "a fox"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/openai/gpt-image-2-5/image"
+  },
+  "grokimage20v1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "prompt": "a fox",
+      "resolution": "2K",
+      "seed": 7
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "prompt": "a fox",
+       "resolution": "2K"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "images": [
+        "https://img.example/a.png"
+       ],
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "images": [
+       "https://img.example/b.png",
+       "https://img.example/c.png"
+      ],
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "images": [
+        "https://img.example/a.png"
+       ],
+       "prompt": "a fox"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/xai/grok-imagine-image-2-0/image"
+  },
+  "ideogramv2turbov1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "prompt": "a fox",
+      "resolution": "2K",
+      "seed": 7
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "images": [
+       "https://img.example/b.png",
+       "https://img.example/c.png"
+      ],
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "prompt": "a fox"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/ideogram/ideogram-v2-turbo/image"
+  },
   "klingv3imagev1": {
    "cases": [
     {
@@ -2440,6 +2836,142 @@
    ],
    "url": "https://pollo.ai/api/platform/v1/generation/kling-ai/kling-v3-omni/image"
   },
+  "midjourneyv82v1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "prompt": "a fox",
+      "resolution": "2K",
+      "seed": 7
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "prompt": "a fox",
+       "resolution": "2K"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "images": [
+        "https://img.example/a.png"
+       ],
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "images": [
+       "https://img.example/b.png",
+       "https://img.example/c.png"
+      ],
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "images": [
+        "https://img.example/a.png"
+       ],
+       "prompt": "a fox"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/midjourney/midjourney-v8-2/image"
+  },
+  "nanobanana21v1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "prompt": "a fox",
+      "resolution": "2K",
+      "seed": 7
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "prompt": "a fox",
+       "resolution": "2K"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "images": [
+        "https://img.example/a.png"
+       ],
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "images": [
+       "https://img.example/b.png",
+       "https://img.example/c.png"
+      ],
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "images": [
+        "https://img.example/a.png",
+        "https://img.example/b.png",
+        "https://img.example/c.png"
+       ],
+       "prompt": "a fox"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/google/nano-banana-2-1/image"
+  },
   "nanobanana2v1": {
    "cases": [
     {
@@ -2508,6 +3040,75 @@
     }
    ],
    "url": "https://pollo.ai/api/platform/v1/generation/google/nano-banana-2/image"
+  },
+  "nanobananaprov1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "prompt": "a fox",
+      "resolution": "2K",
+      "seed": 7
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "prompt": "a fox",
+       "resolution": "2K"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "images": [
+        "https://img.example/a.png"
+       ],
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "images": [
+       "https://img.example/b.png",
+       "https://img.example/c.png"
+      ],
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "images": [
+        "https://img.example/a.png",
+        "https://img.example/b.png",
+        "https://img.example/c.png"
+       ],
+       "prompt": "a fox"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/google/nano-banana-pro/image"
   },
   "pollojourneyv1": {
    "cases": [
@@ -2777,6 +3378,135 @@
    ],
    "url": "https://pollo.ai/api/platform/v1/generation/alibaba/pre-qwen-image-flash/image"
   },
+  "recraftv3v1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "prompt": "a fox",
+      "resolution": "2K",
+      "seed": 7
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "images": [
+       "https://img.example/b.png",
+       "https://img.example/c.png"
+      ],
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "prompt": "a fox"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/recraft/recraft-v3/image"
+  },
+  "seedream45v1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "prompt": "a fox",
+      "resolution": "2K",
+      "seed": 7
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "prompt": "a fox",
+       "resolution": "2K"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "images": [
+        "https://img.example/a.png"
+       ],
+       "prompt": "a fox"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/a.png",
+      "images": [
+       "https://img.example/b.png",
+       "https://img.example/c.png"
+      ],
+      "prompt": "a fox"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "1:1",
+       "images": [
+        "https://img.example/a.png",
+        "https://img.example/b.png",
+        "https://img.example/c.png"
+       ],
+       "prompt": "a fox"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/bytedance/seedream-4-5/image"
+  },
   "seedreamflashv1": {
    "cases": [
     {
@@ -2986,6 +3716,370 @@
   }
  },
  "v1_video": {
+  "flux3extendv1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "generateAudio": true,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "generateAudio": true,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "duration": 8,
+       "generateAudio": true,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "video_url": "https://v.example/src.mp4",
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "generateAudio": false,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/flux/flux-3/video-extend"
+  },
+  "geminiomniextendv1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "duration": 8,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "video_url": "https://v.example/src.mp4",
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/google/gemini-omni-1-1-flash/video-extend"
+  },
+  "grokvideo15v1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p"
+     },
+     "ok": {
+      "input": {
+       "duration": 8,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/xai/grok-imagine-video-1-5/video"
+  },
+  "hailuo03v1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "9:16",
+       "duration": 5,
+       "prompt": "a fox runs",
+       "resolution": "768p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs",
+       "resolution": "768p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "duration": 8,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "image": "https://img.example/x.png",
+       "imageTail": "https://img.example/t.png",
+       "prompt": "a fox runs",
+       "resolution": "768p"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/minimax/hailuo-03/video"
+  },
+  "hailuo23v1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "duration": 6,
+       "prompt": "a fox runs",
+       "resolution": "768p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "duration": 6,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs",
+       "resolution": "768p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p"
+     },
+     "ok": {
+      "input": {
+       "duration": 6,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "duration": 6,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs",
+       "resolution": "768p"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/minimax/hailuo-2-3/video"
+  },
   "klingv21masterv1": {
    "cases": [
     {
@@ -3460,6 +4554,78 @@
    ],
    "url": "https://pollo.ai/api/platform/v1/generation/kling-ai/kling-v3/video"
   },
+  "klingv4v1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "9:16",
+       "duration": 5,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "duration": 8,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "image": "https://img.example/x.png",
+       "imageTail": "https://img.example/t.png",
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/kling-ai/kling-v4/video"
+  },
   "klingvideoo1v1": {
    "cases": [
     {
@@ -3906,6 +5072,168 @@
    ],
    "url": "https://pollo.ai/api/platform/v1/generation/pollo-ai/pollo-v2-5/video"
   },
+  "pollo26fastv1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "9:16",
+       "duration": 5,
+       "generateAudio": true,
+       "prompt": "a fox runs",
+       "resolution": "480p",
+       "webSearch": false
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "generateAudio": true,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs",
+       "resolution": "480p",
+       "webSearch": false
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "duration": 8,
+       "generateAudio": true,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "webSearch": false
+      }
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "generateAudio": false,
+       "image": "https://img.example/x.png",
+       "imageTail": "https://img.example/t.png",
+       "prompt": "a fox runs",
+       "resolution": "480p",
+       "seed": 42,
+       "webSearch": true
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/pollo-ai/pollo-v2-6-fast/video"
+  },
+  "pollo26v1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "9:16",
+       "duration": 5,
+       "generateAudio": true,
+       "prompt": "a fox runs",
+       "resolution": "480p",
+       "webSearch": false
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "generateAudio": true,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs",
+       "resolution": "480p",
+       "webSearch": false
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "duration": 8,
+       "generateAudio": true,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "webSearch": false
+      }
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "generateAudio": false,
+       "image": "https://img.example/x.png",
+       "imageTail": "https://img.example/t.png",
+       "prompt": "a fox runs",
+       "resolution": "480p",
+       "seed": 42,
+       "webSearch": true
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/pollo-ai/pollo-v2-6/video"
+  },
   "pollo30fastv1": {
    "cases": [
     {
@@ -4350,6 +5678,81 @@
     }
    ],
    "url": "https://pollo.ai/api/platform/v1/generation/pollo-ai/pollo-dance-2-0/video"
+  },
+  "pollov2extenderv1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "duration": 8,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "video_url": "https://v.example/src.mp4",
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/pollo-ai/pollo-v2-extender/video-extend"
   },
   "recastv1": {
    "cases": [
@@ -5031,6 +6434,671 @@
     }
    ],
    "url": "https://pollo.ai/api/platform/v1/generation/bytedance/seedance-2-5/video"
+  },
+  "sora2prov1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "9:16",
+       "duration": 8,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "duration": 8,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "duration": 8,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "duration": 8,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/openai/sora-2-pro/video"
+  },
+  "sora2v1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "9:16",
+       "duration": 8,
+       "prompt": "a fox runs"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "duration": 8,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "duration": 8,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "duration": 8,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/openai/sora-2/video"
+  },
+  "veo31fastv1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "9:16",
+       "duration": 8,
+       "generateAudio": true,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "duration": 8,
+       "generateAudio": true,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "duration": 8,
+       "generateAudio": true,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "duration": 8,
+       "generateAudio": false,
+       "image": "https://img.example/x.png",
+       "imageTail": "https://img.example/t.png",
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/google/veo-3-1-fast/video"
+  },
+  "veo31litev1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "9:16",
+       "duration": 8,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "duration": 8,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "duration": 8,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "duration": 8,
+       "image": "https://img.example/x.png",
+       "imageTail": "https://img.example/t.png",
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/google/veo3-1-lite/video"
+  },
+  "veo31v1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "9:16",
+       "duration": 8,
+       "generateAudio": true,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "duration": 8,
+       "generateAudio": true,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "duration": 8,
+       "generateAudio": true,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "duration": 8,
+       "generateAudio": false,
+       "image": "https://img.example/x.png",
+       "imageTail": "https://img.example/t.png",
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/google/veo-3-1/video"
+  },
+  "viduq2proextendv1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "duration": 8,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "video_url": "https://v.example/src.mp4",
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/vidu/viduq2-pro/video-extend"
+  },
+  "viduq2turboextendv1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "duration": 8,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "video_url": "https://v.example/src.mp4",
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/vidu/viduq2-turbo/video-extend"
+  },
+  "wan25v1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "9:16",
+       "duration": 5,
+       "generateAudio": true,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "generateAudio": true,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "duration": 5,
+       "generateAudio": true,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "generateAudio": false,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "seed": 42
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/alibaba/wan-v2-5/video"
+  },
+  "wan26v1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "9:16",
+       "duration": 5,
+       "generateAudio": true,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "generateAudio": true,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "duration": 5,
+       "generateAudio": true,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "generateAudio": false,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs",
+       "resolution": "720p",
+       "seed": 42
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/alibaba/wan-v2-6/video"
   },
   "wan27v1": {
    "cases": [

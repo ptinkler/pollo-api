@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 from ..providers import PROVIDERS, venice
+from ..providers.model_tags import tags_for
 from .constants import MODELS_CACHE_TTL
 
 _models_cache: dict[str, Any] = {"at": 0.0, "data": None}
@@ -26,6 +27,11 @@ def get_models(refresh: bool = False) -> dict[str, Any]:
                     models += prov.list_models(kind, refresh)
                 except Exception as e:  # noqa: BLE001 — surface any failure per provider/kind
                     data["errors"][f"{prov.NAME}_{kind}"] = str(e)
+            # Capability tags, derived uniformly so every provider is consistent;
+            # the picker filters on these. Set once here rather than in each
+            # provider's list_models (see web/providers/model_tags.py).
+            for m in models:
+                m["tags"] = tags_for(kind, m)
             data[kind] = models
         # Only cache a complete result, so a transient failure isn't sticky
         if not data["errors"]:
