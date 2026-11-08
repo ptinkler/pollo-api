@@ -30,6 +30,7 @@ from .. import image_hosts, keyctx, request_log
 from .openrouter import OpenRouterError
 from .pollo_engine import (
     ERROR_STATUSES,
+    GENERATORS_LEGACY,
     GENERATORS_V1,
     IMAGE_GENERATORS,
     IMAGE_GENERATORS_V1,
@@ -61,6 +62,7 @@ def is_configured() -> bool:
 
 
 NAME = "pollo"
+REF_MAX_IMAGES = 9  # reference images a ref2video request carries
 
 
 def list_models(kind: str, refresh: bool = False) -> list[dict]:
@@ -134,6 +136,9 @@ def list_video_models() -> list[dict[str, Any]]:
                 "resolutions": None if recast else (meta.get("resolutions") or list(cls.VALID_RESOLUTIONS) or None),
                 "aspect_ratios": None if recast else (meta.get("ratios") or list(cls.VALID_RATIOS) or None),
                 "frame_images": ["first_frame"],  # recast: the reference image rides on first_frame
+                # ref2video models take several named reference images
+                "reference_images": meta.get("type") == "ref",
+                "max_refs": REF_MAX_IMAGES if meta.get("type") == "ref" else None,
                 "video_input": bool(meta.get("video_input")),
                 "modes": meta.get("modes") or None,
                 "generate_audio": "generate_audio" in meta.get("options", []),
@@ -147,7 +152,11 @@ def list_video_models() -> list[dict[str, Any]]:
 def _video_generators() -> dict:
     """The v1 video models that make a video from a prompt (and maybe a
     first frame) — not the ones that extend an existing video."""
-    return {key: cls for key, cls in GENERATORS_V1.items() if MODEL_INFO.get(key, {}).get("type") != "extend"}
+    return {
+        **{key: cls for key, cls in GENERATORS_V1.items() if MODEL_INFO.get(key, {}).get("type") != "extend"},
+        # ref2video (several reference images) only exists on the legacy API
+        **{key: cls for key, cls in GENERATORS_LEGACY.items() if MODEL_INFO.get(key, {}).get("type") == "ref"},
+    }
 
 
 def _generator_key(model_id: str, generators: dict) -> str:
@@ -221,6 +230,7 @@ def submit_video(
     first_frame: Path | None = None,
     source_video: Path | None = None,
     mode: str | None = None,
+    refs: list[Path] | None = None,
 ) -> dict:
     """Start a Pollo video job. Returns {"id": "pollo:<taskId>", "params": the
     settings actually sent}, shaped like openrouter.submit_video's result.
@@ -242,6 +252,26 @@ def submit_video(
             image_url=_upload(first_frame),
             video_url=_upload_video(source_video),
             mode=mode,
+        )
+        task_id = _submit(generator)
+        return {"id": JOB_PREFIX + task_id, "params": _sent_params(generator)}
+    if MODEL_INFO.get(key, {}).get("type") == "ref":
+        # ref2video: every reference image (the first frame too) becomes a named
+        # "Image N" reference the prompt can mention, like Pollo's own site
+        files = list(dict.fromkeys([*([first_frame] if first_frame else []), *(refs or [])]))[:REF_MAX_IMAGES]
+        generator = get_video_generator(
+            key,
+            api_key=keyctx.provider_key("pollo"),
+            project="chat",
+            prompt=prompt,
+            image_url=None,
+            refs=[
+                {"type": "image", "name": f"Image {i}", "image": _upload(p), "order": i} for i, p in enumerate(files, 1)
+            ],
+            aspect_ratio=aspect_ratio if aspect_ratio in (MODEL_INFO[key].get("ratios") or []) else None,
+            resolution=resolution,
+            length=duration,
+            generate_audio=generate_audio,
         )
         task_id = _submit(generator)
         return {"id": JOB_PREFIX + task_id, "params": _sent_params(generator)}

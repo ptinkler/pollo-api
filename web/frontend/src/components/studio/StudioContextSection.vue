@@ -10,7 +10,7 @@ const label = v => (v == null ? 'All' : v)
 </script>
 
 <template>
-  <div class="isection">
+  <div v-if="mode !== 'video'" class="isection">
     <div class="ilabel">Context</div>
 
     <div v-if="mode === 'auto' || mode === 'text'" class="slider">

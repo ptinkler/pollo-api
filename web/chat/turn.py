@@ -588,7 +588,12 @@ class Turn:
         if info.get("reference_images") or info.get("family") == "motion":
             own = _dedupe([*attached, *([first_frame] if first_frame else []), *self._pinned_images()])
             out["refs"], _ = _plan_refs(
-                own, chars, None, after=len(attached) or (1 if first_frame else 0), choices=self.s.ref_choices
+                own,
+                chars,
+                None,
+                after=len(attached) or (1 if first_frame else 0),
+                max_refs=info.get("max_refs"),
+                choices=self.s.ref_choices,
             )
         if last_frame and "last_frame" in (info.get("frame_images") or []):
             out["last_frame"] = last_frame

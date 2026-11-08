@@ -13,11 +13,18 @@ export const MAX_ATTACHMENTS = 8
 // Images attached to the next message: uploaded from the device, copied in
 // from the media library, or already in the chat. Each is
 // { key, file (once on the server), preview, uploading }.
-export function useChatAttachments({ convId, ensureConversation, showToast }) {
+export function useChatAttachments({ convId, ensureConversation, showToast, limit = () => MAX_ATTACHMENTS }) {
   const attachments = ref([])
-  const room = () => MAX_ATTACHMENTS - attachments.value.length
+  const images = () => attachments.value.filter(a => !a.video).length
+  const room = () => Math.min(MAX_ATTACHMENTS - attachments.value.length, limit() - images())
   const files = computed(() => attachments.value.filter(a => a.file).map(a => a.file))
   const uploading = computed(() => attachments.value.some(a => a.uploading))
+
+  // Why nothing more can be added: the model's own image limit, else the general cap
+  const fullMessage = () =>
+    limit() < MAX_ATTACHMENTS && images() >= limit()
+      ? `This model takes ${limit()} image${limit() === 1 ? '' : 's'} — pick a reference-image (“Ref”) model for more`
+      : `Up to ${MAX_ATTACHMENTS} attachments per message`
 
   function add(preview, file = null, video = false) {
     const att = reactive({ key: Math.random().toString(36).slice(2), file, preview, video, uploading: !file })
@@ -44,7 +51,8 @@ export function useChatAttachments({ convId, ensureConversation, showToast }) {
     } catch (e) {
       return showToast(e.message, 'error')
     }
-    for (const source of sources.slice(0, room())) {
+    if (!video && sources.length > room()) showToast(fullMessage(), 'error')
+    for (const source of video ? sources : sources.slice(0, Math.max(room(), 0))) {
       const att = add(preview(source), null, video)
       send(source, id)
         .then(r => {
@@ -94,17 +102,18 @@ export function useChatAttachments({ convId, ensureConversation, showToast }) {
   // An image already in this chat; false if there's no room for it
   // (`fromConv`: it lives in another thread, so copy it into this one)
   function addChatImage(file, fromConv = null) {
+    if (/\.(mp4|webm|mov)$/i.test(file)) return false // a video isn't an image reference
     if (fromConv && fromConv !== convId.value) {
-      if (!room()) {
-        showToast(`Up to ${MAX_ATTACHMENTS} attachments per message`, 'error')
+      if (room() < 1) {
+        showToast(fullMessage(), 'error')
         return false
       }
       addFromLibrary([{ id: `chat:${fromConv}:${file}`, thumb_url: chatMediaPreviewUrl(fromConv, file) }])
       return true
     }
     if (attachments.value.some(a => a.file === file)) return true
-    if (!room()) {
-      showToast(`Up to ${MAX_ATTACHMENTS} attachments per message`, 'error')
+    if (room() < 1) {
+      showToast(fullMessage(), 'error')
       return false
     }
     add(chatMediaUrl(convId.value, file), file)

@@ -584,9 +584,11 @@ onMounted(() => {
           :attachments="attachments"
           :uploading="uploading"
           :enhancing="enhancing"
+          :video-input="!!settings.videoInfo.value?.video_input"
           @send="onGenerate"
           @files="addFiles"
           @remove="removeAttachment"
+          @clear="[...attachments].forEach(removeAttachment)"
           @library="pickerOpen = true"
           @enhance="enhanceDraft"
         />

@@ -1,9 +1,9 @@
-<!-- Always-visible generation queue: a collapsible dock (bottom-right) that shows
+<!-- Always-visible generation queue: a collapsible pill in the top bar (centre) that shows
      what's rendering across every thread, even after you navigate away. Finished
      and failed items stay until cleared. Clicking a row opens that thread's
      gallery. Fed by useGenQueue (polls /api/chat/generations/active). -->
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { chatMediaUrl, chatMediaPreviewUrl } from '../../composables/useChat'
 
 defineProps({
@@ -16,9 +16,9 @@ const emit = defineEmits(['open', 'clear', 'clear-one'])
 const CKEY = 'studio.genQueue.collapsed'
 const readCollapsed = () => {
   try {
-    return localStorage.getItem(CKEY) === '1'
+    return localStorage.getItem(CKEY) !== '0'
   } catch {
-    return false
+    return true
   }
 }
 const collapsed = ref(readCollapsed())
@@ -31,6 +31,14 @@ function toggle() {
   }
 }
 
+const root = ref(null)
+// Clicking anywhere else folds the list away, so it never sits over a menu
+const onOutside = e => {
+  if (!collapsed.value && root.value && !root.value.contains(e.target)) collapsed.value = true
+}
+onMounted(() => document.addEventListener('mousedown', onOutside))
+onBeforeUnmount(() => document.removeEventListener('mousedown', onOutside))
+
 const thumb = e =>
   e.kind === 'image' ? chatMediaPreviewUrl(e.conversation_id, e.file) : chatMediaUrl(e.conversation_id, e.file)
 function label(e) {
@@ -41,7 +49,7 @@ function label(e) {
 </script>
 
 <template>
-  <div v-if="entries.length" class="qdock" :class="{ collapsed }">
+  <div v-if="entries.length" ref="root" class="qdock" :class="{ collapsed }">
     <div class="qhead" @click="toggle">
       <span class="qtitle">
         <span v-if="pending" class="qspin"></span>
@@ -85,31 +93,25 @@ function label(e) {
 <style scoped>
 .qdock {
   position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 900;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
   width: 300px;
   max-width: calc(100vw - 32px);
-  background: var(--spanel2, var(--sbg2));
-  border: 1px solid var(--sborder);
-  border-radius: 12px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  max-height: min(60vh, 460px);
+}
+.qdock.collapsed {
+  width: auto;
 }
 .qhead {
+  border: 1px solid var(--sborder);
+  border-radius: 999px;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 10px 10px 10px 12px;
   cursor: pointer;
-  border-bottom: 1px solid var(--sborder);
-  background: var(--sbg);
-}
-.collapsed .qhead {
-  border-bottom: none;
+  background: var(--spanel2, var(--sbg2));
 }
 .qtitle {
   flex: 1;
@@ -136,7 +138,16 @@ function label(e) {
   line-height: 1;
   padding: 2px 4px;
 }
+.qbody,
+.qfoot {
+  background: var(--spanel2, var(--sbg2));
+  border: 1px solid var(--sborder);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+}
 .qbody {
+  margin-top: 6px;
+  border-radius: 12px 12px 0 0;
+  max-height: min(55vh, 420px);
   overflow-y: auto;
   padding: 6px;
   display: flex;
@@ -229,7 +240,8 @@ function label(e) {
 }
 .qfoot {
   padding: 6px;
-  border-top: 1px solid var(--sborder);
+  border-top: none;
+  border-radius: 0 0 12px 12px;
 }
 .qclear {
   width: 100%;

@@ -29,7 +29,7 @@ import {
 import { upsert, useChatCharacters } from './useChatCharacters'
 import { useChatInstructions } from './useChatInstructions'
 import { useMessagePolling } from './useMessagePolling'
-import { useChatAttachments } from './useChatAttachments'
+import { useChatAttachments, MAX_ATTACHMENTS } from './useChatAttachments'
 import { useChatBalances } from './useChatBalances'
 import { useChatDefaults } from './useChatDefaults'
 
@@ -65,7 +65,21 @@ export function useStudio({ models, settings, showToast }) {
   let forking = false
 
   // Image attachments (image-edit refs / video first frame) — reused chat layer
-  const attach = useChatAttachments({ convId: active, ensureConversation: ensureThread, showToast })
+  // Images the next message may carry: a video model takes one start frame (two with
+  // first+last frame) unless it's a reference-image model; others take the usual max
+  const imageLimit = () => {
+    if (mode.value !== 'video') return MAX_ATTACHMENTS
+    const v = settings.videoInfo.value
+    if (!v) return MAX_ATTACHMENTS
+    if (v.reference_images) return v.max_refs || MAX_ATTACHMENTS
+    return v.frame_images?.includes('last_frame') ? 2 : 1
+  }
+  const attach = useChatAttachments({
+    convId: active,
+    ensureConversation: ensureThread,
+    showToast,
+    limit: imageLimit,
+  })
   const {
     attachments,
     addFiles,
@@ -420,6 +434,13 @@ export function useStudio({ models, settings, showToast }) {
     if (!canSend.value) return
     const content = draft.value.trim()
     const sent = attachments.value.filter(a => a.file)
+    const nImages = sent.filter(a => !a.video).length
+    if (nImages > imageLimit()) {
+      return showToast(
+        `This video model takes ${imageLimit()} image${imageLimit() === 1 ? '' : 's'} — remove some, or pick a reference-image model (e.g. a “Ref” model)`,
+        'error',
+      )
+    }
     const id = await ensureThread()
     const tempUser = reactive({
       id: `tmp-${Date.now()}`,

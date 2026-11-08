@@ -469,6 +469,7 @@ def _submit_video(conv_id: str, model: str, prompt: str, params: dict[str, Any])
             first_frame=frame,
             source_video=_conv_dir(conv_id) / params["source_video"] if params.get("source_video") else None,
             mode=params.get("mode"),
+            refs=[_ref_file(conv_id, r) for r in params.get("refs") or []],
         )
     return openrouter.submit_video(
         model,

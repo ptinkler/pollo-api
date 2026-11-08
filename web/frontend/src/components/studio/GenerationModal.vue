@@ -80,41 +80,56 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           </div>
 
           <div class="gm-actions">
-            <button v-if="!isError" class="gm-btn" :class="{ on: item.favourite }" @click="emit('favourite', item)">
-              <svg class="ic"><use href="#s-star" /></svg>{{ item.favourite ? 'Favourited' : 'Favourite' }}
-            </button>
-            <a v-if="!isError" class="gm-btn" :href="item.url" :download="item.file">
-              <svg class="ic"><use href="#s-download" /></svg>Download
-            </a>
-            <button
-              v-if="!isError && item.kind === 'image'"
-              class="gm-btn"
-              @click="emit('use-image', { file: item.file, mode: 'image', conversation_id: item.conversation_id })"
-            >
-              🖼 Picture from this
-            </button>
-            <button
-              v-if="!isError"
-              class="gm-btn"
-              @click="emit('use-image', { file: item.file, mode: 'video', conversation_id: item.conversation_id })"
-            >
-              🎬 Video from this
-            </button>
-            <button v-if="canManage" class="gm-btn" @click="emit('use-settings', item)">
-              <svg class="ic"><use href="#s-cog" /></svg>Use settings
-            </button>
-            <button v-if="canManage" class="gm-btn" :class="{ primary: isError }" @click="emit('regenerate', item)">
-              <svg class="ic"><use href="#s-refresh" /></svg>{{ isError ? 'Retry' : 'Regenerate' }}
-            </button>
+            <div class="gm-icons">
+              <button
+                v-if="!isError"
+                class="gm-btn icon"
+                :class="{ on: item.favourite }"
+                :title="item.favourite ? 'Unfavourite' : 'Favourite'"
+                @click="emit('favourite', item)"
+              >
+                <svg class="ic"><use href="#s-star" /></svg>
+              </button>
+              <a v-if="!isError" class="gm-btn icon" title="Download" :href="item.url" :download="item.file">
+                <svg class="ic"><use href="#s-download" /></svg>
+              </a>
+              <button v-if="canManage" class="gm-btn icon danger" title="Delete" @click="emit('delete', item)">
+                <svg class="ic"><use href="#s-trash" /></svg>
+              </button>
+            </div>
+            <!-- Only a picture can start another picture or a video -->
+            <div v-if="!isError && item.kind === 'image'" class="gm-pair">
+              <button
+                class="gm-btn"
+                @click="emit('use-image', { file: item.file, mode: 'image', conversation_id: item.conversation_id })"
+              >
+                🖼 Edit
+              </button>
+              <button
+                class="gm-btn"
+                @click="emit('use-image', { file: item.file, mode: 'video', conversation_id: item.conversation_id })"
+              >
+                🎬 Animate
+              </button>
+            </div>
+            <div v-if="canManage" class="gm-pair">
+              <button
+                class="gm-btn"
+                title="Fill the composer with this generation's settings"
+                @click="emit('use-settings', item)"
+              >
+                <svg class="ic"><use href="#s-cog" /></svg>Use settings
+              </button>
+              <button class="gm-btn" :class="{ primary: isError }" @click="emit('regenerate', item)">
+                <svg class="ic"><use href="#s-refresh" /></svg>{{ isError ? 'Retry' : 'Regenerate' }}
+              </button>
+            </div>
             <button
               v-if="!canManage && item.conversation_id"
               class="gm-btn"
               @click="emit('open-thread', item.conversation_id)"
             >
               Open thread
-            </button>
-            <button v-if="canManage" class="gm-btn danger" @click="emit('delete', item)">
-              <svg class="ic"><use href="#s-trash" /></svg>Delete
             </button>
           </div>
         </div>
@@ -292,6 +307,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .gm-btn .ic {
   width: 16px;
   height: 16px;
+}
+.gm-icons,
+.gm-pair {
+  display: flex;
+  gap: 6px;
+}
+.gm-pair .gm-btn {
+  flex: 1;
+  justify-content: center;
+}
+.gm-btn.icon {
+  flex: 1;
+  justify-content: center;
 }
 .gm-btn.on {
   color: var(--saccent);

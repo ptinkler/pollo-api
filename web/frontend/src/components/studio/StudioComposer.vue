@@ -1,7 +1,7 @@
 <!-- Studio compose bar: attachments + mode pills + prompt box + send.
      Presentational — attachment list/upload state come from props. -->
 <script setup>
-import { ref, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps({
   modes: { type: Array, default: () => [] },
@@ -13,12 +13,37 @@ const props = defineProps({
   attachments: { type: Array, default: () => [] },
   uploading: { type: Boolean, default: false },
   enhancing: { type: Boolean, default: false },
+  // The selected video model takes a source video (Recast / motion models)
+  videoInput: { type: Boolean, default: false },
 })
-const emit = defineEmits(['update:draft', 'update:mode', 'send', 'files', 'remove', 'library', 'enhance'])
+const emit = defineEmits(['update:draft', 'update:mode', 'send', 'files', 'remove', 'clear', 'library', 'enhance'])
 
 const drag = ref(false)
 const ta = ref(null)
 const vid = ref(null)
+const img = ref(null)
+const menu = ref(false)
+const peek = ref(null)
+const onEsc = e => e.key === 'Escape' && (peek.value = null)
+onMounted(() => document.addEventListener('keydown', onEsc))
+onBeforeUnmount(() => document.removeEventListener('keydown', onEsc))
+const mediaMode = computed(() => props.mode === 'image' || props.mode === 'video')
+const pick = fn => {
+  menu.value = false
+  fn()
+}
+// "Image 1", "Image 2"… — the names a prompt can use to point at each reference
+const tags = computed(() => {
+  let n = 0
+  return props.attachments
+    .filter(a => !a.video)
+    .map(a => ({ key: a.key, preview: a.preview, label: `Image ${++n}`, video: a.video }))
+})
+function mention(label) {
+  const d = props.draft
+  emit('update:draft', `${d}${d && !d.endsWith(' ') ? ' ' : ''}${label} `)
+  ta.value?.focus()
+}
 function onVideo(e) {
   emit('files', e.target.files)
   e.target.value = ''
@@ -66,12 +91,28 @@ function onDrop(e) {
 <template>
   <div class="compose" @dragover.prevent="drag = true" @dragleave.prevent="drag = false" @drop.prevent="onDrop">
     <div class="cbox" :class="{ drag }">
-      <div v-if="attachments.length" class="atts">
+      <div v-if="attachments.length || mediaMode" class="atts">
+        <div v-if="mediaMode" class="plus">
+          <button class="addtile" title="Add reference images" @click="menu = !menu">+</button>
+          <div v-if="menu" class="addmenu" @mouseleave="menu = false">
+            <button @click="pick(() => emit('library'))">🖼 From Media…</button>
+            <button @click="pick(() => img?.click())">⬆ Upload image</button>
+            <button v-if="mode === 'video' && videoInput" @click="pick(() => vid?.click())">🎞 Upload video</button>
+          </div>
+        </div>
         <div v-for="a in attachments" :key="a.key" class="att" :class="{ uploading: a.uploading }">
-          <video v-if="a.video" :src="a.preview" muted playsinline></video>
-          <img v-else :src="a.preview" alt="attachment" />
+          <video v-if="a.video" :src="a.preview" muted playsinline @click="peek = a"></video>
+          <img v-else :src="a.preview" alt="attachment" title="Click to enlarge" @click="peek = a" />
           <button class="attx" title="Remove" @click="emit('remove', a)">×</button>
         </div>
+      </div>
+      <div v-if="attachments.length" class="clearrow">
+        <button class="clearall" title="Remove every attached image and video" @click="emit('clear')">Clear all</button>
+      </div>
+      <div v-if="tags.length" class="tags">
+        <button v-for="t in tags" :key="t.key" class="tag" title="Insert into the prompt" @click="mention(t.label)">
+          <img v-if="!t.video" :src="t.preview" alt="" />{{ t.label }}
+        </button>
       </div>
 
       <div class="modes">
@@ -97,18 +138,16 @@ function onDrop(e) {
       ></textarea>
 
       <div class="cbar">
-        <button class="clip" title="Attach images — pick from Media or upload" @click="emit('library')">
+        <button
+          v-if="!mediaMode"
+          class="clip"
+          title="Attach images — pick from Media or upload"
+          @click="emit('library')"
+        >
           <svg class="ic"><use href="#s-clip" /></svg>
         </button>
-        <button
-          v-if="mode === 'video'"
-          class="clip"
-          title="Attach a source video (mp4) — for Recast / motion models"
-          @click="vid?.click()"
-        >
-          🎞
-        </button>
         <input ref="vid" type="file" accept="video/mp4" hidden @change="onVideo" />
+        <input ref="img" type="file" accept="image/*" multiple hidden @change="onVideo" />
         <button
           v-if="mode === 'image' || mode === 'video'"
           class="clip enh"
@@ -122,10 +161,54 @@ function onDrop(e) {
         <button class="sendbtn" :disabled="!canSend" @click="emit('send')">{{ sending ? 'Sending…' : 'Send' }}</button>
       </div>
     </div>
+    <div v-if="peek" class="peek" @click="peek = null" @keydown.esc="peek = null">
+      <video v-if="peek.video" :src="peek.preview" controls autoplay loop @click.stop></video>
+      <img v-else :src="peek.preview" alt="attachment preview" @click.stop />
+    </div>
   </div>
 </template>
 
 <style scoped>
+.clearrow {
+  display: flex;
+  justify-content: flex-end;
+  padding-bottom: 6px;
+}
+.clearall {
+  border: 1px solid var(--sborder);
+  border-radius: 999px;
+  background: none;
+  color: var(--smuted);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.clearall:hover {
+  color: var(--sdanger, #e5484d);
+  border-color: var(--sdanger, #e5484d);
+}
+.peek {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.7);
+  cursor: zoom-out;
+}
+.peek img,
+.peek video {
+  max-width: min(90vw, 900px);
+  max-height: 85vh;
+  object-fit: contain;
+  border-radius: 10px;
+  cursor: default;
+}
+.att img,
+.att video {
+  cursor: zoom-in;
+}
 .compose {
   padding: 8px 22px 20px;
 }
@@ -159,6 +242,76 @@ function onDrop(e) {
 .att img {
   width: 100%;
   height: 100%;
+  object-fit: cover;
+}
+.plus {
+  position: relative;
+}
+.addtile {
+  width: 52px;
+  height: 52px;
+  border-radius: 9px;
+  border: 1px dashed var(--sborder);
+  background: var(--sbg2);
+  color: var(--smuted);
+  font-size: 22px;
+  cursor: pointer;
+}
+.addtile:hover {
+  border-color: var(--saccent);
+  color: var(--sfg);
+}
+.addmenu {
+  position: absolute;
+  bottom: 58px;
+  left: 0;
+  z-index: 20;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  background: var(--spanel2, var(--sbg2));
+  border: 1px solid var(--sborder);
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+}
+.addmenu button {
+  text-align: left;
+  border: none;
+  background: none;
+  color: var(--sfg);
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.addmenu button:hover {
+  background: var(--shover);
+}
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 8px;
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px 2px 3px;
+  border: 1px solid var(--sborder);
+  border-radius: 8px;
+  background: var(--saccent-soft);
+  color: var(--saccent);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.tag img {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
   object-fit: cover;
 }
 .att.uploading {
