@@ -589,7 +589,14 @@ async def api_chat_media_preview(conv_id: str, filename: str):
     _require_own_conversation(conv_id)
     if not path.is_file():
         raise HTTPException(404, "Not found")
-    return await media.thumb_response(path, CHAT_PREVIEW_SIZE)
+    try:
+        return await media.thumb_response(path, CHAT_PREVIEW_SIZE)
+    except HTTPException:
+        # No thumbnail could be made (odd format, half-written file): show the
+        # image itself rather than a broken tile. Videos have nothing to fall back to.
+        if path.suffix.lower() in (".mp4", ".webm", ".mov"):
+            raise
+        return FileResponse(path, headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/request-log")

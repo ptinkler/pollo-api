@@ -163,9 +163,9 @@ const bySpace = computed(() => {
               @keydown.esc="cancelRename"
               @blur="commitRename(t)"
             />
-            <button v-else class="nitem" @click="emit('open', t.id)">
+            <a v-else class="nitem" :href="`/${t.id}`" @click.prevent="emit('open', t.id)">
               <svg class="ic"><use :href="threadIcon(t)" /></svg><span class="lbl">{{ t.title || 'Untitled' }}</span>
-            </button>
+            </a>
             <div class="nactions">
               <button class="nact on" title="Unpin" @click.stop="emit('pin', t)">
                 <svg class="ic sm"><use href="#s-pin" /></svg>
@@ -232,9 +232,9 @@ const bySpace = computed(() => {
                 @keydown.esc="cancelRename"
                 @blur="commitRename(t)"
               />
-              <button v-else class="nitem" @click="emit('open', t.id)">
+              <a v-else class="nitem" :href="`/${t.id}`" @click.prevent="emit('open', t.id)">
                 <svg class="ic"><use :href="threadIcon(t)" /></svg><span class="lbl">{{ t.title || 'Untitled' }}</span>
-              </button>
+              </a>
               <div class="nactions">
                 <button class="nact" :class="{ on: t.pinned }" title="Pin" @click.stop="emit('pin', t)">
                   <svg class="ic sm"><use href="#s-pin" /></svg>
@@ -278,9 +278,9 @@ const bySpace = computed(() => {
             @keydown.esc="cancelRename"
             @blur="commitRename(t)"
           />
-          <button v-else class="nitem" @click="emit('open', t.id)">
+          <a v-else class="nitem" :href="`/${t.id}`" @click.prevent="emit('open', t.id)">
             <svg class="ic"><use :href="threadIcon(t)" /></svg><span class="lbl">{{ t.title || 'Untitled' }}</span>
-          </button>
+          </a>
           <div class="nactions">
             <button class="nact" :class="{ on: t.pinned }" title="Pin" @click.stop="emit('pin', t)">
               <svg class="ic sm"><use href="#s-pin" /></svg>
@@ -526,6 +526,7 @@ const bySpace = computed(() => {
   border: none;
   cursor: pointer;
   text-align: left;
+  text-decoration: none;
 }
 .nrename {
   flex: 1;

@@ -85,14 +85,16 @@ function onThumbError(item, e) {
 
 <template>
   <div class="media-grid">
-    <button
+    <component
+      :is="selectable ? 'button' : 'a'"
       v-for="item in visible"
       :key="item.id"
-      type="button"
+      :type="selectable ? 'button' : undefined"
+      :href="selectable ? undefined : item.url"
       class="tile"
       :class="{ selected: selected.has(item.id) }"
       :title="item.prompt || item.name"
-      @click="selectable ? emit('toggle', item, $event) : emit('open', item)"
+      @click="selectable ? emit('toggle', item, $event) : ($event.preventDefault(), emit('open', item))"
     >
       <span v-if="failed.has(item.id)" class="no-thumb">{{ item.kind === 'video' ? '🎬' : '🖼' }}</span>
       <img v-else :src="item.thumb_url" alt="" loading="lazy" decoding="async" @error="onThumbError(item, $event)" />
@@ -109,7 +111,7 @@ function onThumbError(item, e) {
         @click.stop="emit('toggle', item, $event)"
         >{{ selected.has(item.id) ? '✓' : '' }}</span
       >
-    </button>
+    </component>
     <div v-if="visible.length < items.length || hasMore" ref="sentinel" class="sentinel" aria-hidden="true"></div>
   </div>
 </template>
@@ -122,6 +124,9 @@ function onThumbError(item, e) {
 }
 
 .tile {
+  display: block;
+  text-decoration: none;
+  color: inherit;
   position: relative;
   aspect-ratio: 1;
   padding: 0;

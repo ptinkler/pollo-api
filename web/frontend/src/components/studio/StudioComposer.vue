@@ -85,7 +85,6 @@ function onDrop(e) {
         :value="draft"
         rows="1"
         placeholder="Message, or describe an image / video…"
-        :disabled="sending"
         @input="onInput"
         @keydown="onKey"
         @paste="onPaste"

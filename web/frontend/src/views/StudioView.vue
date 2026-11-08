@@ -70,6 +70,7 @@ const {
   messages,
   sending,
   draft,
+  lane,
   lightbox,
   activeKind,
   favourites,
@@ -159,6 +160,18 @@ watch(
 // A gallery is for straight generations: only Image and Video modes (no
 // Auto/Text — the chat model is never involved), sent exactly as written.
 const inGallery = computed(() => threadView.value === 'gallery')
+// Each view keeps its own prompt draft, and gallery sends run beside the chat
+const draftStash = { chat: '', gallery: '' }
+watch(
+  threadView,
+  (v, old) => {
+    if (old) draftStash[old] = draft.value
+    if (old && old !== v) draft.value = draftStash[v]
+    lane.value = v === 'gallery' ? 'gallery' : null
+  },
+  { immediate: true },
+)
+const chatMessages = computed(() => messages.value.filter(m => !m.lane))
 const composerModes = computed(() =>
   inGallery.value ? MODES.filter(m => m.id === 'image' || m.id === 'video') : MODES,
 )
@@ -535,7 +548,7 @@ onMounted(() => {
 
         <StudioFeed
           v-if="threadView === 'chat'"
-          :messages="messages"
+          :messages="chatMessages"
           :active="active"
           :sending="sending"
           :last-assistant-id="lastAssistantId"

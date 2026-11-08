@@ -48,7 +48,12 @@ export function useStudio({ models, settings, showToast }) {
   const activeThread = ref(null)
   const messages = ref([])
   const loading = ref(false)
-  const sending = ref(false)
+  // Threads with a live turn: generation blocks only its own thread, not the app
+  const sendingIds = ref(new Set())
+  // Which lane the composer feeds: 'gallery' sends are standalone exchanges that
+  // never block (or join) the chat, so the gallery view is never "sending".
+  const lane = ref(null)
+  const sending = computed(() => lane.value !== 'gallery' && sendingIds.value.has(active.value))
   const streamingId = ref(null)
   const draft = ref('')
   const lightbox = ref(null)
@@ -56,7 +61,7 @@ export function useStudio({ models, settings, showToast }) {
   const favourites = ref([]) // cross-thread gallery of favourited generations
   // The thread being created from scratch opens on this view ('chat' | 'gallery')
   const newKind = ref('chat')
-  let abort = null
+  const aborts = new Map() // thread id -> AbortController of its live turn
   let forking = false
 
   // Image attachments (image-edit refs / video first frame) — reused chat layer
@@ -174,7 +179,7 @@ export function useStudio({ models, settings, showToast }) {
 
   const messageIndex = id => messages.value.findIndex(m => m.id === id)
   const lastAssistantId = computed(() => {
-    const last = messages.value[messages.value.length - 1]
+    const last = messages.value.filter(m => !m.lane).at(-1)
     return last?.role === 'assistant' ? last.id : null
   })
   const canSend = computed(
@@ -194,7 +199,20 @@ export function useStudio({ models, settings, showToast }) {
     messages.value = data.messages || []
   }
 
-  const polling = useMessagePolling({ messages, streamingId, replace: replaceMessage, onFinished: () => loadLists() })
+  const polling = useMessagePolling({ messages, streamingId, replace: replaceMessage, onFinished: refreshAfterBilling })
+
+  // Something was billed (a reply or generation landed): refresh every figure
+  // that depends on it instead of waiting for a reload
+  function refreshAfterBilling() {
+    loadLists()
+    refreshSpend(active.value)
+    refreshBalances()
+  }
+  // Balances also drift outside this tab (other devices, other chats): re-check
+  // when the tab is shown again and every couple of minutes while it is.
+  const onShown = () => document.visibilityState === 'visible' && refreshBalances()
+  document.addEventListener('visibilitychange', onShown)
+  setInterval(onShown, 120000)
 
   async function loadModels() {
     modelsLoading.value = true
@@ -305,7 +323,7 @@ export function useStudio({ models, settings, showToast }) {
         if (i !== -1) messages.value.splice(i, 1, ev.user_message)
       }
       messages.value.push(ev.assistant_message)
-      streamingId.value = ev.assistant_message.id
+      if (!ev.assistant_message.lane) streamingId.value = ev.assistant_message.id
     },
     delta(ev) {
       const m = messages.value[messageIndex(streamingId.value)]
@@ -320,6 +338,7 @@ export function useStudio({ models, settings, showToast }) {
       // Flipped pending → done: announce it (the gallery queue has no toast of its own).
       if (ev.item.status === 'done' && (!prev || prev.status === 'pending')) {
         showToast(`${ev.item.kind === 'video' ? 'Video' : 'Image'} ready`, 'success')
+        refreshAfterBilling()
       }
     },
     characters(ev) {
@@ -334,33 +353,46 @@ export function useStudio({ models, settings, showToast }) {
       if (t) t.title = ev.title
     },
     done(ev) {
-      const i = messageIndex(streamingId.value)
-      if (i !== -1 && ev.message) messages.value.splice(i, 1, ev.message)
+      const i = messageIndex(ev.message?.id)
+      if (i !== -1) messages.value.splice(i, 1, ev.message)
     },
   }
 
+  const setSending = (id, on) => {
+    const next = new Set(sendingIds.value)
+    if (on) next.add(id)
+    else next.delete(id)
+    sendingIds.value = next
+  }
+
   async function runTurn(fn, id, body, tempUser) {
-    sending.value = true
-    abort = new AbortController()
+    const gallery = body.lane === 'gallery'
+    if (!gallery) setSending(id, true)
+    const ctl = new AbortController()
+    if (!gallery) aborts.set(id, ctl)
     let started = false
+    // Once the user opens another thread the stream must not touch the shown
+    // messages; the server keeps going and polling picks the result up.
     const onEvent = ev => {
       started ||= ev.type === 'start'
-      TURN_EVENTS[ev.type]?.(ev, tempUser)
+      if (active.value === id && !(gallery && ev.type === 'delta')) TURN_EVENTS[ev.type]?.(ev, tempUser)
     }
     try {
-      await fn(id, body, onEvent, abort.signal)
+      await fn(id, body, onEvent, ctl.signal)
     } catch (e) {
       if (e.name === 'AbortError' || started) return
       showToast(e.message, 'error')
+      if (active.value !== id) return
       if (body.message_id != null) openThread(id)
       else if (tempUser) messages.value = messages.value.filter(m => m !== tempUser)
     } finally {
-      sending.value = false
-      streamingId.value = null
-      abort = null
+      if (!gallery) {
+        setSending(id, false)
+        aborts.delete(id)
+        if (active.value === id) streamingId.value = null
+      }
       polling.ensure()
-      loadLists()
-      refreshSpend(active.value)
+      refreshAfterBilling()
     }
   }
 
@@ -393,13 +425,19 @@ export function useStudio({ models, settings, showToast }) {
       id: `tmp-${Date.now()}`,
       role: 'user',
       content,
+      lane: lane.value,
       status: 'done',
       media: sent.map(a => ({ id: a.key, kind: 'image', status: 'done', file: a.file })),
     })
     messages.value.push(tempUser)
     draft.value = ''
     clearAttachments()
-    await runTurn(sendChatMessage, id, { ...turnSettings(), content, attachments: sent.map(a => a.file) }, tempUser)
+    await runTurn(
+      sendChatMessage,
+      id,
+      { ...turnSettings(), content, attachments: sent.map(a => a.file), lane: lane.value },
+      tempUser,
+    )
   }
 
   async function retry(msg) {
@@ -557,7 +595,7 @@ export function useStudio({ models, settings, showToast }) {
     try {
       await cancelChatMessage(streamingId.value)
     } catch {
-      abort?.abort()
+      aborts.get(active.value)?.abort()
     }
   }
   // "Animate / edit this image" and "picture/video from this reply": attach the
@@ -651,6 +689,7 @@ export function useStudio({ models, settings, showToast }) {
     messages,
     loading,
     sending,
+    lane,
     streamingId,
     draft,
     lightbox,

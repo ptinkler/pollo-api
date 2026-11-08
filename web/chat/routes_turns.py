@@ -90,9 +90,10 @@ def api_send_message(conv_id: str, data: SendMessage):
         media.append(_saved_media(kind, "upload", name))
 
     db = get_db()
-    user_msg = db.add_chat_message(conv_id, "user", content, media=media, mode=data.mode)
+    lane = "gallery" if data.lane == "gallery" else None
+    user_msg = db.add_chat_message(conv_id, "user", content, media=media, mode=data.mode, lane=lane)
     _remember_settings(conv, data)
-    return _start_turn(conv_id, data, user_msg, parent_id=user_msg.id)
+    return _start_turn(conv_id, data, user_msg, parent_id=user_msg.id, lane=lane)
 
 
 @router.post("/conversations/{conv_id}/retry")
@@ -101,15 +102,15 @@ def api_retry(conv_id: str, data: RetryMessage):
     beside it. The old reply and everything after it stay on their branch."""
     _require_openrouter(data.mode)
     conv = _require_conv(conv_id)
-    _require_idle(conv_id)
     msg = get_db().get_chat_message(data.message_id)
     if not msg or msg.conversation_id != conv_id or msg.role != "assistant":
         raise HTTPException(400, "Can only retry an assistant message in this conversation")
+    _require_idle(conv_id, msg.lane)
     # The retry runs in the mode selected now; the prompt's mode tag follows it
     if msg.parent_id:
         get_db().update_chat_message(msg.parent_id, mode=data.mode)
     _remember_settings(conv, data)
-    return _start_turn(conv_id, data, None, parent_id=msg.parent_id)
+    return _start_turn(conv_id, data, None, parent_id=msg.parent_id, lane=msg.lane)
 
 
 @router.post("/conversations/{conv_id}/edit")
@@ -119,28 +120,32 @@ def api_edit(conv_id: str, data: EditMessage):
     everything after it stay on their branch."""
     _require_openrouter(data.mode)
     conv = _require_conv(conv_id)
-    _require_idle(conv_id)
     db = get_db()
     msg = db.get_chat_message(data.message_id)
     if not msg or msg.conversation_id != conv_id or msg.role != "user":
         raise HTTPException(400, "Can only edit a user message in this conversation")
+    _require_idle(conv_id, msg.lane)
     content = data.content.strip()
     if not content and not msg.media:
         raise HTTPException(400, "Message is empty")
     media = [{**item, "id": uuid.uuid4().hex[:8]} for item in msg.media]
-    user_msg = db.add_chat_message(conv_id, "user", content, media=media, parent_id=msg.parent_id, mode=data.mode)
+    user_msg = db.add_chat_message(
+        conv_id, "user", content, media=media, parent_id=msg.parent_id, mode=data.mode, lane=msg.lane
+    )
     _remember_settings(conv, data)
-    return _start_turn(conv_id, data, user_msg, parent_id=user_msg.id)
+    return _start_turn(conv_id, data, user_msg, parent_id=user_msg.id, lane=msg.lane)
 
 
 def _sse(event: dict) -> str:
     return f"data: {json.dumps(event)}\n\n"
 
 
-def _start_turn(conv_id: str, settings: TurnSettings, user_msg, parent_id: int | None) -> StreamingResponse:
+def _start_turn(
+    conv_id: str, settings: TurnSettings, user_msg, parent_id: int | None, lane: str | None = None
+) -> StreamingResponse:
     model = {"image": settings.image_model, "video": settings.video_model}.get(settings.mode, settings.text_model)
     assistant = get_db().add_chat_message(
-        conv_id, "assistant", "", model=model, status="streaming", parent_id=parent_id, mode=settings.mode
+        conv_id, "assistant", "", model=model, status="streaming", parent_id=parent_id, mode=settings.mode, lane=lane
     )
     start = {
         "type": "start",
@@ -220,7 +225,8 @@ class RegenerateMedia(BaseModel):
 
 @router.post("/messages/{message_id}/media/{media_id}/regenerate")
 def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia):
-    """Retry a failed image/video in place, optionally on a different model.
+    """Retry a failed image/video in place (or re-roll a finished one as an
+    extra item beside it), optionally on a different model.
     Runs in the background; the UI polls the message like a rendering video."""
     db = get_db()
     msg = db.get_chat_message(message_id)
@@ -231,14 +237,22 @@ def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia):
     item = _find_media(msg, media_id)
     if not item or item.get("source") != "generated":
         raise HTTPException(404, "Media not found")
-    if item.get("status") != "error":
-        raise HTTPException(400, "Only failed media can be retried")
+    if item.get("status") not in ("error", "done"):
+        raise HTTPException(400, "Wait for the generation to finish first")
     if not item.get("prompt"):
         raise HTTPException(400, "This item has no stored prompt to retry")
     model = data.model or item.get("model")
-    msg = db.update_chat_media_item(
-        message_id, media_id, status="pending", error=None, moderated=False, model=model, job_id=None
-    )
+    if item["status"] == "done":
+        # Re-roll just this image/video: the original stays, a new one joins the reply
+        gone = ("file", "cost", "credits", "error", "job_id", "favourite", "pinned", "log")
+        item = {k: v for k, v in item.items() if k not in gone}
+        item = {**item, "id": uuid.uuid4().hex[:8], "status": "pending", "model": model}
+        media_id = item["id"]
+        msg = db.append_chat_media_item(message_id, item)
+    else:
+        msg = db.update_chat_media_item(
+            message_id, media_id, status="pending", error=None, moderated=False, model=model, job_id=None
+        )
     threading.Thread(
         target=_regenerate_worker,
         args=(msg.conversation_id, message_id, dict(item), model),

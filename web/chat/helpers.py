@@ -77,18 +77,18 @@ def _branch_to(messages: list, leaf_id: int | None) -> list:
 
 def _message_out(msg) -> dict:
     """A message for the UI, with its siblings for the ‹ 1/2 › branch arrows."""
-    return {**msg.to_dict(), "siblings": get_db().get_chat_sibling_ids(msg.conversation_id, msg.parent_id)}
+    return {**msg.to_dict(), "siblings": get_db().get_chat_sibling_ids(msg.conversation_id, msg.parent_id, msg.lane)}
 
 
 def _shown_branch(conv_id: str) -> list[dict]:
     db = get_db()
     messages = db.get_chat_messages(conv_id)
-    siblings: dict[int | None, list[int]] = {}
+    siblings: dict[tuple, list[int]] = {}
     for m in messages:
-        siblings.setdefault(m.parent_id, []).append(m.id)
-    return [
-        {**m.to_dict(), "siblings": siblings[m.parent_id]} for m in _branch_to(messages, db.get_chat_leaf_id(conv_id))
-    ]
+        siblings.setdefault((m.lane, m.parent_id), []).append(m.id)
+    # The chat's branch, then the standalone gallery exchanges beside it
+    shown = [*_branch_to(messages, db.get_chat_leaf_id(conv_id)), *(m for m in messages if m.lane)]
+    return [{**m.to_dict(), "siblings": siblings[(m.lane, m.parent_id)]} for m in shown]
 
 
 def _require_openrouter(mode: str | None = None):
@@ -146,9 +146,12 @@ def _require_own_conversation(conv_id: str) -> None:
         raise HTTPException(404, "Not found")
 
 
-def _require_idle(conv_id: str) -> None:
-    """Edits/retries rewrite history, so they can't overlap a running reply."""
-    if any(m.status == "streaming" for m in get_db().get_chat_messages(conv_id)):
+def _require_idle(conv_id: str, lane: str | None = None) -> None:
+    """Edits/retries rewrite history, so they can't overlap a running reply
+    in the same lane (gallery exchanges never block the chat or each other)."""
+    if lane:
+        return
+    if any(m.status == "streaming" and not m.lane for m in get_db().get_chat_messages(conv_id)):
         raise HTTPException(409, "Wait for the current reply to finish (or stop it) first")
 
 

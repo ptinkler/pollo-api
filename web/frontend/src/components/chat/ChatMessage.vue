@@ -448,6 +448,16 @@ const requestItem = ref(null)
                 >
               </span>
               <button
+                v-if="
+                  item.status === 'done' && item.source === 'generated' && item.prompt && message.status !== 'streaming'
+                "
+                class="caption-btn"
+                title="Generate this image/video again from the same prompt (keeps this one)"
+                @click="emit('regenerate', { mediaId: item.id, model: item.model || null })"
+              >
+                ↻ Redo
+              </button>
+              <button
                 v-if="item.prompt"
                 class="caption-btn"
                 :title="`Copy the prompt sent to the ${item.kind} model:\n${item.prompt}`"

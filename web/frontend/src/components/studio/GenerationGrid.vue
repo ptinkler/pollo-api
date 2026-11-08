@@ -43,6 +43,18 @@ const shown = computed(() =>
     return true
   }),
 )
+// A preview that fails once falls back to the full file, then retries once
+// (a half-written file or a dropped connection), instead of staying blank
+function onImgError(e, item) {
+  const img = e.target
+  if (!img.dataset.fb && item.url && img.src !== new URL(item.url, location.href).href) {
+    img.dataset.fb = '1'
+    img.src = item.url
+  } else if (!img.dataset.retry) {
+    img.dataset.retry = '1'
+    setTimeout(() => (img.src = `${item.url}${item.url.includes('?') ? '&' : '?'}r=1`), 1500)
+  }
+}
 const inProgress = computed(() => props.items.filter(it => it.status === 'pending').length)
 </script>
 
@@ -100,11 +112,17 @@ const inProgress = computed(() => props.items.filter(it => it.status === 'pendin
           <div class="shint">Click for details</div>
         </button>
         <template v-else>
-          <button type="button" class="thumb" @click="emit('open', item)">
-            <img v-if="item.kind === 'image'" :src="item.preview || item.url" loading="lazy" alt="" />
+          <a class="thumb" :href="item.url" @click.prevent="emit('open', item)">
+            <img
+              v-if="item.kind === 'image'"
+              :src="item.preview || item.url"
+              loading="lazy"
+              alt=""
+              @error="onImgError($event, item)"
+            />
             <video v-else :src="item.url" preload="metadata" muted playsinline></video>
             <span v-if="item.kind === 'video'" class="vtag">▶</span>
-          </button>
+          </a>
           <button
             class="fav"
             :class="{ on: item.favourite }"

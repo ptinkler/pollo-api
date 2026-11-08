@@ -365,6 +365,9 @@ class ChatMessage(Base):
     # The composer mode the turn ran in (auto/text/image/video), so an edit or
     # retry reruns it the same way; None on messages from before it was kept
     mode: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # None = the chat's branch; 'gallery' = a standalone gallery exchange that
+    # sits beside the chat (never its context, branch or version arrows)
+    lane: Mapped[str | None] = mapped_column(String(10), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="done")  # 'streaming' | 'done' | 'error'
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     cost: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -392,6 +395,7 @@ class ChatMessage(Base):
             "media": self.media,
             "model": self.model,
             "mode": self.mode,
+            "lane": self.lane,
             "status": self.status,
             "error": self.error,
             "cost": self.cost,

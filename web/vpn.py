@@ -65,14 +65,29 @@ def _gluetun_json(path: str, if_not_ok: Any, if_unreachable: Any, timeout: int =
     return r.json() if r.ok else if_not_ok
 
 
+def _egress_ip() -> str | None:
+    """This app's own egress IP — in vpn mode it shares gluetun's network, so
+    it's the tunnel's exit IP. Fallback when the control server gives none."""
+    for url in ("https://api.ipify.org", "https://icanhazip.com"):
+        try:
+            r = requests.get(url, timeout=6)
+            if r.ok and r.text.strip():
+                return r.text.strip()
+        except Exception:  # noqa: BLE001, S112 — try the next service
+            continue
+    return None
+
+
 @router.get("/status")
 def vpn_status(_admin=Depends(require_admin)):
     """Current VPN status, public IP, and server country from Gluetun."""
     # Gluetun's /v1/publicip/ip returns the tunnel's exit IP under "public_ip"
     # (older builds used "ip"); normalise to {ip, country} for the UI.
-    raw = _gluetun_json("/v1/publicip/ip", {}, {}, timeout=5)
+    raw = _gluetun_json("/v1/publicip/ip", {}, {}, timeout=10)
     ip = raw.get("public_ip") or raw.get("ip")
     country = raw.get("country")
+    if not ip:
+        ip = _egress_ip()
     settings = _gluetun_json("/v1/vpn/settings", {}, {})
     # The public IP lookup's country stands in when settings name none
     countries = settings.get("server_countries") or ([country] if country else [])

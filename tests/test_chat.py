@@ -112,6 +112,24 @@ class TestConversations:
         c = client.post("/api/chat/conversations", json={"kind": "bogus"}).json()
         assert c["kind"] == "chat"
 
+    def test_gallery_lane_stays_beside_the_chat_branch(self, client, db):
+        c = client.post("/api/chat/conversations", json={}).json()
+        u = db.add_chat_message(c["id"], "user", "story")
+        g = db.add_chat_message(c["id"], "user", "a cat", lane="gallery")
+        ga = db.add_chat_message(c["id"], "assistant", parent_id=g.id, lane="gallery")
+        nxt = db.add_chat_message(c["id"], "user", "go on")
+        # The gallery exchange neither moves the chat's leaf nor becomes its parent
+        assert nxt.parent_id == u.id and g.parent_id is None and ga.parent_id == g.id
+        assert db.get_chat_leaf_id(c["id"]) == nxt.id
+        out = client.get(f"/api/chat/conversations/{c['id']}").json()["messages"]
+        chat = [m["id"] for m in out if not m["lane"]]
+        assert chat == [u.id, nxt.id] and {m["id"] for m in out if m["lane"]} == {g.id, ga.id}
+        # No version arrows from sharing "no parent" with the chat's first turn
+        assert next(m for m in out if m["id"] == u.id)["siblings"] == [u.id]
+        # Deleting the gallery exchange leaves the chat alone
+        after = client.delete(f"/api/chat/messages/{g.id}").json()["messages"]
+        assert [m["id"] for m in after] == [u.id, nxt.id]
+
     def test_conversation_thumbs_returns_newest_image(self, client, db):
         c = client.post("/api/chat/conversations", json={}).json()
 
@@ -1234,9 +1252,15 @@ class TestModerationAndRegenerate:
         assert item["status"] == "pending" and item["job_id"] == "gen-vid-9"
         assert started == [(conv["id"], msg.id, "v1", "gen-vid-9")]
 
-    def test_only_failed_items_can_be_retried(self, client, conv, db):
+    def test_finished_item_is_rerolled_as_a_new_item_beside_it(self, client, conv, db, chat, monkeypatch):
         msg = self._failed_image(db, conv, status="done", file="x.png")
-        assert client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={}).status_code == 400
+        self._run_worker_inline(chat, monkeypatch)
+        monkeypatch.setattr(chat.routes_turns, "_regenerate_worker", lambda *a: None)
+        r = client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={})
+        assert r.status_code == 200
+        old, new = db.get_chat_message(msg.id).media
+        assert old["file"] == "x.png" and old["status"] == "done"
+        assert new["id"] != "m1" and new["status"] == "pending" and not new.get("file")
         assert client.post(f"/api/chat/messages/{msg.id}/media/nope/regenerate", json={}).status_code == 404
 
 

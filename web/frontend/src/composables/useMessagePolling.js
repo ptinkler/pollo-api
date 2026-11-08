@@ -1,7 +1,7 @@
 import { onBeforeUnmount, onMounted } from 'vue'
 import { fetchChatMessage } from './useChat'
 
-const POLL_MS = 5000
+const POLL_MS = 3000
 
 // A reply's live stream can drop — a background tab gets throttled or
 // frozen, you reload, or you open it mid-reply from elsewhere. The server

@@ -19,10 +19,18 @@ const SOURCES = [
   { id: 'upload', label: 'Uploaded' },
 ]
 
+const ORIGINS = [
+  { id: 'all', label: 'Everywhere' },
+  { id: 'chat', label: 'Chats' },
+  { id: 'library', label: 'Library' },
+  { id: 'orphan', label: 'Orphaned' },
+]
+
 const items = ref([])
 const total = ref(0)
 const kind = ref('all')
 const source = ref('all')
+const origin = ref('all')
 const q = ref('')
 const loading = ref(false)
 const preview = ref(null)
@@ -34,6 +42,7 @@ function params(offset) {
     q: q.value || undefined,
     kind: kind.value === 'all' ? undefined : kind.value,
     source: source.value === 'all' ? undefined : source.value,
+    origin: origin.value === 'all' ? undefined : origin.value,
   }
 }
 async function load() {
@@ -60,6 +69,11 @@ function setSource(s) {
   load()
 }
 
+function setOrigin(o) {
+  origin.value = o
+  load()
+}
+
 onMounted(load)
 </script>
 
@@ -80,6 +94,11 @@ onMounted(load)
       <div class="kinds">
         <button v-for="s in SOURCES" :key="s.id" :class="{ on: source === s.id }" @click="setSource(s.id)">
           {{ s.label }}
+        </button>
+      </div>
+      <div class="kinds">
+        <button v-for="o in ORIGINS" :key="o.id" :class="{ on: origin === o.id }" @click="setOrigin(o.id)">
+          {{ o.label }}
         </button>
       </div>
       <div class="msearch">

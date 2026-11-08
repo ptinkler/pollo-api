@@ -90,6 +90,7 @@ class TurnSettings(BaseModel):
 class SendMessage(TurnSettings):
     content: str = ""
     attachments: list[str] = []  # filenames returned by the attachments endpoint
+    lane: str | None = None  # 'gallery' = a standalone exchange beside the chat
 
 
 class RetryMessage(TurnSettings):

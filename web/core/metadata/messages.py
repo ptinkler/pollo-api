@@ -25,14 +25,17 @@ class MessageMixin:
         status: str = "done",
         parent_id: Any = _APPEND,
         mode: str | None = None,
+        lane: str | None = None,
     ) -> ChatMessage:
         """Add a message and make it the shown branch's last message. By
         default it continues the shown branch; pass `parent_id` (None for a
-        first message) to start a new branch beside an existing message."""
+        first message) to start a new branch beside an existing message.
+        A `lane` message starts its own standalone exchange: it never joins
+        or moves the shown branch."""
         with self._session() as session:
             conv = session.get(ChatConversation, conversation_id)
             if parent_id is _APPEND:
-                parent_id = self._chat_leaf_id(session, conv) if conv else None
+                parent_id = None if lane else (self._chat_leaf_id(session, conv) if conv else None)
             msg = ChatMessage(
                 conversation_id=conversation_id,
                 parent_id=parent_id,
@@ -41,13 +44,15 @@ class MessageMixin:
                 media_json=json.dumps(media) if media else None,
                 model=model,
                 mode=mode,
+                lane=lane,
                 status=status,
             )
             session.add(msg)
             session.flush()
             if conv:
                 conv.updated_at = datetime.now()
-                conv.current_leaf_id = msg.id
+                if not lane:
+                    conv.current_leaf_id = msg.id
             session.commit()
             session.refresh(msg)
             session.expunge(msg)
@@ -78,7 +83,11 @@ class MessageMixin:
         """The shown branch's last message, falling back to the newest one."""
         if conv.current_leaf_id and session.get(ChatMessage, conv.current_leaf_id):
             return conv.current_leaf_id
-        return session.query(func.max(ChatMessage.id)).filter(ChatMessage.conversation_id == conv.id).scalar()
+        return (
+            session.query(func.max(ChatMessage.id))
+            .filter(ChatMessage.conversation_id == conv.id, ChatMessage.lane.is_(None))
+            .scalar()
+        )
 
     def get_chat_leaf_id(self, conversation_id: str) -> int | None:
         with self._session() as session:
@@ -93,14 +102,16 @@ class MessageMixin:
             )
             session.commit()
 
-    def get_chat_sibling_ids(self, conversation_id: str, parent_id: int | None) -> list[int]:
-        """Ids of every version of a turn (messages sharing a parent), oldest first."""
+    def get_chat_sibling_ids(self, conversation_id: str, parent_id: int | None, lane: str | None = None) -> list[int]:
+        """Ids of every version of a turn (messages sharing a parent in the
+        same lane), oldest first."""
         with self._session() as session:
             rows = (
                 session.query(ChatMessage.id)
                 .filter(
                     ChatMessage.conversation_id == conversation_id,
                     ChatMessage.parent_id == parent_id,
+                    ChatMessage.lane.is_(None) if lane is None else ChatMessage.lane == lane,
                 )
                 .order_by(ChatMessage.id)
                 .all()
@@ -260,6 +271,18 @@ class MessageMixin:
         msgs = {
             m.id: m for m in session.query(ChatMessage).filter(ChatMessage.conversation_id == conversation_id).all()
         }
+        if prompt.lane:
+            # A standalone exchange: just the prompt and its replies
+            doomed = [prompt.id] + [m.id for m in msgs.values() if m.parent_id == prompt.id]
+            return {
+                "prompt": prompt,
+                "msgs": msgs,
+                "doomed": doomed,
+                "kept_next": [],
+                "other_versions": 0,
+                "other_messages": 0,
+            }
+        msgs = {i: m for i, m in msgs.items() if not m.lane}
         children: dict[int | None, list[int]] = {}
         for m in msgs.values():
             children.setdefault(m.parent_id, []).append(m.id)

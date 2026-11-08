@@ -108,6 +108,7 @@ class _DBBase:
         "chat_messages": {
             "parent_id": "INTEGER",
             "mode": "VARCHAR(10)",
+            "lane": "VARCHAR(10)",
             "import_id": "VARCHAR(100)",
             "user_id": "VARCHAR(50)",
         },
