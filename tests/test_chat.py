@@ -734,6 +734,42 @@ class TestStartupResume:
 
 
 @pytest.mark.no_tenant
+def test_gallery_lane_backfill_converts_only_pure_gallery_threads():
+    import importlib.util
+
+    import sqlalchemy as sa
+
+    spec = importlib.util.spec_from_file_location("m0024", "alembic/versions/0024_backfill_gallery_lane.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    eng = sa.create_engine("sqlite://")
+    with eng.begin() as c:
+        c.execute(sa.text("CREATE TABLE chat_conversations (id TEXT, kind TEXT, current_leaf_id INTEGER)"))
+        c.execute(
+            sa.text(
+                "CREATE TABLE chat_messages (id INTEGER PRIMARY KEY, conversation_id TEXT, parent_id INTEGER,"
+                " role TEXT, mode TEXT, lane TEXT)"
+            )
+        )
+        c.execute(sa.text("INSERT INTO chat_conversations VALUES ('g','gallery',4),('m','gallery',7),('c','chat',9)"))
+        rows = [
+            (1, "g", None, "user", "image"), (2, "g", 1, "assistant", "image"),
+            (3, "g", 2, "user", "image"), (4, "g", 3, "assistant", "image"),
+            (5, "m", None, "user", "image"), (6, "m", 5, "assistant", "image"), (7, "m", 6, "user", "text"),
+            (8, "c", None, "user", "image"), (9, "c", 8, "assistant", "image"),
+        ]  # fmt: skip
+        for r in rows:
+            c.execute(
+                sa.text("INSERT INTO chat_messages VALUES (:i,:c,:p,:r,:m,NULL)"), dict(zip("icprm", r, strict=True))
+            )
+        assert mod.backfill(c) == 1
+        lanes = dict(c.execute(sa.text("SELECT conversation_id, MAX(lane) FROM chat_messages GROUP BY 1")).all())
+        assert lanes == {"g": "gallery", "m": None, "c": None}
+        assert c.execute(sa.text("SELECT parent_id FROM chat_messages WHERE id = 3")).scalar() is None
+        assert c.execute(sa.text("SELECT parent_id FROM chat_messages WHERE id = 4")).scalar() == 3
+        assert c.execute(sa.text("SELECT current_leaf_id FROM chat_conversations WHERE id='g'")).scalar() is None
+
+
 def test_alembic_migration_creates_chat_tables(tmp_path):
     """0003 adds the chat tables to a pre-chat DB, and is a no-op when
     create_all() already made them (the app creates tables on startup)."""

@@ -427,7 +427,7 @@ export function useStudio({ models, settings, showToast }) {
       content,
       lane: lane.value,
       status: 'done',
-      media: sent.map(a => ({ id: a.key, kind: 'image', status: 'done', file: a.file })),
+      media: sent.map(a => ({ id: a.key, kind: a.video ? 'video' : 'image', status: 'done', file: a.file })),
     })
     messages.value.push(tempUser)
     draft.value = ''
@@ -522,7 +522,7 @@ export function useStudio({ models, settings, showToast }) {
     clearAttachments()
     const p = item.params || {}
     const files = [...(p.refs || []), p.first_frame, p.last_frame].filter(f => f && !f.startsWith('char:'))
-    for (const f of new Set(files)) addChatImage(f)
+    for (const f of new Set(files)) addChatImage(f, item.conversation_id)
   }
   // Enhance button: rewrite the draft with the text model. Only on request —
   // sending never alters the prompt.
@@ -600,9 +600,9 @@ export function useStudio({ models, settings, showToast }) {
   }
   // "Animate / edit this image" and "picture/video from this reply": attach the
   // image (or append the text) and switch to the chosen mode
-  function useImage({ file, mode: target } = {}) {
+  function useImage({ file, mode: target, conversation_id: fromConv } = {}) {
     lightbox.value = null
-    if (file && !addChatImage(file)) return
+    if (file && !addChatImage(file, fromConv)) return
     if (target) mode.value = target
   }
   function useText({ text, mode: target } = {}) {
@@ -660,9 +660,8 @@ export function useStudio({ models, settings, showToast }) {
       showToast(e.message, 'error')
     }
   }
-  async function renameSpace(s) {
-    const name = prompt('Rename space', s.name || '')
-    if (name == null) return
+  async function renameSpace(s, name) {
+    if (!name?.trim()) return
     try {
       await updateSpace(s.id, { name: name.trim() })
       s.name = name.trim()

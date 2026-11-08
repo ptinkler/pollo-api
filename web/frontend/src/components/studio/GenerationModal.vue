@@ -89,11 +89,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
             <button
               v-if="!isError && item.kind === 'image'"
               class="gm-btn"
-              @click="emit('use-image', { file: item.file, mode: 'image' })"
+              @click="emit('use-image', { file: item.file, mode: 'image', conversation_id: item.conversation_id })"
             >
               🖼 Picture from this
             </button>
-            <button v-if="!isError" class="gm-btn" @click="emit('use-image', { file: item.file, mode: 'video' })">
+            <button
+              v-if="!isError"
+              class="gm-btn"
+              @click="emit('use-image', { file: item.file, mode: 'video', conversation_id: item.conversation_id })"
+            >
               🎬 Video from this
             </button>
             <button v-if="canManage" class="gm-btn" @click="emit('use-settings', item)">

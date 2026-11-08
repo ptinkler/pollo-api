@@ -81,6 +81,10 @@ export const cancelChatGptUpload = id => apiDelete(`/api/chat/import/chatgpt/upl
 export const uploadChatAttachment = (convId, file) =>
   apiUpload(`/api/chat/conversations/${enc(convId)}/attachments`, file)
 
+// A source video (e.g. Recast / motion models)
+export const uploadChatVideoAttachment = (convId, file) =>
+  apiUpload(`/api/chat/conversations/${enc(convId)}/attachments/video`, file)
+
 // Drop an uploaded-but-unsent attachment's file (the server keeps any still in use)
 export const discardChatAttachment = (convId, file) =>
   apiDelete(`/api/chat/conversations/${enc(convId)}/attachments/${enc(file)}`)

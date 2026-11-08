@@ -18,6 +18,11 @@ const emit = defineEmits(['update:draft', 'update:mode', 'send', 'files', 'remov
 
 const drag = ref(false)
 const ta = ref(null)
+const vid = ref(null)
+function onVideo(e) {
+  emit('files', e.target.files)
+  e.target.value = ''
+}
 
 // Grow the prompt box with its content up to the CSS max-height, then scroll.
 function autogrow() {
@@ -63,7 +68,8 @@ function onDrop(e) {
     <div class="cbox" :class="{ drag }">
       <div v-if="attachments.length" class="atts">
         <div v-for="a in attachments" :key="a.key" class="att" :class="{ uploading: a.uploading }">
-          <img :src="a.preview" alt="attachment" />
+          <video v-if="a.video" :src="a.preview" muted playsinline></video>
+          <img v-else :src="a.preview" alt="attachment" />
           <button class="attx" title="Remove" @click="emit('remove', a)">×</button>
         </div>
       </div>
@@ -94,6 +100,15 @@ function onDrop(e) {
         <button class="clip" title="Attach images — pick from Media or upload" @click="emit('library')">
           <svg class="ic"><use href="#s-clip" /></svg>
         </button>
+        <button
+          v-if="mode === 'video'"
+          class="clip"
+          title="Attach a source video (mp4) — for Recast / motion models"
+          @click="vid?.click()"
+        >
+          🎞
+        </button>
+        <input ref="vid" type="file" accept="video/mp4" hidden @change="onVideo" />
         <button
           v-if="mode === 'image' || mode === 'video'"
           class="clip enh"
@@ -140,6 +155,7 @@ function onDrop(e) {
   overflow: hidden;
   border: 1px solid var(--sborder);
 }
+.att video,
 .att img {
   width: 100%;
   height: 100%;

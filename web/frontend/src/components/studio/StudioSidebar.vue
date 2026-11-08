@@ -56,6 +56,17 @@ function commitRename(t) {
 function cancelRename() {
   renamingId.value = null
 }
+const spaceKey = s => `space:${s.id}`
+function startRenameSpace(s) {
+  renamingId.value = spaceKey(s)
+  renameText.value = s.name || ''
+}
+function commitRenameSpace(s) {
+  if (renamingId.value !== spaceKey(s)) return
+  const name = renameText.value.trim()
+  renamingId.value = null
+  if (name && name !== (s.name || '')) emit('rename-space', s, name)
+}
 
 // Drag a thread onto a space folder (or Recent) to move it
 const dragId = ref(null)
@@ -197,7 +208,17 @@ const bySpace = computed(() => {
             <button class="fchev" @click="toggleSpace(g.space.id)">
               <svg class="ic sm"><use href="#s-chev" /></svg>
             </button>
-            <button class="fmain" @click="emit('open-space', g.space)">
+            <input
+              v-if="renamingId === spaceKey(g.space)"
+              v-focus-select
+              class="nrename"
+              :value="renameText"
+              @input="renameText = $event.target.value"
+              @keydown.enter.prevent="commitRenameSpace(g.space)"
+              @keydown.esc="cancelRename"
+              @blur="commitRenameSpace(g.space)"
+            />
+            <button v-else class="fmain" @click="emit('open-space', g.space)">
               <svg class="ic"><use href="#s-folder" /></svg><span class="lbl">{{ g.space.name }}</span
               ><span class="count">{{ g.items.length }}</span>
             </button>
@@ -205,7 +226,7 @@ const bySpace = computed(() => {
               <button class="nact" title="Space defaults" @click.stop="emit('space-settings', g.space)">
                 <svg class="ic sm"><use href="#s-cog" /></svg>
               </button>
-              <button class="nact" title="Rename" @click.stop="emit('rename-space', g.space)">
+              <button class="nact" title="Rename" @click.stop="startRenameSpace(g.space)">
                 <svg class="ic sm"><use href="#s-pencil" /></svg>
               </button>
               <button class="nact" title="Delete" @click.stop="emit('delete-space', g.space)">
