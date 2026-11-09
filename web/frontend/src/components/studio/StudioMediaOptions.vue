@@ -107,7 +107,7 @@ function onDuration(e) {
 .card {
   margin-top: 6px;
   border: 1px solid var(--sborder);
-  border-radius: 9px;
+  border-radius: var(--r);
   background: var(--spanel2);
 }
 .crow {
@@ -115,8 +115,11 @@ function onDuration(e) {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  min-height: 30px;
+  min-height: 32px;
   padding: 0 10px;
+}
+.crow + .crow {
+  margin-top: 0;
 }
 .crow + .crow:not(.slide) {
   border-top: 1px solid var(--sborder2);
@@ -124,28 +127,6 @@ function onDuration(e) {
 .clabel {
   font-size: 12px;
   color: var(--smuted);
-}
-
-/* Auto | Custom */
-.seg {
-  display: inline-flex;
-  padding: 2px;
-  border-radius: 7px;
-  background: var(--sbg2);
-}
-.seg button {
-  padding: 2px 9px;
-  border: 0;
-  border-radius: 5px;
-  background: none;
-  color: var(--smuted);
-  font-size: 12px;
-  cursor: pointer;
-}
-.seg button.on {
-  background: var(--shover);
-  color: var(--sfg);
-  box-shadow: 0 0 0 1px var(--sborder);
 }
 
 /* Slider row: always present, dimmed on Auto, so nothing shifts */

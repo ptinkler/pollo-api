@@ -14,18 +14,23 @@ const TOOLS = [
 </script>
 
 <template>
-  <div class="tools">
-    <div class="twrap">
-      <div class="thead">
+  <div class="page">
+    <div class="pwrap narrow">
+      <div class="phead">
         <h1>Tools &amp; library</h1>
-        <button class="closebtn" @click="$emit('close')">
-          <svg class="ic"><use href="#s-chevL" /></svg> Back
-        </button>
+        <div class="hactions">
+          <button class="btn" @click="$emit('close')">
+            <svg class="ic"><use href="#s-chevL" /></svg> Back
+          </button>
+        </div>
       </div>
 
       <div class="links">
         <button class="link" @click="$emit('defaults')">
-          <span class="lmain"><span class="llabel">Default instructions &amp; characters</span></span>
+          <span class="lmain"
+            ><span class="llabel">Default instructions &amp; characters</span
+            ><span class="lnote">Attached to every chat, or to every chat in a space</span></span
+          >
           <svg class="ic"><use href="#s-chev" /></svg>
         </button>
         <button v-for="t in TOOLS" :key="t.route" class="link" @click="$emit('navigate', t.route)">
@@ -36,7 +41,10 @@ const TOOLS = [
           <svg class="ic"><use href="#s-chev" /></svg>
         </button>
         <button class="link" @click="$emit('import')">
-          <span class="lmain"><span class="llabel">Import chats…</span></span>
+          <span class="lmain"
+            ><span class="llabel">Import chats…</span
+            ><span class="lnote">Bring in an export from another instance</span></span
+          >
           <svg class="ic"><use href="#s-chev" /></svg>
         </button>
       </div>
@@ -45,58 +53,23 @@ const TOOLS = [
 </template>
 
 <style scoped>
-.tools {
-  flex: 1;
-  overflow-y: auto;
-  padding: 32px 22px;
-}
-.twrap {
-  max-width: 720px;
-  margin: 0 auto;
-}
-.thead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 22px;
-}
-h1 {
-  font-size: 22px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-}
-.closebtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border: 1px solid var(--sborder);
-  border-radius: 9px;
-  color: var(--smuted);
-  background: none;
-  cursor: pointer;
-}
-.closebtn:hover {
-  background: var(--shover);
-  color: var(--sfg);
-}
 .links {
   display: flex;
   flex-direction: column;
   gap: 2px;
   border: 1px solid var(--sborder);
   background: var(--sbg);
-  border-radius: 14px;
-  padding: 8px;
+  border-radius: var(--r-lg);
+  padding: 6px;
 }
 .link {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px;
+  padding: 10px 12px;
   border: none;
-  border-radius: 9px;
+  border-radius: var(--r);
   background: none;
   color: var(--sfg);
   cursor: pointer;
@@ -108,11 +81,12 @@ h1 {
 .lmain {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
 }
 .llabel {
-  font-size: 14px;
+  font-size: 13.5px;
+  font-weight: 500;
 }
 .lnote {
   font-size: 12px;

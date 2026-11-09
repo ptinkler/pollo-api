@@ -122,29 +122,43 @@ onMounted(load)
   <div class="media">
     <div class="mhead">
       <h1>Media library</h1>
-      <button class="closebtn" @click="$emit('close')">
+      <span v-if="total" class="gcount">{{ total }} item{{ total === 1 ? '' : 's' }}</span>
+      <span class="spacer"></span>
+      <button class="btn" @click="$emit('close')">
         <svg class="ic"><use href="#s-chevL" /></svg> Back
       </button>
     </div>
     <div class="mbar">
       <div class="kinds">
-        <button v-for="k in KINDS" :key="k.id" :class="{ on: kind === k.id }" @click="setKind(k.id)">
+        <button v-for="k in KINDS" :key="k.id" class="pillbtn" :class="{ on: kind === k.id }" @click="setKind(k.id)">
           {{ k.label }}
         </button>
       </div>
       <div class="kinds">
-        <button v-for="s in SOURCES" :key="s.id" :class="{ on: source === s.id }" @click="setSource(s.id)">
+        <button
+          v-for="s in SOURCES"
+          :key="s.id"
+          class="pillbtn"
+          :class="{ on: source === s.id }"
+          @click="setSource(s.id)"
+        >
           {{ s.label }}
         </button>
       </div>
       <div class="kinds">
-        <button v-for="o in ORIGINS" :key="o.id" :class="{ on: origin === o.id }" @click="setOrigin(o.id)">
+        <button
+          v-for="o in ORIGINS"
+          :key="o.id"
+          class="pillbtn"
+          :class="{ on: origin === o.id }"
+          @click="setOrigin(o.id)"
+        >
           {{ o.label }}
         </button>
       </div>
-      <div class="msearch">
+      <div class="sbox msearch">
         <svg class="ic"><use href="#s-search" /></svg>
-        <input v-model="q" placeholder="Search prompts…" @keyup.enter="load" />
+        <input v-model="q" type="search" placeholder="Search prompts…" @keyup.enter="load" />
       </div>
     </div>
 
@@ -165,10 +179,10 @@ onMounted(load)
 
     <div v-if="picked.size" class="bulkbar">
       <span>{{ picked.size }} selected</span>
-      <button :disabled="busy" @click="bulkDownload">Download</button>
-      <button :disabled="busy" class="danger" @click="bulkDelete">Delete</button>
-      <button @click="selectAll">Select all loaded</button>
-      <button @click="clearPicked">Clear</button>
+      <button class="btn btn-sm" :disabled="busy" @click="bulkDownload">Download</button>
+      <button class="btn btn-sm btn-danger-quiet" :disabled="busy" @click="bulkDelete">Delete</button>
+      <button class="btn btn-sm" @click="selectAll">Select all loaded</button>
+      <button class="btn btn-sm btn-quiet" @click="clearPicked">Clear</button>
     </div>
 
     <div v-if="preview" class="ovl" @click="preview = null">
@@ -179,34 +193,6 @@ onMounted(load)
 </template>
 
 <style scoped>
-.bulkbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 22px;
-  border-top: 1px solid var(--sborder2);
-  background: var(--spanel2);
-}
-.bulkbar span {
-  flex: 1;
-  color: var(--sfg);
-  font-size: 13px;
-}
-.bulkbar button {
-  padding: 6px 13px;
-  border: 1px solid var(--sborder);
-  border-radius: 8px;
-  background: none;
-  color: var(--sfg);
-  cursor: pointer;
-  font-size: 12.5px;
-}
-.bulkbar button.danger {
-  color: var(--sdanger, #e5484d);
-}
-.bulkbar button:disabled {
-  opacity: 0.5;
-}
 .media {
   flex: 1;
   display: flex;
@@ -216,98 +202,71 @@ onMounted(load)
 .mhead {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 16px 22px;
+  gap: 10px;
+  min-height: 52px;
+  padding: 10px 18px;
   border-bottom: 1px solid var(--sborder2);
 }
 h1 {
-  font-size: 20px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
+  font-size: 15px;
+  font-weight: 600;
 }
-.closebtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 12px;
-  border: 1px solid var(--sborder);
-  border-radius: 9px;
+.gcount {
+  font-size: 12px;
   color: var(--smuted);
-  background: none;
-  cursor: pointer;
 }
-.closebtn:hover {
-  background: var(--shover);
-  color: var(--sfg);
+.spacer {
+  flex: 1;
 }
 .mbar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 22px;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 10px 18px;
 }
 .kinds {
   display: flex;
-  gap: 6px;
-}
-.kinds button {
-  padding: 6px 13px;
-  border: 1px solid var(--sborder);
-  border-radius: 8px;
-  color: var(--smuted);
-  background: none;
-  cursor: pointer;
-  font-size: 12.5px;
-}
-.kinds button.on {
-  background: var(--saccent-soft);
-  color: var(--saccent);
-  border-color: transparent;
+  gap: 4px;
 }
 .msearch {
-  position: relative;
   flex: 1;
+  min-width: 180px;
   max-width: 320px;
-}
-.msearch .ic {
-  position: absolute;
-  left: 11px;
-  top: 9px;
-  width: 15px;
-  height: 15px;
-  color: var(--sfaint);
-}
-.msearch input {
-  width: 100%;
-  padding: 8px 11px 8px 33px;
-  border: 1px solid var(--sborder);
-  border-radius: 9px;
-  background: var(--spanel2);
-  color: var(--sfg);
-  outline: none;
+  margin-left: auto;
 }
 .mbody {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 22px 24px;
+  padding: 4px 18px 24px;
 }
-.empty {
-  color: var(--sfaint);
-  text-align: center;
-  margin-top: 60px;
+.bulkbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border-top: 1px solid var(--sborder2);
+  background: var(--spanel2);
+}
+.bulkbar span {
+  flex: 1;
+  color: var(--sfg);
+  font-size: 13px;
 }
 .ovl {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: 1000;
   display: grid;
   place-items: center;
   background: rgba(0, 0, 0, 0.82);
   padding: 32px;
+  cursor: zoom-out;
 }
 .pv {
   max-width: 92vw;
   max-height: 92vh;
-  border-radius: 10px;
+  border-radius: var(--r);
+  cursor: default;
 }
 </style>

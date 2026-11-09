@@ -195,7 +195,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   max-height: 90vh;
   background: var(--sbg);
   border: 1px solid var(--sborder);
-  border-radius: 16px;
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-modal);
   overflow: hidden;
 }
 .gm-x {
@@ -244,7 +245,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .gm-err-title {
   font-size: 15px;
   font-weight: 700;
-  color: var(--sdanger, #e5484d);
+  color: var(--sdanger);
 }
 .gm-err-msg {
   font-size: 13px;
@@ -270,10 +271,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   align-items: center;
   gap: 6px;
   font-size: 12px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
   color: #fff;
   background: rgba(0, 0, 0, 0.5);
   padding: 4px 9px;
-  border-radius: 7px;
+  border-radius: var(--r);
   cursor: pointer;
 }
 .gm-side {
@@ -281,7 +285,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   display: flex;
   flex-direction: column;
   border-left: 1px solid var(--sborder);
-  background: var(--spanel2, var(--sbg2));
+  background: var(--spanel2);
 }
 .gm-scroll {
   flex: 1;
@@ -321,9 +325,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  min-height: 30px;
+  padding: 5px 12px;
   border: 1px solid var(--sborder);
-  border-radius: 9px;
+  border-radius: var(--r);
   background: var(--sbg);
   color: var(--sfg);
   font: inherit;
@@ -356,8 +361,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   border-color: var(--saccent);
 }
 .gm-btn.danger:hover {
-  color: var(--sdanger, #e5484d);
-  border-color: var(--sdanger, #e5484d);
+  color: var(--sdanger);
+  border-color: var(--sdanger);
 }
 @media (max-width: 760px) {
   .gm-card {

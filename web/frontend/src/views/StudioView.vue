@@ -345,6 +345,9 @@ const mq = window.matchMedia?.('(prefers-color-scheme: dark)')
 const systemDark = ref(mq ? mq.matches : true)
 mq?.addEventListener?.('change', e => (systemDark.value = e.matches))
 const dataTheme = computed(() => (theme.value === 'system' ? (systemDark.value ? 'dark' : 'light') : theme.value))
+// The tokens live on :root (style.css), so the theme goes on <html>: dialogs
+// and popovers teleported to <body> then follow it too, not just the shell.
+watch(dataTheme, t => document.documentElement.setAttribute('data-theme', t), { immediate: true })
 function setTheme(t) {
   theme.value = t
   try {
@@ -545,7 +548,7 @@ onMounted(() => {
       <template v-else>
         <div class="top">
           <div class="ttitle">{{ activeTitle }}</div>
-          <div class="vtoggle">
+          <div class="seg" role="group" aria-label="Thread view">
             <button :class="{ on: threadView === 'chat' }" title="Chat view" @click="setThreadView('chat')">
               <svg class="ic"><use href="#s-chat" /></svg>
             </button>
@@ -569,7 +572,11 @@ onMounted(() => {
           </button>
           <div class="spacer"></div>
           <StudioBalances :balances="balances" :spend="spend" :messages="messages" @usage="router.push('/usage')" />
-          <button class="iconbtn" title="Inspector" @click="rightCollapsed = !rightCollapsed">
+          <button
+            class="iconbtn"
+            :title="rightCollapsed ? 'Show inspector' : 'Hide inspector'"
+            @click="rightCollapsed = !rightCollapsed"
+          >
             <svg class="ic"><use href="#s-cog" /></svg>
           </button>
         </div>

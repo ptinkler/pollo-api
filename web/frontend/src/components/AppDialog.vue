@@ -67,23 +67,24 @@ watch(
   background: rgba(0, 0, 0, 0.6);
 }
 .ad {
-  width: min(420px, 100%);
-  padding: 16px 20px 18px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--surface);
-  color: var(--text);
+  width: min(400px, 100%);
+  padding: 14px 18px 16px;
+  border: 1px solid var(--sborder);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-modal);
+  background: var(--sbg);
+  color: var(--sfg);
 }
 .ad h3 {
-  margin: 0 0 12px;
-  font-size: 1.05rem;
+  margin: 0 0 8px;
+  font-size: 15px;
   font-weight: 600;
 }
 .ad-msg {
   margin: 0 0 14px;
-  font-size: 0.88rem;
+  font-size: 13px;
   line-height: 1.5;
-  color: var(--text2);
+  color: var(--smuted);
   white-space: pre-line;
 }
 .ad-field {
@@ -92,31 +93,19 @@ watch(
 }
 .ad-field span {
   display: block;
-  font-size: 0.75rem;
-  color: var(--text2);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 .ad-field input {
   width: 100%;
   margin-top: 6px;
-  padding: 9px 11px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: var(--surface2);
-  color: var(--text);
-  outline: none;
-}
-.ad-field input:focus {
-  border-color: var(--accent);
 }
 .ad-check {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 16px;
-  font-size: 0.86rem;
-  color: var(--text);
+  margin-bottom: 14px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--sfg);
   text-transform: none;
   letter-spacing: normal;
   cursor: pointer;
@@ -125,8 +114,5 @@ watch(
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-}
-.ad-actions .btn {
-  padding: 8px 16px;
 }
 </style>

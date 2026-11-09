@@ -196,18 +196,14 @@ async function close() {
 
 <style scoped>
 .name {
-  padding: 9px 11px;
-  border-radius: 8px;
-  font-size: 1rem;
+  padding: 8px 11px;
+  font-size: 15px;
   font-weight: 600;
 }
 
 textarea {
   min-height: 220px;
-  resize: vertical;
-  padding: 10px 11px;
-  border-radius: 8px;
-  line-height: 1.5;
+  padding: 9px 11px;
 }
 
 .members {
@@ -284,10 +280,10 @@ textarea {
   max-height: 220px;
   overflow-y: auto;
   padding: 4px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  background: var(--spanel2);
+  border: 1px solid var(--sborder);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
   display: flex;
   flex-direction: column;
 }

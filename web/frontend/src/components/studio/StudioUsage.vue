@@ -83,13 +83,15 @@ function keySet(id) {
 </script>
 
 <template>
-  <div class="usage">
-    <div class="uwrap">
-      <div class="uhead">
+  <div class="page">
+    <div class="pwrap narrow">
+      <div class="phead">
         <h1>Credit usage</h1>
-        <div class="uactions">
-          <button class="ubtn" title="Refresh balances" @click="emit('refresh')">Refresh</button>
-          <button class="closebtn" @click="emit('close')">
+        <div class="hactions">
+          <button class="btn" title="Refresh balances" @click="emit('refresh')">
+            <svg class="ic"><use href="#s-refresh" /></svg> Refresh
+          </button>
+          <button class="btn" @click="emit('close')">
             <svg class="ic"><use href="#s-chevL" /></svg> Back
           </button>
         </div>
@@ -106,14 +108,16 @@ function keySet(id) {
           <div class="pval">{{ p.value }}</div>
           <div class="punit">{{ p.unit }}</div>
           <div class="pnote">{{ p.note }}</div>
-          <button v-if="!loading && !keySet(p.id)" class="plink" @click="emit('manage-keys')">Add a key →</button>
+          <button v-if="!loading && !keySet(p.id)" class="btn btn-sm plink" @click="emit('manage-keys')">
+            Add a key
+          </button>
         </div>
       </div>
 
       <div class="bd">
         <div class="bd-head">
           <h2>Where it went</h2>
-          <div class="bd-periods">
+          <div class="seg" role="group" aria-label="Period">
             <button v-for="p in PERIODS" :key="p.days" :class="{ on: days === p.days }" @click="setDays(p.days)">
               {{ p.label }}
             </button>
@@ -149,12 +153,69 @@ function keySet(id) {
         </table>
       </div>
 
-      <button class="manage" @click="emit('manage-keys')">Manage provider keys</button>
+      <button class="btn" @click="emit('manage-keys')">Manage provider keys</button>
     </div>
   </div>
 </template>
 
 <style scoped>
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.pcard {
+  border: 1px solid var(--sborder);
+  background: var(--sbg);
+  border-radius: var(--r-lg);
+  padding: 14px 16px;
+}
+.pcard.nokey {
+  opacity: 0.75;
+}
+.pcard-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.pname {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.pkey {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--smuted);
+  background: var(--sbg2);
+}
+.pkey.on {
+  color: var(--saccent);
+  background: var(--saccent-soft);
+}
+.pval {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--sfg);
+  font-variant-numeric: tabular-nums;
+}
+.punit {
+  font-size: 12px;
+  color: var(--sfaint);
+}
+.pnote {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--smuted);
+}
+.plink {
+  margin-top: 10px;
+  color: var(--saccent);
+  border-color: var(--saccent);
+}
 .bd {
   margin-bottom: 18px;
 }
@@ -162,29 +223,11 @@ function keySet(id) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .bd-head h2 {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 650;
-}
-.bd-periods {
-  display: flex;
-  gap: 6px;
-}
-.bd-periods button {
-  padding: 5px 11px;
-  border: 1px solid var(--sborder);
-  border-radius: 8px;
-  background: none;
-  color: var(--smuted);
-  cursor: pointer;
-  font-size: 12px;
-}
-.bd-periods button.on {
-  background: var(--saccent-soft);
-  color: var(--saccent);
-  border-color: transparent;
 }
 .bd-none {
   color: var(--smuted);
@@ -197,7 +240,7 @@ function keySet(id) {
 }
 .bd-table th,
 .bd-table td {
-  padding: 7px 8px;
+  padding: 6px 8px;
   text-align: left;
   border-bottom: 1px solid var(--sborder2);
 }
@@ -216,116 +259,5 @@ function keySet(id) {
 }
 .bd-cr {
   color: var(--sfaint);
-}
-.usage {
-  flex: 1;
-  overflow-y: auto;
-  padding: 32px 22px;
-}
-.uwrap {
-  max-width: 720px;
-  margin: 0 auto;
-}
-.uhead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 22px;
-}
-h1 {
-  font-size: 22px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-}
-.uactions {
-  display: flex;
-  gap: 8px;
-}
-.ubtn,
-.closebtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 12px;
-  border: 1px solid var(--sborder);
-  border-radius: 9px;
-  color: var(--smuted);
-  background: none;
-  cursor: pointer;
-}
-.ubtn:hover,
-.closebtn:hover {
-  background: var(--shover);
-  color: var(--sfg);
-}
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 14px;
-  margin-bottom: 18px;
-}
-.pcard {
-  border: 1px solid var(--sborder);
-  background: var(--sbg);
-  border-radius: 14px;
-  padding: 18px;
-}
-.pcard.nokey {
-  opacity: 0.75;
-}
-.pcard-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-.pname {
-  font-weight: 600;
-}
-.pkey {
-  font-size: 11px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  color: var(--smuted);
-  background: var(--sbg2);
-}
-.pkey.on {
-  color: var(--saccent);
-  background: var(--saccent-soft);
-}
-.pval {
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--sfg);
-}
-.punit {
-  font-size: 12px;
-  color: var(--sfaint);
-}
-.pnote {
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--smuted);
-}
-.plink {
-  margin-top: 12px;
-  padding: 6px 10px;
-  border: 1px solid var(--saccent);
-  border-radius: 8px;
-  background: none;
-  color: var(--saccent);
-  cursor: pointer;
-  font-size: 12px;
-}
-.manage {
-  padding: 9px 14px;
-  border: 1px solid var(--sborder);
-  border-radius: 10px;
-  background: none;
-  color: var(--sfg);
-  cursor: pointer;
-}
-.manage:hover {
-  background: var(--shover);
 }
 </style>

@@ -48,13 +48,13 @@ const byModel = computed(() => {
 
 <template>
   <div class="bals">
-    <button v-if="label" class="seg spent" title="Spent in this thread — click for breakdown" @click="open = !open">
+    <button v-if="label" class="bseg spent" title="Spent in this thread — click for breakdown" @click="open = !open">
       Spent <b>{{ label }}</b>
     </button>
     <button
       v-for="p in pills"
       :key="p.id"
-      class="seg"
+      class="bseg"
       :class="p.id"
       :title="`${p.tip} — click for usage`"
       @click="emit('usage')"
@@ -87,10 +87,10 @@ const byModel = computed(() => {
   position: relative;
   display: inline-flex;
   border: 1px solid var(--sborder);
-  border-radius: 7px;
+  border-radius: var(--r);
   overflow: visible;
 }
-.seg {
+.bseg {
   font: inherit;
   font-size: 12px;
   color: var(--smuted);
@@ -101,18 +101,18 @@ const byModel = computed(() => {
   white-space: nowrap;
   cursor: pointer;
 }
-.seg:first-child {
+.bseg:first-child {
   border-left: 0;
-  border-radius: 6px 0 0 6px;
+  border-radius: 7px 0 0 7px;
 }
-.seg:last-of-type {
-  border-radius: 0 6px 6px 0;
+.bseg:last-of-type {
+  border-radius: 0 7px 7px 0;
 }
-.seg:hover {
+.bseg:hover {
   background: var(--saccent-soft);
   color: var(--sfg);
 }
-.seg b {
+.bseg b {
   color: var(--sfg);
   font-weight: 600;
 }
@@ -127,11 +127,11 @@ const byModel = computed(() => {
   right: 0;
   z-index: 41;
   min-width: 260px;
-  background: var(--sbg2);
+  background: var(--spanel2);
   border: 1px solid var(--sborder);
-  border-radius: 10px;
+  border-radius: var(--r-lg);
   padding: 10px 12px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-pop);
   font-size: 12.5px;
   color: var(--sfg);
 }

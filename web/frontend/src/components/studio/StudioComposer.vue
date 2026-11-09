@@ -339,7 +339,7 @@ function onDrop(e) {
         <button
           v-for="md in modes"
           :key="md.id"
-          class="modepill"
+          class="pillbtn"
           :class="{ on: mode === md.id }"
           @click="emit('update:mode', md.id)"
         >
@@ -424,8 +424,8 @@ function onDrop(e) {
   cursor: pointer;
 }
 .clearall:hover {
-  color: var(--sdanger, #e5484d);
-  border-color: var(--sdanger, #e5484d);
+  color: var(--sdanger);
+  border-color: var(--sdanger);
 }
 .est {
   font-size: 12.5px;
@@ -433,7 +433,7 @@ function onDrop(e) {
   white-space: nowrap;
 }
 .est.warn {
-  color: var(--sdanger, #e5a000);
+  color: var(--swarn);
   cursor: help;
 }
 .compose {
@@ -445,8 +445,11 @@ function onDrop(e) {
   margin: 0 auto;
   border: 1px solid var(--sborder);
   background: var(--sbg);
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   padding: 10px 12px 8px;
+}
+.cbox:focus-within {
+  border-color: var(--sfaint);
 }
 .cbox.drag {
   border-color: var(--saccent);
@@ -470,7 +473,7 @@ function onDrop(e) {
 .unused-note {
   padding: 2px 12px 6px;
   font-size: 12px;
-  color: var(--yellow);
+  color: var(--swarn);
 }
 .att.ins {
   cursor: pointer;
@@ -509,10 +512,10 @@ function onDrop(e) {
   display: none;
   z-index: 30;
   padding: 3px;
-  background: var(--spanel2, var(--sbg2));
+  background: var(--spanel2);
   border: 1px solid var(--sborder);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-pop);
 }
 .att:hover .att-zoom {
   display: block;
@@ -571,20 +574,6 @@ function onDrop(e) {
   display: flex;
   gap: 6px;
   padding-bottom: 8px;
-}
-.modepill {
-  padding: 4px 11px;
-  border: 1px solid var(--sborder);
-  border-radius: 8px;
-  color: var(--smuted);
-  background: none;
-  cursor: pointer;
-  font-size: 12px;
-}
-.modepill.on {
-  background: var(--saccent-soft);
-  color: var(--saccent);
-  border-color: transparent;
 }
 .ed {
   width: 100%;
@@ -651,11 +640,11 @@ function onDrop(e) {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  background: var(--spanel2, var(--sbg2));
+  background: var(--spanel2);
   border: 1px solid var(--sborder);
-  border-radius: 10px;
+  border-radius: var(--r-lg);
   padding: 4px;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-pop);
 }
 .atmenu button {
   display: inline-flex;
@@ -701,13 +690,17 @@ function onDrop(e) {
   color: var(--sfaint);
 }
 .sendbtn {
-  padding: 7px 16px;
+  min-height: 30px;
+  padding: 5px 14px;
   border: none;
-  border-radius: 9px;
+  border-radius: var(--r);
   background: var(--saccent);
   color: #fff;
   cursor: pointer;
   font-weight: 600;
+}
+.sendbtn:hover:not(:disabled) {
+  filter: brightness(1.08);
 }
 .sendbtn:disabled {
   opacity: 0.4;

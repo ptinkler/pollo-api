@@ -262,11 +262,11 @@ async function remove() {
 
 <style scoped>
 .tag {
-  font-size: 0.7rem;
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: var(--surface2);
-  color: var(--yellow);
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: var(--r-sm);
+  background: var(--spanel2);
+  color: var(--swarn);
 }
 
 .sub {
@@ -277,10 +277,6 @@ async function remove() {
 }
 
 label {
-  font-size: 0.75rem;
-  color: var(--text2);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   margin-top: 4px;
 }
 
@@ -292,18 +288,10 @@ label {
 input,
 textarea {
   width: 100%;
-  padding: 9px 11px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface2);
-  color: var(--text);
-  font: inherit;
-  font-size: 0.9rem;
 }
 
 textarea {
   min-height: 110px;
-  resize: vertical;
 }
 
 .images {

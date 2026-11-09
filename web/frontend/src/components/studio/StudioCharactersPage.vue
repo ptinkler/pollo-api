@@ -82,8 +82,10 @@ onMounted(load)
           </p>
         </div>
         <div class="hactions">
-          <button class="primary" @click="edit(null)">＋ New character</button>
-          <button class="closebtn" @click="emit('close')">
+          <button class="btn btn-primary" @click="edit(null)">
+            <svg class="ic"><use href="#s-plus" /></svg> New character
+          </button>
+          <button class="btn" @click="emit('close')">
             <svg class="ic"><use href="#s-chevL" /></svg> Back
           </button>
         </div>
@@ -93,7 +95,7 @@ onMounted(load)
       <template v-else>
         <div v-if="!saved.length" class="empty">No saved characters yet. Create one here, or save one from a chat.</div>
         <div v-else class="grid">
-          <button v-for="c in saved" :key="c.id" class="card" @click="edit(c)">
+          <button v-for="c in saved" :key="c.id" class="gcard card" @click="edit(c)">
             <div class="thumb">
               <img v-if="characterAvatar(c)" :src="characterAvatar(c)" alt="" loading="lazy" />
               <span v-else>👤</span>
@@ -107,7 +109,7 @@ onMounted(load)
         </div>
 
         <section v-if="adhoc.length" class="adhoc">
-          <h2>Chat-only characters</h2>
+          <h2 class="sect">Chat-only characters</h2>
           <p class="sub">Made inside a chat; deleted with it unless you save them.</p>
           <div v-for="c in adhoc" :key="c.id" class="arow">
             <img v-if="characterAvatar(c)" :src="characterAvatar(c)" alt="" class="mini" />
@@ -117,8 +119,8 @@ onMounted(load)
               in “{{ c.conversation_title || 'a chat' }}”
             </button>
             <span class="spacer"></span>
-            <button class="small" @click="promote(c)">⭐ Save</button>
-            <button class="small danger" @click="remove(c)">Delete</button>
+            <button class="btn btn-sm" @click="promote(c)">Save</button>
+            <button class="btn btn-sm btn-danger-quiet" @click="remove(c)">Delete</button>
           </div>
         </section>
       </template>
@@ -135,92 +137,21 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page {
-  flex: 1;
-  overflow-y: auto;
-  padding: 32px 22px;
-}
-.pwrap {
-  max-width: 820px;
-  margin: 0 auto;
-}
-.phead {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 20px;
-}
-h1 {
-  font-size: 22px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-}
-.sub {
-  font-size: 13px;
-  color: var(--smuted);
-  margin-top: 6px;
-  line-height: 1.5;
-  max-width: 560px;
-}
-.hactions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
-.primary {
-  padding: 8px 14px;
-  border: none;
-  border-radius: 9px;
-  background: var(--saccent);
-  color: #fff;
-  font-weight: 600;
-  cursor: pointer;
-}
-.closebtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border: 1px solid var(--sborder);
-  border-radius: 9px;
-  color: var(--smuted);
-  background: none;
-  cursor: pointer;
-}
-.closebtn:hover {
-  background: var(--shover);
-  color: var(--sfg);
-}
-.muted,
-.empty {
-  color: var(--smuted);
-  font-size: 13px;
-  padding: 20px 0;
-}
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px;
 }
 .card {
-  text-align: left;
   padding: 0;
-  background: var(--sbg);
-  border: 1px solid var(--sborder);
-  border-radius: 12px;
   overflow: hidden;
-  cursor: pointer;
-}
-.card:hover {
-  border-color: var(--saccent);
 }
 .thumb {
   aspect-ratio: 1;
   background: var(--sbg2);
   display: grid;
   place-items: center;
-  font-size: 2.5rem;
+  font-size: 2.2rem;
 }
 .thumb img {
   width: 100%;
@@ -228,16 +159,16 @@ h1 {
   object-fit: cover;
 }
 .info {
-  padding: 10px 12px;
+  padding: 8px 10px 10px;
 }
 .info h3 {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
 }
 .desc {
   font-size: 12px;
   color: var(--smuted);
-  margin: 4px 0;
+  margin: 2px 0 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -247,24 +178,23 @@ h1 {
   color: var(--sfaint);
 }
 .adhoc {
-  margin-top: 28px;
+  margin-top: 8px;
 }
-h2 {
-  font-size: 15px;
-  font-weight: 600;
-  margin-bottom: 4px;
+.adhoc .sub {
+  margin: 0 0 4px;
 }
 .arow {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 0;
+  padding: 7px 0;
   border-bottom: 1px solid var(--sborder2);
+  font-size: 13px;
 }
 .mini {
-  width: 30px;
-  height: 30px;
-  border-radius: 7px;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
   object-fit: cover;
 }
 .mini.blank {
@@ -278,6 +208,11 @@ h2 {
   color: var(--sfg);
   cursor: pointer;
   font-weight: 500;
+  font-size: 13px;
+  padding: 0;
+}
+.link:hover {
+  color: var(--saccent);
 }
 .chat-link {
   background: none;
@@ -285,27 +220,12 @@ h2 {
   color: var(--smuted);
   cursor: pointer;
   font-size: 12px;
+  padding: 0;
 }
 .chat-link:hover {
   color: var(--saccent);
 }
 .spacer {
   flex: 1;
-}
-.small {
-  padding: 5px 10px;
-  border: 1px solid var(--sborder);
-  border-radius: 8px;
-  background: none;
-  color: var(--sfg);
-  cursor: pointer;
-  font-size: 12px;
-}
-.small:hover {
-  background: var(--shover);
-}
-.small.danger:hover {
-  color: var(--sdanger, #e5484d);
-  border-color: var(--sdanger, #e5484d);
 }
 </style>

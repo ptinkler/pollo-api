@@ -169,15 +169,6 @@ async function remove() {
 }
 
 label {
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text2);
-  margin-top: 6px;
-}
-
-input {
-  padding: 8px 10px;
-  border-radius: 8px;
+  margin-top: 4px;
 }
 </style>

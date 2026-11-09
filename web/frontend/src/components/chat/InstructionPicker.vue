@@ -448,10 +448,10 @@ function manage() {
   max-height: 300px;
   overflow-y: auto;
   padding: 4px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  background: var(--spanel2);
+  border: 1px solid var(--sborder);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
 }
 
 .menu-head {

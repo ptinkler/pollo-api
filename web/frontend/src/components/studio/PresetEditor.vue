@@ -173,25 +173,11 @@ function load() {
   line-height: 1.45;
 }
 label {
-  font-size: 0.75rem;
-  color: var(--text2);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   margin-top: 4px;
 }
 input,
 select {
   width: 100%;
-  padding: 9px 11px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface2);
-  color: var(--text);
-  font: inherit;
-  font-size: 0.9rem;
-}
-select:disabled {
-  opacity: 0.5;
 }
 .pickers {
   display: flex;
@@ -208,7 +194,5 @@ select:disabled {
 }
 .replace {
   align-self: flex-start;
-  padding: 6px 12px;
-  font-size: 0.8rem;
 }
 </style>

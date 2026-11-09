@@ -33,7 +33,7 @@ async function pick(id) {
 </script>
 
 <template>
-  <section class="card">
+  <section class="scard">
     <div class="ctitle">Chat naming</div>
     <div class="crow">
       <div class="clabel">
@@ -58,14 +58,14 @@ async function pick(id) {
   min-width: 0;
 }
 .hint {
-  margin-top: 3px;
+  margin-top: 2px;
   font-size: 12px;
   color: var(--smuted);
   line-height: 1.45;
   max-width: 360px;
 }
 .crow :deep(.model-picker) {
-  flex-shrink: 0;
+  flex: 0 1 240px;
   min-width: 190px;
 }
 </style>

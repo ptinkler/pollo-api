@@ -45,17 +45,16 @@ async function onPick(e) {
   flex: 1;
   min-width: 0;
   padding: 4px 8px;
-  border-radius: 8px;
   font-size: 12px;
   color: var(--smuted);
 }
 .add {
-  width: 26px;
+  width: 28px;
   border: 1px solid var(--sborder);
-  border-radius: 8px;
+  border-radius: var(--r);
   background: var(--spanel2);
   color: var(--sfg);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
   cursor: pointer;
 }
