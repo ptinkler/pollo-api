@@ -16,12 +16,14 @@
 .top {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
   padding: 12px 18px;
   border-bottom: 1px solid var(--sborder2);
 }
 .ttitle {
   font-weight: 600;
+  flex: 1 1 120px; /* take the slack and truncate, so the controls never overflow */
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

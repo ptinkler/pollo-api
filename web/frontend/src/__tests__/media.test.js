@@ -77,6 +77,22 @@ describe('MediaPicker', () => {
     w.unmount()
   })
 
+  it('shows the given kinds and enforces per-kind caps', async () => {
+    const withVideo = [
+      ...ITEMS,
+      { id: 'lib:v.mp4', kind: 'video', source: 'upload', origin: 'library', name: 'v.mp4', url: '/v' },
+    ]
+    globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ items: withVideo }) }))
+    const w = await open({ kinds: ['image', 'video'], limits: { image: 1, video: 1 } })
+    expect(document.body.querySelectorAll('.tile')).toHaveLength(3) // both images + the video are offered
+    const tiles = document.body.querySelectorAll('.tile')
+    tiles[0].click() // image 1
+    tiles[1].click() // image 2 — over the image cap of 1, ignored
+    await flushPromises()
+    expect(document.body.querySelectorAll('.tile.selected')).toHaveLength(1)
+    w.unmount()
+  })
+
   it('single mode swaps the selection', async () => {
     const w = await open({ multiple: false })
     const tiles = document.body.querySelectorAll('.tile')

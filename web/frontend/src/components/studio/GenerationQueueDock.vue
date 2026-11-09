@@ -93,12 +93,13 @@ function label(e) {
 <style scoped>
 .qdock {
   position: fixed;
-  top: 8px;
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: 16px;
+  right: 16px;
   z-index: 60;
   width: 300px;
   max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column-reverse; /* pill sits at the bottom; the list opens upward */
 }
 .qdock.collapsed {
   width: auto;

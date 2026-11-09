@@ -5,14 +5,17 @@ import MediaFilters from './MediaFilters.vue'
 import { fetchMedia, uploadMedia, useMediaFilters } from '../../composables/useMedia'
 import { takeFiles } from '../../utils/files'
 
-// Pick images from the media library, or upload new ones from this
-// computer (they go into the library and come back selected). Emits
-// 'pick' with the chosen items; the caller imports them where they're used.
+// Pick media from the library, or upload new from this computer (they go into
+// the library and come back selected). Supports several kinds (image/video) at
+// once with per-kind caps, for reference-to-video. Emits 'pick' with the chosen
+// items; the caller imports them where they're used.
 const props = defineProps({
   open: { type: Boolean, default: false },
   title: { type: String, default: 'Choose images' },
   multiple: { type: Boolean, default: true },
-  max: { type: Number, default: null }, // most that can be picked (null = no limit)
+  max: { type: Number, default: null }, // total that can be picked when no per-kind limits (null = no limit)
+  kinds: { type: Array, default: () => ['image'] }, // which media kinds to show / accept
+  limits: { type: Object, default: null }, // per-kind caps, e.g. { image: 10, video: 5 } (overrides `max`)
   origin: { type: String, default: 'all' }, // where-from filter it opens on
 })
 const emit = defineEmits(['pick', 'close'])
@@ -22,9 +25,21 @@ const items = ref([])
 const loading = ref(false)
 const uploading = ref(0)
 const selected = ref(new Set())
-const images = computed(() => items.value.filter(i => i.kind === 'image'))
-const { filters, filtered } = useMediaFilters(images, { kind: 'image', origin: props.origin })
-const limit = computed(() => (props.multiple ? props.max : 1))
+const shown = computed(() => items.value.filter(i => props.kinds.includes(i.kind)))
+const { filters, filtered } = useMediaFilters(shown, { kind: 'all', origin: props.origin })
+const byId = computed(() => Object.fromEntries(items.value.map(i => [i.id, i])))
+const kindCount = kind => [...selected.value].filter(id => byId.value[id]?.kind === kind).length
+// Per-kind tallies for the footer, e.g. "Images 2/10 · Videos 1/5"
+const tallies = computed(() => props.kinds.map(k => ({ kind: k, n: kindCount(k), cap: props.limits?.[k] ?? null })))
+
+const ACCEPT = { image: 'image/png,image/jpeg,image/webp,image/gif', video: 'video/mp4' }
+const accept = computed(() =>
+  props.kinds
+    .map(k => ACCEPT[k])
+    .filter(Boolean)
+    .join(','),
+)
+const kindOf = file => (file.type.startsWith('video/') ? 'video' : file.type.startsWith('image/') ? 'image' : null)
 
 watch(
   () => props.open,
@@ -44,21 +59,33 @@ watch(
 )
 
 function toggle(item) {
-  const next = new Set(limit.value === 1 ? [] : selected.value)
-  if (selected.value.has(item.id)) next.delete(item.id)
-  else if (limit.value == null || next.size < limit.value) next.add(item.id)
-  else return showToast(`Pick up to ${limit.value}`, 'error')
-  selected.value = next
+  if (selected.value.has(item.id)) {
+    const next = new Set(selected.value)
+    next.delete(item.id)
+    selected.value = next
+    return
+  }
+  if (!props.multiple) return (selected.value = new Set([item.id]))
+  if (props.limits) {
+    const cap = props.limits[item.kind]
+    if (cap != null && kindCount(item.kind) >= cap)
+      return showToast(`Up to ${cap} ${item.kind}${cap === 1 ? '' : 's'}`, 'error')
+  } else if (props.max != null && selected.value.size >= props.max) {
+    return showToast(`Pick up to ${props.max}`, 'error')
+  }
+  selected.value = new Set(selected.value).add(item.id)
 }
 
 async function upload(files) {
-  for (const file of [...files].filter(f => f.type.startsWith('image/'))) {
+  for (const file of [...files]) {
+    const kind = kindOf(file)
+    if (!kind || !props.kinds.includes(kind)) continue
     uploading.value++
     try {
       const item = await uploadMedia(file)
       items.value = [item, ...items.value]
       if (![item.origin, 'all'].includes(filters.origin)) filters.origin = 'all' // so the upload shows
-      toggle(item)
+      toggle(item) // pre-select what was just uploaded
     } catch (e) {
       showToast(`Upload failed: ${e.message}`, 'error')
     } finally {
@@ -94,31 +121,30 @@ function confirm() {
         <div class="toolbar">
           <label class="btn btn-secondary upload">
             ⬆ Upload from computer
-            <input
-              type="file"
-              accept="image/png,image/jpeg,image/webp,image/gif"
-              :multiple="multiple"
-              hidden
-              @change="upload(takeFiles($event))"
-            />
+            <input type="file" :accept="accept" :multiple="multiple" hidden @change="upload(takeFiles($event))" />
           </label>
           <span v-if="uploading" class="muted">Uploading {{ uploading }}…</span>
-          <span class="muted hint">or drop images here, or choose from your uploads and creations below</span>
+          <span class="muted hint">or drop files here, or choose from your uploads and creations below</span>
         </div>
         <MediaFilters v-model:filters="filters" :show-kind="false" />
 
         <div class="body">
           <p v-if="loading" class="muted">Loading…</p>
-          <p v-else-if="!filtered.length" class="muted">Nothing here yet — upload an image above.</p>
+          <p v-else-if="!filtered.length" class="muted">Nothing here yet — upload above.</p>
           <MediaGrid v-else :items="filtered" :selected="selected" selectable @toggle="toggle" />
         </div>
 
         <div class="actions">
-          <span class="muted">{{ selected.size }} selected</span>
+          <span class="muted tallies">
+            <span v-for="t in tallies" :key="t.kind"
+              >{{ t.kind === 'image' ? 'Images' : t.kind === 'video' ? 'Videos' : 'Audio' }} {{ t.n
+              }}<template v-if="t.cap != null">/{{ t.cap }}</template></span
+            >
+          </span>
           <span class="spacer"></span>
           <button class="btn btn-secondary" @click="emit('close')">Cancel</button>
           <button class="btn btn-primary" :disabled="!selected.size" @click="confirm">
-            {{ selected.size > 1 ? `Use ${selected.size} images` : 'Use image' }}
+            {{ selected.size > 1 ? `Add ${selected.size}` : 'Add' }}
           </button>
         </div>
       </div>
@@ -196,6 +222,10 @@ function confirm() {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.tallies {
+  display: flex;
+  gap: 12px;
 }
 
 .actions .btn {
