@@ -96,6 +96,7 @@ export function useStudio({ models, settings, showToast }) {
     addFiles,
     addFromLibrary,
     addChatImage,
+    addChatMedia,
     remove: removeAttachment,
     clear: clearAttachments,
     uploading,
@@ -577,6 +578,14 @@ export function useStudio({ models, settings, showToast }) {
   function restoreRefs(item) {
     clearAttachments()
     const p = item.params || {}
+    // Reference-to-video: re-attach each named ref with its kind, in order, so
+    // the [@name] pills resolve again (image1, video1…).
+    if (p.ref_items?.length) {
+      for (const r of p.ref_items) {
+        if (r.file && !r.file.startsWith?.('char:')) addChatMedia(r.file, r.type, item.conversation_id)
+      }
+      return
+    }
     const files = [...(p.refs || []), p.first_frame, p.last_frame].filter(f => f && !f.startsWith('char:'))
     for (const f of new Set(files)) addChatImage(f, item.conversation_id)
   }

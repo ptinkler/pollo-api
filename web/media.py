@@ -41,7 +41,14 @@ from web.core import config
 from web.core.metadata import get_db, iso
 
 from . import characters
-from .uploads import image_media_type, is_blank_image, read_image_upload, safe_filename, store_deduped
+from .uploads import (
+    image_media_type,
+    is_blank_image,
+    read_image_upload,
+    read_video_upload,
+    safe_filename,
+    store_deduped,
+)
 from .users import require_user
 
 router = APIRouter(prefix="/api/media", dependencies=[Depends(require_user)])
@@ -385,8 +392,10 @@ def api_library_file(filename: str):
 
 @router.post("/upload")
 async def api_upload_media(file: UploadFile = File(...)):
-    """Upload an image straight to the library."""
-    content, ext = await read_image_upload(file)
+    """Upload an image or video straight to the library (so it can be picked as
+    a reference). Audio stays a chat-only upload."""
+    ct = file.content_type or ""
+    content, ext = await (read_video_upload(file) if ct.startswith("video/") else read_image_upload(file))
     name = store_deduped(library_dir(), "up_", content, ext)
     _invalidate_list()
     return next(i for i in _library_items() if i["name"] == name)

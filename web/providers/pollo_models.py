@@ -239,7 +239,6 @@ MODEL_INFO = {
     "pollodance20v1": {
         "label": "Pollo Dance 2.0",
         "type": "img2vid",
-        "hidden": "No longer enabled for API access on this key",  # 2026-10-07
         "lengths": list(range(4, 16)),
         "resolutions": ["480p", "720p", "1080p"],
         "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
@@ -254,7 +253,6 @@ MODEL_INFO = {
     "pollodance20fastv1": {
         "label": "Pollo Dance 2.0 Fast",
         "type": "img2vid",
-        "hidden": "No longer enabled for API access on this key",  # 2026-10-07
         "lengths": list(range(4, 16)),
         "resolutions": ["480p", "720p"],
         "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
@@ -269,7 +267,6 @@ MODEL_INFO = {
     "pollo30v1": {
         "label": "Pollo 3.0",
         "type": "img2vid",
-        "hidden": "Not enabled for API access on this key (403)",  # checked with a real request 2026-10-07
         "lengths": list(range(4, 16)),
         "resolutions": ["480p", "720p", "1080p", "4K"],  # 1080p/4K are sent with mode "pro"
         "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
@@ -333,7 +330,6 @@ MODEL_INFO = {
     },
     "seedance25draftv1": {
         "label": "Seedance 2.5 Draft",
-        "hidden": "Not enabled for API access on this key (403)",  # checked with real requests 2026-10-18
         "type": "img2vid",
         "lengths": list(range(4, 31)),
         "resolutions": ["480p"],
@@ -351,7 +347,6 @@ MODEL_INFO = {
     # image. The user picks how many seconds to add (duration) and a resolution.
     "seedance25extendv1": {
         "label": "Seedance 2.5 Extend",
-        "hidden": "Not enabled for API access on this key (403)",  # checked with real requests 2026-10-18
         "type": "extend",
         "lengths": list(range(4, 31)),
         "resolutions": ["480p", "720p", "1080p"],
@@ -621,8 +616,14 @@ MODEL_INFO = {
         "resolutions": ["std", "pro", "4K"],  # quality tiers, sent as Kling's "mode"
         "ratios": ["16:9", "9:16", "1:1"],
         "options": ["generate_audio", "image_tail", "refs"],
-        # With a video ref: ≤4 images + ≤1 video; without a video: up to 7 images (docs 2026-11)
-        "ref_mode": {"types": ["image", "video"], "max": 7, "limits": {"image": 4, "video": 1}},
+        # With a video ref: ≤4 images + ≤1 video; without a video: up to 7 images (docs 2026-11).
+        # Omni can't generate a soundtrack when a video ref is present.
+        "ref_mode": {
+            "types": ["image", "video"],
+            "max": 7,
+            "limits": {"image": 4, "video": 1},
+            "no_audio_with_video": True,
+        },
     },
     "pollojourneyv1": {
         "label": "Pollo Journey 8.2",
@@ -671,7 +672,6 @@ MODEL_INFO = {
     "seedreamflashv1": {
         "label": "Seedream 5.0 Flash",
         "type": "image",
-        "hidden": "Not enabled for API access on this key (403)",  # real requests 2026-10-06, 2026-10-18
         "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
         "resolutions": ["1K", "1.5K", "2K"],
         "options": ["images"],
@@ -679,7 +679,6 @@ MODEL_INFO = {
     "seedreamprov1": {
         "label": "Seedream 5.0 Pro",
         "type": "image",
-        "hidden": "Not enabled for API access on this key (403)",  # real requests 2026-10-06, 2026-10-18
         "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
         "resolutions": ["1K", "2K"],
         "options": ["images"],

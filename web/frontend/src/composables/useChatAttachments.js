@@ -113,13 +113,39 @@ export function useChatAttachments({
     }
   }
 
-  // Items from the media library, copied into the chat
+  // Items from the media library, copied into the chat — each with its kind, so
+  // a picked video imports as a video reference, not an image.
   function addFromLibrary(items) {
-    attachEach(
-      items,
-      item => item.thumb_url || item.url,
-      (item, id) => importMedia(item.id, { target: 'chat', conversation_id: id }),
-    )
+    for (const item of items) {
+      attachEach(
+        [item],
+        it => it.thumb_url || it.url || '',
+        (it, id) => importMedia(it.id, { target: 'chat', conversation_id: id }),
+        item.kind === 'video',
+        item.kind === 'audio',
+      )
+    }
+  }
+
+  // Re-attach an existing media file by kind (image/video/audio) — used to put
+  // a past generation's references back when you "use settings". Same thread:
+  // reference it directly; another thread: import a copy with the right kind.
+  function addChatMedia(file, kind = 'image', fromConv = null) {
+    const video = kind === 'video'
+    const audio = kind === 'audio'
+    if (fromConv && fromConv !== convId.value) {
+      attachEach(
+        [{ id: `chat:${fromConv}:${file}`, thumb: chatMediaPreviewUrl(fromConv, file) }],
+        s => s.thumb,
+        (s, id) => importMedia(s.id, { target: 'chat', conversation_id: id }),
+        video,
+        audio,
+      )
+      return true
+    }
+    if (attachments.value.some(a => a.file === file)) return true
+    add(audio ? '' : chatMediaUrl(convId.value, file), file, video, audio)
+    return true
   }
 
   // An image already in this chat; false if there's no room for it
@@ -143,5 +169,5 @@ export function useChatAttachments({
     return true
   }
 
-  return { attachments, files, uploading, room, addFiles, addFromLibrary, addChatImage, remove, clear }
+  return { attachments, files, uploading, room, addFiles, addFromLibrary, addChatImage, addChatMedia, remove, clear }
 }

@@ -29,13 +29,9 @@ const emit = defineEmits(['update:draft', 'update:mode', 'send', 'files', 'remov
 
 const drag = ref(false)
 const ed = ref(null) // the contenteditable prompt
-const vid = ref(null)
-const aud = ref(null)
-const img = ref(null)
-const menu = ref(false)
+const aud = ref(null) // hidden audio-clip file input (audio mode)
 const atMenu = ref(false) // the @-mention picker
-const peek = ref(null)
-const onEsc = e => e.key === 'Escape' && ((peek.value = null), (atMenu.value = false))
+const onEsc = e => e.key === 'Escape' && (atMenu.value = false)
 onMounted(() => document.addEventListener('keydown', onEsc))
 onBeforeUnmount(() => document.removeEventListener('keydown', onEsc))
 // Audio mode with a voice-clone model: the only attachment is the reference clip
@@ -47,10 +43,6 @@ const placeholder = computed(() =>
     ? 'Add instructions, e.g. replace the person in [@video1] with [@image1]'
     : 'Message, or describe an image / video…',
 )
-const pick = fn => {
-  menu.value = false
-  fn()
-}
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1)
 const attType = a => (a.audio ? 'audio' : a.video ? 'video' : 'image')
 
@@ -75,34 +67,42 @@ const refItems = computed(() => {
   }
   return out
 })
-// Legacy ref2video ("Image N", plain text) — only when the model isn't a v1
-// ref_mode one; images only.
-const tags = computed(() => {
-  if (refsActive.value) return []
-  let n = 0
-  return props.attachments
-    .filter(a => !a.video && !a.audio)
-    .map(a => ({ key: a.key, preview: a.preview, label: `Image ${++n}` }))
-})
+// Click-to-insert: map each attachment to its ref so clicking its thumbnail
+// drops the [@name] pill into the prompt.
+const refByKey = computed(() => Object.fromEntries(refItems.value.map(r => [r.key, r])))
+const canInsert = a => !a.uploading && !!refByKey.value[a.key]
+function insertAtt(a) {
+  const r = refByKey.value[a.key]
+  if (r) insertMention(r)
+}
 
 // ― contenteditable plumbing: [@name] text is the source of truth; a pill is
 // just how a known mention is shown. We edit the DOM imperatively (re-rendering
 // on every keystroke would fight the caret) and serialize back to [@name]. ―
 const MENTION = /\[@([a-zA-Z0-9_]+)\]/g
 
+// Pills are built imperatively, so Vue's scoped CSS can't reach them — style
+// them inline (CSS vars resolve against the app root).
+const PILL_CSS =
+  'display:inline-flex;align-items:center;gap:6px;vertical-align:middle;margin:0 2px;' +
+  'padding:1px 8px 1px 3px;border:1px solid var(--sborder);border-radius:8px;' +
+  'background:var(--saccent-soft);color:var(--saccent);font-size:0.85em;line-height:1.5;' +
+  'user-select:none;white-space:nowrap'
 function makePill(refItem) {
   const span = document.createElement('span')
   span.className = 'pill'
   span.contentEditable = 'false'
   span.dataset.name = refItem.name
+  span.style.cssText = PILL_CSS
   if (refItem.type === 'image' && refItem.preview) {
     const im = document.createElement('img')
     im.src = refItem.preview
+    im.style.cssText = 'width:18px;height:18px;border-radius:4px;object-fit:cover;flex:none'
     span.appendChild(im)
   } else {
     const ic = document.createElement('span')
-    ic.className = 'pill-ic'
     ic.textContent = refItem.type === 'audio' ? '🔊' : '🎞'
+    ic.style.fontSize = '13px'
     span.appendChild(ic)
   }
   span.appendChild(document.createTextNode(refItem.label))
@@ -184,10 +184,6 @@ function insertMention(refItem) {
   atMenu.value = false
   insertNode(makePill(refItem), true)
 }
-// Legacy chips insert plain "Image N" text (no pill).
-function mention(label) {
-  insertNode(document.createTextNode(label + ' '))
-}
 
 // Re-render only on external draft changes (enhance, clear, resend) — not our
 // own edits — so the caret isn't disturbed mid-type.
@@ -251,34 +247,45 @@ function onDrop(e) {
     <div class="cbox" :class="{ drag }">
       <div v-if="attachments.length || mediaMode || audioClip" class="atts">
         <div v-if="mediaMode || audioClip" class="plus">
-          <button class="addtile" title="Add reference images" @click="menu = !menu">+</button>
-          <div v-if="menu" class="addmenu" @mouseleave="menu = false">
-            <template v-if="mediaMode">
-              <button @click="pick(() => emit('library'))">🖼 From Media…</button>
-              <button @click="pick(() => img?.click())">⬆ Upload image</button>
-            </template>
-            <button v-if="mode === 'video' && (videoInput || refMode)" @click="pick(() => vid?.click())">
-              🎞 Upload video
-            </button>
-            <button v-if="(mode === 'video' && (audioInput || refMode)) || audioClip" @click="pick(() => aud?.click())">
-              🔊 Upload audio
-            </button>
-          </div>
+          <button
+            class="addtile"
+            :title="audioClip ? 'Upload an audio clip' : 'Add references — pick from your media or upload'"
+            @click="audioClip ? aud?.click() : emit('library')"
+          >
+            +
+          </button>
         </div>
-        <div v-for="a in attachments" :key="a.key" class="att" :class="{ uploading: a.uploading }">
-          <div v-if="a.audio" class="att-audio" title="Lip-sync audio track">🔊</div>
-          <video v-else-if="a.video" :src="a.preview" muted playsinline @click="peek = a"></video>
-          <img v-else :src="a.preview" alt="attachment" title="Click to enlarge" @click="peek = a" />
-          <button class="attx" title="Remove" @click="emit('remove', a)">×</button>
+        <div
+          v-for="a in attachments"
+          :key="a.key"
+          class="att"
+          :class="{ uploading: a.uploading, ins: canInsert(a) }"
+          :title="canInsert(a) ? 'Click to add this reference to the prompt' : ''"
+          @click="insertAtt(a)"
+        >
+          <div class="att-media">
+            <div v-if="a.audio" class="att-audio" title="Audio reference">🔊</div>
+            <video
+              v-else-if="a.video"
+              :src="a.preview"
+              muted
+              playsinline
+              disablepictureinpicture
+              preload="metadata"
+            ></video>
+            <img v-else :src="a.preview" alt="attachment" />
+          </div>
+          <button class="attx" title="Remove" @click.stop="emit('remove', a)">×</button>
+          <!-- Hover: a slightly larger still preview (no playback / PiP) -->
+          <div class="att-zoom">
+            <video v-if="a.video" :src="a.preview" muted playsinline disablepictureinpicture preload="metadata"></video>
+            <span v-else-if="a.audio" class="zoom-audio">🔊</span>
+            <img v-else :src="a.preview" alt="" />
+          </div>
         </div>
       </div>
       <div v-if="attachments.length" class="clearrow">
         <button class="clearall" title="Remove every attached image and video" @click="emit('clear')">Clear all</button>
-      </div>
-      <div v-if="tags.length" class="tags">
-        <button v-for="t in tags" :key="t.key" class="tag" title="Insert into the prompt" @click="mention(t.label)">
-          <img :src="t.preview" alt="" />{{ t.label }}
-        </button>
       </div>
 
       <div class="modes">
@@ -323,9 +330,7 @@ function onDrop(e) {
         >
           <svg class="ic"><use href="#s-clip" /></svg>
         </button>
-        <input ref="vid" type="file" accept="video/mp4" hidden @change="onVideo" />
         <input ref="aud" type="file" accept="audio/*" hidden @change="onVideo" />
-        <input ref="img" type="file" accept="image/*" multiple hidden @change="onVideo" />
         <button
           v-if="mode === 'image' || mode === 'video'"
           class="clip enh"
@@ -349,27 +354,24 @@ function onDrop(e) {
         <button class="sendbtn" :disabled="!canSend" @click="emit('send')">{{ sending ? 'Sending…' : 'Send' }}</button>
       </div>
     </div>
-    <div v-if="peek" class="peek" @click="peek = null" @keydown.esc="peek = null">
-      <video v-if="peek.video" :src="peek.preview" controls autoplay loop @click.stop></video>
-      <img v-else :src="peek.preview" alt="attachment preview" @click.stop />
-    </div>
   </div>
 </template>
 
 <style scoped>
 .clearrow {
-  display: flex;
-  justify-content: flex-end;
-  padding-bottom: 6px;
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 2;
 }
 .clearall {
   border: 1px solid var(--sborder);
   border-radius: 999px;
-  background: none;
+  background: var(--sbg);
   color: var(--smuted);
   font: inherit;
-  font-size: 12px;
-  padding: 3px 10px;
+  font-size: 11px;
+  padding: 2px 9px;
   cursor: pointer;
 }
 .clearall:hover {
@@ -381,31 +383,11 @@ function onDrop(e) {
   color: var(--saccent);
   white-space: nowrap;
 }
-.peek {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: grid;
-  place-items: center;
-  background: rgba(0, 0, 0, 0.7);
-  cursor: zoom-out;
-}
-.peek img,
-.peek video {
-  max-width: min(90vw, 900px);
-  max-height: 85vh;
-  object-fit: contain;
-  border-radius: 10px;
-  cursor: default;
-}
-.att img,
-.att video {
-  cursor: zoom-in;
-}
 .compose {
   padding: 8px 22px 20px;
 }
 .cbox {
+  position: relative;
   max-width: 820px;
   margin: 0 auto;
   border: 1px solid var(--sborder);
@@ -427,15 +409,26 @@ function onDrop(e) {
   position: relative;
   width: 52px;
   height: 52px;
+}
+.att.ins {
+  cursor: pointer;
+}
+.att-media {
+  width: 100%;
+  height: 100%;
   border-radius: 9px;
   overflow: hidden;
   border: 1px solid var(--sborder);
 }
-.att video,
-.att img {
+.att.ins:hover .att-media {
+  border-color: var(--saccent);
+}
+.att-media video,
+.att-media img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
 }
 .att-audio {
   width: 100%;
@@ -444,6 +437,37 @@ function onDrop(e) {
   place-items: center;
   font-size: 22px;
   background: var(--saccent-soft);
+}
+/* Hover: a larger still preview floating above the thumbnail */
+.att-zoom {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  z-index: 30;
+  padding: 3px;
+  background: var(--spanel2, var(--sbg2));
+  border: 1px solid var(--sborder);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.att:hover .att-zoom {
+  display: block;
+}
+.att-zoom img,
+.att-zoom video {
+  display: block;
+  max-width: 200px;
+  max-height: 200px;
+  border-radius: 5px;
+}
+.zoom-audio {
+  display: grid;
+  place-items: center;
+  width: 120px;
+  height: 64px;
+  font-size: 30px;
 }
 .plus {
   position: relative;
@@ -461,59 +485,6 @@ function onDrop(e) {
 .addtile:hover {
   border-color: var(--saccent);
   color: var(--sfg);
-}
-.addmenu {
-  position: absolute;
-  bottom: 58px;
-  left: 0;
-  z-index: 20;
-  min-width: 160px;
-  display: flex;
-  flex-direction: column;
-  background: var(--spanel2, var(--sbg2));
-  border: 1px solid var(--sborder);
-  border-radius: 10px;
-  padding: 4px;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
-}
-.addmenu button {
-  text-align: left;
-  border: none;
-  background: none;
-  color: var(--sfg);
-  font: inherit;
-  font-size: 13px;
-  padding: 7px 10px;
-  border-radius: 7px;
-  cursor: pointer;
-}
-.addmenu button:hover {
-  background: var(--shover);
-}
-.tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding-bottom: 8px;
-}
-.tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 10px 2px 3px;
-  border: 1px solid var(--sborder);
-  border-radius: 8px;
-  background: var(--saccent-soft);
-  color: var(--saccent);
-  font: inherit;
-  font-size: 12.5px;
-  cursor: pointer;
-}
-.tag img {
-  width: 20px;
-  height: 20px;
-  border-radius: 5px;
-  object-fit: cover;
 }
 .att.uploading {
   opacity: 0.5;
@@ -570,29 +541,30 @@ function onDrop(e) {
   color: var(--sfaint);
   pointer-events: none;
 }
-/* Inline reference mention, e.g. [@video1] shown as a pill */
+/* Inline reference mention, e.g. [@video1] — styled like the old chip */
 .pill {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  vertical-align: baseline;
-  margin: 0 1px;
-  padding: 1px 7px 1px 2px;
-  border-radius: 6px;
+  gap: 6px;
+  vertical-align: middle;
+  margin: 0 2px;
+  padding: 2px 10px 2px 3px;
+  border: 1px solid var(--sborder);
+  border-radius: 8px;
   background: var(--saccent-soft);
   color: var(--saccent);
-  font-size: 0.92em;
+  font-size: 0.86em;
   user-select: none;
   white-space: nowrap;
 }
 .pill img {
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
   object-fit: cover;
 }
 .pill-ic {
-  font-size: 13px;
+  font-size: 14px;
 }
 .cbar {
   display: flex;

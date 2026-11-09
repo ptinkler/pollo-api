@@ -301,6 +301,11 @@ def _submit_ref_video_job(
     mentions as [@name] (Kling 4.0 / Flash / 3.0 Omni, MiniMax H3…). The engine
     routes to the refs branch whenever `refs` is present (_generic_payload)."""
     refs = [_upload_ref_item(ri) for ri in ref_items]
+    # Some models (Kling 3.0 Omni) can't generate a soundtrack when a video ref
+    # is present — Pollo rejects generateAudio:true in that case.
+    no_audio = MODEL_INFO.get(key, {}).get("ref_mode", {}).get("no_audio_with_video")
+    if generate_audio and no_audio and any(r.get("type") == "video" for r in refs):
+        generate_audio = False
     generator = get_video_generator(
         key,
         api_key=keyctx.provider_key("pollo"),

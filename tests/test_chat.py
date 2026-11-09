@@ -2896,13 +2896,11 @@ class TestPolloImageModels:
         images = {m["id"]: m for m in chat.catalogue.get_models(refresh=True)["image"]}
         hidden = {k for k, m in images.items() if m["hidden"]}
         assert hidden == {
-            "pollo/seedreamprov1",
-            "pollo/seedreamflashv1",
             "pollo/qwenimage",
             "pollo/qwenimageflashv1",
         }
         assert images["pollo/qwenimage3v1"]["hidden"] is None  # works since its address was fixed
-        assert "403" in images["pollo/seedreamprov1"]["hidden"]
+        assert "403" in images["pollo/qwenimage"]["hidden"]
         assert images["pollo/klingv3imagev1"]["hidden"] is None  # confirmed working
 
 
