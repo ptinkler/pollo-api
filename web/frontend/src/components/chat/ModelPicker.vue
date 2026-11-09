@@ -12,7 +12,7 @@ const props = defineProps({
   models: { type: Array, default: () => [] },
   label: { type: String, required: true },
   icon: { type: String, default: '' },
-  kind: { type: String, default: 'text' }, // text | image | video
+  kind: { type: String, default: 'text' }, // text | image | video | audio
   loading: { type: Boolean, default: false },
   // Render the trigger as a small text button (e.g. "Try another model…")
   // instead of the labelled picker box, for one-off picks
@@ -68,6 +68,8 @@ const TAG_LABELS = {
   lipsync: 'Lip sync',
   upscale: 'Upscale',
   audio: 'Makes audio',
+  tts: 'Text→Speech',
+  music: 'Music',
   text2img: 'Text→Image',
   image_edit: 'Image edit',
   tools: 'Image tools',

@@ -24,12 +24,14 @@ from urllib.parse import urlsplit
 import requests
 from PIL import Image
 
+from web.core.config import POLLO_API_TIMEOUT, POLLO_API_V1_BASE
 from web.core.get_task import get_task_status
 
 from .. import image_hosts, keyctx, request_log
 from . import pollo_estimate
 from .openrouter import OpenRouterError
 from .pollo_engine import (
+    AUDIO_GENERATORS,
     ERROR_STATUSES,
     GENERATORS_LEGACY,
     GENERATORS_V1,
@@ -38,9 +40,12 @@ from .pollo_engine import (
     SUCCESS_STATUSES,
     closest_aspect_ratio,
 )
+from .pollo_engine import audio_generator as get_audio_generator
 from .pollo_engine import image_generator as get_image_generator
 from .pollo_engine import video_generator as get_video_generator
 from .pollo_models import MODEL_INFO
+
+POLLO_PLATFORM_BASE = POLLO_API_V1_BASE.split("/v1/")[0]
 
 
 class PolloError(OpenRouterError):
@@ -73,6 +78,8 @@ def list_models(kind: str, refresh: bool = False) -> list[dict]:
         return list_image_models()
     if kind == "video":
         return list_video_models()
+    if kind == "audio":
+        return list_audio_models()
     return []
 
 
@@ -133,12 +140,13 @@ def list_video_models() -> list[dict[str, Any]]:
         recast = typ in ("recast", "motion")  # animate a reference image with a source video
         extend = typ == "extend"  # continue a source video
         edit = typ == "video_edit"  # edit a source video from a prompt
+        upscale = typ == "upscale"  # enlarge / enhance a source video
         lipsync = typ == "lipsync"  # drive a portrait with an audio track
-        no_image = extend or edit  # source-video families that take no first frame
+        no_image = extend or edit or upscale  # source-video families that take no first frame
         # only the plain generators carry their own duration / aspect ratio;
         # the source-video / audio families derive the length from their input
-        own_duration = not (recast or edit or lipsync)
-        own_ratio = not (recast or extend or edit or lipsync)
+        own_duration = not (recast or edit or upscale or lipsync)
+        own_ratio = not (recast or extend or edit or upscale or lipsync)
         out.append(
             {
                 "id": PREFIX + key,
@@ -161,6 +169,56 @@ def list_video_models() -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+def list_audio_models() -> list[dict[str, Any]]:
+    """Pollo's speech and music models. `options` says which inputs the UI offers."""
+    return [
+        {
+            "id": PREFIX + key,
+            "name": f"Pollo: {meta.get('label') or key}",
+            "type": meta.get("type"),
+            "options": meta.get("options") or [],
+            "max_prompt": getattr(cls, "MAX_PROMPT", None),
+            "created": None,
+            "hidden": meta.get("hidden") or None,
+        }
+        for key, cls, meta in _catalogue(AUDIO_GENERATORS)
+    ]
+
+
+def list_voices(page: int = 1, page_size: int = 50, **filters: str) -> dict[str, Any]:
+    """Pollo's official TTS voices ({"voices": [...], "total"}). A free GET."""
+    params = {"page": page, "pageSize": page_size, **{k: v for k, v in filters.items() if v}}
+    try:
+        resp = requests.get(
+            f"{POLLO_PLATFORM_BASE}/config/voice/items",
+            params=params,
+            headers={"x-api-key": keyctx.provider_key("pollo")},
+            timeout=POLLO_API_TIMEOUT,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+    except (requests.RequestException, ValueError) as e:
+        raise PolloError(f"Couldn't load Pollo's voice list: {e}") from e
+    keep = ("voiceId", "voiceName", "sampleAudio", "language", "gender", "age", "voiceStyle", "accent", "engineCode")
+    voices = [{k: v.get(k) for k in keep} for v in body.get("data") or []]
+    return {"voices": voices, "total": body.get("total", len(voices))}
+
+
+def submit_audio(model_id: str, prompt: str, **opts: Any) -> dict:
+    """Start a speech / music job. Returns {"id": "pollo:<task>", "params": the
+    settings actually sent}, like submit_video."""
+    key = _generator_key(model_id, AUDIO_GENERATORS)
+    try:
+        generator = get_audio_generator(
+            key, api_key=keyctx.provider_key("pollo"), project="chat", prompt=prompt, **opts
+        )
+        generator.get_payload()
+    except ValueError as e:
+        raise PolloError(str(e)) from e
+    task_id = _submit(generator)
+    return {"id": JOB_PREFIX + task_id, "params": dict(generator.payload_attrs)}
 
 
 def _video_generators() -> dict:
@@ -244,7 +302,13 @@ def generate_image(
 
 
 # "needs a source video" label per source-video family (preserves wording)
-_SRC_VIDEO_NEEDS = {"recast": "Recast", "motion": "Motion", "extend": "Extending", "video_edit": "Editing"}
+_SRC_VIDEO_NEEDS = {
+    "recast": "Recast",
+    "motion": "Motion",
+    "extend": "Extending",
+    "video_edit": "Editing",
+    "upscale": "Upscaling",
+}
 # families that animate a reference image with a source video (image + video)
 _IMAGE_AND_VIDEO = ("recast", "motion")
 
@@ -263,9 +327,9 @@ def _submit_source_video_job(
 ) -> dict | None:
     """Submit a job for a family that works on a source video — Recast / Motion
     (video + reference image + mode), Extend (video, adds duration) or Video Edit
-    (video + instruction prompt). Returns the job dict, or None if `typ` isn't one
+    (video + instruction prompt) or Upscale (video + scale/mode). Returns the job dict, or None if `typ` isn't one
     of those (so the caller falls through to the image/text path)."""
-    if typ not in (*_IMAGE_AND_VIDEO, "extend", "video_edit"):
+    if typ not in (*_IMAGE_AND_VIDEO, "extend", "video_edit", "upscale"):
         return None
     if not source_video:
         raise PolloError(f"{_SRC_VIDEO_NEEDS[typ]} needs a source video")
@@ -284,6 +348,8 @@ def _submit_source_video_job(
         kw.update(image_url=_upload(first_frame), mode=mode)
     else:
         kw.update(image_url=None, resolution=resolution)
+        if typ == "upscale":  # resolution carries the scale; mode the enhancement
+            kw.update(mode=mode)
         if typ == "extend":  # extend lets the user pick added duration + audio
             kw.update(length=duration, generate_audio=generate_audio)
     generator = get_video_generator(key, **kw)

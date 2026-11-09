@@ -35,7 +35,9 @@ const emit = defineEmits([
 ])
 
 // Model catalogues, provided by ChatView, for "Try another model"
-const chatModels = inject('chatModels', { image: [], video: [] })
+const KIND_LABEL = { image: 'Image', video: 'Video', audio: 'Audio' }
+const KIND_ICON = { image: '🖼', video: '🎬', audio: '🔊' }
+const chatModels = inject('chatModels', { image: [], video: [], audio: [] })
 
 marked.setOptions({ gfm: true, breaks: true })
 
@@ -352,6 +354,7 @@ const requestItem = ref(null)
                 decoding="async"
                 @click="emit('open-media', { url: url(item), kind: 'image', prompt: item.prompt, file: item.file })"
               />
+              <audio v-else-if="item.kind === 'audio'" :src="url(item)" class="media-audio" controls></audio>
               <video v-else :src="url(item)" controls loop playsinline preload="metadata"></video>
               <button
                 v-if="canPin(item)"
@@ -388,6 +391,7 @@ const requestItem = ref(null)
               <div class="pending-label">
                 <div class="spinner"></div>
                 <span v-if="item.kind === 'image'">Creating image…</span>
+                <span v-else-if="item.kind === 'audio'">Composing audio… {{ elapsed() }}</span>
                 <span v-else>Rendering video… {{ elapsed() }}</span>
               </div>
               <div v-if="specs(item).length" class="pending-specs">{{ specs(item).join(' · ') }}</div>
@@ -396,7 +400,7 @@ const requestItem = ref(null)
 
             <div v-else class="media-error">
               <strong>
-                {{ item.kind === 'image' ? 'Image' : 'Video' }}
+                {{ KIND_LABEL[item.kind] || 'Video' }}
                 {{ item.moderated ? 'blocked by moderation' : 'failed' }}
               </strong>
               <span>{{ item.error || 'Unknown error' }}</span>
@@ -416,7 +420,7 @@ const requestItem = ref(null)
                   :model-value="''"
                   :models="chatModels[item.kind] || []"
                   :kind="item.kind"
-                  :label="item.kind === 'image' ? 'Image' : 'Video'"
+                  :label="KIND_LABEL[item.kind] || 'Video'"
                   :allow-none="false"
                   trigger-text="Try another model…"
                   @update:model-value="model => model && emit('regenerate', { mediaId: item.id, model })"
@@ -427,7 +431,7 @@ const requestItem = ref(null)
             <!-- Which model made this — the footer only names the chat model -->
             <div v-if="item.model || item.prompt" class="media-caption">
               <span class="caption-text" :title="[item.model, ...specs(item)].join(' · ')">
-                {{ item.kind === 'image' ? '🖼' : '🎬' }} {{ shortModel(item.model)
+                {{ KIND_ICON[item.kind] || '🎬' }} {{ shortModel(item.model)
                 }}<template v-if="specs(item).length">
                   · <span class="caption-specs">{{ specs(item).join(' · ') }}</span></template
                 ><template v-if="item.cost"> · {{ fmtCost(item.cost) }}</template

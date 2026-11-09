@@ -376,6 +376,25 @@ MODEL_INFO = {
     "happyhorse10v1": {"label": "HappyHorse 1.0 Edit", "type": "video_edit", "options": [], "video_input": True},
     "viduq2proeditv1": {"label": "Vidu Q2 Pro Edit", "type": "video_edit", "options": [], "video_input": True},
     "runwayalepheditv1": {"label": "Runway Gen-4 Aleph Edit", "type": "video_edit", "options": [], "video_input": True},
+    # "type": "upscale" enlarges / enhances a source video (video_input). No
+    # prompt, duration or aspect ratio: the resolution picker carries Pollo's
+    # `scale` (original / 2x / 4x / hd / 4K) and `modes` the enhancement mode.
+    "pollovideoupscalev1": {
+        "label": "Pollo Video Upscale",
+        "type": "upscale",
+        "resolutions": ["original", "2x", "4x", "hd", "4K"],
+        "options": ["mode"],
+        "modes": ["standard", "face", "denoise", "sharpen", "anime"],
+        "video_input": True,
+    },
+    "topazvideoupscalev1": {
+        "label": "Topaz Video Upscale",
+        "type": "upscale",
+        "resolutions": ["original", "2x", "4x", "hd", "4K"],
+        "options": ["mode"],
+        "modes": ["standard", "face", "denoise", "sharpen", "anime"],
+        "video_input": True,
+    },
     # "type": "recast" = Pollo Recast (wan-2-2-animate-mix): replaces the
     # subject in a source video with one reference image, keeping the motion.
     # A selectable model (unlike "extend"): the source video rides in on
@@ -671,4 +690,13 @@ MODEL_INFO = {
     "grokimage20v1": {"label": "Grok Imagine Image 2.0", "type": "image", "options": ["images"]},
     "recraftv3v1": {"label": "Recraft v3", "type": "image", "options": []},
     "ideogramv2turbov1": {"label": "Ideogram v2 Turbo", "type": "image", "options": []},
+    # Audio models. "type": "speech" = text-to-speech ("voice" option: a voice
+    # id from Pollo's voice list; "tuning": speed/volume/pitch), "music" = Suno
+    # ("instrumental", lyrics mode via style + title, "duration" on v5.5).
+    "seedaudio10v1": {"label": "Seed Audio 1.0", "type": "speech", "options": ["tuning"]},
+    "minimaxspeech28hdv1": {"label": "MiniMax Speech 2.8 HD", "type": "speech", "options": ["voice"]},
+    "elevenv3v1": {"label": "ElevenLabs v3", "type": "speech", "options": ["voice"]},
+    "sunov45plusv1": {"label": "Suno v4.5+", "type": "music", "options": ["instrumental", "lyrics"]},
+    "sunov5v1": {"label": "Suno v5", "type": "music", "options": ["instrumental", "lyrics"]},
+    "sunov55v1": {"label": "Suno v5.5", "type": "music", "options": ["instrumental", "lyrics", "duration"]},
 }

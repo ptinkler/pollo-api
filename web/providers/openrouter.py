@@ -92,7 +92,8 @@ def list_models(kind: str, refresh: bool = False) -> list[dict]:
     """Uniform provider interface: text/image/video models (empty without a key)."""
     if not is_configured():
         return []
-    return {"text": list_text_models, "image": list_image_models, "video": list_video_models}[kind]()
+    lister = {"text": list_text_models, "image": list_image_models, "video": list_video_models}.get(kind)
+    return lister() if lister else []  # no audio models here
 
 
 def _headers() -> dict[str, str]:

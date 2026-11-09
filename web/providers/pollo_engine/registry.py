@@ -29,6 +29,7 @@ from .legacy_ref import (
     legacy_ref_payload,
 )
 from .legacy_video import LEGACY_VIDEO, _legacy_cfg, _legacy_inputs, legacy_video_model_url, legacy_video_payload
+from .v1_audio import V1_AUDIO, v1_audio_model_url, v1_audio_payload
 from .v1_image import V1_IMAGE, _img_cfg, v1_image_model_url, v1_image_payload
 from .v1_video import V1_VIDEO, _cfg, _process_inputs, v1_video_model_url, v1_video_payload
 
@@ -49,6 +50,7 @@ _V1_FAMILY = {
     "kling": "kling",
     "extend": "extend",
     "edit": "edit",
+    "upscale": "upscale",
     "lipsync": "lipsync",
     "recast": "recast",
 }
@@ -61,8 +63,8 @@ class ModelSpec:
     read off the (former) class, and is callable like the old class was."""
 
     model_id: str
-    kind: str  # "video" | "image"
-    family: str  # v1video | kling | extend | edit | lipsync | recast | legacyvideo | ref | v1image | legacyimage
+    kind: str  # "video" | "image" | "audio"
+    family: str  # v1video, kling, extend, edit, upscale, lipsync, recast, legacyvideo, ref, v1image, legacyimage
     model_url: str
     VALID_RATIOS: tuple = ()
     VALID_LENGTHS: tuple = ()
@@ -76,10 +78,12 @@ class ModelSpec:
 
 
 def _build_payload(spec: ModelSpec, prompt: str, image_url: str | None, **kw) -> dict[str, Any]:
+    if spec.kind == "audio":
+        return v1_audio_payload(spec.model_id, prompt=prompt, **kw)
     if spec.kind == "image":
         fn = v1_image_payload if spec.family == "v1image" else legacy_image_payload
         return fn(spec.model_id, prompt=prompt, image_url=image_url, **kw)
-    if spec.family in ("v1video", "kling", "extend", "edit", "lipsync", "recast"):
+    if spec.family in ("v1video", "kling", "extend", "edit", "upscale", "lipsync", "recast"):
         return v1_video_payload(spec.model_id, prompt=prompt, image_url=image_url, **kw)
     if spec.family == "legacyvideo":
         return legacy_video_payload(spec.model_id, prompt=prompt, image_url=image_url, **kw)
@@ -89,7 +93,7 @@ def _build_payload(spec: ModelSpec, prompt: str, image_url: str | None, **kw) ->
 def _video_state(spec: ModelSpec, image_url: str | None, **kw) -> dict[str, Any]:
     """The resolved aspect/resolution/length/audio for job records — the values
     the old __init__ stored as attributes (whether or not the payload sends them)."""
-    if spec.family in ("v1video", "kling", "extend", "edit", "lipsync", "recast"):
+    if spec.family in ("v1video", "kling", "extend", "edit", "upscale", "lipsync", "recast"):
         s = _process_inputs(_cfg(spec.model_id), image_url, **kw)
         return {
             "aspect_ratio": s["aspect_ratio"],
@@ -136,10 +140,12 @@ class PolloGenerator:
         self.prompt = kwargs.get("prompt") or get_prompt(self.project)
         image_url = kwargs.get("image_url", _UNSET)
         self.image_url = get_image_url(self.project) if image_url is _UNSET else image_url
-        if spec.family in ("extend", "edit"):
+        if spec.kind == "audio":
+            self.image_url = None
+        if spec.family in ("extend", "edit", "upscale"):
             self.image_url = None  # works on a source video; never a source image
-        elif spec.family == "recast":
-            self.prompt = kwargs.get("prompt") or " "  # recast ignores the prompt; the API wants it non-empty
+        if spec.family in ("recast", "upscale"):
+            self.prompt = kwargs.get("prompt") or " "  # ignored by these; the API wants it non-empty
         self.video_url = kwargs.get("video_url")
         # what the family builders take (resolved prompt/image_url pass explicitly)
         self._kwargs = {k: v for k, v in kwargs.items() if k not in ("api_key", "project", "prompt", "image_url")}
@@ -167,6 +173,8 @@ class PolloGenerator:
 
     @property
     def is_text_only(self) -> bool:
+        if self.spec.kind == "audio":
+            return True
         if self.spec.video_edit:
             return False
         if self.spec.family == "ref":
@@ -249,7 +257,7 @@ for _mid in V1_VIDEO:
         VALID_RATIOS=tuple(_c["VALID_RATIOS"]),
         VALID_LENGTHS=tuple(_c["VALID_LENGTHS"]),
         VALID_RESOLUTIONS=tuple(_c["VALID_RESOLUTIONS"]),
-        video_edit=_fam in ("extend", "edit", "recast"),
+        video_edit=_fam in ("extend", "edit", "upscale", "recast"),
     )
 GENERATORS: dict[str, ModelSpec] = {**GENERATORS_LEGACY, **GENERATORS_V1}
 
@@ -278,6 +286,18 @@ IMAGE_GENERATORS_LEGACY: dict[str, ModelSpec] = {
     for _mid, _row in LEGACY_IMAGE.items()
 }
 IMAGE_GENERATORS: dict[str, ModelSpec] = {**IMAGE_GENERATORS_LEGACY, **IMAGE_GENERATORS_V1}
+
+
+AUDIO_GENERATORS: dict[str, ModelSpec] = {
+    _mid: ModelSpec(_mid, "audio", _row["builder"], v1_audio_model_url(_mid)) for _mid, _row in V1_AUDIO.items()
+}
+
+
+def audio_generator(model_id: str, **kwargs) -> PolloGenerator:
+    try:
+        return AUDIO_GENERATORS[model_id](**kwargs)
+    except KeyError:
+        raise ValueError(f"Unsupported audio model: {model_id}. Available: {', '.join(AUDIO_GENERATORS)}") from None
 
 
 def video_generator(model_id: str, **kwargs) -> PolloGenerator:

@@ -14,6 +14,7 @@ from web.core.metadata import get_db
 from .. import characters
 from ..providers import openrouter, venice
 from . import generation, polling
+from .audio import audio_params, submit_audio_generation
 from .catalogue import _auto_ratio, _fit_video_params, _model_info
 from .constants import (
     CHAT_ROUND_SECONDS,
@@ -81,6 +82,8 @@ class Turn:
                 self._direct_image()
             elif self.s.mode == "video":
                 self._direct_video()
+            elif self.s.mode == "audio":
+                self._direct_audio()
             else:
                 self._chat(tools_enabled=self.s.mode == "auto")
             status, error = ("done", None)
@@ -142,6 +145,26 @@ class Turn:
             last_frame=frames[1] if len(frames) > 1 else None,
             attached=frames,
         )
+
+    def _direct_audio(self) -> None:
+        user = self._last_user()
+        prompt = (user.content if user else "").strip()
+        if not prompt:
+            raise openrouter.OpenRouterError("Audio mode needs a text prompt")
+        if not self.s.audio_model:
+            raise openrouter.OpenRouterError("No audio model selected")
+        params = audio_params(self.s.audio_options)
+        item = _new_media("audio", "generated", prompt=prompt, model=self.s.audio_model, params=params)
+        self._add_media(item)
+        try:
+            job = submit_audio_generation(self.s.audio_model, prompt, params)
+        except openrouter.OpenRouterError as e:
+            self._update_media(item, **_failure_fields(e))
+            raise
+        self._update_media(
+            item, job_id=job["id"], params={**params, **job.get("params", {})}, **_exchange(job.get("log"))
+        )
+        polling.start_video_poller(self.conv_id, self.message_id, item["id"], job["id"])
 
     # ― chat with tools ―
     def _chat(self, tools_enabled: bool) -> None:
@@ -643,7 +666,7 @@ class Turn:
             return None
         job: dict[str, Any] = {"prompt": first.content, "title": None, "cost": 0.0, "thread": None}
         model = os.environ.get("CHAT_TITLE_MODEL") or self.s.text_model
-        direct = self.s.mode in ("image", "video")  # no text model involved: the prompt titles the chat
+        direct = self.s.mode in ("image", "video", "audio")  # no text model involved: the prompt titles the chat
         if model and not direct and (venice.is_configured() if venice.is_venice(model) else openrouter.is_configured()):
 
             def work():

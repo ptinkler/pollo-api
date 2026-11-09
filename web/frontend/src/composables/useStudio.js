@@ -233,7 +233,7 @@ export function useStudio({ models, settings, showToast }) {
     modelsLoading.value = true
     try {
       const d = await fetchChatModels()
-      Object.assign(models, { text: d.text || [], image: d.image || [], video: d.video || [] })
+      Object.assign(models, { text: d.text || [], image: d.image || [], video: d.video || [], audio: d.audio || [] })
       applyDefaults()
     } catch {
       /* leave empty */

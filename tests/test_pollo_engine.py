@@ -21,6 +21,7 @@ GOLDEN = json.loads((Path(__file__).parent / "data" / "pollo_payloads_golden.jso
 # section -> (payload builder, model-url builder)
 _FN = {
     "v1_video": (eng.v1_video_payload, eng.v1_video_model_url),
+    "v1_audio": (eng.v1_audio_payload, eng.v1_audio_model_url),
     "v1_image": (eng.v1_image_payload, eng.v1_image_model_url),
     "legacy_video": (eng.legacy_video_payload, eng.legacy_video_model_url),
     "legacy_image": (eng.legacy_image_payload, eng.legacy_image_model_url),
@@ -33,6 +34,7 @@ _PARAMS = [(section, mid) for section, models in GOLDEN.items() for mid in model
 def test_golden_covers_every_registered_model():
     """The golden snapshot must list exactly the models the registries expose."""
     assert set(GOLDEN["v1_video"]) == set(eng.V1_VIDEO)
+    assert set(GOLDEN["v1_audio"]) == set(eng.V1_AUDIO)
     assert set(GOLDEN["v1_image"]) == set(eng.V1_IMAGE)
     assert set(GOLDEN["legacy_video"]) == set(eng.LEGACY_VIDEO)
     assert set(GOLDEN["legacy_image"]) == set(eng.LEGACY_IMAGE)

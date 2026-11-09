@@ -486,7 +486,7 @@ def _public(models: list[dict]) -> list[dict]:
 
 def list_models(kind: str, refresh: bool = False) -> list[dict[str, Any]]:
     """Venice's models of one kind (text | image | video), shaped like openrouter.list_*_models()."""
-    if not is_configured():
+    if not is_configured() or kind not in ("text", "image", "video"):
         return []
     return _public(_get_catalogue(refresh)[kind])
 

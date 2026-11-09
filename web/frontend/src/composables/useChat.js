@@ -11,6 +11,8 @@ export const fetchVeniceBalance = () => apiGet('/api/chat/venice-balance')
 export const fetchConversations = (q = '') => apiGet(`/api/chat/conversations${q ? `?q=${enc(q)}` : ''}`)
 // What a chat has cost: { usd, credits, inherited_usd, inherited_credits }
 export const fetchConversationSpend = id => apiGet(`/api/chat/conversations/${enc(id)}/spend`)
+// Pollo's official TTS voices: { voices: [{voiceId, voiceName, language, gender, ...}], total }
+export const fetchAudioVoices = (params = '') => apiGet(`/api/chat/audio/voices${params}`)
 export const estimateChatCost = data => apiPost('/api/chat/estimate', data)
 export const enhanceChatPrompt = data => apiPost('/api/chat/enhance-prompt', data)
 export const fetchConversation = id => apiGet(`/api/chat/conversations/${enc(id)}`)

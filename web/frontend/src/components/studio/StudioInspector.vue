@@ -3,6 +3,7 @@
 <script setup>
 import StudioModelSection from './StudioModelSection.vue'
 import StudioMediaOptions from './StudioMediaOptions.vue'
+import StudioAudioOptions from './StudioAudioOptions.vue'
 import StudioContextSection from './StudioContextSection.vue'
 import StudioInstructions from './StudioInstructions.vue'
 import StudioCharacters from './StudioCharacters.vue'
@@ -57,6 +58,7 @@ defineEmits([
       <div class="pbody">
         <StudioModelSection :models="models" :loading="modelsLoading" />
         <StudioMediaOptions />
+        <StudioAudioOptions />
         <StudioContextSection />
         <StudioInstructions
           :instructions="instructions.list"

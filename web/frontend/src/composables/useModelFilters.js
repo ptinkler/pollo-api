@@ -14,9 +14,9 @@ function load() {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY)) || {}
     const one = x => ({ providers: x?.providers || [], tags: x?.tags || [] })
-    return { text: one(raw.text), image: one(raw.image), video: one(raw.video) }
+    return { text: one(raw.text), image: one(raw.image), video: one(raw.video), audio: one(raw.audio) }
   } catch {
-    return { text: blank(), image: blank(), video: blank() }
+    return { text: blank(), image: blank(), video: blank(), audio: blank() }
   }
 }
 

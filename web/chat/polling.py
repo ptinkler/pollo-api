@@ -30,7 +30,8 @@ def _poll_video(conv_id: str, message_id: int, media_id: str, job_id: str) -> No
     errors = 0
     while time.time() < deadline:
         time.sleep(VIDEO_POLL_INTERVAL)
-        if not db.find_chat_media_item(message_id, media_id):
+        item = db.find_chat_media_item(message_id, media_id)
+        if not item:
             return  # conversation deleted (items detached to the library are still updated)
         try:
             job = source.get_video(job_id)
@@ -45,7 +46,11 @@ def _poll_video(conv_id: str, message_id: int, media_id: str, job_id: str) -> No
 
         status = job.get("status")
         if status == "completed":
-            name = f"vid_{uuid.uuid4().hex[:12]}.mp4"
+            name = (
+                f"aud_{uuid.uuid4().hex[:12]}.mp3"
+                if item.get("kind") == "audio"
+                else f"vid_{uuid.uuid4().hex[:12]}.mp4"
+            )
             try:
                 source.download_video(job_id, _conv_dir(conv_id) / name)
             except Exception as e:  # noqa: BLE001
@@ -60,12 +65,12 @@ def _poll_video(conv_id: str, message_id: int, media_id: str, job_id: str) -> No
             print(f"✅ chat video {job_id} saved as {name}")
             return
         if status in ("failed", "cancelled", "expired"):
-            error = job.get("error") or f"Video {status}"
+            error = job.get("error") or f"{(item.get('kind') or 'video').title()} {status}"
             db.update_chat_media_item(
                 message_id, media_id, status="error", error=error, moderated=bool(_MODERATION.search(error))
             )
             return
-    db.update_chat_media_item(message_id, media_id, status="error", error="Timed out waiting for video")
+    db.update_chat_media_item(message_id, media_id, status="error", error="Timed out waiting for the file")
 
 
 def startup_resume_chat() -> None:

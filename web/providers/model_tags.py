@@ -28,6 +28,9 @@ TAGS: dict[str, str] = {
     "lipsync": "Lip sync",
     "upscale": "Upscale",
     "audio": "Makes audio",
+    # audio
+    "tts": "Text→Speech",
+    "music": "Music",
     # image
     "text2img": "Text→Image",
     "image_edit": "Image edit",
@@ -51,6 +54,8 @@ def tags_for(kind: str, m: dict[str, Any]) -> list[str]:
         _video_tags(m, add)
     elif kind == "image":
         _image_tags(m, add)
+    elif kind == "audio":
+        add(*_AUDIO_TYPE_TAGS.get(m.get("type"), ()))
     elif kind == "text":
         if "image" in (m.get("input_modalities") or []):
             add("vision")
@@ -59,11 +64,14 @@ def tags_for(kind: str, m: dict[str, Any]) -> list[str]:
     return out
 
 
+_AUDIO_TYPE_TAGS = {"speech": ("tts",), "music": ("music",)}
+
 # Pollo's `type` and Venice's `family` → capability tags (table-driven so the
 # function stays simple). "standard" / img-animation is handled in the helper.
 _POLLO_TYPE_TAGS = {
     "extend": ("video_extend",),
     "video_edit": ("video_edit",),
+    "upscale": ("upscale",),
     "motion": ("motion",),
     "lipsync": ("lipsync",),
     "recast": ("motion", "video_edit"),
@@ -79,7 +87,7 @@ _VENICE_FAMILY_TAGS = {
     "angles": ("img2vid",),
 }
 # Families/types where a "first_frame" is a role other than "animate this image"
-_EDIT_TYPES = {"recast", "motion", "ref", "extend", "video_edit", "lipsync"}
+_EDIT_TYPES = {"recast", "motion", "ref", "extend", "video_edit", "upscale", "lipsync"}
 _VENICE_EDIT_FAMS = {"video", "motion", "upscale", "reference"}
 
 

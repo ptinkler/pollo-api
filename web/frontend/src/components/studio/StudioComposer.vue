@@ -146,7 +146,7 @@ function onDrop(e) {
 
       <div class="cbar">
         <button
-          v-if="!mediaMode"
+          v-if="!mediaMode && mode !== 'audio'"
           class="clip"
           title="Attach images — pick from Media or upload"
           @click="emit('library')"

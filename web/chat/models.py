@@ -66,6 +66,21 @@ class TurnOptions(BaseModel):
     generate_audio: bool | None = None
 
 
+class AudioOptions(BaseModel):
+    """Speech / music settings; each applies only to models that take it."""
+
+    voice: str | None = None  # a Pollo voice id (speech)
+    speed: float | None = None
+    volume: float | None = None
+    pitch: int | None = None
+    instrumental: bool | None = None  # music
+    vocal_gender: str | None = None  # "m" | "f"
+    style: str | None = None  # style + title together = lyrics mode
+    title: str | None = None
+    negative_prompt: str | None = None
+    duration: int | None = None
+
+
 class RefChoices(BaseModel):
     """The composer's reference picks: chat files or "char:" refs."""
 
@@ -74,16 +89,18 @@ class RefChoices(BaseModel):
 
 
 class TurnSettings(BaseModel):
-    mode: str = "auto"  # auto | text | image | video
+    mode: str = "auto"  # auto | text | image | video | audio
     history_limit: int | None = Field(default=None, ge=1)  # past messages sent to the chat model; None = all
     image_limit: int | None = Field(default=DEFAULT_IMAGE_LIMIT, ge=0)  # chat images per request; None = all
     text_model: str | None = None
     image_model: str | None = None
     video_model: str | None = None
+    audio_model: str | None = None  # kept in the remembered settings, not a conversation column
     # The composer's picks, applied in every mode (Auto included). Unset =
     # the chat model's choice (Auto), else the media model's default.
     image_options: TurnOptions = TurnOptions()
     video_options: TurnOptions = TurnOptions()
+    audio_options: AudioOptions = AudioOptions()
     ref_choices: RefChoices = RefChoices()
 
 

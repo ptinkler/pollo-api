@@ -28,4 +28,13 @@ _KINDS = ("character", "instruction", "instruction_group")
 _PAUSE_KINDS = ("instruction", "instruction_group")
 _PARAM_FILES = ("first_frame", "last_frame", "source_video")  # media params naming one reference file
 # The turn settings remembered on the conversation (so a reopen restores them)
-_REMEMBERED_SETTINGS = {"mode", "history_limit", "image_limit", "image_options", "video_options", "ref_choices"}
+_REMEMBERED_SETTINGS = {
+    "mode",
+    "history_limit",
+    "image_limit",
+    "image_options",
+    "video_options",
+    "audio_model",
+    "audio_options",
+    "ref_choices",
+}

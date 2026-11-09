@@ -27,6 +27,7 @@ from .legacy_image import LEGACY_IMAGE, legacy_image_model_url, legacy_image_pay
 from .legacy_ref import LEGACY_REF, legacy_ref_model_url, legacy_ref_payload
 from .legacy_video import LEGACY_VIDEO, legacy_video_model_url, legacy_video_payload
 from .registry import (
+    AUDIO_GENERATORS,
     GENERATORS,
     GENERATORS_LEGACY,
     GENERATORS_V1,
@@ -35,9 +36,11 @@ from .registry import (
     IMAGE_GENERATORS_V1,
     ModelSpec,
     PolloGenerator,
+    audio_generator,
     image_generator,
     video_generator,
 )
+from .v1_audio import V1_AUDIO, v1_audio_model_url, v1_audio_payload
 from .v1_image import V1_IMAGE, v1_image_model_url, v1_image_payload
 from .v1_video import V1_VIDEO, v1_video_model_url, v1_video_payload
 
@@ -45,6 +48,7 @@ __all__ = [
     "ERROR_STATUSES",
     "SUCCESS_STATUSES",
     "closest_aspect_ratio",
+    "AUDIO_GENERATORS",
     "GENERATORS",
     "GENERATORS_LEGACY",
     "GENERATORS_V1",
@@ -53,13 +57,17 @@ __all__ = [
     "IMAGE_GENERATORS_V1",
     "ModelSpec",
     "PolloGenerator",
+    "audio_generator",
     "image_generator",
     "video_generator",
+    "V1_AUDIO",
     "V1_VIDEO",
     "V1_IMAGE",
     "LEGACY_VIDEO",
     "LEGACY_IMAGE",
     "LEGACY_REF",
+    "v1_audio_model_url",
+    "v1_audio_payload",
     "v1_video_model_url",
     "v1_video_payload",
     "v1_image_model_url",

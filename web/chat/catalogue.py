@@ -20,7 +20,7 @@ def get_models(refresh: bool = False) -> dict[str, Any]:
         data: dict[str, Any] = {"errors": {}}
         # Uniform dispatch: each provider lists its own models per kind (in
         # PROVIDERS order), so no provider is special-cased here.
-        for kind in ("text", "image", "video"):
+        for kind in ("text", "image", "video", "audio"):
             models: list = []
             for prov in PROVIDERS:
                 try:

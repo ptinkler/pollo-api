@@ -1,4 +1,4 @@
-<!-- Inspector section: the three searchable model pickers. -->
+<!-- Inspector section: the four searchable model pickers. -->
 <script setup>
 import { inject } from 'vue'
 import ModelPicker from '../chat/ModelPicker.vue'
@@ -25,6 +25,7 @@ const { selected } = inject('composerSettings')
       />
       <ModelPicker v-model="selected.image" :models="models.image" label="Image" kind="image" :loading="loading" />
       <ModelPicker v-model="selected.video" :models="models.video" label="Video" kind="video" :loading="loading" />
+      <ModelPicker v-model="selected.audio" :models="models.audio" label="Audio" kind="audio" :loading="loading" />
     </div>
   </div>
 </template>

@@ -9,6 +9,7 @@ export const MODES = [
   { id: 'text', label: 'Chat', icon: '💬', hint: 'Text replies only' },
   { id: 'image', label: 'Image', icon: '🖼', hint: 'Send the prompt straight to the image model' },
   { id: 'video', label: 'Video', icon: '🎬', hint: 'Send the prompt (and image) straight to the video model' },
+  { id: 'audio', label: 'Audio', icon: '🔊', hint: 'Send the prompt straight to the speech / music model' },
 ]
 const DEFAULT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9']
 // First id containing one of these wins when nothing is remembered yet
@@ -16,6 +17,7 @@ const PREFERRED = {
   text: ['anthropic/claude-sonnet', 'google/gemini', 'openai/gpt'],
   image: ['gemini', 'seedream', 'flux', 'gpt-image'],
   video: ['veo', 'seedance', 'wan', 'sora'],
+  audio: ['eleven', 'suno', 'minimax'],
 }
 const STORE_KEY = 'chat.prefs'
 // Memory slider stops: how many past messages the chat model gets (null = all)
@@ -64,10 +66,31 @@ function dropUnsupported(opts, ratios, resolutions, durations = null) {
   if (durations && opts.duration && !durations.includes(Number(opts.duration))) opts.duration = ''
 }
 
-/** `models`: the catalogues ({ text, image, video } lists) the pickers choose from. */
+// Audio option -> [the model option that offers it, how to clean the raw value]
+const num = v => (v === null || v === '' ? null : Number(v))
+const text = v => (v || '').trim() || null
+const AUDIO_FIELDS = {
+  voice: ['voice', v => v || null],
+  speed: ['tuning', num],
+  volume: ['tuning', num],
+  pitch: ['tuning', num],
+  instrumental: ['instrumental', v => !!v],
+  vocal_gender: ['instrumental', (v, o) => (o.instrumental ? null : v || null)],
+  style: ['lyrics', text],
+  title: ['lyrics', text],
+  negative_prompt: ['instrumental', text],
+  duration: ['duration', num],
+}
+
+/** `models`: the catalogues ({ text, image, video, audio } lists) the pickers choose from. */
 export function useComposerSettings(models) {
   const prefs = loadPrefs()
-  const selected = reactive({ text: prefs.text || '', image: prefs.image ?? '', video: prefs.video ?? '' })
+  const selected = reactive({
+    text: prefs.text || '',
+    image: prefs.image ?? '',
+    video: prefs.video ?? '',
+    audio: prefs.audio ?? '',
+  })
   const mode = ref(prefs.mode || 'auto')
   const memoryIndex = ref(stepIndex(MEMORY_STEPS, prefs, 'memory', DEFAULT_MEMORY))
   const imageIndex = ref(stepIndex(IMAGE_STEPS, prefs, 'images', DEFAULT_IMAGES))
@@ -83,12 +106,34 @@ export function useComposerSettings(models) {
     generate_audio: true,
     ...prefs.videoOpts,
   })
+  // Speech / music settings; '' / null = the model's own default
+  const audioOpts = reactive({
+    voice: '',
+    speed: null,
+    volume: null,
+    pitch: null,
+    instrumental: false,
+    vocal_gender: '',
+    style: '',
+    title: '',
+    negative_prompt: '',
+    duration: '',
+    ...prefs.audioOpts,
+  })
   // Reference images switched on (sent first) or off (never sent) in the
   // composer: chat filenames or "char:<id>/<file>". Per chat, not per browser.
   const refChoices = reactive({ on: [], off: [] })
 
   watch(
-    [() => ({ ...selected }), mode, memoryIndex, imageIndex, () => ({ ...imageOpts }), () => ({ ...videoOpts })],
+    [
+      () => ({ ...selected }),
+      mode,
+      memoryIndex,
+      imageIndex,
+      () => ({ ...imageOpts }),
+      () => ({ ...videoOpts }),
+      () => ({ ...audioOpts }),
+    ],
     () => {
       try {
         localStorage.setItem(
@@ -100,6 +145,7 @@ export function useComposerSettings(models) {
             images: imageLimit.value,
             imageOpts: { ...imageOpts },
             videoOpts: { ...videoOpts },
+            audioOpts: { ...audioOpts },
           }),
         )
       } catch {
@@ -112,6 +158,7 @@ export function useComposerSettings(models) {
   const textInfo = computed(() => models.text.find(m => m.id === selected.text))
   const imageInfo = computed(() => models.image.find(m => m.id === selected.image))
   const videoInfo = computed(() => models.video.find(m => m.id === selected.video))
+  const audioInfo = computed(() => models.audio.find(m => m.id === selected.audio))
   const imageRatioOptions = computed(() => ratiosOf(imageInfo.value))
   const imageResOptions = computed(() => imageInfo.value?.resolutions || [])
   const videoRatioOptions = computed(() => ratiosOf(videoInfo.value))
@@ -119,6 +166,7 @@ export function useComposerSettings(models) {
   const durationOptions = computed(() => videoInfo.value?.durations || [])
   const showImageOpts = computed(() => !!selected.image && ['auto', 'image'].includes(mode.value))
   const showVideoOpts = computed(() => !!selected.video && ['auto', 'video'].includes(mode.value))
+  const showAudioOpts = computed(() => !!selected.audio && mode.value === 'audio')
   const currentMode = computed(() => MODES.find(m => m.id === mode.value) || MODES[0])
 
   watch(imageInfo, info => {
@@ -148,6 +196,7 @@ export function useComposerSettings(models) {
     if (!selected.text) selected.text = pickDefault('text')
     if (!('image' in prefs)) selected.image = pickDefault('image')
     if (!('video' in prefs)) selected.video = pickDefault('video')
+    if (!('audio' in prefs)) selected.audio = pickDefault('audio')
   }
 
   // A chat's own models and settings, restored when it's opened
@@ -156,6 +205,7 @@ export function useComposerSettings(models) {
       if (conv[`${kind}_model`]) selected[kind] = conv[`${kind}_model`]
     }
     const st = conv.settings
+    if (st?.audio_model) selected.audio = st.audio_model
     setRefChoices(st?.ref_choices)
     if (!st) return
     if (MODES.some(m => m.id === st.mode)) mode.value = st.mode
@@ -164,11 +214,22 @@ export function useComposerSettings(models) {
     Object.assign(imageOpts, optionsOrUnset(st.image_options, ['aspect_ratio', 'resolution']))
     Object.assign(videoOpts, optionsOrUnset(st.video_options, ['aspect_ratio', 'resolution', 'duration']))
     if (st.video_options?.generate_audio != null) videoOpts.generate_audio = st.video_options.generate_audio
+    if (st.audio_options) Object.assign(audioOpts, st.audio_options)
   }
 
   function setRefChoices(choices) {
     refChoices.on = [...(choices?.on || [])]
     refChoices.off = [...(choices?.off || [])]
+  }
+
+  // Only what the picked model takes goes out (the rest stays the model's default)
+  function audioSettings() {
+    const has = opt => audioInfo.value?.options?.includes(opt)
+    const out = {}
+    for (const [field, [option, clean]] of Object.entries(AUDIO_FIELDS)) {
+      out[field] = has(option) ? clean(audioOpts[field], audioOpts) : null
+    }
+    return out
   }
 
   // The settings a turn is sent with (retries and edits too: they run in the mode selected now)
@@ -180,6 +241,7 @@ export function useComposerSettings(models) {
       text_model: selected.text || null,
       image_model: selected.image || null,
       video_model: selected.video || null,
+      audio_model: selected.audio || null,
       image_options: { aspect_ratio: imageOpts.aspect_ratio || null, resolution: imageOpts.resolution || null },
       video_options: {
         aspect_ratio: videoOpts.aspect_ratio || null,
@@ -187,12 +249,15 @@ export function useComposerSettings(models) {
         duration: videoOpts.duration ? Number(videoOpts.duration) : null,
         generate_audio: videoInfo.value?.generate_audio ? videoOpts.generate_audio : null,
       },
+      audio_options: audioSettings(),
       ref_choices: { on: [...refChoices.on], off: [...refChoices.off] },
     }
   }
 
   // The model the current mode sends to
-  const activeModel = computed(() => ({ image: selected.image, video: selected.video })[mode.value] ?? selected.text)
+  const activeModel = computed(
+    () => ({ image: selected.image, video: selected.video, audio: selected.audio })[mode.value] ?? selected.text,
+  )
 
   return {
     selected,
@@ -203,11 +268,13 @@ export function useComposerSettings(models) {
     imageLimit,
     imageOpts,
     videoOpts,
+    audioOpts,
     refChoices,
     setRefChoices,
     textInfo,
     imageInfo,
     videoInfo,
+    audioInfo,
     imageRatioOptions,
     imageResOptions,
     videoRatioOptions,
@@ -215,6 +282,7 @@ export function useComposerSettings(models) {
     durationOptions,
     showImageOpts,
     showVideoOpts,
+    showAudioOpts,
     currentMode,
     activeModel,
     cycleMode,

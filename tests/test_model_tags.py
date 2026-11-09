@@ -29,9 +29,16 @@ class TestVideoTags:
         # act/motion: the first_frame is the image being animated, not img2vid
         assert tags_for("video", {"type": "motion", "frame_images": ["first_frame"]}) == ["motion"]
 
+    def test_pollo_upscale(self):
+        assert tags_for("video", {"type": "upscale", "frame_images": []}) == ["upscale"]
+
     def test_pollo_lipsync(self):
         # lip sync: the first_frame is the portrait, driven by audio — not img2vid
         assert tags_for("video", {"type": "lipsync", "frame_images": ["first_frame"]}) == ["lipsync"]
+
+    def test_pollo_audio(self):
+        assert tags_for("audio", {"type": "speech"}) == ["tts"]
+        assert tags_for("audio", {"type": "music"}) == ["music"]
 
     def test_venice_families(self):
         assert tags_for("video", {"family": "motion"}) == ["motion"]

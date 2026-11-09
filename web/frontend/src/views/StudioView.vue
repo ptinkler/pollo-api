@@ -54,7 +54,7 @@ async function onSignOut() {
 
 const showToast = inject('showToast', (m, t) => console.warn(`[${t}] ${m}`))
 
-const models = reactive({ text: [], image: [], video: [] })
+const models = reactive({ text: [], image: [], video: [], audio: [] })
 provide('chatModels', models) // ChatMessage's "Try another model"
 const settings = useComposerSettings(models)
 provide('composerSettings', settings) // read by the inspector's model/options sections

@@ -18,6 +18,7 @@ from web.core.metadata import get_db, iso
 from ..providers import openrouter, pollo
 from ..uploads import safe_filename
 from . import polling
+from .audio import submit_audio_generation
 from .catalogue import _fit_video_params
 from .constants import DEFAULT_IMAGE_LIMIT
 from .deps import router
@@ -85,6 +86,17 @@ def api_estimate(data: EstimateRequest):
             data.n_images,
         )
     }
+
+
+@router.get("/audio/voices")
+def api_audio_voices(page: int = 1, page_size: int = 50, language: str = "", gender: str = ""):
+    """Pollo's official TTS voices, for the speech models' voice picker."""
+    if not pollo.is_configured():
+        raise HTTPException(503, "No Pollo API key set — add one in Settings → Keys")
+    try:
+        return pollo.list_voices(page, min(page_size, 100), language=language, gender=gender)
+    except openrouter.OpenRouterError as e:
+        raise HTTPException(502, str(e)) from e
 
 
 @router.post("/messages/{message_id}/cancel")
@@ -171,7 +183,9 @@ def _sse(event: dict) -> str:
 def _start_turn(
     conv_id: str, settings: TurnSettings, user_msg, parent_id: int | None, lane: str | None = None
 ) -> StreamingResponse:
-    model = {"image": settings.image_model, "video": settings.video_model}.get(settings.mode, settings.text_model)
+    model = {"image": settings.image_model, "video": settings.video_model, "audio": settings.audio_model}.get(
+        settings.mode, settings.text_model
+    )
     assistant = get_db().add_chat_message(
         conv_id, "assistant", "", model=model, status="streaming", parent_id=parent_id, mode=settings.mode, lane=lane
     )
@@ -328,7 +342,7 @@ def api_active_generations(data: ActiveQuery):
     seen: set[str] = set()
     for m in msgs.values():
         for item in m.media:
-            if item.get("source") != "generated" or item.get("kind") not in ("image", "video"):
+            if item.get("source") != "generated" or item.get("kind") not in ("image", "video", "audio"):
                 continue
             if item["id"] in seen:
                 continue
@@ -382,6 +396,16 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
                     message_id, _saved_media("image", "generated", extra, prompt=item["prompt"], model=model)
                 )
             _add_message_cost(message_id, cost)
+        elif item["kind"] == "audio":
+            job = submit_audio_generation(model, item["prompt"], params)
+            db.update_chat_media_item(
+                message_id,
+                media_id,
+                job_id=job["id"],
+                params={**params, **job.get("params", {})},
+                **_exchange(job.get("log")),
+            )
+            polling.start_video_poller(conv_id, message_id, media_id, job["id"])
         else:
             # A different model may support different durations/ratios
             params["duration"], params["aspect_ratio"], params["resolution"] = _fit_video_params(

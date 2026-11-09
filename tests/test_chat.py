@@ -2532,6 +2532,56 @@ class TestPolloImageModels:
         assert (kwargs["prompt"], kwargs["length"], kwargs["generate_audio"]) == ("make it move", 15, False)
         assert kwargs["aspect_ratio"] == "9:16"  # picked in the composer, so it wins over the image's shape
 
+    # ── audio ──
+    AUDIO = {**SETTINGS, "audio_model": "pollo/elevenv3v1"}
+
+    def test_audio_models_listed_with_their_type(self, chat, monkeypatch, pollo):
+        for fn in ("list_text_models", "list_image_models", "list_video_models"):
+            monkeypatch.setattr(openrouter, fn, lambda: [])
+        models = {m["id"]: m for m in chat.catalogue.get_models(refresh=True)["audio"]}
+        assert models["pollo/elevenv3v1"]["tags"] == ["tts"] and models["pollo/elevenv3v1"]["options"] == ["voice"]
+        assert models["pollo/sunov55v1"]["tags"] == ["music"]
+
+    def test_audio_mode_submits_speech_with_the_picked_voice(self, client, conv, chat, monkeypatch, pollo):
+        class Gen:
+            payload_attrs = {"prompt": "hello", "voiceId": "v1"}
+
+            def __init__(self, key, **kw):
+                pollo["generators"].append((key, kw))
+
+            def get_payload(self):
+                return {}
+
+            def send_request(self):
+                return type(
+                    "R", (), {"status_code": 200, "text": "", "json": lambda s: {"data": {"taskId": "task-1"}}}
+                )()
+
+        monkeypatch.setattr(pollo_provider, "get_audio_generator", lambda key, **kw: Gen(key, **kw))
+        monkeypatch.setattr(chat.polling, "start_video_poller", lambda *a: None)
+        msg = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "hello", "mode": "audio", **self.AUDIO, "audio_options": {"voice": "v1"}},
+            )
+        )[-1]["message"]
+        item = msg["media"][0]
+        assert item["kind"] == "audio" and item["status"] == "pending" and item["job_id"] == "pollo:task-1"
+        key, kwargs = pollo["generators"][0]
+        assert key == "elevenv3v1" and kwargs["prompt"] == "hello" and kwargs["voice"] == "v1"
+        # the picks are remembered with the conversation's composer settings
+        settings = client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["settings"]
+        assert settings["audio_model"] == "pollo/elevenv3v1" and settings["audio_options"]["voice"] == "v1"
+
+    def test_audio_mode_needs_a_prompt_and_a_model(self, client, conv, chat, monkeypatch, pollo):
+        msgs = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "hi", "mode": "audio", **SETTINGS},
+            )
+        )
+        assert "No audio model" in msgs[-1]["message"]["error"]
+
     def _video_from_image(self, client, conv, chat, size, model, **extra):
         up = client.post(
             f"/api/chat/conversations/{conv['id']}/attachments",
@@ -2606,6 +2656,17 @@ class TestPolloImageModels:
         item = db.get_chat_message(msg.id).media[0]
         assert item["status"] == "done" and item["credits"] == 40 and not item.get("cost")
         assert (chat.helpers._chat_root() / conv["id"] / item["file"]).read_bytes() == b"mp4-bytes"
+
+    def test_poller_saves_a_pollo_audio_job_as_mp3(self, chat, db, conv, monkeypatch, pollo):
+        msg = db.add_chat_message(
+            conv["id"],
+            "assistant",
+            media=[{"id": "pa1", "kind": "audio", "source": "generated", "status": "pending", "job_id": "pollo:t-5"}],
+        )
+        pollo["statuses"] = iter([[("succeed", None, "https://cdn/a.mp3", 3)]] * 2)
+        chat.polling._poll_video(conv["id"], msg.id, "pa1", "pollo:t-5")
+        item = db.get_chat_message(msg.id).media[0]
+        assert item["status"] == "done" and item["file"].endswith(".mp3") and item["credits"] == 3
 
     def test_failed_pollo_video_marks_the_item(self, chat, db, conv, monkeypatch, pollo):
         msg = db.add_chat_message(

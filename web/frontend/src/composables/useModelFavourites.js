@@ -1,15 +1,15 @@
 import { reactive } from 'vue'
 
-// Favourite model ids per picker kind (text | image | video). Per-browser
+// Favourite model ids per picker kind (text | image | video | audio). Per-browser
 // convenience, so localStorage is enough; shared across all pickers.
 const STORE_KEY = 'chat.favourites'
 
 function load() {
   try {
     const raw = JSON.parse(localStorage.getItem(STORE_KEY)) || {}
-    return { text: raw.text || [], image: raw.image || [], video: raw.video || [] }
+    return { text: raw.text || [], image: raw.image || [], video: raw.video || [], audio: raw.audio || [] }
   } catch {
-    return { text: [], image: [], video: [] }
+    return { text: [], image: [], video: [], audio: [] }
   }
 }
 

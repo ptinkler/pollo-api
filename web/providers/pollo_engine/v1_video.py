@@ -1,4 +1,4 @@
-"""V1 video API bodies: the generic family plus Kling, extend, edit, lipsync and recast."""
+"""V1 video API bodies: the generic family plus Kling, extend, edit, upscale, lipsync and recast."""
 
 from __future__ import annotations
 
@@ -48,6 +48,9 @@ _KLING_BASE: dict[str, Any] = {
     "VALID_RATIOS": ("16:9", "9:16", "1:1"),
     "DEFAULT_RESOLUTION": "",
 }
+
+_UPSCALE_SCALES = ("original", "2x", "4x", "hd", "4K")
+_UPSCALE_MODES = ("standard", "face", "denoise", "sharpen", "anime")
 
 # model_id -> overrides of the defaults above (plus V1_PROVIDER/V1_MODEL)
 V1_VIDEO: dict[str, dict[str, Any]] = {
@@ -634,6 +637,25 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "endpoint": "motion",
         "builder": "recast",
     },
+    # Video upscale (added 2026-11): {video, scale (+mode)}. The resolution
+    # picker carries Pollo's `scale`; Pollo's own endpoint has no provider/model
+    # segment, so it sets V1_URL.
+    "pollovideoupscalev1": {
+        "V1_URL": f"{POLLO_API_V1_BASE}/upscale",
+        "VALID_RESOLUTIONS": _UPSCALE_SCALES,
+        "DEFAULT_RESOLUTION": "2x",
+        "MODES": _UPSCALE_MODES,
+        "builder": "upscale",
+    },
+    "topazvideoupscalev1": {
+        "V1_PROVIDER": "topaz",
+        "V1_MODEL": "topaz-video-upscale",
+        "endpoint": "upscale",
+        "VALID_RESOLUTIONS": _UPSCALE_SCALES,
+        "DEFAULT_RESOLUTION": "2x",
+        "MODES": _UPSCALE_MODES,
+        "builder": "upscale",
+    },
     # Lip-sync (added 2026-11): drive a reference image (a portrait) with an
     # audio track. Shape {image, audio} (+prompt, +resolution where offered).
     "omnihumanv1": {
@@ -678,6 +700,8 @@ def _cfg(model_id: str) -> dict[str, Any]:
 
 def v1_video_model_url(model_id: str) -> str:
     c = _cfg(model_id)
+    if c.get("V1_URL"):
+        return c["V1_URL"]
     return f"{POLLO_API_V1_BASE}/{c['V1_PROVIDER']}/{c['V1_MODEL']}/{c['endpoint']}"
 
 
@@ -836,6 +860,18 @@ def _edit_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: dict
     return {"input": attrs}
 
 
+def _upscale_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw) -> dict[str, Any]:
+    """Video upscale: {video, scale, mode}. An unknown scale / mode (e.g. left over
+    from another model's picker) falls back to the model's default."""
+    video_url = kw.get("video_url")
+    if not video_url:
+        raise ValueError("Upscaling needs the source video's URL")
+    scales = {v.lower(): v for v in c["VALID_RESOLUTIONS"]}
+    scale = scales.get(str(s["resolution"]).lower(), c["DEFAULT_RESOLUTION"])
+    mode = kw.get("mode") if kw.get("mode") in c["MODES"] else c["MODES"][0]
+    return {"input": {"video": video_url, "scale": scale, "mode": mode}}
+
+
 def _lipsync_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw) -> dict[str, Any]:
     """Lip sync: a reference image driven by an audio track — {image, audio}
     (+prompt where given / required, +resolution where the model offers one)."""
@@ -882,6 +918,8 @@ def v1_video_payload(model_id: str, *, prompt: str, image_url: str | None, **kw)
         return _extend_payload(c, prompt, image_url, s, **kw)
     if builder == "edit":
         return _edit_payload(c, prompt, image_url, s, **kw)
+    if builder == "upscale":
+        return _upscale_payload(c, prompt, image_url, s, **kw)
     if builder == "lipsync":
         return _lipsync_payload(c, prompt, image_url, s, **kw)
     if builder == "recast":

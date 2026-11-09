@@ -655,3 +655,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.media-item .media-audio {
+  display: block;
+  width: 100%;
+  min-width: 260px;
+}
