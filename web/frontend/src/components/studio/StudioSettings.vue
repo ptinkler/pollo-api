@@ -4,6 +4,7 @@
 import { ref } from 'vue'
 import StudioAccount from './StudioAccount.vue'
 import StudioKeys from './StudioKeys.vue'
+import StudioUploads from './StudioUploads.vue'
 import StudioVpnCard from './StudioVpnCard.vue'
 
 defineProps({
@@ -49,6 +50,8 @@ const THEMES = [
       <StudioAccount @user="onUser" @sign-out="$emit('sign-out')" />
 
       <StudioKeys />
+
+      <StudioUploads />
 
       <StudioVpnCard v-if="isAdmin" />
     </div>

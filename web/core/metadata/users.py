@@ -109,6 +109,15 @@ class UserMixin:
                 user.api_keys_json = api_keys_json
                 session.commit()
 
+    def set_user_upload_prefs(self, user_id: str, upload_prefs_json: str | None) -> None:
+        """Store the user's source-media hosting preferences (plain JSON, or
+        None to fall back to the instance default)."""
+        with self._session() as session:
+            user = session.get(User, user_id)
+            if user:
+                user.upload_prefs_json = upload_prefs_json
+                session.commit()
+
     def list_api_key_blobs(self) -> list[str]:
         """Every stored api_keys_json across all users (non-empty), for deciding
         whether the DB already holds encrypted key material."""

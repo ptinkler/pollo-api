@@ -1,7 +1,9 @@
 """
-Temporary public hosting for local media, for providers that only take a
-URL (Pollo): tmpfiles.org, falling back to litterbox.catbox.moe. Videos use
-litterbox first — it accepts much larger files (up to 1 GB) than tmpfiles.
+Public hosting for local source media, for providers that only take a URL
+(Pollo): the per-user preference picks the host (litterbox / tmpfiles /
+self-host) and retention — see web/upload_settings.py. A primary host is tried
+first, then the backup. Self-host serves the file from this instance itself
+(web/public_media.py) instead of a third-party temp host.
 """
 
 from pathlib import Path
@@ -9,37 +11,52 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 
-HOSTED_SECONDS = 3600  # how long an uploaded image stays up (both hosts)
 LITTERBOX_URL = "https://litterbox.catbox.moe/resources/internals/api.php"
-LITTERBOX_EXPIRY = "1h"  # litterbox's name for HOSTED_SECONDS: 1h, 12h, 24h or 72h
 TMPFILES_URL = "https://tmpfiles.org/api/v1/upload"
+# Litterbox only offers these fixed retentions; map any requested span to the
+# nearest. Keys are minutes.
+_LITTERBOX_BUCKETS = {60: "1h", 720: "12h", 1440: "24h", 4320: "72h"}
 
 
 def upload_image(filepath: Path) -> str:
-    """Upload an image to tmpfiles.org, falling back to litterbox if that fails."""
-    return upload_file(filepath, prefer_large=False)
+    """Upload a source image to the user's configured host(s)."""
+    return upload_file(filepath)
 
 
-def upload_file(filepath: Path, prefer_large: bool = False) -> str:
-    """Upload any file to a temporary public host and return its URL. With
-    prefer_large (videos), try litterbox first — it accepts much larger files
-    and handles video — then tmpfiles; otherwise tmpfiles first (fast for
-    images), then litterbox."""
-    hosts = (
-        [("litterbox", _upload_to_litterbox), ("tmpfiles.org", _upload_to_tmpfiles)]
-        if prefer_large
-        else [("tmpfiles.org", _upload_to_tmpfiles), ("litterbox", _upload_to_litterbox)]
-    )
+def upload_file(filepath: Path, prefs: dict | None = None) -> str:
+    """Upload any source file to the configured public host and return its URL,
+    trying the primary host then the backup. `prefs` defaults to the current
+    user's resolved upload preferences (web/upload_settings.py)."""
+    if prefs is None:
+        from .upload_settings import current_upload_prefs
+
+        prefs = current_upload_prefs()
+    order = [prefs["primary"]]
+    if prefs.get("backup") and prefs["backup"] != prefs["primary"]:
+        order.append(prefs["backup"])
     errors: list[str] = []
-    for name, upload in hosts:
+    for host in order:
         try:
-            url = upload(filepath)
-            print(f"[Upload] {name} succeeded: {url}")
+            url = _dispatch(host, filepath, prefs)
+            print(f"[Upload] {host} succeeded: {url}")
             return url
         except ValueError as exc:
-            print(f"[Upload] {name} failed ({exc}), trying next host…")
-            errors.append(f"{name}: {exc}")
+            print(f"[Upload] {host} failed ({exc}), trying next host…")
+            errors.append(f"{host}: {exc}")
     raise ValueError("All upload hosts failed — " + "; ".join(errors))
+
+
+def _dispatch(host: str, filepath: Path, prefs: dict) -> str:
+    expiry = prefs.get("expiry_minutes", 60)
+    if host == "litterbox":
+        return _upload_to_litterbox(filepath, expiry)
+    if host == "tmpfiles":
+        return _upload_to_tmpfiles(filepath, expiry)
+    if host == "selfhost":
+        from .public_media import selfhost_url
+
+        return selfhost_url(filepath, prefs.get("selfhost_base", ""), ttl_seconds=expiry * 60)
+    raise ValueError(f"Unknown upload host {host!r}")
 
 
 def _http_failure(service: str, resp: requests.Response) -> ValueError:
@@ -47,14 +64,19 @@ def _http_failure(service: str, resp: requests.Response) -> ValueError:
     return ValueError(f"{service} upload failed — HTTP {resp.status_code}" + (f" — {body}" if body else ""))
 
 
-def _upload_to_litterbox(filepath: Path) -> str:
+def _litterbox_time(expiry_minutes: int) -> str:
+    """Litterbox's retention label (1h/12h/24h/72h) nearest to the request."""
+    return _LITTERBOX_BUCKETS[min(_LITTERBOX_BUCKETS, key=lambda v: abs(v - expiry_minutes))]
+
+
+def _upload_to_litterbox(filepath: Path, expiry_minutes: int = 60) -> str:
     """Upload a file to litterbox.catbox.moe and return the public URL.
     Fails fast (no retry) so VPN/Cloudflare blocks surface immediately."""
     try:
         with open(filepath, "rb") as f:
             resp = requests.post(
                 LITTERBOX_URL,
-                data={"reqtype": "fileupload", "time": LITTERBOX_EXPIRY},
+                data={"reqtype": "fileupload", "time": _litterbox_time(expiry_minutes)},
                 files={"fileToUpload": (filepath.name, f)},
                 timeout=(8, 15),  # (connect, read) — read is server response time only, not upload duration
             )
@@ -71,12 +93,16 @@ def _upload_to_litterbox(filepath: Path) -> str:
     return resp.text.strip()
 
 
-def _upload_to_tmpfiles(filepath: Path) -> str:
-    """Upload a file to tmpfiles.org and return its direct download URL."""
+def _upload_to_tmpfiles(filepath: Path, expiry_minutes: int = 60) -> str:
+    """Upload a file to tmpfiles.org and return its direct download URL.
+    (tmpfiles honors its own retention; we pass the requested span as a hint.)"""
     try:
         with open(filepath, "rb") as f:
             resp = requests.post(
-                TMPFILES_URL, data={"expire": HOSTED_SECONDS}, files={"file": (filepath.name, f)}, timeout=(8, 30)
+                TMPFILES_URL,
+                data={"expire": expiry_minutes * 60},
+                files={"file": (filepath.name, f)},
+                timeout=(8, 30),
             )
         if resp.status_code != 200:
             raise _http_failure("tmpfiles.org", resp)

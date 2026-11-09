@@ -121,7 +121,7 @@ class _DBBase:
         "chat_settings": {"user_id": "VARCHAR(50)"},
         "chat_library_items": {"user_id": "VARCHAR(50)"},
         "chat_import_skips": {"user_id": "VARCHAR(50)"},
-        "users": {"password_hash": "TEXT"},
+        "users": {"password_hash": "TEXT", "upload_prefs_json": "TEXT"},
     }
     # Run once when the column is added: chats from before branching were
     # linear, so each message's parent is the one before it

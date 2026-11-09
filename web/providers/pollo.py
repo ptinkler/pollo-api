@@ -254,19 +254,19 @@ def _upload(path: Path) -> str:
 
 
 def _upload_video(path: Path) -> str:
-    """Upload a source video to a temporary public host (Pollo only takes URLs).
-    Prefers the host that accepts larger files, since videos dwarf images."""
+    """Upload a source video to the user's configured host (Pollo only takes
+    URLs). The host/retention come from the user's upload preferences."""
     try:
-        return image_hosts.upload_file(path, prefer_large=True)
+        return image_hosts.upload_file(path)
     except ValueError as e:
         raise PolloError(f"Couldn't upload the video for Pollo: {e}") from e
 
 
 def _upload_audio(path: Path) -> str:
-    """Upload a lip-sync audio track to a temporary public host (Pollo only
-    takes URLs). Uses the larger-file host, like videos."""
+    """Upload a lip-sync audio track to the user's configured host (Pollo only
+    takes URLs)."""
     try:
-        return image_hosts.upload_file(path, prefer_large=True)
+        return image_hosts.upload_file(path)
     except ValueError as e:
         raise PolloError(f"Couldn't upload the audio for Pollo: {e}") from e
 

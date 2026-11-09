@@ -315,10 +315,14 @@ def api_usage_balance(_api_key: str = Depends(require_user)):
 # Must be registered before the SPA catch-all below.
 from .dev_login import router as dev_login_router  # noqa: E402
 from .oauth_routes import router as oauth_router  # noqa: E402
+from .public_media import router as public_media_router  # noqa: E402
+from .upload_settings import router as upload_settings_router  # noqa: E402
 from .user_keys import router as keys_router  # noqa: E402
 
 app.include_router(oauth_router)
 app.include_router(keys_router)
+app.include_router(upload_settings_router)
+app.include_router(public_media_router)
 app.include_router(dev_login_router)
 app.include_router(chat_router)
 app.include_router(chatgpt_import_router)

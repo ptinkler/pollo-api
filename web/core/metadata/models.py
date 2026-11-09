@@ -39,6 +39,10 @@ class User(Base):
     password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Per-user provider keys, JSON {"pollo": "...", "venice": "...", "openrouter": "..."}
     api_keys_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Where source media (image/audio/video) is hosted for providers that only
+    # take a URL (Pollo). JSON {"primary","backup","expiry_minutes","selfhost_base"};
+    # null = fall back to the instance default. See web/upload_settings.py.
+    upload_prefs_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
