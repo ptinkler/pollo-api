@@ -224,18 +224,18 @@ function imageBadges(m) {
     m.conversational && {
       t: 'context',
       title: 'Sees the conversation (text and earlier images), like the Gemini app',
-      cls: 'info',
+      cls: 'context',
     },
     chatImageModelTakesCharacters(m) && {
       t: 'characters',
       title: 'Can use characters (sends their reference images)',
-      cls: 'info',
+      cls: 'characters',
     },
   ]
 }
 function videoBadges(m) {
   const d = m.durations
-  return [d?.length && { t: `${Math.min(...d)}–${Math.max(...d)}s`, title: 'Durations', cls: 'info' }]
+  return [d?.length && { t: `${Math.min(...d)}–${Math.max(...d)}s`, title: 'Durations', cls: 'duration' }]
 }
 
 // What each model can do, from the backend's capability tags; each tag has its own colour
@@ -824,9 +824,17 @@ function onKeydown(e) {
 :is(.item-badge, .dot).private {
   --b: #4fd1a5;
 }
-:is(.item-badge, .dot).anonymized,
-:is(.item-badge, .dot).info {
+:is(.item-badge, .dot).anonymized {
   --b: var(--text2);
+}
+:is(.item-badge, .dot).characters {
+  --b: #e68fd0; /* pastel magenta */
+}
+:is(.item-badge, .dot).context {
+  --b: #5fb0f0; /* pastel sky blue */
+}
+:is(.item-badge, .dot).duration {
+  --b: #3fcabf; /* pastel teal */
 }
 :is(.item-badge, .dot).price {
   --b: #e8a33d;

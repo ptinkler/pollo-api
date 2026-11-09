@@ -87,6 +87,32 @@ def conv(client):
 SETTINGS = {"text_model": "t/model", "image_model": "i/model", "video_model": "v/model"}
 
 
+class TestModelCatalogue:
+    """The /models catalogue lists each provider independently — no provider
+    gates the endpoint, so media models show with only a Pollo key."""
+
+    def test_media_models_load_without_a_chat_provider(self, client, monkeypatch, provider_keys):
+        # Only Pollo configured — no OpenRouter/Venice text provider.
+        provider_keys["openrouter"] = None
+        provider_keys["venice"] = None
+        provider_keys["pollo"] = "pollo-test"
+        from web.chat import catalogue
+
+        catalogue._models_cache.update(at=0.0, data=None)
+
+        def fake_list(kind, refresh=False):
+            return [{"id": "pollo/seedreamv1", "name": "Seedream"}] if kind == "image" else []
+
+        monkeypatch.setattr(pollo_provider, "list_models", fake_list)
+
+        r = client.get("/api/chat/models")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["errors"] == {}
+        assert data["text"] == []  # no chat provider, but the endpoint still serves
+        assert [m["id"] for m in data["image"]] == ["pollo/seedreamv1"]
+
+
 class TestConversations:
     def test_crud(self, client):
         c = client.post("/api/chat/conversations", json={"text_model": "a/b"}).json()

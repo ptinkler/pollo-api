@@ -80,7 +80,11 @@ def api_venice_balance():
 
 @router.get("/models")
 def api_chat_models(refresh: bool = False):
-    _require_openrouter()
+    # No provider gate: the catalogue lists each provider independently
+    # (get_models swallows a provider's failure and an unconfigured provider
+    # returns []), so media models show with only a Pollo key, and new
+    # providers slot in without touching this endpoint. Chat generation still
+    # requires a text provider — that gate lives on the turn routes.
     return get_models(refresh)
 
 
