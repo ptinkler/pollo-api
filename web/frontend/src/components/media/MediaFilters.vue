@@ -54,36 +54,10 @@ const ORIGINS = [
   align-items: center;
 }
 
-.seg {
-  display: inline-flex;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.seg button {
-  padding: 6px 12px;
-  border: none;
-  background: none;
-  color: var(--text2);
-  cursor: pointer;
-  font-size: 0.82rem;
-}
-
-.seg button.on {
-  background: var(--surface2);
-  color: var(--text);
-}
-
 select,
 input {
-  padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface2);
-  color: var(--text);
-  font: inherit;
-  font-size: 0.82rem;
+  padding: 5px 9px;
+  font-size: 12.5px;
 }
 
 input {

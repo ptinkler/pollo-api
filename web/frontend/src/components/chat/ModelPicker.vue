@@ -502,14 +502,14 @@ function onKeydown(e) {
   align-items: center;
   gap: 8px;
   width: 100%;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 6px 10px;
-  color: var(--text);
+  background: var(--spanel2);
+  border: 1px solid var(--sborder);
+  border-radius: var(--r);
+  padding: 5px 10px;
+  color: var(--sfg);
   cursor: pointer;
   text-align: left;
-  transition: border-color 0.2s;
+  transition: border-color 0.12s;
 }
 
 .picker-trigger {
@@ -568,10 +568,10 @@ function onKeydown(e) {
   width: min(420px, 92vw);
   display: flex;
   flex-direction: column;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  background: var(--spanel2);
+  border: 1px solid var(--sborder);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
   overflow: hidden;
 }
 
@@ -582,10 +582,11 @@ function onKeydown(e) {
 .picker-search {
   width: 100%;
   border: none;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--sborder);
   border-radius: 0;
-  padding: 10px 12px;
-  background: var(--surface);
+  padding: 9px 12px;
+  background: transparent;
+  box-shadow: none;
 }
 
 .provider-tag {
@@ -721,11 +722,11 @@ function onKeydown(e) {
 }
 
 .picker-item:hover {
-  background: var(--surface2);
+  background: var(--shover);
 }
 
 .picker-item.selected {
-  background: rgba(108, 92, 231, 0.18);
+  background: var(--saccent-soft);
 }
 
 .item-row {

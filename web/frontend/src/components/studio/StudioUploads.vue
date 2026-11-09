@@ -70,7 +70,7 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="card">
+  <section class="scard">
     <div class="ctitle">Media uploads</div>
     <p class="cnote">
       Pollo only accepts a URL, so a source image, audio or video you attach is hosted somewhere public first for Pollo
@@ -111,7 +111,7 @@ onMounted(load)
           placeholder="https://your-host.example.com"
           autocomplete="off"
         />
-        <button class="xbtn" :disabled="testing || !prefs.selfhost_base" @click="runTest">
+        <button class="btn btn-sm" :disabled="testing || !prefs.selfhost_base" @click="runTest">
           {{ testing ? 'Testing…' : 'Test' }}
         </button>
       </div>
@@ -125,60 +125,31 @@ onMounted(load)
       </p>
     </div>
 
-    <div class="actions">
-      <button class="btn" :disabled="saving" @click="save">{{ saving ? 'Saving…' : 'Save' }}</button>
-      <span v-if="message" class="msg">{{ message }}</span>
+    <div class="cactions">
+      <button class="btn btn-primary" :disabled="saving" @click="save">{{ saving ? 'Saving…' : 'Save' }}</button>
+      <span v-if="message" class="cmsg">{{ message }}</span>
     </div>
   </section>
 </template>
 
 <style scoped>
-.card {
-  border: 1px solid var(--sborder);
-  background: var(--sbg);
-  border-radius: 14px;
-  padding: 18px 20px;
-  margin-bottom: 16px;
-}
-.ctitle {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--sfaint);
-  font-weight: 650;
-  margin-bottom: 12px;
-}
-.cnote {
-  color: var(--smuted);
-  line-height: 1.6;
-  font-size: 13px;
-  margin-bottom: 14px;
-}
 .rows {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 .urow {
   display: grid;
-  grid-template-columns: 120px 1fr auto;
+  grid-template-columns: 110px 1fr auto;
   align-items: center;
   gap: 10px;
 }
 .ul {
   color: var(--sfg);
-}
-select,
-input {
-  padding: 8px 10px;
-  border: 1px solid var(--sborder);
-  border-radius: 9px;
-  background: var(--spanel2);
-  color: var(--sfg);
-  outline: none;
-}
-select:disabled {
-  opacity: 0.5;
+  font-size: 13.5px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
 }
 .hint {
   font-size: 11px;
@@ -191,53 +162,13 @@ select:disabled {
   margin: 2px 0 0;
 }
 .subnote code {
-  font-family: monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
 }
 .subnote.ok {
-  color: #3fcabf;
+  color: var(--ssuccess);
 }
 .subnote.bad {
-  color: #ff8a6e;
-}
-.xbtn {
-  padding: 7px 11px;
-  border: 1px solid var(--sborder);
-  border-radius: 8px;
-  color: var(--smuted);
-  background: none;
-  cursor: pointer;
-  font-size: 12px;
-}
-.xbtn:hover:not(:disabled) {
-  background: var(--shover);
-  color: var(--sfg);
-}
-.xbtn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 16px;
-}
-.btn {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 9px;
-  background: var(--saccent);
-  color: #fff;
-  cursor: pointer;
-  font-weight: 600;
-}
-.btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.msg {
-  font-size: 12px;
-  color: var(--smuted);
+  color: var(--sdanger);
 }
 </style>

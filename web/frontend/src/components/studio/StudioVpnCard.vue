@@ -36,7 +36,7 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="card">
+  <section class="scard">
     <div class="ctitle">Network / VPN</div>
     <div v-if="loading && !status" class="cnote">Checking…</div>
     <template v-else-if="status">
@@ -54,11 +54,11 @@ onMounted(load)
         <span class="k">Country</span>
         <span class="v">{{ (status.server_countries || []).join(', ') || status.public_ip?.country || '—' }}</span>
       </div>
-      <div class="actions">
+      <div class="cactions">
         <button class="btn" :disabled="restarting" @click="restart">
           {{ restarting ? 'Restarting…' : 'Restart tunnel' }}
         </button>
-        <span v-if="message" class="msg">{{ message }}</span>
+        <span v-if="message" class="cmsg">{{ message }}</span>
       </div>
     </template>
     <div v-else class="cnote">VPN control server unreachable.</div>
@@ -66,69 +66,24 @@ onMounted(load)
 </template>
 
 <style scoped>
-.card {
-  border: 1px solid var(--sborder);
-  background: var(--sbg);
-  border-radius: 14px;
-  padding: 18px 20px;
-  margin-bottom: 16px;
-}
-.ctitle {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--sfaint);
-  font-weight: 650;
-  margin-bottom: 14px;
-}
 .row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 5px 0;
+  padding: 4px 0;
+  font-size: 13px;
 }
 .k {
   color: var(--smuted);
-  font-size: 13px;
 }
 .v {
   color: var(--sfg);
-  font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 .v.ok {
-  color: #5fd08a;
+  color: var(--ssuccess);
 }
 .v.bad {
-  color: #e2a04a;
-}
-.actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 14px;
-}
-.btn {
-  padding: 7px 14px;
-  border: 1px solid var(--sborder);
-  border-radius: 9px;
-  color: var(--sfg);
-  background: none;
-  cursor: pointer;
-}
-.btn:hover:not(:disabled) {
-  background: var(--shover);
-}
-.btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.msg {
-  font-size: 12px;
-  color: var(--smuted);
-}
-.cnote {
-  color: var(--smuted);
-  font-size: 13px;
-  line-height: 1.6;
+  color: var(--swarn);
 }
 </style>

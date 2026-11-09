@@ -105,7 +105,7 @@ const voiceLabel = v => [v.voiceName, v.language, v.gender].filter(Boolean).join
   margin-top: 8px;
 }
 .aerr {
-  color: var(--danger, #c0392b);
+  color: var(--sdanger);
   font-size: 12px;
 }
 </style>

@@ -64,7 +64,7 @@ const inProgress = computed(() => props.items.filter(it => it.status === 'pendin
       <div class="gleft">
         <span class="gcount">{{ shown.length }} item{{ shown.length === 1 ? '' : 's' }}</span>
         <span v-if="inProgress" class="ginprog"><span class="dot"></span>{{ inProgress }} generating</span>
-        <div class="gseg">
+        <div class="seg" role="group" aria-label="Kind">
           <button v-for="k in ['all', 'image', 'video']" :key="k" :class="{ on: kind === k }" @click="kind = k">
             {{ k === 'all' ? 'All' : k === 'image' ? 'Images' : 'Videos' }}
           </button>
@@ -79,7 +79,7 @@ const inProgress = computed(() => props.items.filter(it => it.status === 'pendin
           <svg class="ic"><use href="#s-star" /></svg>
         </button>
       </div>
-      <div class="gsize">
+      <div class="seg" role="group" aria-label="Card size">
         <button v-for="s in ['s', 'm', 'l']" :key="s" :class="{ on: size === s }" @click="setSize(s)">
           {{ s.toUpperCase() }}
         </button>
@@ -174,45 +174,24 @@ const inProgress = computed(() => props.items.filter(it => it.status === 'pendin
   background: var(--saccent);
   animation: pulse 1.1s ease-in-out infinite;
 }
-.gseg,
-.gsize {
-  display: inline-flex;
-  gap: 2px;
-  border: 1px solid var(--sborder);
-  border-radius: 7px;
-  padding: 2px;
-}
-.gseg button,
-.gsize button {
-  min-width: 26px;
-  padding: 3px 9px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--smuted);
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 600;
-}
-.gseg button.on,
-.gsize button.on {
-  background: var(--shover);
-  color: var(--sfg);
-}
 .gfav {
   display: grid;
   place-items: center;
   width: 28px;
   height: 28px;
   border: 1px solid var(--sborder);
-  border-radius: 7px;
+  border-radius: var(--r);
   background: transparent;
   color: var(--smuted);
   cursor: pointer;
 }
+.gfav:hover {
+  color: var(--sfg);
+  border-color: var(--sfaint);
+}
 .gfav.on {
-  color: #ffd25a;
-  border-color: #ffd25a;
+  color: var(--sstar);
+  border-color: var(--sstar);
 }
 .gfav .ic {
   width: 15px;
@@ -222,7 +201,7 @@ const inProgress = computed(() => props.items.filter(it => it.status === 'pendin
   color: var(--smuted);
   text-align: center;
   padding: 40px 0;
-  font-size: 0.9rem;
+  font-size: 13px;
 }
 .grid {
   display: grid;
@@ -237,7 +216,7 @@ const inProgress = computed(() => props.items.filter(it => it.status === 'pendin
   width: 100%;
   height: 100%;
   border: 1px solid var(--sborder);
-  border-radius: 10px;
+  border-radius: var(--r);
   overflow: hidden;
   background: var(--sbg2);
   cursor: pointer;
@@ -347,7 +326,7 @@ const inProgress = computed(() => props.items.filter(it => it.status === 'pendin
   opacity: 1;
 }
 .fav.on {
-  color: #ffd25a;
+  color: var(--sstar);
 }
 .fav .ic {
   width: 15px;

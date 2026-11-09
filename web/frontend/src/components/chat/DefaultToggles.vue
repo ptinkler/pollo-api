@@ -134,9 +134,9 @@ defineExpose({ commit, dirty })
   max-width: 220px;
   gap: 2px;
   padding: 2px 3px 2px 10px;
-  border: 1px solid var(--accent);
+  border: 1px solid color-mix(in srgb, var(--saccent) 50%, transparent);
   border-radius: 999px;
-  background: rgba(108, 92, 231, 0.18);
+  background: var(--saccent-soft);
   font-size: 0.78rem;
 }
 
@@ -198,10 +198,10 @@ defineExpose({ commit, dirty })
   max-height: 280px;
   overflow-y: auto;
   padding: 4px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  background: var(--spanel2);
+  border: 1px solid var(--sborder);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
   display: flex;
   flex-direction: column;
 }
@@ -232,7 +232,7 @@ defineExpose({ commit, dirty })
 }
 
 .option[aria-selected='true'] {
-  background: rgba(108, 92, 231, 0.16);
+  background: var(--saccent-soft);
 }
 
 .tick {

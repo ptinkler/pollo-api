@@ -40,7 +40,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         <div class="head">
           <h3>{{ title }}</h3>
           <slot name="head" />
-          <button type="button" class="x" title="Close" @click="emit('close')">✕</button>
+          <button type="button" class="iconbtn x" title="Close" @click="emit('close')">✕</button>
         </div>
         <div class="body"><slot /></div>
         <div v-if="$slots.actions" class="actions"><slot name="actions" /></div>
@@ -54,7 +54,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.6);
   display: grid;
   place-items: center;
   padding: 16px;
@@ -64,10 +64,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   max-height: calc(100vh - 32px);
   display: flex;
   flex-direction: column;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 16px 20px 18px;
+  background: var(--sbg);
+  border: 1px solid var(--sborder);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-modal);
+  padding: 14px 18px 16px;
 }
 
 .head {
@@ -80,7 +81,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .head h3 {
   flex: 1;
   min-width: 0;
-  font-size: 1.05rem;
+  font-size: 15px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -89,18 +90,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
 .x {
   flex-shrink: 0;
-  background: none;
-  border: none;
-  color: var(--text2);
-  font-size: 1rem;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 6px;
-}
-
-.x:hover {
-  background: var(--surface2);
-  color: var(--text);
+  width: 28px;
+  height: 28px;
+  margin-right: -6px;
+  font-size: 13px;
 }
 
 .body {
@@ -109,17 +102,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   gap: 10px;
   min-height: 0;
   overflow-y: auto;
+  font-size: 13.5px;
 }
 
 .actions {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-top: 16px;
-}
-
-.actions :slotted(.btn) {
-  padding: 8px 16px;
+  padding-top: 14px;
 }
 
 .actions :slotted(.spacer) {

@@ -120,7 +120,7 @@ const bySpace = computed(() => {
       </button>
     </div>
     <div class="panel">
-      <div class="phead">
+      <div class="panelhead">
         <span class="brand"
           ><span class="mk"
             ><svg class="ic"><use href="#s-spark" /></svg
@@ -140,23 +140,32 @@ const bySpace = computed(() => {
             <svg class="ic"><use href="#s-image" /></svg> New gallery
           </button>
         </div>
-        <div class="nsearch">
+        <div class="sbox nsearch">
           <svg class="ic"><use href="#s-search" /></svg>
-          <input :value="search" placeholder="Search threads…" @input="emit('update:search', $event.target.value)" />
+          <input
+            :value="search"
+            type="search"
+            placeholder="Search threads…"
+            @input="emit('update:search', $event.target.value)"
+          />
         </div>
         <div class="nfilter">
-          <button :class="{ on: filter === 'all' }" @click="emit('update:filter', 'all')">All</button>
-          <button :class="{ on: filter === 'chat' }" @click="emit('update:filter', 'chat')">Chat</button>
-          <button :class="{ on: filter === 'gallery' }" @click="emit('update:filter', 'gallery')">Gallery</button>
+          <button class="pillbtn" :class="{ on: filter === 'all' }" @click="emit('update:filter', 'all')">All</button>
+          <button class="pillbtn" :class="{ on: filter === 'chat' }" @click="emit('update:filter', 'chat')">
+            Chat
+          </button>
+          <button class="pillbtn" :class="{ on: filter === 'gallery' }" @click="emit('update:filter', 'gallery')">
+            Gallery
+          </button>
           <button
-            class="ficon"
+            class="pillbtn ficon"
             :class="{ on: filter === 'favourites' }"
             title="Favourites"
             @click="emit('update:filter', 'favourites')"
           >
             <svg class="ic"><use href="#s-star" /></svg>
           </button>
-          <button class="ficon" title="More filters — coming soon" disabled>
+          <button class="pillbtn ficon" title="More filters — coming soon" disabled>
             <svg class="ic"><use href="#s-filter" /></svg>
           </button>
         </div>
@@ -377,11 +386,12 @@ const bySpace = computed(() => {
   flex-direction: column;
   height: 100%;
 }
-.phead {
+.panelhead {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 14px;
+  min-height: 52px;
+  padding: 10px 12px 10px 14px;
   border-bottom: 1px solid var(--sborder2);
 }
 .brand {
@@ -401,21 +411,6 @@ const bySpace = computed(() => {
   display: grid;
   place-items: center;
 }
-.iconbtn {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  color: var(--smuted);
-  background: none;
-  border: none;
-  cursor: pointer;
-}
-.iconbtn:hover {
-  background: var(--shover);
-  color: var(--sfg);
-}
 .pbody {
   flex: 1;
   overflow-y: auto;
@@ -433,13 +428,14 @@ const bySpace = computed(() => {
   gap: 6px;
   flex: 1;
   min-width: 0;
-  padding: 9px 8px;
+  padding: 7px 8px;
   border: 1px solid var(--sborder);
   color: var(--sfg);
-  border-radius: 10px;
+  border-radius: var(--r);
   background: none;
   cursor: pointer;
   font-size: 12.5px;
+  font-weight: 500;
   white-space: nowrap;
 }
 .newbtn:hover {
@@ -450,63 +446,20 @@ const bySpace = computed(() => {
   color: var(--saccent);
 }
 .nsearch {
-  position: relative;
-  padding-bottom: 8px;
-}
-.nsearch .ic {
-  position: absolute;
-  left: 11px;
-  top: 9px;
-  color: var(--sfaint);
-  width: 15px;
-  height: 15px;
-}
-.nsearch input {
-  width: 100%;
-  padding: 8px 11px 8px 33px;
-  border: 1px solid var(--sborder);
-  border-radius: 9px;
-  background: var(--spanel2);
-  color: var(--sfg);
-  outline: none;
+  margin-bottom: 8px;
 }
 .nfilter {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   padding-bottom: 6px;
-}
-.nfilter button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 11px;
-  border: 1px solid var(--sborder);
-  border-radius: 8px;
-  color: var(--smuted);
-  background: none;
-  cursor: pointer;
-  font-size: 12px;
-}
-.nfilter button.on {
-  background: var(--saccent-soft);
-  color: var(--saccent);
-  border-color: transparent;
 }
 /* Favourites + the filter placeholder are icon-only (text overflowed the rail) */
 .nfilter .ficon {
-  padding: 5px 8px;
+  padding: 4px 7px;
   margin-left: auto;
 }
 .nfilter .ficon + .ficon {
   margin-left: 0;
-}
-.nfilter .ficon[disabled] {
-  opacity: 0.5;
-  cursor: default;
-}
-.nfilter .ic {
-  width: 13px;
-  height: 13px;
 }
 .nlabel {
   font-size: 10.5px;
@@ -520,7 +473,7 @@ const bySpace = computed(() => {
   position: relative;
   display: flex;
   align-items: center;
-  border-radius: 9px;
+  border-radius: var(--r);
 }
 .nrow:hover {
   background: var(--shover);
@@ -541,13 +494,14 @@ const bySpace = computed(() => {
   gap: 10px;
   flex: 1;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 7px 10px;
   color: var(--smuted);
   background: none;
   border: none;
   cursor: pointer;
   text-align: left;
   text-decoration: none;
+  font-size: 13.5px;
 }
 .nrename {
   flex: 1;
@@ -563,7 +517,7 @@ const bySpace = computed(() => {
   font-size: 13px;
 }
 .nrow.sm .nitem {
-  padding: 7px 10px;
+  padding: 6px 10px;
   font-size: 13px;
 }
 .nitem .ic {
@@ -706,8 +660,9 @@ const bySpace = computed(() => {
   align-items: center;
   gap: 9px;
   width: 100%;
-  padding: 8px 10px;
-  border-radius: 9px;
+  padding: 7px 10px;
+  border-radius: var(--r);
+  font-size: 13.5px;
   color: var(--smuted);
   background: none;
   border: none;

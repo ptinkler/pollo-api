@@ -29,11 +29,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
       <div class="req-dialog" role="dialog" aria-label="Request and response">
         <div class="req-head">
           <h3>Request and response</h3>
-          <button class="req-btn" @click="copy(both, 'req')">
+          <button class="btn btn-sm" @click="copy(both, 'req')">
             {{ copiedKey === 'req' ? '✓ Copied' : '⧉ Copy JSON' }}
           </button>
-          <RouterLink class="req-btn" :to="{ name: 'studio-requests' }" @click="emit('close')">All requests</RouterLink>
-          <button class="req-btn" title="Close" @click="emit('close')">✕</button>
+          <RouterLink class="btn btn-sm" :to="{ name: 'studio-requests' }" @click="emit('close')"
+            >All requests</RouterLink
+          >
+          <button class="iconbtn x" title="Close" @click="emit('close')">✕</button>
         </div>
         <p v-if="error" class="req-error">{{ error }}</p>
         <div class="req-body">
@@ -54,7 +56,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .req-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: 1300;
   display: grid;
   place-items: center;
   padding: 16px;
@@ -66,10 +68,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   max-height: 85vh;
   display: flex;
   flex-direction: column;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 14px;
+  background: var(--sbg);
+  border: 1px solid var(--sborder);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-modal);
+  padding: 14px 18px 16px;
 }
 
 .req-head {
@@ -80,24 +83,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
 .req-head h3 {
   flex: 1;
-  font-size: 0.95rem;
+  font-size: 15px;
+  font-weight: 600;
 }
 
-.req-btn {
-  border: 1px solid var(--border);
-  background: none;
-  color: var(--text2);
-  border-radius: 8px;
-  padding: 4px 10px;
-  font-size: 0.78rem;
-  cursor: pointer;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.req-btn:hover {
-  color: var(--text);
-  background: var(--surface2);
+.x {
+  width: 28px;
+  height: 28px;
+  margin-right: -6px;
+  font-size: 13px;
 }
 
 .req-body {
@@ -107,31 +101,31 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
 .req-body h4 {
   margin-top: 12px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--text2);
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--sfaint);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
 }
 
 .req-none {
   margin-top: 6px;
-  font-size: 0.8rem;
-  color: var(--text2);
+  font-size: 12.5px;
+  color: var(--smuted);
 }
 
 .req-error {
   margin-top: 10px;
-  font-size: 0.82rem;
-  color: var(--red);
+  font-size: 12.5px;
+  color: var(--sdanger);
 }
 
 .req-json {
   margin-top: 6px;
-  padding: 12px;
-  border-radius: 10px;
-  background: var(--bg);
-  font-size: 0.78rem;
+  padding: 10px 12px;
+  border-radius: var(--r);
+  background: var(--sbg2);
+  font-size: 11.5px;
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;

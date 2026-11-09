@@ -77,6 +77,7 @@ const shownItems = computed(() => (showOrphans.value ? orphans.value : items.val
   <div class="gwrap">
     <div class="orphbar">
       <button
+        class="pillbtn"
         :class="{ on: showOrphans }"
         title="Files in this thread that no message references"
         @click="toggleOrphans"
@@ -110,19 +111,5 @@ const shownItems = computed(() => (showOrphans.value ? orphans.value : items.val
   padding: 6px 18px 0;
   display: flex;
   justify-content: flex-end;
-}
-.orphbar button {
-  font: inherit;
-  font-size: 12px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--sborder);
-  background: none;
-  color: var(--smuted);
-  cursor: pointer;
-}
-.orphbar button.on {
-  background: var(--saccent-soft, var(--saccent));
-  color: var(--sfg);
 }
 </style>

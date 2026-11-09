@@ -61,9 +61,13 @@ onMounted(() => {
           <p class="sub">Sent to the chat model word for word. A group bundles snippets that go together.</p>
         </div>
         <div class="hactions">
-          <button class="ghost" @click="editing = { kind: 'group', id: null }">＋ Group</button>
-          <button class="primary" @click="editing = { kind: 'snippet', id: null }">＋ Snippet</button>
-          <button class="closebtn" @click="emit('close')">
+          <button class="btn" @click="editing = { kind: 'group', id: null }">
+            <svg class="ic"><use href="#s-plus" /></svg> Group
+          </button>
+          <button class="btn btn-primary" @click="editing = { kind: 'snippet', id: null }">
+            <svg class="ic"><use href="#s-plus" /></svg> Snippet
+          </button>
+          <button class="btn" @click="emit('close')">
             <svg class="ic"><use href="#s-chevL" /></svg> Back
           </button>
         </div>
@@ -84,9 +88,14 @@ onMounted(() => {
         </div>
 
         <section v-if="shownGroups.length">
-          <h2>Groups</h2>
+          <h2 class="sect">Groups</h2>
           <div class="grid">
-            <button v-for="g in shownGroups" :key="g.id" class="card" @click="editing = { kind: 'group', id: g.id }">
+            <button
+              v-for="g in shownGroups"
+              :key="g.id"
+              class="gcard card"
+              @click="editing = { kind: 'group', id: g.id }"
+            >
               <h3>📦 {{ g.name }}</h3>
               <div class="members">
                 <span
@@ -108,12 +117,12 @@ onMounted(() => {
         </section>
 
         <section v-if="shownSnippets.length">
-          <h2>Snippets</h2>
+          <h2 class="sect">Snippets</h2>
           <div class="grid">
             <button
               v-for="s in shownSnippets"
               :key="s.id"
-              class="card"
+              class="gcard card"
               @click="editing = { kind: 'snippet', id: s.id }"
             >
               <h3><span class="dot" :style="{ background: instructionColor(s.name) }"></span>{{ s.name }}</h3>
@@ -142,121 +151,34 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.page {
-  flex: 1;
-  overflow-y: auto;
-  padding: 32px 22px;
-}
-.pwrap {
-  max-width: 820px;
-  margin: 0 auto;
-}
-.phead {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-h1 {
-  font-size: 22px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-}
-.sub {
-  font-size: 13px;
-  color: var(--smuted);
-  margin-top: 6px;
-  line-height: 1.5;
-  max-width: 560px;
-}
-.hactions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
-.primary {
-  padding: 8px 14px;
-  border: none;
-  border-radius: 9px;
-  background: var(--saccent);
-  color: #fff;
-  font-weight: 600;
-  cursor: pointer;
-}
-.ghost,
-.closebtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border: 1px solid var(--sborder);
-  border-radius: 9px;
-  color: var(--smuted);
-  background: none;
-  cursor: pointer;
-}
-.ghost:hover,
-.closebtn:hover {
-  background: var(--shover);
-  color: var(--sfg);
-}
 .search {
   width: 100%;
-  padding: 9px 12px;
-  border: 1px solid var(--sborder);
-  border-radius: 10px;
-  background: var(--spanel2, var(--sbg2));
-  color: var(--sfg);
-  outline: none;
-  margin-bottom: 16px;
-}
-.muted,
-.empty {
-  color: var(--smuted);
-  font-size: 13px;
-  padding: 12px 0;
-}
-h2 {
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--sfaint);
-  font-weight: 650;
-  margin: 18px 0 8px;
+  margin-bottom: 8px;
 }
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
 }
 .card {
-  text-align: left;
-  background: var(--sbg);
-  border: 1px solid var(--sborder);
-  border-radius: 12px;
-  padding: 12px 14px;
-  cursor: pointer;
-}
-.card:hover {
-  border-color: var(--saccent);
+  padding: 10px 12px;
 }
 .card h3 {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
 }
 .dot {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   display: inline-block;
   flex-shrink: 0;
 }
 .preview {
-  margin-top: 6px;
+  margin-top: 4px;
   font-size: 12px;
   color: var(--smuted);
   line-height: 1.45;
@@ -267,7 +189,7 @@ h2 {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 .member {
   display: inline-flex;
@@ -283,10 +205,9 @@ h2 {
   margin-top: 8px;
 }
 .badge {
-  font-size: 11px;
-  padding: 2px 7px;
-  border-radius: 999px;
   background: var(--saccent-soft);
   color: var(--saccent);
+  border-radius: 999px;
+  padding: 1px 7px;
 }
 </style>

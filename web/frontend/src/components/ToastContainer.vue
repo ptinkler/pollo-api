@@ -24,58 +24,70 @@ function getIcon(type) {
 <style scoped>
 .toaster {
   position: fixed;
-  top: 20px;
+  top: 14px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 2000;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   pointer-events: none;
 }
 
 .toast {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px 20px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  background: var(--spanel2);
+  border: 1px solid var(--sborder);
+  border-left: 3px solid var(--sfaint);
+  border-radius: var(--r);
+  padding: 8px 14px;
+  box-shadow: var(--shadow-pop);
   display: flex;
   align-items: center;
   gap: 10px;
   pointer-events: auto;
   cursor: pointer;
+  max-width: min(520px, calc(100vw - 32px));
 }
 
 .toast.success {
-  border-color: var(--green);
+  border-left-color: var(--ssuccess);
 }
 
 .toast.error {
-  border-color: var(--red);
+  border-left-color: var(--sdanger);
 }
 
 .toast-icon {
-  font-size: 1.1rem;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--smuted);
+}
+
+.toast.success .toast-icon {
+  color: var(--ssuccess);
+}
+
+.toast.error .toast-icon {
+  color: var(--sdanger);
 }
 
 .toast-message {
-  font-size: 0.9rem;
-  color: var(--text);
+  font-size: 13px;
+  color: var(--sfg);
 }
 
 .toast-enter-active {
-  animation: toastIn 0.3s ease;
+  animation: toastIn 0.2s ease;
 }
 
 .toast-leave-active {
-  animation: toastOut 0.3s ease forwards;
+  animation: toastOut 0.2s ease forwards;
 }
 
 @keyframes toastIn {
   from {
     opacity: 0;
-    transform: translateY(-10px);
+    transform: translateY(-8px);
   }
   to {
     opacity: 1;
@@ -89,7 +101,7 @@ function getIcon(type) {
   }
   to {
     opacity: 0;
-    transform: translateY(-10px);
+    transform: translateY(-8px);
   }
 }
 </style>

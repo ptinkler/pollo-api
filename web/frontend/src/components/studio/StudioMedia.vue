@@ -16,7 +16,7 @@ const KINDS = [
   { id: 'video', label: 'Videos' },
 ]
 const SOURCES = [
-  { id: 'all', label: 'All' },
+  { id: 'all', label: 'Any source' },
   { id: 'generated', label: 'Generated' },
   { id: 'upload', label: 'Uploaded' },
 ]
@@ -129,30 +129,18 @@ onMounted(load)
       </button>
     </div>
     <div class="mbar">
-      <div class="kinds">
-        <button v-for="k in KINDS" :key="k.id" class="pillbtn" :class="{ on: kind === k.id }" @click="setKind(k.id)">
+      <div class="seg">
+        <button v-for="k in KINDS" :key="k.id" :class="{ on: kind === k.id }" @click="setKind(k.id)">
           {{ k.label }}
         </button>
       </div>
-      <div class="kinds">
-        <button
-          v-for="s in SOURCES"
-          :key="s.id"
-          class="pillbtn"
-          :class="{ on: source === s.id }"
-          @click="setSource(s.id)"
-        >
+      <div class="seg">
+        <button v-for="s in SOURCES" :key="s.id" :class="{ on: source === s.id }" @click="setSource(s.id)">
           {{ s.label }}
         </button>
       </div>
-      <div class="kinds">
-        <button
-          v-for="o in ORIGINS"
-          :key="o.id"
-          class="pillbtn"
-          :class="{ on: origin === o.id }"
-          @click="setOrigin(o.id)"
-        >
+      <div class="seg">
+        <button v-for="o in ORIGINS" :key="o.id" :class="{ on: origin === o.id }" @click="setOrigin(o.id)">
           {{ o.label }}
         </button>
       </div>
@@ -224,10 +212,6 @@ h1 {
   flex-wrap: wrap;
   gap: 8px 14px;
   padding: 10px 18px;
-}
-.kinds {
-  display: flex;
-  gap: 4px;
 }
 .msearch {
   flex: 1;

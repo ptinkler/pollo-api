@@ -49,7 +49,7 @@ defineEmits([
       <span class="rail-label">Inspector</span>
     </div>
     <div class="panel">
-      <div class="phead">
+      <div class="panelhead">
         <button class="iconbtn" title="Collapse" @click="$emit('update:collapsed', true)">
           <svg class="ic"><use href="#s-chev" /></svg>
         </button>
@@ -151,34 +151,20 @@ defineEmits([
   flex-direction: column;
   height: 100%;
 }
-.phead {
+.panelhead {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 14px;
+  min-height: 52px;
+  padding: 10px 14px 10px 12px;
   border-bottom: 1px solid var(--sborder2);
 }
 .brand {
   font-weight: 600;
 }
-.iconbtn {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  color: var(--smuted);
-  background: none;
-  border: none;
-  cursor: pointer;
-}
-.iconbtn:hover {
-  background: var(--shover);
-  color: var(--sfg);
-}
 .pbody {
   flex: 1;
   overflow-y: auto;
-  padding: 10px 14px;
+  padding: 4px 14px 10px;
 }
 </style>

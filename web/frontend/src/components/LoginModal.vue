@@ -79,7 +79,7 @@ const providerLabels = { google: 'Google', microsoft: 'Microsoft', x: 'X' }
         </template>
         <template v-if="devAvailable">
           <div class="divider">dev</div>
-          <button class="btn btn-secondary oauth" :disabled="busy" @click="devSignIn">🛠 Dev sign-in</button>
+          <button class="btn btn-secondary oauth" :disabled="busy" @click="devSignIn">Dev sign-in</button>
         </template>
       </div>
     </div>
@@ -90,7 +90,7 @@ const providerLabels = { google: 'Google', microsoft: 'Microsoft', x: 'X' }
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -98,40 +98,51 @@ const providerLabels = { google: 'Google', microsoft: 'Microsoft', x: 'X' }
 }
 
 .modal-box {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 24px;
-  width: 360px;
+  background: var(--sbg);
+  border: 1px solid var(--sborder);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-modal);
+  padding: 18px 20px 20px;
+  width: 340px;
   max-width: 90vw;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .modal-box h3 {
-  font-size: 1.1rem;
+  font-size: 15px;
   font-weight: 600;
+  margin-bottom: 2px;
 }
 
 .error-hint {
-  font-size: 0.8rem;
-  color: var(--red);
+  font-size: 12.5px;
+  color: var(--sdanger);
 }
 
 .modal-box input {
   width: 100%;
-  font-size: 0.9rem;
 }
 
 .divider {
-  text-align: center;
-  font-size: 0.75rem;
-  color: var(--text2);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--sfaint);
+}
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--sborder);
 }
 
 .oauth {
-  text-align: center;
-  text-decoration: none;
+  justify-content: center;
 }
 </style>

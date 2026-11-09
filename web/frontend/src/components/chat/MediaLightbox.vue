@@ -20,13 +20,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
       <img :src="item.url" alt="" @click.stop />
       <p v-if="item.prompt" class="lightbox-caption" @click.stop>{{ item.prompt }}</p>
       <div v-if="item.file" class="lightbox-actions" @click.stop>
-        <button class="lightbox-animate" @click="emit('use-image', { file: item.file, mode: 'image' })">
+        <button class="btn lightbox-btn" @click="emit('use-image', { file: item.file, mode: 'image' })">
           🖼 Make a picture from this
         </button>
-        <button class="lightbox-animate" @click="emit('use-image', { file: item.file, mode: 'video' })">
+        <button class="btn lightbox-btn" @click="emit('use-image', { file: item.file, mode: 'video' })">
           🎬 Make a video from this
         </button>
-        <button class="lightbox-animate" @click="emit('make-character', item.file)">
+        <button class="btn lightbox-btn" @click="emit('make-character', item.file)">
           👤 Make a character from this
         </button>
       </div>
@@ -68,15 +68,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   gap: 8px;
 }
 
-.lightbox-animate {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 999px;
-  background: linear-gradient(145deg, var(--accent), #5a4bd1);
-  color: white;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
+.lightbox-btn {
+  background: rgba(20, 23, 29, 0.85);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+.lightbox-btn:hover:not(:disabled) {
+  background: rgba(40, 45, 56, 0.95);
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 .lightbox-caption {
@@ -85,8 +84,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   max-height: 25vh;
   overflow-y: auto;
   margin: 0;
-  color: var(--text2);
-  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 13px;
   text-align: center;
   cursor: text;
 }

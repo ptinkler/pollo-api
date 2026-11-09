@@ -7,7 +7,7 @@ import { useChatAttachments, MAX_ATTACHMENTS } from '../composables/useChatAttac
 describe('MediaLightbox', () => {
   it('offers uses for a chat image and closes on Escape', async () => {
     const w = mount(MediaLightbox, { props: { item: { url: '/x.png', file: 'x.png' } }, attachTo: document.body })
-    document.querySelector('.lightbox-animate').click()
+    document.querySelector('.lightbox-btn').click()
     expect(w.emitted('use-image')).toEqual([[{ file: 'x.png', mode: 'image' }]])
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     expect(w.emitted('close')).toHaveLength(1)

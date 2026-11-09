@@ -112,7 +112,7 @@ function label(e) {
   gap: 8px;
   padding: 10px 10px 10px 12px;
   cursor: pointer;
-  background: var(--spanel2, var(--sbg2));
+  background: var(--spanel2);
 }
 .qtitle {
   flex: 1;
@@ -141,9 +141,9 @@ function label(e) {
 }
 .qbody,
 .qfoot {
-  background: var(--spanel2, var(--sbg2));
+  background: var(--spanel2);
   border: 1px solid var(--sborder);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-pop);
 }
 .qbody {
   margin-top: 6px;
@@ -190,10 +190,10 @@ function label(e) {
   object-fit: cover;
 }
 .qrow.error .qthumb {
-  background: color-mix(in srgb, var(--sdanger, #e5484d) 14%, var(--sbg2));
+  background: color-mix(in srgb, var(--sdanger) 14%, var(--sbg2));
 }
 .qfail {
-  color: var(--sdanger, #e5484d);
+  color: var(--sdanger);
   font-size: 13px;
   font-weight: 700;
 }
@@ -212,7 +212,7 @@ function label(e) {
   text-overflow: ellipsis;
 }
 .qrow.error .qlabel {
-  color: var(--sdanger, #e5484d);
+  color: var(--sdanger);
 }
 .qrow.pending .qlabel {
   color: var(--saccent);

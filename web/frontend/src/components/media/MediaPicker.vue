@@ -117,12 +117,12 @@ function confirm() {
       >
         <div class="head">
           <h3>{{ title }}</h3>
-          <button class="x" title="Close" @click="emit('close')">✕</button>
+          <button class="iconbtn x" title="Close" @click="emit('close')">✕</button>
         </div>
 
         <div class="toolbar">
-          <label class="btn btn-secondary upload">
-            ⬆ Upload from computer
+          <label class="btn upload">
+            <svg class="ic"><use href="#s-download" /></svg> Upload from computer
             <input type="file" :accept="accept" :multiple="multiple" hidden @change="upload(takeFiles($event))" />
           </label>
           <span v-if="uploading" class="muted">Uploading {{ uploading }}…</span>
@@ -159,7 +159,7 @@ function confirm() {
   position: fixed;
   inset: 0;
   z-index: 1200;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.6);
   display: grid;
   place-items: center;
   padding: 16px;
@@ -171,30 +171,30 @@ function confirm() {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 18px 20px;
+  background: var(--sbg);
+  border: 1px solid var(--sborder);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-modal);
+  padding: 14px 18px 16px;
 }
 
 .head {
   display: flex;
   align-items: center;
+  gap: 8px;
 }
 
 .head h3 {
   flex: 1;
-  font-size: 1.1rem;
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .x {
-  background: none;
-  border: none;
-  color: var(--text2);
-  font-size: 1rem;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  margin-right: -6px;
+  font-size: 13px;
 }
 
 .toolbar {
@@ -204,9 +204,8 @@ function confirm() {
   flex-wrap: wrap;
 }
 
-.upload {
-  padding: 8px 14px;
-  cursor: pointer;
+.upload .ic {
+  transform: rotate(180deg);
 }
 
 .body {
@@ -216,8 +215,8 @@ function confirm() {
 }
 
 .muted {
-  font-size: 0.8rem;
-  color: var(--text2);
+  font-size: 12.5px;
+  color: var(--smuted);
 }
 
 .actions {
@@ -228,10 +227,6 @@ function confirm() {
 .tallies {
   display: flex;
   gap: 12px;
-}
-
-.actions .btn {
-  padding: 8px 16px;
 }
 
 .spacer {

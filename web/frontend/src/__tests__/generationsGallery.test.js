@@ -46,7 +46,7 @@ describe('GenerationGrid', () => {
 
   it('filters by kind and by favourites-only', async () => {
     const w = mount(GenerationGrid, { props: { items: ITEMS } })
-    const seg = w.findAll('.gseg button')
+    const seg = w.findAll('.seg button')
     await seg[1].trigger('click') // Images
     expect(w.findAll('.cell')).toHaveLength(2) // d1 + p1
     await seg[0].trigger('click') // All

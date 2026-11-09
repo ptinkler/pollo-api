@@ -41,7 +41,7 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <div class="pwrap">
+    <div class="pwrap wide">
       <div class="phead">
         <div>
           <h1>Request log</h1>
@@ -51,8 +51,10 @@ onMounted(load)
         </div>
         <div class="hactions">
           <label class="failed"><input v-model="failedOnly" type="checkbox" /> Failures only</label>
-          <button class="ghost" @click="load">⟳ Refresh</button>
-          <button class="closebtn" @click="emit('close')">
+          <button class="btn" @click="load">
+            <svg class="ic"><use href="#s-refresh" /></svg> Refresh
+          </button>
+          <button class="btn" @click="emit('close')">
             <svg class="ic"><use href="#s-chevL" /></svg> Back
           </button>
         </div>
@@ -75,7 +77,7 @@ onMounted(load)
         </button>
         <p v-if="e.error" class="err">{{ e.error }}</p>
         <div v-if="open.has(key(e, i))" class="detail">
-          <button class="ghost small" @click="copy(json(e), key(e, i))">
+          <button class="btn btn-sm" @click="copy(json(e), key(e, i))">
             {{ copiedKey === key(e, i) ? '✓ Copied' : '⧉ Copy JSON' }}
           </button>
           <h4>Sent</h4>
@@ -90,90 +92,40 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page {
-  flex: 1;
-  overflow-y: auto;
-  padding: 32px 22px;
-}
-.pwrap {
-  max-width: 1000px;
-  margin: 0 auto;
-}
-.phead {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 18px;
-}
-h1 {
-  font-size: 22px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-}
-.sub {
-  font-size: 13px;
-  color: var(--smuted);
-  margin-top: 6px;
-  line-height: 1.5;
-  max-width: 560px;
-}
-.hactions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
 .failed {
   font-size: 12px;
   color: var(--smuted);
   display: inline-flex;
   align-items: center;
   gap: 5px;
-}
-.ghost,
-.closebtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 11px;
-  border: 1px solid var(--sborder);
-  border-radius: 9px;
-  color: var(--smuted);
-  background: none;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
   cursor: pointer;
-  font-size: 13px;
-}
-.ghost.small {
-  padding: 4px 8px;
-  font-size: 12px;
-}
-.ghost:hover,
-.closebtn:hover {
-  background: var(--shover);
-  color: var(--sfg);
 }
 .entry {
   border: 1px solid var(--sborder);
-  border-radius: 10px;
-  margin-bottom: 8px;
+  border-radius: var(--r);
+  margin-bottom: 6px;
   overflow: hidden;
+  background: var(--sbg);
 }
 .entry.bad {
-  border-color: #e5484d66;
+  border-color: color-mix(in srgb, var(--sdanger) 45%, transparent);
 }
 .row {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 9px 12px;
+  padding: 8px 12px;
   background: none;
   border: none;
   color: var(--sfg);
   cursor: pointer;
   text-align: left;
   font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
 }
 .row:hover {
   background: var(--shover);
@@ -183,10 +135,10 @@ h1 {
   min-width: 34px;
 }
 .status.good {
-  color: #2ec16b;
+  color: var(--ssuccess);
 }
 .status.fail {
-  color: #e5484d;
+  color: var(--sdanger);
 }
 .when {
   color: var(--sfaint);
@@ -206,7 +158,7 @@ h1 {
   min-width: 0;
 }
 .flag {
-  color: #e2a03f;
+  color: var(--swarn);
 }
 .secs {
   color: var(--sfaint);
@@ -214,7 +166,7 @@ h1 {
 }
 .err {
   padding: 6px 12px;
-  color: #e5484d;
+  color: var(--sdanger);
   font-size: 12px;
 }
 .detail {
@@ -222,16 +174,19 @@ h1 {
   border-top: 1px solid var(--sborder2);
 }
 .detail h4 {
-  font-size: 12px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   color: var(--sfaint);
   margin: 10px 0 4px;
 }
 .detail pre {
   background: var(--sbg2);
-  border-radius: 8px;
+  border-radius: var(--r);
   padding: 10px;
   overflow-x: auto;
   font-size: 11.5px;
+  line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
 }

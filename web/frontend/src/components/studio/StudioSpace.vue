@@ -28,24 +28,24 @@ watch(
 </script>
 
 <template>
-  <div class="space">
-    <div class="swrap">
-      <div class="shead">
+  <div class="page">
+    <div class="pwrap">
+      <div class="phead">
         <h1>
           <svg class="ic lg"><use href="#s-folder" /></svg> {{ space.name }}
         </h1>
-        <div class="sactions">
-          <button class="btn" @click="$emit('new')">
+        <div class="hactions">
+          <button class="btn btn-primary" @click="$emit('new')">
             <svg class="ic"><use href="#s-plus" /></svg> New thread
           </button>
-          <button class="closebtn" @click="$emit('close')">
+          <button class="btn" @click="$emit('close')">
             <svg class="ic"><use href="#s-chevL" /></svg> Back
           </button>
         </div>
       </div>
       <div v-if="!threads.length" class="empty">No threads in this space yet.</div>
       <div v-else class="grid">
-        <button v-for="t in threads" :key="t.id" class="card" @click="$emit('open', t.id)">
+        <button v-for="t in threads" :key="t.id" class="gcard card" @click="$emit('open', t.id)">
           <div class="cthumb">
             <img v-if="thumbs[t.id]" :src="thumbs[t.id]" alt="" loading="lazy" />
             <div v-else class="cph">
@@ -63,90 +63,22 @@ watch(
 </template>
 
 <style scoped>
-.space {
-  flex: 1;
-  overflow-y: auto;
-  padding: 32px 22px;
-}
-.swrap {
-  max-width: 900px;
-  margin: 0 auto;
-}
-.shead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 24px;
-}
-h1 {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 22px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-  min-width: 0;
-}
-h1 .ic {
-  color: var(--saccent);
-}
-.sactions {
-  display: flex;
-  gap: 8px;
-  flex: 0 0 auto;
-}
-.btn,
-.closebtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 12px;
-  border: 1px solid var(--sborder);
-  border-radius: 9px;
-  color: var(--smuted);
-  background: none;
-  cursor: pointer;
-}
-.btn:hover,
-.closebtn:hover {
-  background: var(--shover);
-  color: var(--sfg);
-}
-.btn .ic {
-  color: var(--saccent);
-}
-.empty {
-  color: var(--sfaint);
-  text-align: center;
-  margin-top: 60px;
-}
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
 }
 .card {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   align-items: stretch;
-  padding: 10px;
-  border: 1px solid var(--sborder);
-  border-radius: 12px;
-  background: var(--sbg);
-  color: var(--sfg);
-  cursor: pointer;
-  text-align: left;
-}
-.card:hover {
-  border-color: var(--sfaint);
-  background: var(--spanel2);
+  padding: 8px;
 }
 .cthumb {
   aspect-ratio: 4 / 3;
-  border-radius: 8px;
+  border-radius: var(--r);
   overflow: hidden;
   background: var(--sbg2);
 }
@@ -165,14 +97,15 @@ h1 .ic {
   background: var(--saccent-soft);
 }
 .cph .ic {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   color: var(--saccent);
 }
 .ct {
-  font-weight: 550;
+  font-size: 13px;
+  font-weight: 500;
   line-height: 1.4;
-  padding: 0 6px 4px;
+  padding: 0 4px 2px;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -180,11 +113,12 @@ h1 .ic {
 }
 .cfav {
   position: absolute;
-  top: 14px;
-  right: 14px;
-  color: var(--saccent);
-  background: rgba(0, 0, 0, 0.4);
-  border-radius: 6px;
-  padding: 2px;
+  top: 12px;
+  right: 12px;
+  color: var(--sstar);
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: var(--r-sm);
+  padding: 3px;
+  display: grid;
 }
 </style>

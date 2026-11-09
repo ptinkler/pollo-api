@@ -39,7 +39,7 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="card">
+  <section class="scard">
     <div class="ctitle">Provider keys</div>
     <p class="cnote">Enter your Pollo, Venice and OpenRouter keys.</p>
     <div class="rows">
@@ -55,51 +55,33 @@ onMounted(load)
           :placeholder="keys[p.id]?.set ? 'Enter a new key to replace' : 'Paste key'"
           @input="drafts[p.id] = $event.target.value"
         />
-        <button v-if="keys[p.id]?.set" class="xbtn" title="Clear this key" @click="drafts[p.id] = ''">Clear</button>
+        <button v-if="keys[p.id]?.set" class="btn btn-sm" title="Clear this key" @click="drafts[p.id] = ''">
+          Clear
+        </button>
       </div>
     </div>
-    <div class="actions">
-      <button class="btn" :disabled="saving" @click="save">{{ saving ? 'Saving…' : 'Save keys' }}</button>
-      <span v-if="message" class="msg">{{ message }}</span>
+    <div class="cactions">
+      <button class="btn btn-primary" :disabled="saving" @click="save">{{ saving ? 'Saving…' : 'Save keys' }}</button>
+      <span v-if="message" class="cmsg">{{ message }}</span>
     </div>
   </section>
 </template>
 
 <style scoped>
-.card {
-  border: 1px solid var(--sborder);
-  background: var(--sbg);
-  border-radius: 14px;
-  padding: 18px 20px;
-  margin-bottom: 16px;
-}
-.ctitle {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--sfaint);
-  font-weight: 650;
-  margin-bottom: 12px;
-}
-.cnote {
-  color: var(--smuted);
-  line-height: 1.6;
-  font-size: 13px;
-  margin-bottom: 14px;
-}
 .rows {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 .krow {
   display: grid;
-  grid-template-columns: 120px 1fr auto;
+  grid-template-columns: 110px 1fr auto;
   align-items: center;
   gap: 10px;
 }
 .kl {
   color: var(--sfg);
+  font-size: 13.5px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -107,50 +89,6 @@ onMounted(load)
 .kset {
   font-size: 11px;
   color: var(--saccent);
-  font-family: monospace;
-}
-input {
-  padding: 8px 10px;
-  border: 1px solid var(--sborder);
-  border-radius: 9px;
-  background: var(--spanel2);
-  color: var(--sfg);
-  outline: none;
-}
-.xbtn {
-  padding: 7px 11px;
-  border: 1px solid var(--sborder);
-  border-radius: 8px;
-  color: var(--smuted);
-  background: none;
-  cursor: pointer;
-  font-size: 12px;
-}
-.xbtn:hover {
-  background: var(--shover);
-  color: var(--sfg);
-}
-.actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 16px;
-}
-.btn {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 9px;
-  background: var(--saccent);
-  color: #fff;
-  cursor: pointer;
-  font-weight: 600;
-}
-.btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.msg {
-  font-size: 12px;
-  color: var(--smuted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 </style>

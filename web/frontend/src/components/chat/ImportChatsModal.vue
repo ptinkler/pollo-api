@@ -245,7 +245,7 @@ async function start() {
 }
 
 .file-item.active {
-  background: rgba(108, 92, 231, 0.2);
+  background: var(--saccent-soft);
 }
 
 .file-name {
@@ -267,7 +267,7 @@ async function start() {
 }
 
 .result.error {
-  color: var(--danger, #e74c3c);
+  color: var(--sdanger);
 }
 
 .bar {

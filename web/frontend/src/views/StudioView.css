@@ -5,7 +5,7 @@
   overflow: hidden;
   background: var(--sbg2);
   color: var(--sfg);
-  font-size: 15px; /* base for inherited text (item 27: bumped from 13.5px) */
+  font-size: 15px; /* base for inherited text */
 }
 .center {
   flex: 1;
@@ -13,12 +13,14 @@
   display: flex;
   flex-direction: column;
 }
+/* Thread / favourites header bar */
 .top {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px 12px;
-  padding: 12px 18px;
+  gap: 8px 10px;
+  min-height: 52px;
+  padding: 10px 18px;
   border-bottom: 1px solid var(--sborder2);
 }
 .ttitle {
@@ -32,84 +34,12 @@
 .top .spacer {
   flex: 1;
 }
-.iconbtn {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  color: var(--smuted);
-  background: none;
-  border: none;
-  cursor: pointer;
-}
-.iconbtn:hover {
-  background: var(--shover);
-  color: var(--sfg);
-}
-.spend {
-  font-size: 12px;
-  color: var(--smuted);
-  padding: 3px 9px;
-  border: 1px solid var(--sborder);
-  border-radius: 7px;
-  white-space: nowrap;
-}
-.spend b {
-  color: var(--sfg);
-  font-weight: 600;
-}
-.bal {
-  font-size: 12px;
-  color: var(--smuted);
-  padding: 3px 9px;
-  border: 1px solid var(--sborder);
-  border-radius: 7px;
-  white-space: nowrap;
-}
-.bal b {
-  color: var(--sfg);
-  font-weight: 600;
-}
-.bal.pollo {
-  cursor: pointer;
-}
-.bal.pollo:hover {
-  border-color: var(--saccent);
-}
-.vtoggle {
-  display: inline-flex;
-  gap: 2px;
-  background: var(--sbg2);
-  border: 1px solid var(--sborder);
-  border-radius: 7px;
-  padding: 2px;
-}
-.vtoggle button {
-  display: inline-flex;
-  align-items: center;
-  font-size: 12px;
-  padding: 4px 10px;
-  border: 0;
-  background: transparent;
-  color: var(--smuted);
-  border-radius: 5px;
-  cursor: pointer;
-}
-.vtoggle button .ic {
-  width: 15px;
-  height: 15px;
-}
-.vtoggle button.on {
-  background: var(--shover);
-  color: var(--sfg);
-}
 /* Sliding switch for the thread's default view: chat ◄► gallery */
 .kindswitch {
   position: relative;
   display: inline-flex;
   align-items: center;
-  width: 58px;
+  width: 56px;
   height: 28px;
   padding: 3px;
   border: 1px solid var(--sborder);
@@ -129,7 +59,7 @@
   border-radius: 999px;
   /* A bright thumb so the active icon (accent, below) reads clearly in both
      themes — white-on-accent washed out at this size. */
-  background: #fff;
+  background: var(--sfg);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
   transition: transform 0.16s ease;
 }
@@ -146,14 +76,14 @@
   transition: color 0.16s ease;
 }
 .kindswitch .kopt .ic {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   stroke-width: 2;
 }
-/* The icon sitting on the thumb: accent on white = high contrast. */
+/* The icon sitting on the thumb: it inverts against the bright knob. */
 .kindswitch[data-on='chat'] .kopt:first-of-type,
 .kindswitch[data-on='gallery'] .kopt:last-of-type {
-  color: var(--saccent);
+  color: var(--sbg);
 }
 .gcount {
   font-size: 12px;

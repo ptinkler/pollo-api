@@ -87,12 +87,10 @@ watch(
 .feed {
   flex: 1;
   overflow-y: auto;
-  padding: 22px;
+  padding: 18px 22px;
 }
 .empty {
   color: var(--sfaint);
-  text-align: center;
-  margin-top: 60px;
 }
 .finner {
   max-width: 820px;

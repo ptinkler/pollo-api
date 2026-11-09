@@ -63,7 +63,7 @@ function pick(id) {
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-pop);
 }
 
 .fork-menu.right {
@@ -86,6 +86,6 @@ function pick(id) {
 }
 
 .fork-item:hover {
-  background: rgba(108, 92, 231, 0.2);
+  background: var(--saccent-soft);
 }
 </style>

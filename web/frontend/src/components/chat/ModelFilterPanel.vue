@@ -75,7 +75,7 @@ defineEmits(['toggle-provider', 'toggle-tag', 'clear'])
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-pop);
 }
 .fhead {
   padding: 4px 8px;
@@ -91,10 +91,13 @@ defineEmits(['toggle-provider', 'toggle-tag', 'clear'])
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 7px 8px;
-  border-radius: 8px;
-  font-size: 0.85rem;
-  color: var(--text);
+  padding: 6px 8px;
+  border-radius: var(--r);
+  font-size: 13px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--sfg);
   cursor: pointer;
   user-select: none;
 }
