@@ -1,4 +1,4 @@
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { patchConversation } from './useChat'
 import { chatImageModelTakesCharacters, fetchCharacters } from './useCharacters'
 
@@ -56,13 +56,19 @@ export function useChatCharacters({ convId, settings, ensureConversation, showTo
     return reason ? { ok: false, reason } : { ok: true }
   })
 
+  // A chat's own (ad hoc) characters only come back when asked for by chat id,
+  // so reload when the open chat changes (a refresh opens it after the first load)
+  let loadSeq = 0
   async function loadCharacters() {
+    const seq = ++loadSeq
     try {
-      characters.value = await fetchCharacters({ conversationId: convId.value })
+      const list = await fetchCharacters({ conversationId: convId.value })
+      if (seq === loadSeq) characters.value = list
     } catch {
       /* 401 handled by auth prompt */
     }
   }
+  watch(convId, loadCharacters)
 
   async function setCharacters(ids) {
     characterIds.value = ids

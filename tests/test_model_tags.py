@@ -14,10 +14,10 @@ class TestVideoTags:
         m = {"type": "img2vid", "generate_audio": True, "frame_images": ["first_frame", "last_frame"]}
         assert tags_for("video", m) == ["img2vid", "text2vid", "first_last", "audio"]
 
-    def test_pollo_motion_models_are_all_recast(self):
+    def test_pollo_motion_models_are_not_img2vid(self):
         # the first_frame is a reference image, not "animate this image"
         m = {"type": "motion", "frame_images": ["first_frame"]}
-        assert tags_for("video", m) == ["motion", "recast"]
+        assert tags_for("video", m) == ["motion"]
 
     def test_pollo_ref_and_extend(self):
         assert tags_for("video", {"type": "ref"}) == ["ref2vid"]

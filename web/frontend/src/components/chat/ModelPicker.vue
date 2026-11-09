@@ -5,6 +5,8 @@ import { useModelFavourites } from '../../composables/useModelFavourites'
 import { useShowHidden } from '../../composables/useShowHidden'
 import { useUncensoredOnly } from '../../composables/useUncensoredOnly'
 import { useModelFilters } from '../../composables/useModelFilters'
+import ModelFilterPanel from './ModelFilterPanel.vue'
+import { PROVIDER_COLOR, TAG_LABELS, tagColor } from '../../composables/modelTags'
 import { chatImageModelTakesCharacters } from '../../composables/useCharacters'
 
 const props = defineProps({
@@ -55,32 +57,6 @@ const providerOf = id => {
   return prefix === 'pollo' || prefix === 'venice' ? prefix : 'openrouter'
 }
 
-// Capability-tag labels (mirrors web/providers/model_tags.py TAGS, same order).
-// The backend sends each model's `tags` slugs; these name the filter chips.
-const TAG_LABELS = {
-  img2vid: 'Image→Video',
-  text2vid: 'Text→Video',
-  ref2vid: 'References→Video',
-  first_last: 'First+Last frame',
-  video_edit: 'Video edit',
-  video_extend: 'Video extend',
-  motion: 'Motion / act',
-  recast: 'Recast',
-  lipsync: 'Lip sync',
-  upscale: 'Upscale',
-  audio: 'Makes audio',
-  bg_remove: 'Background remove',
-  subtitle_remove: 'Subtitle remove',
-  face_swap: 'Face swap',
-  tts: 'Text→Speech',
-  music: 'Music',
-  text2img: 'Text→Image',
-  image_edit: 'Image edit',
-  tools: 'Image tools',
-  vision: 'Vision',
-  functions: 'Tools / functions',
-}
-
 const { filters, toggleProvider, toggleTag, clear: clearFilters, hasActive } = useModelFilters()
 
 // Provider facet: which providers the list spans, with counts. Chips are only
@@ -105,7 +81,7 @@ const tagCounts = computed(() => {
 const tagsPresent = computed(() =>
   Object.keys(TAG_LABELS)
     .filter(s => tagCounts.value[s])
-    .map(s => ({ slug: s, label: TAG_LABELS[s], n: tagCounts.value[s] })),
+    .map(s => ({ slug: s, label: TAG_LABELS[s], n: tagCounts.value[s], color: tagColor(s) })),
 )
 
 const selProviders = computed(() => filters[props.kind].providers)
@@ -133,6 +109,39 @@ function clearAll() {
   uncensoredOnly.value = false
   searchInput.value?.focus()
 }
+
+// The filter menu (providers, capabilities, uncensored, show-hidden) sits in
+// the pop-up behind the Filters button; the active picks also show as chips
+const filtersOpen = ref(false)
+const providerFacet = computed(() =>
+  showProviders.value
+    ? providersPresent.value.map(id => ({
+        id,
+        ...ALL_PROVIDERS[id],
+        n: providerCounts.value[id],
+        color: PROVIDER_COLOR[id],
+      }))
+    : [],
+)
+const hasFacets = computed(
+  () => providerFacet.value.length || tagsPresent.value.length || uncensoredCount.value || hiddenCount.value,
+)
+const filterCount = computed(() => selProviders.value.length + selTags.value.length + (uncensoredOnly.value ? 1 : 0))
+const activeChips = computed(() => [
+  ...selProviders.value.map(id => ({
+    key: `p-${id}`,
+    label: ALL_PROVIDERS[id]?.label || id,
+    color: PROVIDER_COLOR[id],
+    off: () => toggleProvider(props.kind, id),
+  })),
+  ...selTags.value.map(slug => ({
+    key: `t-${slug}`,
+    label: TAG_LABELS[slug] || slug,
+    color: tagColor(slug),
+    off: () => toggleTag(props.kind, slug),
+  })),
+  ...(uncensoredOnly.value ? [{ key: 'unc', label: 'Uncensored', off: () => (uncensoredOnly.value = false) }] : []),
+])
 
 // Favourites keep the order they were starred in; models that have left
 // the catalogue are skipped rather than shown broken
@@ -163,7 +172,7 @@ const UNCENSORED_TITLE = 'Uncensored: the provider marks this model as having no
 
 // Venice's privacy levels
 const PRIVACY = {
-  private: { t: '🔒 private', cls: 'private', title: "Private: runs on Venice's own servers and nothing is stored" },
+  private: { t: 'private', cls: 'private', title: "Private: runs on Venice's own servers and nothing is stored" },
   anonymized: {
     t: 'anonymized',
     cls: 'anonymized',
@@ -175,39 +184,29 @@ const PRIVACY = {
 // Venice prices: per image, or a quote for a ~5s video at the lowest resolution
 const fmtPrice = usd => `$${usd < 0.1 ? usd.toFixed(3).replace(/0$/, '') : usd.toFixed(2)}`
 
-const VIDEO_FAMILY = {
-  reference: 'refs→vid',
-  frames: 'first+last',
-  angles: 'multi-angle',
-  video: 'vid→vid',
-  motion: 'motion',
-  upscale: 'upscale',
-}
+const colorVar = b => (b.color ? { '--b': b.color } : null)
+const MAX_INLINE_BADGES = 2 // more than this and a row's badges fold up
 
 // The little labels beside a model: warnings first, then what it can do and costs
 function badges(m) {
   const kindBadges = { text: textBadges, image: imageBadges, video: videoBadges }[props.kind] || (() => [])
   const price = props.kind === 'text' ? [] : priceBadge(m)
-  return [...flagBadges(m), ...price, ...kindBadges(m)].filter(Boolean)
+  return [...flagBadges(m), ...price, ...kindBadges(m), ...tagBadges(m)].filter(Boolean)
 }
 
 function flagBadges(m) {
   return [
     // First, so it's the one thing you can't miss
-    m.uncensored && { t: '🔞 uncensored', title: UNCENSORED_TITLE, cls: 'uncensored' },
+    m.uncensored && { t: 'uncensored', title: UNCENSORED_TITLE, cls: 'uncensored' },
     PRIVACY[m.privacy],
-    m.hidden && { t: 'hidden', title: m.hidden },
+    m.hidden && { t: 'hidden', title: m.hidden, cls: 'hidden' },
   ]
 }
 
 function textBadges(m) {
   const p = perMillion(m.prompt_price)
   const c = perMillion(m.completion_price)
-  return [
-    m.input_modalities?.includes('image') && { t: 'vision', title: 'Accepts images' },
-    m.supports_tools && { t: 'tools', title: 'Can create images/videos in Auto mode' },
-    p && { t: p === 'free' ? 'free' : `${p}/${c}`, title: 'Input/output price per million tokens' },
-  ]
+  return [p && { t: p === 'free' ? 'free' : `${p}/${c}`, title: 'Input/output price per million tokens', cls: 'price' }]
 }
 
 function priceBadge(m) {
@@ -217,29 +216,36 @@ function priceBadge(m) {
     props.kind === 'video'
       ? `Quoted price for ${basis || 'a default video'} (longer or sharper costs more)`
       : `Price per image${basis ? ` (${basis})` : ''}`
-  return [{ t: fmtPrice(m.price.usd), title }]
+  return [{ t: fmtPrice(m.price.usd), title, cls: 'price' }]
 }
 
 function imageBadges(m) {
-  const input = m.conversational
-    ? { t: 'context', title: 'Sees the conversation (text and earlier images), like the Gemini app' }
-    : m.input_modalities?.includes('image') && { t: 'edits', title: 'Takes reference images (tends to edit them)' }
   return [
-    input,
-    chatImageModelTakesCharacters(m) && { t: '👤', title: 'Can use characters (sends their reference images)' },
+    m.conversational && {
+      t: 'context',
+      title: 'Sees the conversation (text and earlier images), like the Gemini app',
+      cls: 'info',
+    },
+    chatImageModelTakesCharacters(m) && {
+      t: 'characters',
+      title: 'Can use characters (sends their reference images)',
+      cls: 'info',
+    },
   ]
+}
+function videoBadges(m) {
+  const d = m.durations
+  return [d?.length && { t: `${Math.min(...d)}–${Math.max(...d)}s`, title: 'Durations', cls: 'info' }]
 }
 
-function videoBadges(m) {
-  const family = VIDEO_FAMILY[m.family]
-    ? { t: VIDEO_FAMILY[m.family], title: m.family_hint }
-    : m.frame_images?.includes('first_frame') && { t: 'img→vid', title: 'Can animate an image' }
-  return [
-    family,
-    m.durations?.length && { t: `${Math.min(...m.durations)}–${Math.max(...m.durations)}s`, title: 'Durations' },
-    m.generate_audio && { t: 'audio', title: 'Can generate audio' },
-  ]
-}
+// What each model can do, from the backend's capability tags; each tag has its own colour
+const tagBadges = m =>
+  (m.tags || []).map(slug => ({
+    t: TAG_LABELS[slug] || slug,
+    title: `Capability: ${TAG_LABELS[slug] || slug}`,
+    cls: 'tag',
+    color: tagColor(slug),
+  }))
 
 // The pop-up is position: fixed, placed next to its button, so a scrolling
 // or narrow container (the chat sidebar) can't clip it. It opens upwards
@@ -272,10 +278,16 @@ const { open, root, toggle, close } = useDropdown({
     window.addEventListener('scroll', place, true) // any scrolling ancestor moves the button
   },
   onClose() {
+    filtersOpen.value = false
     window.removeEventListener('resize', place)
     window.removeEventListener('scroll', place, true)
   },
 })
+
+// A click anywhere in the pop-up but the filter menu / its button closes the menu
+function closeFiltersOutside(e) {
+  if (filtersOpen.value && !e.target.closest('.fpanel, .filters-btn')) filtersOpen.value = false
+}
 
 // A model, or null for none
 function pick(m) {
@@ -284,7 +296,10 @@ function pick(m) {
 }
 
 function onKeydown(e) {
-  if (e.key === 'Escape') close()
+  if (e.key === 'Escape') {
+    if (filtersOpen.value) filtersOpen.value = false
+    else close()
+  }
   if (e.key === 'Enter' && filtered.value.length) pick(filtered.value[0])
 }
 </script>
@@ -319,7 +334,7 @@ function onKeydown(e) {
           <template v-if="loading">Loading…</template>
           <template v-else>{{ current?.name || 'None' }}</template>
           <span v-if="!loading && current?.uncensored" class="item-badge uncensored picked" :title="UNCENSORED_TITLE"
-            >🔞 uncensored</span
+            >uncensored</span
           >
           <span
             v-if="!loading && PRIVACY[current?.privacy]"
@@ -333,69 +348,72 @@ function onKeydown(e) {
       <span class="chev">▾</span>
     </button>
 
-    <div v-if="open" class="picker-pop" :style="popStyle">
-      <input
-        ref="searchInput"
-        v-model="query"
-        class="picker-search"
-        :placeholder="`Search ${visibleModels.length} ${label.toLowerCase()} models…`"
-        @keydown="onKeydown"
-      />
-      <div v-if="showProviders || tagsPresent.length || uncensoredCount || hiddenCount" class="picker-filters">
-        <!-- Provider chips (only when the list spans more than one provider) -->
-        <template v-if="showProviders">
-          <label
-            v-for="id in providersPresent"
-            :key="`prov-${id}`"
-            class="fchip provider"
-            :class="[id, { on: selProviders.includes(id) }]"
-            :title="ALL_PROVIDERS[id].title"
+    <div
+      v-if="open"
+      class="picker-pop"
+      :class="{ 'filters-open': filtersOpen }"
+      :style="popStyle"
+      @mousedown="closeFiltersOutside"
+    >
+      <div class="picker-searchrow">
+        <input
+          ref="searchInput"
+          v-model="query"
+          class="picker-search"
+          :placeholder="`Search ${visibleModels.length} ${label.toLowerCase()} models…`"
+          @keydown="onKeydown"
+        />
+        <button
+          v-if="hasFacets"
+          type="button"
+          class="filters-btn"
+          :class="{ on: filtersOpen || anyFilter }"
+          title="Filters"
+          aria-haspopup="true"
+          :aria-expanded="filtersOpen"
+          @click="filtersOpen = !filtersOpen"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
           >
-            <input
-              type="checkbox"
-              :checked="selProviders.includes(id)"
-              @change="toggleProvider(kind, id)"
-              @click="searchInput?.focus()"
-            />
-            {{ ALL_PROVIDERS[id].label }} <span class="fchip-n">{{ providerCounts[id] }}</span>
-          </label>
-        </template>
-        <!-- Capability-tag chips -->
-        <label
-          v-for="t in tagsPresent"
-          :key="`tag-${t.slug}`"
-          class="fchip tag"
-          :class="{ on: selTags.includes(t.slug) }"
-          :title="`Only ${t.label} models`"
+            <path d="M4 7h16M7 12h10M10 17h4" />
+          </svg>
+          <span v-if="filterCount" class="filters-n">{{ filterCount }}</span>
+        </button>
+      </div>
+      <ModelFilterPanel
+        v-if="filtersOpen && hasFacets"
+        v-model:uncensored-only="uncensoredOnly"
+        v-model:show-hidden="showHidden"
+        :providers="providerFacet"
+        :tags="tagsPresent"
+        :sel-providers="selProviders"
+        :sel-tags="selTags"
+        :uncensored-count="uncensoredCount"
+        :hidden-count="hiddenCount"
+        :any-filter="anyFilter"
+        @toggle-provider="id => toggleProvider(kind, id)"
+        @toggle-tag="slug => toggleTag(kind, slug)"
+        @clear="clearAll"
+      />
+      <div v-if="activeChips.length" class="picker-active">
+        <button
+          v-for="c in activeChips"
+          :key="c.key"
+          type="button"
+          class="achip"
+          :style="colorVar(c)"
+          :title="`Remove ${c.label}`"
+          @click="c.off()"
         >
-          <input
-            type="checkbox"
-            :checked="selTags.includes(t.slug)"
-            @change="toggleTag(kind, t.slug)"
-            @click="searchInput?.focus()"
-          />
-          {{ t.label }} <span class="fchip-n">{{ t.n }}</span>
-        </label>
-        <label
-          v-if="uncensoredCount"
-          class="fchip uncensored-only"
-          :class="{ on: uncensoredOnly }"
-          title="Only list models marked uncensored"
-        >
-          <input v-model="uncensoredOnly" type="checkbox" @change="searchInput?.focus()" />
-          🔞 Uncensored <span class="fchip-n">{{ uncensoredCount }}</span>
-        </label>
-        <label
-          v-if="hiddenCount"
-          class="fchip show-hidden"
-          :class="{ on: showHidden }"
-          title="Models left out of the list: not enabled for this API key, or retired"
-        >
-          <input v-model="showHidden" type="checkbox" @change="searchInput?.focus()" />
-          Show hidden <span class="fchip-n">{{ hiddenCount }}</span>
-        </label>
-        <!-- Clears providers, tags and uncensored-only (not search / show-hidden) -->
-        <button v-if="anyFilter" type="button" class="fchip filters-clear" @click="clearAll">Clear ✕</button>
+          {{ c.label }} ✕
+        </button>
       </div>
       <div class="picker-list">
         <template v-for="section in sections" :key="section.id">
@@ -429,10 +447,23 @@ function onKeydown(e) {
                 :title="ALL_PROVIDERS[providerOf(m.id)].title"
                 >{{ ALL_PROVIDERS[providerOf(m.id)].label }}</span
               >
-              <span class="item-badges">
-                <span v-for="b in badges(m)" :key="b.t" class="item-badge" :class="b.cls" :title="b.title">{{
-                  b.t
-                }}</span>
+              <span class="item-badges" :class="{ collapsed: badges(m).length > MAX_INLINE_BADGES }">
+                <!-- Long lists fold into coloured dots; hovering unfolds the labels -->
+                <span v-if="badges(m).length > MAX_INLINE_BADGES" class="badge-dots" aria-hidden="true">
+                  <span v-for="b in badges(m)" :key="b.t" class="dot" :class="b.cls" :style="colorVar(b)"></span>
+                  <span class="dots-n">{{ badges(m).length }}</span>
+                </span>
+                <span class="badge-list">
+                  <span
+                    v-for="b in badges(m)"
+                    :key="b.t"
+                    class="item-badge"
+                    :class="b.cls"
+                    :style="colorVar(b)"
+                    :title="b.title"
+                    >{{ b.t }}</span
+                  >
+                </span>
               </span>
               <button
                 type="button"
@@ -603,70 +634,68 @@ function onKeydown(e) {
   cursor: pointer;
 }
 
-/* Filter chips row: providers, capability tags, uncensored, show-hidden, clear. */
-.picker-filters {
+/* Search + Filters button on one row; the menu itself is ModelFilterPanel */
+.picker-searchrow {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+.picker-searchrow .picker-search {
+  flex: 1;
+  min-width: 0;
+  border-bottom: none;
+}
+.filters-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 6px 8px 6px 0;
+  padding: 0 10px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text2);
+  cursor: pointer;
+}
+.filters-btn:hover,
+.filters-btn.on {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.filters-n {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+/* Room for the menu even when only a few models are listed */
+.picker-pop.filters-open {
+  min-height: 330px;
+}
+/* The active picks, as removable chips */
+.picker-active {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  max-height: 148px;
-  overflow-y: auto;
 }
-.fchip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border: 1px solid var(--border);
+.achip {
+  --b: var(--accent);
+  padding: 2px 9px;
+  border: 1px solid color-mix(in srgb, var(--b) 55%, transparent);
   border-radius: 999px;
-  font-size: 0.75rem;
-  color: var(--text2);
-  background: var(--surface2);
+  background: color-mix(in srgb, var(--b) 16%, transparent);
+  color: var(--b);
+  font-weight: 600;
+  font-size: 0.73rem;
   cursor: pointer;
-  user-select: none;
 }
-.fchip:hover {
-  color: var(--text);
-}
-.fchip input {
-  margin: 0;
-  accent-color: var(--accent);
-}
-.fchip.on {
-  color: var(--text);
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-}
-.fchip.uncensored-only.on {
-  color: #ff8a6e;
-  border-color: #ff8a6e;
-  background: color-mix(in srgb, #ff8a6e 14%, transparent);
-}
-.fchip.provider.pollo.on {
-  color: var(--accent2);
-  border-color: var(--accent2);
-  background: color-mix(in srgb, var(--accent2) 14%, transparent);
-}
-.fchip.provider.venice.on {
-  color: #e8a33d;
-  border-color: #e8a33d;
-  background: color-mix(in srgb, #e8a33d 14%, transparent);
-}
-/* The Clear button is a chip too, but an action rather than a toggle */
-.fchip.filters-clear {
-  margin-left: auto;
-  font-weight: 600;
-  color: var(--text2);
-}
-.fchip.filters-clear:hover {
-  color: var(--text);
-  border-color: var(--accent);
-}
-.fchip-n {
-  font-weight: 600;
-  opacity: 0.8;
+.achip:hover {
+  background: color-mix(in srgb, var(--b) 28%, transparent);
 }
 
 .picker-list {
@@ -716,34 +745,94 @@ function onKeydown(e) {
   font-family: monospace;
 }
 
+.picker-item {
+  position: relative;
+}
 .item-badges {
-  display: flex;
-  gap: 4px;
+  position: relative;
   flex-shrink: 0;
   margin-left: auto;
 }
-
-.item-badge {
-  font-size: 0.65rem;
-  padding: 1px 6px;
-  border-radius: 6px;
+.badge-list {
+  display: flex;
+  gap: 4px;
+}
+/* Folded: just coloured dots (one per badge) + a count; the labels open on hover */
+.item-badges.collapsed .badge-list {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 5;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  width: max-content;
+  max-width: 300px;
+  margin-top: 2px;
+  padding: 6px;
   background: var(--surface2);
-  color: var(--accent2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
-
-.item-badge.uncensored {
-  background: rgba(225, 112, 85, 0.18);
-  color: #ff8a6e;
-  font-weight: 600;
+.item-badges.collapsed:hover .badge-list,
+.item-badges.collapsed:focus-within .badge-list {
+  display: flex;
 }
-
-.item-badge.private {
-  background: rgba(0, 184, 148, 0.16);
-  color: #4fd1a5;
+.badge-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--surface2);
+  cursor: default;
 }
-
-.item-badge.anonymized {
+.item-badges.collapsed:hover .badge-dots {
+  outline: 1px solid var(--border);
+}
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.dots-n {
+  margin-left: 2px;
+  font-size: 0.65rem;
   color: var(--text2);
+}
+
+/* Every badge is the same pill: its hue comes from --b alone (text colour, tinted
+   fill, and the folded dot), so they stay consistent whatever they say */
+.item-badge {
+  --b: var(--text2);
+  font-size: 0.65rem;
+  font-weight: 600;
+  line-height: 1.5;
+  padding: 1px 7px;
+  border-radius: 6px;
+  white-space: nowrap;
+  color: var(--b);
+  background: color-mix(in srgb, var(--b) 16%, transparent);
+}
+.dot {
+  background: var(--b, var(--text2));
+}
+:is(.item-badge, .dot).uncensored {
+  --b: #ff8a6e;
+}
+:is(.item-badge, .dot).private {
+  --b: #4fd1a5;
+}
+:is(.item-badge, .dot).anonymized,
+:is(.item-badge, .dot).info {
+  --b: var(--text2);
+}
+:is(.item-badge, .dot).price {
+  --b: #e8a33d;
+}
+:is(.item-badge, .dot).hidden {
+  --b: #c9a227;
 }
 
 .item-badge.picked {

@@ -25,6 +25,11 @@ async function openPicker(props = {}) {
 }
 
 const names = w => w.findAll('.picker-item .item-name').map(n => n.text())
+// The filter menu opens from the Filters button (when the list has anything to filter by)
+async function openFilters(w) {
+  if (!w.find('.fpanel').exists() && w.find('.filters-btn').exists()) await w.find('.filters-btn').trigger('click')
+  return w
+}
 const sections = w => w.findAll('.picker-section').map(n => n.text())
 
 describe('ModelPicker favourites', () => {
@@ -238,10 +243,10 @@ describe('ModelPicker provider & tag filters', () => {
     { id: 'google/g', name: 'Gemini', tags: ['text2vid'] },
     { id: 'qwen/q', name: 'Qwen OR', tags: ['img2vid'] },
   ]
-  const providerChips = w => w.findAll('.fchip.provider').map(c => c.text().replace(/\s+/g, ' ').trim())
-  const tagChips = w => w.findAll('.fchip.tag').map(c => c.text().replace(/\s+/g, ' ').trim())
+  const providerChips = w => w.findAll('.frow.provider').map(c => `${c.find('.fpill').text()} ${c.find('.fn').text()}`)
+  const tagChips = w => w.findAll('.frow.tag').map(c => `${c.find('.fpill').text()} ${c.find('.fn').text()}`)
   const modelNames = w => names(w).filter(n => n !== 'None')
-  const openVid = (props = {}) => openPicker({ kind: 'video', models: MIXED, ...props })
+  const openVid = async (props = {}) => openFilters(await openPicker({ kind: 'video', models: MIXED, ...props }))
 
   beforeEach(() => {
     const { favourites } = useModelFavourites()
@@ -258,6 +263,20 @@ describe('ModelPicker provider & tag filters', () => {
     w.unmount()
   })
 
+  it('has a Filters button that opens the menu (and counts what is ticked)', async () => {
+    const w = await openPicker({ kind: 'video', models: MIXED })
+    expect(w.find('.fpanel').exists()).toBe(false)
+    await w.find('.filters-btn').trigger('click')
+    expect(w.find('.fpanel').exists()).toBe(true)
+    await w.findAll('.frow.provider input')[0].setValue(true)
+    await w.findAll('.frow.tag input')[0].setValue(true)
+    expect(w.find('.filters-n').text()).toBe('2')
+    expect(w.findAll('.achip').map(c => c.text().replace(/\s+/g, ' '))).toEqual(['Pollo ✕', 'Image→Video ✕'])
+    await w.find('.achip').trigger('click') // remove a pick from its chip
+    expect(w.find('.filters-n').text()).toBe('1')
+    w.unmount()
+  })
+
   it('shows all providers in one list, with provider chips and per-row provider tags', async () => {
     const w = await openVid()
     expect(providerChips(w)).toEqual(['Pollo 2', 'OpenRouter 2'])
@@ -268,7 +287,7 @@ describe('ModelPicker provider & tag filters', () => {
 
   it('a provider chip narrows the list to that provider, and persists', async () => {
     const w = await openVid()
-    await w.findAll('.fchip.provider input')[0].setValue(true) // Pollo
+    await w.findAll('.frow.provider input')[0].setValue(true) // Pollo
     expect(modelNames(w)).toEqual(['Pollo A', 'Pollo B'])
     expect(JSON.parse(localStorage.getItem('models.filters')).video.providers).toEqual(['pollo'])
     w.unmount()
@@ -281,32 +300,32 @@ describe('ModelPicker provider & tag filters', () => {
   it('tag chips come from the models and narrow the list (OR within tags, AND across facets)', async () => {
     const w = await openVid()
     expect(tagChips(w)).toEqual(['Image→Video 3', 'Text→Video 1', 'Makes audio 1'])
-    await w.findAll('.fchip.tag input')[2].setValue(true) // "Makes audio"
+    await w.findAll('.frow.tag input')[2].setValue(true) // "Makes audio"
     expect(modelNames(w)).toEqual(['Pollo A'])
     // add Text→Video: OR within the tag facet
-    await w.findAll('.fchip.tag input')[1].setValue(true)
+    await w.findAll('.frow.tag input')[1].setValue(true)
     expect(modelNames(w)).toEqual(['Pollo A', 'Gemini'])
     // narrow by provider too: AND across facets (Gemini is OpenRouter, drops out)
-    await w.findAll('.fchip.provider input')[0].setValue(true) // Pollo
+    await w.findAll('.frow.provider input')[0].setValue(true) // Pollo
     expect(modelNames(w)).toEqual(['Pollo A'])
     w.unmount()
   })
 
   it('Clear resets provider, tag and uncensored filters (keeping the search box)', async () => {
     const w = await openVid()
-    await w.findAll('.fchip.provider input')[0].setValue(true)
-    await w.findAll('.fchip.tag input')[0].setValue(true)
-    expect(w.find('.filters-clear').exists()).toBe(true)
-    await w.find('.filters-clear').trigger('click')
+    await w.findAll('.frow.provider input')[0].setValue(true)
+    await w.findAll('.frow.tag input')[0].setValue(true)
+    expect(w.find('.fclear').exists()).toBe(true)
+    await w.find('.fclear').trigger('click')
     expect(modelNames(w)).toEqual(['Pollo A', 'Pollo B', 'Gemini', 'Qwen OR'])
-    expect(w.find('.filters-clear').exists()).toBe(false)
+    expect(w.find('.fclear').exists()).toBe(false)
     expect(useModelFilters().hasActive('video')).toBe(false)
     w.unmount()
   })
 
   it('always keeps the current pick visible even when filtered out', async () => {
     const w = await openVid({ modelValue: 'google/g' }) // Gemini: OpenRouter + text2vid
-    await w.findAll('.fchip.provider input')[0].setValue(true) // Pollo only
+    await w.findAll('.frow.provider input')[0].setValue(true) // Pollo only
     expect(modelNames(w)).toContain('Gemini')
     w.unmount()
   })
@@ -358,7 +377,7 @@ describe('ModelPicker provider & tag filters', () => {
     ]
     const w = await openPicker({ models })
     const item = name => w.findAll('.picker-item').find(i => i.text().includes(name))
-    expect(item('Lustify').find('.item-badge.private').text()).toBe('🔒 private')
+    expect(item('Lustify').find('.item-badge.private').text()).toBe('private')
     expect(item('Flux 2 Pro').find('.item-badge.anonymized').text()).toBe('anonymized')
     expect(item('Other').find('.item-badge.private').exists()).toBe(false)
     expect(item('Other').find('.item-badge.anonymized').exists()).toBe(false)
@@ -368,6 +387,32 @@ describe('ModelPicker provider & tag filters', () => {
     })
     expect(closed.find('.picker-value .private').text()).toContain('private')
     closed.unmount()
+  })
+})
+
+describe('ModelPicker row badges', () => {
+  it('shows capability tags on the row, folding more than two into coloured dots', async () => {
+    const models = [
+      { id: 'pollo/few', name: 'Few', tags: ['img2vid', 'motion'] },
+      { id: 'pollo/many', name: 'Many', tags: ['img2vid', 'text2vid', 'motion', 'audio'] },
+    ]
+    const w = await openPicker({ kind: 'video', models })
+    const row = name => w.findAll('.picker-item').find(i => i.find('.item-name').text() === name)
+    expect(row('Few').find('.item-badges.collapsed').exists()).toBe(false)
+    expect(
+      row('Few')
+        .findAll('.item-badge')
+        .map(b => b.text()),
+    ).toEqual(['Image→Video', 'Motion / recast'])
+    const many = row('Many')
+    expect(many.find('.item-badges.collapsed').exists()).toBe(true)
+    expect(many.findAll('.dot')).toHaveLength(4)
+    // every tag has its own colour, and each dot matches its label
+    const colours = many.findAll('.badge-list .item-badge').map(b => b.attributes('style'))
+    expect(new Set(colours).size).toBe(4)
+    expect(many.findAll('.dot').map(d => d.attributes('style'))).toEqual(colours)
+    expect(many.findAll('.badge-list .item-badge')).toHaveLength(4) // the labels, shown on hover
+    w.unmount()
   })
 })
 
@@ -386,12 +431,13 @@ describe('ModelPicker uncensored filter', () => {
   it('narrows the list to uncensored models, dropping providers left empty', async () => {
     const w = mount(ModelPicker, { attachTo: document.body, props: { models: MODELS, label: 'Image', kind: 'image' } })
     await w.find('.picker-btn').trigger('click')
+    await openFilters(w)
     // Venice (uncensored + plain) and OpenRouter → two providers before filtering
-    expect(w.findAll('.fchip.provider')).toHaveLength(2)
+    expect(w.findAll('.frow.provider')).toHaveLength(2)
     const toggle = w.find('.uncensored-only input')
-    expect(w.find('.uncensored-only .fchip-n').text()).toBe('1')
+    expect(w.find('.uncensored-only .fn').text()).toBe('1')
     await toggle.setValue(true)
-    expect(w.findAll('.fchip.provider')).toHaveLength(0) // only Venice is left
+    expect(w.findAll('.frow.provider')).toHaveLength(0) // only Venice is left
     expect(
       w
         .findAll('.item-name')
@@ -407,6 +453,7 @@ describe('ModelPicker uncensored filter', () => {
       props: { models: MODELS.slice(1), label: 'Image', kind: 'image' },
     })
     await w.find('.picker-btn').trigger('click')
+    await openFilters(w)
     expect(w.find('.uncensored-only').exists()).toBe(false)
     w.unmount()
   })
@@ -480,9 +527,9 @@ describe('ModelPicker hidden models', () => {
   })
 
   it('hides them until "Show hidden" is ticked, then badges them', async () => {
-    const w = await openPicker({ models: WITH_HIDDEN, modelValue: 'pollo/seedreamv1' })
+    const w = await openFilters(await openPicker({ models: WITH_HIDDEN, modelValue: 'pollo/seedreamv1' }))
     expect(modelNames(w)).toEqual(['Pollo: Seedream 5.0 Lite'])
-    expect(w.find('.show-hidden .fchip-n').text()).toBe('1')
+    expect(w.find('.show-hidden .fn').text()).toBe('1')
     await w.find('.show-hidden input').setValue(true)
     expect(modelNames(w)).toEqual(['Pollo: Seedream 5.0 Lite', 'Pollo: Seedream 5.0 Pro'])
     const badge = w.findAll('.item-badge').find(b => b.text() === 'hidden')

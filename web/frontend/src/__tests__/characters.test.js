@@ -119,8 +119,34 @@ describe('which models can use characters', () => {
     })
     await w.find('.picker-btn').trigger('click')
     await nextTick()
-    const badged = w.findAll('.picker-item').filter(i => i.findAll('.item-badge').some(b => b.text() === '👤'))
+    const badged = w.findAll('.picker-item').filter(i => i.findAll('.item-badge').some(b => b.text() === 'characters'))
     expect(badged.map(i => i.find('.item-name').text())).toEqual(['Refs'])
     w.unmount()
+  })
+})
+
+describe('useChatCharacters reloads for the open chat', () => {
+  it("asks for a chat's own characters once the chat is known (a refresh opens it after the first load)", async () => {
+    vi.resetModules()
+    const fetchCharacters = vi.fn(async ({ conversationId }) =>
+      conversationId ? [{ id: 1, name: 'Ad hoc', conversation_id: conversationId }] : [],
+    )
+    vi.doMock('../composables/useCharacters', () => ({ chatImageModelTakesCharacters: () => true, fetchCharacters }))
+    const { ref, nextTick } = await import('vue')
+    const { useChatCharacters } = await import('../composables/useChatCharacters.js')
+    const convId = ref(null)
+    const c = useChatCharacters({
+      convId,
+      settings: { mode: ref('auto'), selected: {}, textInfo: ref(null), imageInfo: ref(null), videoInfo: ref(null) },
+      ensureConversation: vi.fn(),
+      showToast: vi.fn(),
+    })
+    await c.loadCharacters()
+    expect(c.characters.value).toEqual([])
+    convId.value = 'abc'
+    await nextTick()
+    await vi.waitFor(() => expect(c.characters.value.map(x => x.name)).toEqual(['Ad hoc']))
+    expect(fetchCharacters).toHaveBeenLastCalledWith({ conversationId: 'abc' })
+    vi.doUnmock('../composables/useCharacters')
   })
 })
