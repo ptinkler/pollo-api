@@ -19,6 +19,39 @@ const emit = defineEmits(['close', 'favourite', 'use-image', 'use-settings', 're
 const isVideo = computed(() => props.item?.kind === 'video')
 const isError = computed(() => props.item?.status === 'error')
 const requestOpen = ref(false) // the "exactly what was sent" dialog
+// Pollo bills in credits, everything else in dollars
+const costLabel = computed(() => {
+  const parts = []
+  if (props.item?.credits) parts.push(`${props.item.credits} credit${props.item.credits === 1 ? '' : 's'}`)
+  if (props.item?.cost) parts.push(fmtCost(props.item.cost))
+  return parts.filter(Boolean).join(' · ')
+})
+// What a generation was made from, e.g. "first frame + 2 refs"
+function sourceLabel(p) {
+  const from = []
+  if (p.source_video) from.push('source video')
+  if (p.last_frame) from.push('first + last frame')
+  else if (p.first_frame) from.push('first frame')
+  const n = p.ref_items?.length || p.refs?.length
+  if (n) from.push(`${n} ref${n === 1 ? '' : 's'}`)
+  return from.join(' + ')
+}
+// The settings it was made with (what was actually sent, where the provider says)
+const details = computed(() => {
+  const p = props.item?.params || {}
+  const video = props.item?.kind === 'video'
+  const audio = p.generate_audio == null ? '' : p.generate_audio ? 'generated' : 'off'
+  const rows = [
+    ['Length', video && p.duration ? `${p.duration}s` : ''],
+    ['Resolution', p.resolution],
+    ['Ratio', p.aspect_ratio],
+    ['Audio', video ? audio : ''],
+    ['Source', sourceLabel(p)],
+    ['Seed', p.seed],
+    ['Characters', p.character_names?.join(', ')],
+  ]
+  return rows.filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => [k, String(v)])
+})
 const loop = ref(false) // videos don't autoplay; the user opts into looping
 const when = computed(() => {
   const d = props.item?.created_at && new Date(props.item.created_at)
@@ -66,9 +99,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                 <dt>Model</dt>
                 <dd>{{ shortModel(item.model) }}</dd>
               </template>
-              <template v-if="item.cost">
+              <template v-if="costLabel">
                 <dt>Cost</dt>
-                <dd>{{ fmtCost(item.cost) || '—' }}</dd>
+                <dd>{{ costLabel }}</dd>
+              </template>
+              <template v-for="[label, value] in details" :key="label">
+                <dt>{{ label }}</dt>
+                <dd>{{ value }}</dd>
               </template>
               <template v-if="when">
                 <dt>Created</dt>
