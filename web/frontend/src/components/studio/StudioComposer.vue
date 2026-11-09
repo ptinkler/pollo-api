@@ -32,6 +32,8 @@ const peek = ref(null)
 const onEsc = e => e.key === 'Escape' && (peek.value = null)
 onMounted(() => document.addEventListener('keydown', onEsc))
 onBeforeUnmount(() => document.removeEventListener('keydown', onEsc))
+// Audio mode with a voice-clone model: the only attachment is the reference clip
+const audioClip = computed(() => props.mode === 'audio' && props.audioInput)
 const mediaMode = computed(() => props.mode === 'image' || props.mode === 'video')
 const pick = fn => {
   menu.value = false
@@ -96,14 +98,18 @@ function onDrop(e) {
 <template>
   <div class="compose" @dragover.prevent="drag = true" @dragleave.prevent="drag = false" @drop.prevent="onDrop">
     <div class="cbox" :class="{ drag }">
-      <div v-if="attachments.length || mediaMode" class="atts">
-        <div v-if="mediaMode" class="plus">
+      <div v-if="attachments.length || mediaMode || audioClip" class="atts">
+        <div v-if="mediaMode || audioClip" class="plus">
           <button class="addtile" title="Add reference images" @click="menu = !menu">+</button>
           <div v-if="menu" class="addmenu" @mouseleave="menu = false">
-            <button @click="pick(() => emit('library'))">🖼 From Media…</button>
-            <button @click="pick(() => img?.click())">⬆ Upload image</button>
+            <template v-if="mediaMode">
+              <button @click="pick(() => emit('library'))">🖼 From Media…</button>
+              <button @click="pick(() => img?.click())">⬆ Upload image</button>
+            </template>
             <button v-if="mode === 'video' && videoInput" @click="pick(() => vid?.click())">🎞 Upload video</button>
-            <button v-if="mode === 'video' && audioInput" @click="pick(() => aud?.click())">🔊 Upload audio</button>
+            <button v-if="(mode === 'video' || audioClip) && audioInput" @click="pick(() => aud?.click())">
+              🔊 Upload audio
+            </button>
           </div>
         </div>
         <div v-for="a in attachments" :key="a.key" class="att" :class="{ uploading: a.uploading }">
@@ -167,7 +173,7 @@ function onDrop(e) {
         </button>
         <span class="note">{{ uploading ? 'Uploading…' : hint }}</span>
         <span
-          v-if="estimate && mediaMode"
+          v-if="estimate && (mediaMode || mode === 'audio')"
           class="est"
           :title="
             estimate.full_credits > estimate.credits

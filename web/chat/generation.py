@@ -17,7 +17,7 @@ from .catalogue import _auto_ratio, _model_info
 from .constants import DEFAULT_IMAGE_LIMIT, IMAGE_EXTS, TITLE_SECONDS
 from .helpers import _conv_dir, _effective_ids, _file_to_data_url
 from .models import RefChoices
-from .tools import IMAGE_TOOL_RESULT, TITLE_PROMPT, VIDEO_TOOL_RESULT
+from .tools import AUDIO_TOOL_RESULT, IMAGE_TOOL_RESULT, TITLE_PROMPT, VIDEO_TOOL_RESULT
 
 # Chat APIs don't accept images inside assistant messages, so images the
 # model generated ride along with the next user message, after this label
@@ -315,16 +315,19 @@ def _history_tool_call(item: dict) -> dict:
         "id": f"call_{item['id']}",
         "type": "function",
         "function": {
-            "name": "generate_image" if item["kind"] == "image" else "generate_video",
+            "name": f"generate_{item['kind']}",
             "arguments": json.dumps(args),
         },
     }
 
 
+_TOOL_RESULTS = {"image": IMAGE_TOOL_RESULT, "audio": AUDIO_TOOL_RESULT}
+
+
 def _history_tool_result(item: dict) -> dict:
     if item.get("status") == "error":
         return {"ok": False, "error": item.get("error") or "failed"}
-    result: dict[str, Any] = {"ok": True, "result": IMAGE_TOOL_RESULT if item["kind"] == "image" else VIDEO_TOOL_RESULT}
+    result: dict[str, Any] = {"ok": True, "result": _TOOL_RESULTS.get(item["kind"], VIDEO_TOOL_RESULT)}
     refs = (item.get("params") or {}).get("refs") or []
     if item["kind"] == "image" and refs:
         result["reference_images"] = len(refs)

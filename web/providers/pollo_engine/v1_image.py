@@ -190,6 +190,19 @@ V1_IMAGE: dict[str, dict[str, Any]] = {
         "VALID_RATIOS": ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16"),
         "ACCEPTS_IMAGES": False,
     },
+    # Image tools (added 2026-11): a source image in, an image out, no prompt.
+    # "TOOL" picks the body; image upscale's `scale` rides the resolution picker.
+    "imageupscalev1": {
+        "V1_URL": f"{POLLO_API_V1_BASE}/image-upscale",
+        "TOOL": "upscale",
+        "VALID_RESOLUTIONS": ("1x", "2x", "4x", "8x", "16x"),
+        "MAX_IMAGES": 1,
+    },
+    "imagebgremovev1": {
+        "V1_URL": f"{POLLO_API_V1_BASE}/image-background-remove",
+        "TOOL": "bgremove",
+        "MAX_IMAGES": 1,
+    },
 }
 
 
@@ -199,12 +212,26 @@ def _img_cfg(model_id: str) -> dict[str, Any]:
 
 def v1_image_model_url(model_id: str) -> str:
     c = _img_cfg(model_id)
-    return f"{POLLO_API_V1_BASE}/{c['V1_PROVIDER']}/{c['V1_MODEL']}/image"
+    return c.get("V1_URL") or f"{POLLO_API_V1_BASE}/{c['V1_PROVIDER']}/{c['V1_MODEL']}/image"
+
+
+def _tool_payload(c: dict[str, Any], image_url: str | None, **kw) -> dict[str, Any]:
+    """An image tool: {image} (+ upscale's integer scale from "2x"-style values)."""
+    image = image_url or next(iter(kw.get("images") or []), None)
+    if not image:
+        raise ValueError("This tool needs a source image")
+    attrs: dict[str, Any] = {"image": image}
+    if c["TOOL"] == "upscale":
+        scale = str(kw.get("resolution") or "2x")
+        attrs["scale"] = int(scale[:-1]) if scale in c["VALID_RESOLUTIONS"] else 2
+    return {"input": attrs}
 
 
 def v1_image_payload(model_id: str, *, prompt: str, image_url: str | None, **kw) -> dict[str, Any]:
     """Build the v1 image API body, matching BaseV1ImageGenerator exactly."""
     c = _img_cfg(model_id)
+    if c.get("TOOL"):
+        return _tool_payload(c, image_url, **kw)
     aspect_ratio = kw.get("aspect_ratio") or _aspect_ratio(
         os.getenv("ASPECT_RATIO") or os.getenv("RATIO", c["DEFAULT_RATIO_KEYWORD"])
     )

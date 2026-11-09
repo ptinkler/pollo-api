@@ -12,7 +12,7 @@ the classes were removed; tests/test_pollo_engine.py now pins that proven output
 as a golden snapshot. The engine is split by model family:
 
     _shared        statuses, input-parsing + aspect-ratio helpers
-    v1_video       V1_VIDEO table + generic/kling/extend/recast builders
+    v1_video       V1_VIDEO table + generic/kling/extend/motion builders
     v1_image       V1_IMAGE table + builder
     legacy_video   LEGACY_VIDEO table + builders
     legacy_image   LEGACY_IMAGE table + builders

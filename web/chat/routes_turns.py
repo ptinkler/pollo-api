@@ -18,8 +18,8 @@ from web.core.metadata import get_db, iso
 from ..providers import openrouter, pollo
 from ..uploads import safe_filename
 from . import polling
-from .audio import submit_audio_generation
-from .catalogue import _fit_video_params
+from .audio import audio_params, submit_audio_generation
+from .catalogue import _fit_video_params, _model_info
 from .constants import DEFAULT_IMAGE_LIMIT
 from .deps import router
 from .generation import (
@@ -78,12 +78,14 @@ def api_estimate(data: EstimateRequest):
     return {
         "estimate": pollo.estimate_cost(
             data.model,
-            "video" if data.kind == "video" else "image",
+            data.kind if data.kind in ("video", "audio") else "image",
             duration,
             ratio,
             resolution,
             data.generate_audio,
             data.n_images,
+            data.prompt,
+            audio_params(data.audio_options),
         )
     }
 
@@ -107,12 +109,19 @@ def api_cancel_message(message_id: int):
     return {"cancelled": bool(ev)}
 
 
+def _prompt_optional(settings: TurnSettings) -> bool:
+    """Tools take a source file and no prompt (e.g. upscale the chat's latest video)."""
+    kind = settings.mode if settings.mode in ("image", "video") else None
+    model = {"image": settings.image_model, "video": settings.video_model}.get(kind)
+    return bool((_model_info(kind, model) or {}).get("no_prompt")) if kind else False
+
+
 @router.post("/conversations/{conv_id}/messages")
 def api_send_message(conv_id: str, data: SendMessage):
     _require_openrouter(data.mode)
     conv = _require_conv(conv_id)
     content = data.content.strip()
-    if not content and not data.attachments:
+    if not content and not data.attachments and not _prompt_optional(data):
         raise HTTPException(400, "Message is empty")
 
     conv_dir = _conv_dir(conv_id)
@@ -397,7 +406,7 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
                 )
             _add_message_cost(message_id, cost)
         elif item["kind"] == "audio":
-            job = submit_audio_generation(model, item["prompt"], params)
+            job = submit_audio_generation(conv_id, model, item["prompt"], params)
             db.update_chat_media_item(
                 message_id,
                 media_id,

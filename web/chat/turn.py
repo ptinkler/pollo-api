@@ -41,8 +41,10 @@ from .generation import (
 from .helpers import _branch_to, _conv_dir, _effective_ids, _message_out, _new_media, _saved_media
 from .models import TurnSettings
 from .tools import (
+    AUDIO_TOOL_RESULT,
     IMAGE_TOOL_RESULT,
     SYSTEM_PROMPT,
+    TOOLS_AUDIO,
     TOOLS_CREATE_CHARACTER,
     TOOLS_CREATE_INSTRUCTION,
     TOOLS_IMAGE,
@@ -112,6 +114,9 @@ class Turn:
     def _direct_image(self) -> None:
         user = self._last_user()
         prompt = (user.content if user else "").strip()
+        info = _model_info("image", self.s.image_model) or {}
+        if info.get("tool"):
+            return self._direct_image_tool(user, prompt, info)
         if not prompt:
             raise openrouter.OpenRouterError("Image mode needs a text prompt")
         chars = self.characters  # every attached character
@@ -128,10 +133,22 @@ class Turn:
             )
         self._generate_image(prompt, self.s.image_options.aspect_ratio, refs, chars=chars, dropped=dropped)
 
+    def _direct_image_tool(self, user, prompt: str, info: dict) -> None:
+        """An image tool (upscale, background remover…): the attached image is
+        the whole input. The model's name stands in for the prompt, so the
+        card can be retried."""
+        files = [m["file"] for m in (user.media if user else []) if m["kind"] == "image" and m.get("file")]
+        if not files:
+            raise openrouter.OpenRouterError("This tool needs an image — attach one")
+        self._generate_image(prompt or info.get("name") or "Image tool", None, files[:1])
+
     def _direct_video(self) -> None:
         user = self._last_user()
         prompt = (user.content if user else "").strip()
         frames = [m["file"] for m in (user.media if user else []) if m["kind"] == "image" and m.get("file")]
+        info = _model_info("video", self.s.video_model) or {}
+        if not prompt and info.get("no_prompt"):
+            prompt = info.get("name") or "Video tool"  # the source file is the whole input
         if not prompt and not frames:
             raise openrouter.OpenRouterError("Video mode needs a prompt or an image")
         # Attached images: the first frame, the last frame (first+last-frame
@@ -151,13 +168,18 @@ class Turn:
         prompt = (user.content if user else "").strip()
         if not prompt:
             raise openrouter.OpenRouterError("Audio mode needs a text prompt")
+        self._generate_audio(prompt)
+
+    def _generate_audio(self, prompt: str) -> None:
         if not self.s.audio_model:
             raise openrouter.OpenRouterError("No audio model selected")
         params = audio_params(self.s.audio_options)
+        if (_model_info("audio", self.s.audio_model) or {}).get("audio_input"):
+            params["source_audio"] = self._latest_audio()  # the clip to clone the voice from
         item = _new_media("audio", "generated", prompt=prompt, model=self.s.audio_model, params=params)
         self._add_media(item)
         try:
-            job = submit_audio_generation(self.s.audio_model, prompt, params)
+            job = submit_audio_generation(self.conv_id, self.s.audio_model, prompt, params)
         except openrouter.OpenRouterError as e:
             self._update_media(item, **_failure_fields(e))
             raise
@@ -217,6 +239,8 @@ class Turn:
             tools.insert(0, _with_character_arg(TOOLS_IMAGE, names))
         if self.s.video_model:
             tools.append(_with_character_arg(TOOLS_VIDEO, names))
+        if self.s.audio_model:
+            tools.append(TOOLS_AUDIO)
         tools.append(TOOLS_CREATE_INSTRUCTION)  # needs no media model: applies to the chat model itself
         return tools
 
@@ -282,6 +306,8 @@ class Turn:
             return self._create_character(args)
         if name == "create_instruction":
             return self._create_instruction(args)
+        if name == "generate_audio":
+            return self._audio_tool(args)
         if name not in ("generate_image", "generate_video"):
             return {"ok": False, "error": f"Unknown tool {name}"}
         prompt = str(args.get("prompt") or "").strip()
@@ -297,6 +323,16 @@ class Turn:
             return self._video_tool(prompt, args, source, chars)
         except openrouter.OpenRouterError as e:
             return {"ok": False, "error": str(e), "moderated": _is_moderation_error(e)}
+
+    def _audio_tool(self, args: dict) -> dict:
+        prompt = str(args.get("prompt") or "").strip()
+        if not prompt:
+            return {"ok": False, "error": "prompt is required"}
+        try:
+            self._generate_audio(prompt)
+        except openrouter.OpenRouterError as e:
+            return {"ok": False, "error": str(e), "moderated": _is_moderation_error(e)}
+        return {"ok": True, "result": AUDIO_TOOL_RESULT}
 
     def _image_tool(self, prompt: str, args: dict, source: str | None, chars: list) -> dict:
         # Aspect ratio is the composer's to set, not the chat model's. A ratio

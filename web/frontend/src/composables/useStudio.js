@@ -198,7 +198,10 @@ export function useStudio({ models, settings, showToast }) {
     return last?.role === 'assistant' ? last.id : null
   })
   const canSend = computed(
-    () => (!!draft.value.trim() || attachments.value.some(a => a.file)) && !uploading.value && !sending.value,
+    () =>
+      (!!draft.value.trim() || attachments.value.some(a => a.file) || !!settings.activeInfo.value?.no_prompt) &&
+      !uploading.value &&
+      !sending.value,
   )
   const activeTitle = computed(() => threads.value.find(t => t.id === active.value)?.title || 'New thread')
   // Which view the current thread opens on. A saved thread carries its own
@@ -528,7 +531,7 @@ export function useStudio({ models, settings, showToast }) {
   // "Use settings" (gallery): fill the composer from a past generation so the
   // user can tweak and press Generate. Fills only — never fires (unlike retry).
   function applyGenerationSettings(item) {
-    const kind = item.kind === 'video' ? 'video' : 'image'
+    const kind = ['video', 'audio'].includes(item.kind) ? item.kind : 'image'
     const text = item.original_prompt || item.prompt
     if (text) draft.value = text
     const model = item.model || item.params?.model
@@ -537,7 +540,23 @@ export function useStudio({ models, settings, showToast }) {
     applyOptions(kind, item.params || {})
     restoreRefs(item)
   }
+  const AUDIO_KEYS = [
+    'voice',
+    'speed',
+    'volume',
+    'pitch',
+    'instrumental',
+    'vocal_gender',
+    'style',
+    'title',
+    'negative_prompt',
+    'duration',
+  ]
   function applyOptions(kind, p) {
+    if (kind === 'audio') {
+      for (const k of AUDIO_KEYS) if (p[k] != null) settings.audioOpts[k] = p[k]
+      return
+    }
     const opts = kind === 'video' ? settings.videoOpts : settings.imageOpts
     for (const k of ['aspect_ratio', 'resolution']) if (p[k]) opts[k] = p[k]
     if (kind !== 'video') return
@@ -557,19 +576,21 @@ export function useStudio({ models, settings, showToast }) {
   let estimateSeq = 0
   async function refreshEstimate() {
     const kind = mode.value
-    const model = kind === 'image' || kind === 'video' ? selected[kind] : null
+    const model = ['image', 'video', 'audio'].includes(kind) ? selected[kind] : null
     const seq = ++estimateSeq
     if (!model?.startsWith('pollo/')) {
       estimate.value = null
       return
     }
     const t = turnSettings()
-    const o = kind === 'video' ? t.video_options : t.image_options
+    const o = { video: t.video_options, audio: {}, image: t.image_options }[kind]
+    const audio = kind === 'audio' ? { prompt: draft.value.trim(), audio_options: t.audio_options } : {}
     try {
       const r = await estimateChatCost({
         model,
         kind,
         ...o,
+        ...audio,
         n_images: attachments.value.filter(a => !a.video && !a.audio).length,
       })
       if (seq === estimateSeq) estimate.value = r.estimate
@@ -578,7 +599,16 @@ export function useStudio({ models, settings, showToast }) {
     }
   }
   watch(
-    () => JSON.stringify([mode.value, selected.image, selected.video, turnSettings(), attachments.value.length]),
+    () =>
+      JSON.stringify([
+        mode.value,
+        selected.image,
+        selected.video,
+        selected.audio,
+        turnSettings(),
+        attachments.value.length,
+        mode.value === 'audio' ? draft.value : '',
+      ]),
     () => {
       clearTimeout(estimateTimer)
       estimateTimer = setTimeout(refreshEstimate, 400)

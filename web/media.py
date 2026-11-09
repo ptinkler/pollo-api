@@ -46,7 +46,7 @@ from .users import require_user
 
 router = APIRouter(prefix="/api/media", dependencies=[Depends(require_user)])
 
-VIDEO_EXTS = {".mp4"}
+VIDEO_EXTS = {".mp4", ".webm", ".mov"}
 THUMB_SIZE = 320  # px, the thumbnail's shorter side (grid tiles are square, cropped to fill)
 THUMB_WORKERS = 2  # thumbnails made at once — a grid asks for many together, and a NAS CPU is slow
 # A new chat file isn't orphaned until it's this old (s): attachments wait in

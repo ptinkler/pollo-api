@@ -13,6 +13,9 @@ const {
   showImageOpts,
   showVideoOpts,
   videoInfo,
+  imageShowsRatio,
+  videoShowsRatio,
+  videoShowsDuration,
 } = inject('composerSettings')
 </script>
 
@@ -20,7 +23,7 @@ const {
   <div v-if="showImageOpts" class="isection">
     <div class="ilabel">Image options</div>
     <div class="orow">
-      <select v-model="imageOpts.aspect_ratio" class="msel">
+      <select v-if="imageShowsRatio" v-model="imageOpts.aspect_ratio" class="msel">
         <option value="">Ratio: auto</option>
         <option v-for="r in imageRatioOptions" :key="r" :value="r">{{ r }}</option>
       </select>
@@ -34,7 +37,7 @@ const {
   <div v-if="showVideoOpts" class="isection">
     <div class="ilabel">Video options</div>
     <div class="orow">
-      <select v-model="videoOpts.aspect_ratio" class="msel">
+      <select v-if="videoShowsRatio" v-model="videoOpts.aspect_ratio" class="msel">
         <option value="">Ratio: auto</option>
         <option v-for="r in videoRatioOptions" :key="r" :value="r">{{ r }}</option>
       </select>
@@ -44,7 +47,7 @@ const {
       </select>
     </div>
     <div class="orow">
-      <select v-model="videoOpts.duration" class="msel">
+      <select v-if="videoShowsDuration" v-model="videoOpts.duration" class="msel">
         <option value="">Duration: auto</option>
         <option v-for="d in durationOptions" :key="d" :value="d">{{ d }}s</option>
       </select>

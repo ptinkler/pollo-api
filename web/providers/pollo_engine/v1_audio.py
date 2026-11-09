@@ -11,6 +11,7 @@ _AUDIO_DEFAULTS: dict[str, Any] = {
     "NEEDS_VOICE": False,  # voiceId is required (ElevenLabs / MiniMax)
     "HAS_TUNING": False,  # speed / volume / pitch (Seed Audio)
     "HAS_DURATION": False,
+    "NEEDS_REF": False,  # a reference voice clip (voice cloning)
 }
 
 # model_id -> overrides (plus V1_PROVIDER / V1_MODEL / endpoint / builder)
@@ -21,6 +22,14 @@ V1_AUDIO: dict[str, dict[str, Any]] = {
         "endpoint": "text2speech",
         "builder": "speech",
         "HAS_TUNING": True,
+    },
+    "seedaudioref10v1": {
+        "V1_PROVIDER": "bytedance",
+        "V1_MODEL": "seed-audio-1-0",
+        "endpoint": "ref2audio",
+        "builder": "speech",
+        "HAS_TUNING": True,
+        "NEEDS_REF": True,
     },
     "minimaxspeech28hdv1": {
         "V1_PROVIDER": "minimax",
@@ -82,6 +91,11 @@ def _speech_payload(c: dict[str, Any], prompt: str, **kw) -> dict[str, Any]:
         if not kw.get("voice"):
             raise ValueError("This speech model needs a voice")
         attrs["voiceId"] = kw["voice"]
+    if c["NEEDS_REF"]:
+        if not kw.get("voice_ref_url"):
+            raise ValueError("This model needs a reference voice clip")
+        # the shape of the spec's own voiceRefs example
+        attrs["voiceRefs"] = [{"type": "audio", "name": "voice", "audioUrl": kw["voice_ref_url"]}]
     if c["HAS_TUNING"]:
         if kw.get("speed") is not None:
             attrs["speed"] = _clamp(kw["speed"], 0.5, 2)

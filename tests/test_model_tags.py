@@ -14,9 +14,10 @@ class TestVideoTags:
         m = {"type": "img2vid", "generate_audio": True, "frame_images": ["first_frame", "last_frame"]}
         assert tags_for("video", m) == ["img2vid", "text2vid", "first_last", "audio"]
 
-    def test_pollo_recast_is_motion_not_img2vid(self):
-        # recast's first_frame is a reference image, not "animate this image"
-        assert tags_for("video", {"type": "recast", "frame_images": ["first_frame"]}) == ["motion", "video_edit"]
+    def test_pollo_motion_models_are_all_recast(self):
+        # the first_frame is a reference image, not "animate this image"
+        m = {"type": "motion", "frame_images": ["first_frame"]}
+        assert tags_for("video", m) == ["motion", "recast"]
 
     def test_pollo_ref_and_extend(self):
         assert tags_for("video", {"type": "ref"}) == ["ref2vid"]
@@ -25,16 +26,19 @@ class TestVideoTags:
     def test_pollo_video_edit(self):
         assert tags_for("video", {"type": "video_edit", "frame_images": []}) == ["video_edit"]
 
-    def test_pollo_motion_is_motion_only(self):
-        # act/motion: the first_frame is the image being animated, not img2vid
-        assert tags_for("video", {"type": "motion", "frame_images": ["first_frame"]}) == ["motion"]
-
     def test_pollo_upscale(self):
         assert tags_for("video", {"type": "upscale", "frame_images": []}) == ["upscale"]
 
     def test_pollo_lipsync(self):
         # lip sync: the first_frame is the portrait, driven by audio — not img2vid
         assert tags_for("video", {"type": "lipsync", "frame_images": ["first_frame"]}) == ["lipsync"]
+
+    def test_pollo_video_tools(self):
+        for typ, tag in (("bgremove", "bg_remove"), ("subtitle_remove", "subtitle_remove"), ("faceswap", "face_swap")):
+            assert tags_for("video", {"type": typ, "frame_images": ["first_frame"]}) == [tag]
+
+    def test_image_tool(self):
+        assert tags_for("image", {"tool": "upscale"}) == ["tools"]
 
     def test_pollo_audio(self):
         assert tags_for("audio", {"type": "speech"}) == ["tts"]

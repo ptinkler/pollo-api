@@ -7,8 +7,8 @@ Reply with the title alone: no quotes, no "Title:", no full stop.
 Message:
 {prompt}"""
 
-SYSTEM_PROMPT = """You are an assistant in a chat app. You have generate_image and generate_video \
-tools, which create media with the image and video models the user has selected; the result is shown \
+SYSTEM_PROMPT = """You are an assistant in a chat app. You have generate_image, generate_video and \
+generate_audio tools, which create media with the models the user has selected; the result is shown \
 to the user in the chat.
 
 When tools aren't available, bracketed notes in the conversation history record media that was \
@@ -18,6 +18,7 @@ Today's date is {today}."""
 
 IMAGE_TOOL_RESULT = "Image generated; it is shown to the user."
 VIDEO_TOOL_RESULT = "Video job started; it is shown to the user once rendering finishes."
+AUDIO_TOOL_RESULT = "Audio job started; it is shown to the user once it is ready."
 
 TOOLS_IMAGE = {
     "type": "function",
@@ -102,6 +103,25 @@ TOOLS_CREATE_INSTRUCTION = {
                 },
             },
             "required": ["name", "content"],
+        },
+    },
+}
+
+TOOLS_AUDIO = {
+    "type": "function",
+    "function": {
+        "name": "generate_audio",
+        "description": (
+            "Generate audio with the user's selected audio model: speech (the exact text to be spoken) or a "
+            "song / music track (a description of it, or its lyrics). Voice and other settings are the "
+            "user's to choose. Runs in the background."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string", "description": "The text to speak, or the music description / lyrics."},
+            },
+            "required": ["prompt"],
         },
     },
 }

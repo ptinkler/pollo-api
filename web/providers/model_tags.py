@@ -25,8 +25,12 @@ TAGS: dict[str, str] = {
     "video_edit": "Video edit",
     "video_extend": "Video extend",
     "motion": "Motion / act",
+    "recast": "Recast",
     "lipsync": "Lip sync",
     "upscale": "Upscale",
+    "bg_remove": "Background remove",
+    "subtitle_remove": "Subtitle remove",
+    "face_swap": "Face swap",
     "audio": "Makes audio",
     # audio
     "tts": "Text→Speech",
@@ -72,9 +76,11 @@ _POLLO_TYPE_TAGS = {
     "extend": ("video_extend",),
     "video_edit": ("video_edit",),
     "upscale": ("upscale",),
-    "motion": ("motion",),
+    "bgremove": ("bg_remove",),
+    "subtitle_remove": ("subtitle_remove",),
+    "faceswap": ("face_swap",),
+    "motion": ("motion", "recast"),
     "lipsync": ("lipsync",),
-    "recast": ("motion", "video_edit"),
     "ref": ("ref2vid",),
     "img2vid": ("img2vid", "text2vid"),
 }
@@ -87,7 +93,17 @@ _VENICE_FAMILY_TAGS = {
     "angles": ("img2vid",),
 }
 # Families/types where a "first_frame" is a role other than "animate this image"
-_EDIT_TYPES = {"recast", "motion", "ref", "extend", "video_edit", "upscale", "lipsync"}
+_EDIT_TYPES = {
+    "motion",
+    "ref",
+    "extend",
+    "video_edit",
+    "upscale",
+    "bgremove",
+    "subtitle_remove",
+    "faceswap",
+    "lipsync",
+}
 _VENICE_EDIT_FAMS = {"video", "motion", "upscale", "reference"}
 
 

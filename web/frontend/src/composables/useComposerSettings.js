@@ -164,6 +164,10 @@ export function useComposerSettings(models) {
   const videoRatioOptions = computed(() => ratiosOf(videoInfo.value))
   const videoResOptions = computed(() => videoInfo.value?.resolutions || [])
   const durationOptions = computed(() => videoInfo.value?.durations || [])
+  // Source-file tools (upscale, face swap…) carry no ratio / duration of their own
+  const imageShowsRatio = computed(() => !imageInfo.value?.tool)
+  const videoShowsRatio = computed(() => !(videoInfo.value?.type && !videoInfo.value.aspect_ratios))
+  const videoShowsDuration = computed(() => !(videoInfo.value?.type && !videoInfo.value.durations))
   const showImageOpts = computed(() => !!selected.image && ['auto', 'image'].includes(mode.value))
   const showVideoOpts = computed(() => !!selected.video && ['auto', 'video'].includes(mode.value))
   const showAudioOpts = computed(() => !!selected.audio && mode.value === 'audio')
@@ -254,9 +258,9 @@ export function useComposerSettings(models) {
     }
   }
 
-  // The model the current mode sends to
-  const activeModel = computed(
-    () => ({ image: selected.image, video: selected.video, audio: selected.audio })[mode.value] ?? selected.text,
+  // The picked model's catalogue entry for the current mode (null in Chat / Auto)
+  const activeInfo = computed(
+    () => ({ image: imageInfo, video: videoInfo, audio: audioInfo })[mode.value]?.value ?? null,
   )
 
   return {
@@ -280,11 +284,14 @@ export function useComposerSettings(models) {
     videoRatioOptions,
     videoResOptions,
     durationOptions,
+    imageShowsRatio,
+    videoShowsRatio,
+    videoShowsDuration,
+    activeInfo,
     showImageOpts,
     showVideoOpts,
     showAudioOpts,
     currentMode,
-    activeModel,
     cycleMode,
     applyDefaults,
     applyChat,

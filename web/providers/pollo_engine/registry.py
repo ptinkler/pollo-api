@@ -51,9 +51,17 @@ _V1_FAMILY = {
     "extend": "extend",
     "edit": "edit",
     "upscale": "upscale",
+    "bgremove": "bgremove",
+    "subtitle": "subtitle",
+    "faceswap": "faceswap",
     "lipsync": "lipsync",
-    "recast": "recast",
+    "motion": "motion",
 }
+
+_V1_VIDEO_FAMILIES = tuple(_V1_FAMILY.values())
+# families that work on a source video (and take no source image) / any source video
+_VIDEO_ONLY_FAMILIES = ("extend", "edit", "upscale", "bgremove", "subtitle")
+_SOURCE_VIDEO_FAMILIES = (*_VIDEO_ONLY_FAMILIES, "motion", "faceswap")
 
 
 @dataclass
@@ -64,7 +72,7 @@ class ModelSpec:
 
     model_id: str
     kind: str  # "video" | "image" | "audio"
-    family: str  # v1video, kling, extend, edit, upscale, lipsync, recast, legacyvideo, ref, v1image, legacyimage
+    family: str  # a _V1_FAMILY value, legacyvideo, ref, v1image, legacyimage
     model_url: str
     VALID_RATIOS: tuple = ()
     VALID_LENGTHS: tuple = ()
@@ -83,7 +91,7 @@ def _build_payload(spec: ModelSpec, prompt: str, image_url: str | None, **kw) ->
     if spec.kind == "image":
         fn = v1_image_payload if spec.family == "v1image" else legacy_image_payload
         return fn(spec.model_id, prompt=prompt, image_url=image_url, **kw)
-    if spec.family in ("v1video", "kling", "extend", "edit", "upscale", "lipsync", "recast"):
+    if spec.family in _V1_VIDEO_FAMILIES:
         return v1_video_payload(spec.model_id, prompt=prompt, image_url=image_url, **kw)
     if spec.family == "legacyvideo":
         return legacy_video_payload(spec.model_id, prompt=prompt, image_url=image_url, **kw)
@@ -93,7 +101,7 @@ def _build_payload(spec: ModelSpec, prompt: str, image_url: str | None, **kw) ->
 def _video_state(spec: ModelSpec, image_url: str | None, **kw) -> dict[str, Any]:
     """The resolved aspect/resolution/length/audio for job records — the values
     the old __init__ stored as attributes (whether or not the payload sends them)."""
-    if spec.family in ("v1video", "kling", "extend", "edit", "upscale", "lipsync", "recast"):
+    if spec.family in _V1_VIDEO_FAMILIES:
         s = _process_inputs(_cfg(spec.model_id), image_url, **kw)
         return {
             "aspect_ratio": s["aspect_ratio"],
@@ -142,9 +150,9 @@ class PolloGenerator:
         self.image_url = get_image_url(self.project) if image_url is _UNSET else image_url
         if spec.kind == "audio":
             self.image_url = None
-        if spec.family in ("extend", "edit", "upscale"):
+        if spec.family in _VIDEO_ONLY_FAMILIES:
             self.image_url = None  # works on a source video; never a source image
-        if spec.family in ("recast", "upscale"):
+        if spec.family in ("motion", "upscale", "bgremove", "subtitle", "faceswap"):
             self.prompt = kwargs.get("prompt") or " "  # ignored by these; the API wants it non-empty
         self.video_url = kwargs.get("video_url")
         # what the family builders take (resolved prompt/image_url pass explicitly)
@@ -257,7 +265,7 @@ for _mid in V1_VIDEO:
         VALID_RATIOS=tuple(_c["VALID_RATIOS"]),
         VALID_LENGTHS=tuple(_c["VALID_LENGTHS"]),
         VALID_RESOLUTIONS=tuple(_c["VALID_RESOLUTIONS"]),
-        video_edit=_fam in ("extend", "edit", "upscale", "recast"),
+        video_edit=_fam in _SOURCE_VIDEO_FAMILIES,
     )
 GENERATORS: dict[str, ModelSpec] = {**GENERATORS_LEGACY, **GENERATORS_V1}
 

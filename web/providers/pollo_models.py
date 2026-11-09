@@ -346,7 +346,7 @@ MODEL_INFO = {
         },
     },
     # "type": "extend" continues a source video (video_url) instead of
-    # animating an image. Selectable like Recast: the source video rides in on
+    # animating an image. Selectable like the motion models: the source video rides in on
     # video_input (the chat's latest video, or an uploaded one) — no reference
     # image. The user picks how many seconds to add (duration) and a resolution.
     "seedance25extendv1": {
@@ -395,24 +395,36 @@ MODEL_INFO = {
         "modes": ["standard", "face", "denoise", "sharpen", "anime"],
         "video_input": True,
     },
-    # "type": "recast" = Pollo Recast (wan-2-2-animate-mix): replaces the
-    # subject in a source video with one reference image, keeping the motion.
-    # A selectable model (unlike "extend"): the source video rides in on
-    # video_input (latest chat video or an uploaded one), the reference image
-    # on first_frame. No length/resolution/ratio — the source video sets them.
-    "recastv1": {
-        "label": "Pollo Recast",
-        "type": "recast",
-        "lengths": [],
-        "resolutions": [],
-        "ratios": [],
+    # Video tools: source video in, video out; no prompt. The resolution picker
+    # carries the one choice (output format / subtitle language).
+    "videobgremovev1": {
+        "label": "Video Background Remover",
+        "type": "bgremove",
+        "resolutions": ["webm", "mov"],
+        "options": [],
+        "video_input": True,
+    },
+    "videosubtitleremovev1": {
+        "label": "Video Subtitle Remover",
+        "type": "subtitle_remove",
+        "resolutions": ["en", "zh", "all", "ja", "ko", "ar"],
+        "options": ["mode"],
+        "modes": ["standard", "advanced"],
+        "video_input": True,
+    },
+    # Face swap: source video (video_input) + the face image (first_frame).
+    "faceswapv1": {"label": "Face Swap", "type": "faceswap", "options": [], "video_input": True},
+    # Wan 2.2 Animate Mix: a motion model like the ones below.
+    "wananimatemixv1": {
+        "label": "Wan 2.2 Animate Mix",
+        "type": "motion",
         "options": ["mode"],
         "modes": ["std", "pro"],
         "video_input": True,
     },
     # "type": "motion" = act / motion transfer: animate a reference image
     # (first_frame) with the motion of a source video (video_input). Same shape
-    # as Recast; tagged "motion". Some models take a std/pro mode, some don't.
+    # as above; tagged "motion". Some models take a std/pro mode, some don't.
     "wananimatemovev1": {
         "label": "Wan Animate Move",
         "type": "motion",
@@ -694,9 +706,20 @@ MODEL_INFO = {
     # id from Pollo's voice list; "tuning": speed/volume/pitch), "music" = Suno
     # ("instrumental", lyrics mode via style + title, "duration" on v5.5).
     "seedaudio10v1": {"label": "Seed Audio 1.0", "type": "speech", "options": ["tuning"]},
+    # ref2audio: speaks in the voice of an uploaded clip (audio_input).
+    "seedaudioref10v1": {
+        "label": "Seed Audio 1.0 (voice clone)",
+        "type": "speech",
+        "options": ["tuning"],
+        "audio_input": True,
+    },
     "minimaxspeech28hdv1": {"label": "MiniMax Speech 2.8 HD", "type": "speech", "options": ["voice"]},
     "elevenv3v1": {"label": "ElevenLabs v3", "type": "speech", "options": ["voice"]},
     "sunov45plusv1": {"label": "Suno v4.5+", "type": "music", "options": ["instrumental", "lyrics"]},
     "sunov5v1": {"label": "Suno v5", "type": "music", "options": ["instrumental", "lyrics"]},
     "sunov55v1": {"label": "Suno v5.5", "type": "music", "options": ["instrumental", "lyrics", "duration"]},
+    # Image tools ("tool": source image in, image out; no prompt). The upscale
+    # factor rides the resolution picker.
+    "imageupscalev1": {"label": "Image Upscale", "type": "image", "tool": "upscale", "options": []},
+    "imagebgremovev1": {"label": "Image Background Remover", "type": "image", "tool": "bgremove", "options": []},
 }

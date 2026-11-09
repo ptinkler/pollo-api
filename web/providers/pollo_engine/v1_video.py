@@ -1,4 +1,4 @@
-"""V1 video API bodies: the generic family plus Kling, extend, edit, upscale, lipsync and recast."""
+"""V1 video API bodies: the generic family plus Kling, extend, edit, upscale, lipsync and motion."""
 
 from __future__ import annotations
 
@@ -584,16 +584,16 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "endpoint": "video-edit",
         "builder": "edit",
     },
-    "recastv1": {
+    "wananimatemixv1": {
         "V1_PROVIDER": "alibaba",
         "V1_MODEL": "wan-2-2-animate-mix",
         "endpoint": "motion",
         "HAS_MODE": True,
         "DEFAULT_MODE": "std",
-        "builder": "recast",
+        "builder": "motion",
     },
     # Motion / act (added 2026-11): a reference image animated by the motion of a
-    # source video. Same {image, video (+mode)} shape as Recast (builder reused);
+    # source video. Wan 2.2 Animate Mix is one of them;
     # the MODEL_INFO "type": "motion" sets the tag and submit routing.
     "wananimatemovev1": {
         "V1_PROVIDER": "alibaba",
@@ -601,7 +601,7 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "endpoint": "motion",
         "HAS_MODE": True,
         "DEFAULT_MODE": "std",
-        "builder": "recast",
+        "builder": "motion",
     },
     "klingmotion26v1": {
         "V1_PROVIDER": "kling-ai",
@@ -609,7 +609,7 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "endpoint": "motion",
         "HAS_MODE": True,
         "DEFAULT_MODE": "std",
-        "builder": "recast",
+        "builder": "motion",
     },
     "klingmotion3v1": {
         "V1_PROVIDER": "kling-ai",
@@ -617,25 +617,25 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "endpoint": "motion",
         "HAS_MODE": True,
         "DEFAULT_MODE": "std",
-        "builder": "recast",
+        "builder": "motion",
     },
     "actionimitationv1": {
         "V1_PROVIDER": "pollo-ai",
         "V1_MODEL": "action-imitation",
         "endpoint": "motion",
-        "builder": "recast",
+        "builder": "motion",
     },
     "actionimitationv2v1": {
         "V1_PROVIDER": "pollo-ai",
         "V1_MODEL": "action-imitation-v2",
         "endpoint": "motion",
-        "builder": "recast",
+        "builder": "motion",
     },
     "runwayacttwov1": {
         "V1_PROVIDER": "runway",
         "V1_MODEL": "runway-act-two",
         "endpoint": "motion",
-        "builder": "recast",
+        "builder": "motion",
     },
     # Video upscale (added 2026-11): {video, scale (+mode)}. The resolution
     # picker carries Pollo's `scale`; Pollo's own endpoint has no provider/model
@@ -655,6 +655,26 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "DEFAULT_RESOLUTION": "2x",
         "MODES": _UPSCALE_MODES,
         "builder": "upscale",
+    },
+    # Video tools (added 2026-11): source video in, video out. Like upscale, the
+    # resolution picker carries the one choice (output format / subtitle language).
+    "videobgremovev1": {
+        "V1_URL": f"{POLLO_API_V1_BASE}/video-background-remove",
+        "VALID_RESOLUTIONS": ("webm", "mov"),
+        "DEFAULT_RESOLUTION": "webm",
+        "builder": "bgremove",
+    },
+    "videosubtitleremovev1": {
+        "V1_URL": f"{POLLO_API_V1_BASE}/video-subtitle-remove",
+        "VALID_RESOLUTIONS": ("en", "zh", "all", "ja", "ko", "ar"),
+        "DEFAULT_RESOLUTION": "en",
+        "MODES": ("standard", "advanced"),
+        "builder": "subtitle",
+    },
+    # Face swap: the source video plus one face image (first_frame).
+    "faceswapv1": {
+        "V1_URL": f"{POLLO_API_V1_BASE}/face-swap",
+        "builder": "faceswap",
     },
     # Lip-sync (added 2026-11): drive a reference image (a portrait) with an
     # audio track. Shape {image, audio} (+prompt, +resolution where offered).
@@ -783,7 +803,7 @@ def _process_inputs(c: dict[str, Any], image_url: str | None, **kw) -> dict[str,
     }
 
 
-def _generic_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any]) -> dict[str, Any]:
+def _generic_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **_) -> dict[str, Any]:
     refs, is_text_only = s["refs"], s["is_text_only"]
     attrs: dict[str, Any] = {"prompt": prompt}
     if refs:
@@ -813,7 +833,7 @@ def _generic_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: d
     return {"input": attrs}
 
 
-def _kling_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any]) -> dict[str, Any]:
+def _kling_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **_) -> dict[str, Any]:
     if s["is_text_only"] and not c["TEXT_TO_VIDEO"]:
         raise ValueError(f"{c['V1_MODEL']} needs a source image (it has no text-to-video mode)")
     payload = _generic_payload(c, prompt, image_url, s)
@@ -872,6 +892,32 @@ def _upscale_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: d
     return {"input": {"video": video_url, "scale": scale, "mode": mode}}
 
 
+def _bgremove_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw) -> dict[str, Any]:
+    """Video background removal: {video, outputFormat} (webm / mov, both transparent)."""
+    if not kw.get("video_url"):
+        raise ValueError("Background removal needs the source video's URL")
+    fmt = s["resolution"] if s["resolution"] in c["VALID_RESOLUTIONS"] else c["DEFAULT_RESOLUTION"]
+    return {"input": {"video": kw["video_url"], "outputFormat": fmt}}
+
+
+def _subtitle_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw) -> dict[str, Any]:
+    """Subtitle removal: {video, language, tier}; unknown values fall back to the defaults."""
+    if not kw.get("video_url"):
+        raise ValueError("Subtitle removal needs the source video's URL")
+    lang = s["resolution"] if s["resolution"] in c["VALID_RESOLUTIONS"] else c["DEFAULT_RESOLUTION"]
+    tier = kw.get("mode") if kw.get("mode") in c["MODES"] else c["MODES"][0]
+    return {"input": {"video": kw["video_url"], "language": lang, "tier": tier}}
+
+
+def _faceswap_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw) -> dict[str, Any]:
+    """Face swap: the source video plus a face image."""
+    if not kw.get("video_url"):
+        raise ValueError("Face swap needs the source video's URL")
+    if not image_url:
+        raise ValueError("Face swap needs a face image URL")
+    return {"input": {"video": kw["video_url"], "faceImage": image_url}}
+
+
 def _lipsync_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw) -> dict[str, Any]:
     """Lip sync: a reference image driven by an audio track — {image, audio}
     (+prompt where given / required, +resolution where the model offers one)."""
@@ -890,8 +936,8 @@ def _lipsync_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: d
     return {"input": attrs}
 
 
-def _recast_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw) -> dict[str, Any]:
-    """Recast and motion/act share this shape: a reference image animated by a
+def _motion_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw) -> dict[str, Any]:
+    """Motion / act models (Wan Animate, Kling Motion…) share this shape: a reference image animated by a
     source video. `mode` (std/pro) is sent only when the model offers one — a
     few (action-imitation, runway-act-two) take just image + video."""
     video_url = kw.get("video_url")
@@ -905,23 +951,24 @@ def _recast_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: di
     return {"input": attrs}
 
 
+_BUILDERS = {
+    "generic": _generic_payload,
+    "kling": _kling_payload,
+    "extend": _extend_payload,
+    "edit": _edit_payload,
+    "upscale": _upscale_payload,
+    "bgremove": _bgremove_payload,
+    "subtitle": _subtitle_payload,
+    "faceswap": _faceswap_payload,
+    "lipsync": _lipsync_payload,
+    "motion": _motion_payload,
+}
+
+
 def v1_video_payload(model_id: str, *, prompt: str, image_url: str | None, **kw) -> dict[str, Any]:
     """Build the v1 video API body for any model, dispatching on its family."""
     c = _cfg(model_id)
-    s = _process_inputs(c, image_url, **kw)
-    builder = c["builder"]
-    if builder == "generic":
-        return _generic_payload(c, prompt, image_url, s)
-    if builder == "kling":
-        return _kling_payload(c, prompt, image_url, s)
-    if builder == "extend":
-        return _extend_payload(c, prompt, image_url, s, **kw)
-    if builder == "edit":
-        return _edit_payload(c, prompt, image_url, s, **kw)
-    if builder == "upscale":
-        return _upscale_payload(c, prompt, image_url, s, **kw)
-    if builder == "lipsync":
-        return _lipsync_payload(c, prompt, image_url, s, **kw)
-    if builder == "recast":
-        return _recast_payload(c, prompt, image_url, s, **kw)
-    raise ValueError(f"unknown builder {builder!r} for {model_id}")
+    build = _BUILDERS.get(c["builder"])
+    if build is None:
+        raise ValueError(f"unknown builder {c['builder']!r} for {model_id}")
+    return build(c, prompt, image_url, _process_inputs(c, image_url, **kw), **kw)

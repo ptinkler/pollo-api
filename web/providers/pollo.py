@@ -119,6 +119,8 @@ def list_image_models() -> list[dict[str, Any]]:
             "max_refs": getattr(cls, "MAX_IMAGES", 0) or None,  # reference images it takes (None = unknown)
             "aspect_ratios": list(cls.VALID_RATIOS) or None,
             "resolutions": list(cls.VALID_RESOLUTIONS) or None,
+            "tool": meta.get("tool") or None,  # a source image in, a result out (no prompt)
+            "no_prompt": bool(meta.get("tool")),
             "created": None,
             "conversational": False,
             # Not enabled for this key — listed only behind "Show hidden"
@@ -132,27 +134,27 @@ def list_video_models() -> list[dict[str, Any]]:
     """Pollo's v1 video models, shaped like openrouter.list_video_models()."""
     out = []
     for key, cls, meta in _catalogue(_video_generators()):
-        # Recast works on a source video + one reference image, so it has no
+        # Motion models work on a source video + one reference image, so it has no
         # duration/resolution/aspect ratio (the source video sets those). Extend
         # continues a source video too, but the user picks the added duration
         # and resolution — it takes no image and no aspect ratio.
         typ = meta.get("type")
-        recast = typ in ("recast", "motion")  # animate a reference image with a source video
-        extend = typ == "extend"  # continue a source video
-        edit = typ == "video_edit"  # edit a source video from a prompt
-        upscale = typ == "upscale"  # enlarge / enhance a source video
+        recast = typ in _IMAGE_AND_VIDEO  # a reference image + a source video
+        no_image = typ in _VIDEO_ONLY  # source-video families that take no first frame
         lipsync = typ == "lipsync"  # drive a portrait with an audio track
-        no_image = extend or edit or upscale  # source-video families that take no first frame
         # only the plain generators carry their own duration / aspect ratio;
-        # the source-video / audio families derive the length from their input
-        own_duration = not (recast or edit or upscale or lipsync)
-        own_ratio = not (recast or extend or edit or upscale or lipsync)
+        # the source-video / audio families derive the length from their input.
+        # Extend alone lets the user pick the added duration.
+        derived = recast or lipsync or no_image
+        own_duration = not derived or typ == "extend"
+        own_ratio = not derived
         out.append(
             {
                 "id": PREFIX + key,
                 "name": f"Pollo: {meta.get('label') or key}",
                 "type": typ,
                 "durations": (meta.get("lengths") or list(cls.VALID_LENGTHS) or None) if own_duration else None,
+                "no_prompt": typ in _NO_PROMPT,  # the source file is the whole input
                 "resolutions": None if recast else (meta.get("resolutions") or list(cls.VALID_RESOLUTIONS) or None),
                 "aspect_ratios": (meta.get("ratios") or list(cls.VALID_RATIOS) or None) if own_ratio else None,
                 # recast/lipsync: the reference image rides on first_frame; extend/edit take none
@@ -179,7 +181,7 @@ def list_audio_models() -> list[dict[str, Any]]:
             "name": f"Pollo: {meta.get('label') or key}",
             "type": meta.get("type"),
             "options": meta.get("options") or [],
-            "max_prompt": getattr(cls, "MAX_PROMPT", None),
+            "audio_input": bool(meta.get("audio_input")),  # takes a reference clip (voice cloning)
             "created": None,
             "hidden": meta.get("hidden") or None,
         }
@@ -206,10 +208,14 @@ def list_voices(page: int = 1, page_size: int = 50, **filters: str) -> dict[str,
     return {"voices": voices, "total": body.get("total", len(voices))}
 
 
-def submit_audio(model_id: str, prompt: str, **opts: Any) -> dict:
+def submit_audio(model_id: str, prompt: str, source_audio: Path | None = None, **opts: Any) -> dict:
     """Start a speech / music job. Returns {"id": "pollo:<task>", "params": the
     settings actually sent}, like submit_video."""
     key = _generator_key(model_id, AUDIO_GENERATORS)
+    if MODEL_INFO.get(key, {}).get("audio_input"):
+        if not source_audio:
+            raise PolloError("Voice cloning needs a reference clip — upload an audio file")
+        opts["voice_ref_url"] = _upload_audio(source_audio)
     try:
         generator = get_audio_generator(
             key, api_key=keyctx.provider_key("pollo"), project="chat", prompt=prompt, **opts
@@ -223,7 +229,7 @@ def submit_audio(model_id: str, prompt: str, **opts: Any) -> dict:
 
 def _video_generators() -> dict:
     """The v1 video models selectable in the picker — text/image-to-video plus
-    the source-video families (recast, extend) — and legacy ref2video."""
+    the source-video families (extend, motion…) — and legacy ref2video."""
     return {
         **GENERATORS_V1,
         # ref2video (several reference images) only exists on the legacy API
@@ -303,14 +309,22 @@ def generate_image(
 
 # "needs a source video" label per source-video family (preserves wording)
 _SRC_VIDEO_NEEDS = {
-    "recast": "Recast",
+    "faceswap": "Face swap",
+    "bgremove": "Background removal",
+    "subtitle_remove": "Subtitle removal",
     "motion": "Motion",
     "extend": "Extending",
     "video_edit": "Editing",
     "upscale": "Upscaling",
 }
 # families that animate a reference image with a source video (image + video)
-_IMAGE_AND_VIDEO = ("recast", "motion")
+_IMAGE_AND_VIDEO = ("motion", "faceswap")
+# families that work on a source video alone (no image)
+_VIDEO_ONLY = ("extend", "video_edit", "upscale", "bgremove", "subtitle_remove")
+# families that run with no prompt text
+_NO_PROMPT = ("upscale", "bgremove", "subtitle_remove", "faceswap", "motion")
+# families whose enhancement mode the user can pick
+_TAKES_MODE = ("motion", "upscale", "subtitle_remove")
 
 
 def _submit_source_video_job(
@@ -325,11 +339,11 @@ def _submit_source_video_job(
     generate_audio: bool | None,
     mode: str | None,
 ) -> dict | None:
-    """Submit a job for a family that works on a source video — Recast / Motion
+    """Submit a job for a family that works on a source video — Motion
     (video + reference image + mode), Extend (video, adds duration) or Video Edit
     (video + instruction prompt) or Upscale (video + scale/mode). Returns the job dict, or None if `typ` isn't one
     of those (so the caller falls through to the image/text path)."""
-    if typ not in (*_IMAGE_AND_VIDEO, "extend", "video_edit", "upscale"):
+    if typ not in (*_IMAGE_AND_VIDEO, *_VIDEO_ONLY):
         return None
     if not source_video:
         raise PolloError(f"{_SRC_VIDEO_NEEDS[typ]} needs a source video")
@@ -344,11 +358,11 @@ def _submit_source_video_job(
         "prompt": prompt,
         "video_url": _upload_video(source_video),
     }
-    if typ in _IMAGE_AND_VIDEO:  # recast / motion: animate the reference image
+    if typ in _IMAGE_AND_VIDEO:  # the reference / face image rides along
         kw.update(image_url=_upload(first_frame), mode=mode)
     else:
         kw.update(image_url=None, resolution=resolution)
-        if typ == "upscale":  # resolution carries the scale; mode the enhancement
+        if typ in _TAKES_MODE:  # resolution carries the one pick (scale / language); mode the rest
             kw.update(mode=mode)
         if typ == "extend":  # extend lets the user pick added duration + audio
             kw.update(length=duration, generate_audio=generate_audio)
@@ -457,12 +471,24 @@ def estimate_cost(
     resolution: str | None = None,
     generate_audio: bool | None = None,
     n_images: int = 0,
+    prompt: str = "",
+    audio: dict[str, Any] | None = None,
 ) -> dict | None:
     """Pollo's own price for a request ({"credits", "full_credits"}), or None if
     it can't say (a ref2video model has no estimate endpoint; errors). Free, and
     nothing is uploaded: stand-in URLs are priced the same as real ones."""
     try:
-        if kind == "image":
+        if kind == "audio":
+            key = _generator_key(model_id, AUDIO_GENERATORS)
+            generator = get_audio_generator(
+                key,
+                api_key=keyctx.provider_key("pollo"),
+                project="chat",
+                prompt=prompt or "estimate",
+                voice_ref_url=pollo_estimate.PLACEHOLDERS["audio"],
+                **(audio or {}),
+            )
+        elif kind == "image":
             generators = _image_generators()
             key = _generator_key(model_id, generators)
             generator = get_image_generator(
@@ -484,6 +510,8 @@ def estimate_cost(
                 project="chat",
                 prompt="estimate",
                 image_url=pollo_estimate.PLACEHOLDERS["image"] if n_images else None,
+                # source-file models (upscale, tools…) price from stand-in files
+                video_url=pollo_estimate.PLACEHOLDERS["video"] if MODEL_INFO.get(key, {}).get("video_input") else None,
                 aspect_ratio=aspect_ratio if aspect_ratio in ratios else None,
                 resolution=resolution,
                 length=duration,

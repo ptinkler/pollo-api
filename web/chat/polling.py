@@ -5,6 +5,8 @@ warm missing thumbnails at startup."""
 import threading
 import time
 import uuid
+from pathlib import Path
+from urllib.parse import urlsplit
 
 from web.core.metadata import get_db
 
@@ -14,6 +16,18 @@ from .constants import CHAT_PREVIEW_SIZE, IMAGE_EXTS, VIDEO_MAX_POLL_ERRORS, VID
 from .generation import _MODERATION
 from .helpers import _add_message_cost, _chat_root, _conv_dir
 from .workers import _with_owner_keys
+
+_RESULT_EXTS = {".mp4", ".webm", ".mov", ".mp3", ".wav", ".m4a", ".ogg"}
+
+
+def _result_name(kind: str | None, job: dict) -> str:
+    """A fresh file name; the extension follows the result's URL (tools return
+    .webm / .mov, speech may be .wav), else .mp3 for audio and .mp4 for video."""
+    audio = kind == "audio"
+    ext = Path(urlsplit((job.get("urls") or [""])[0]).path).suffix.lower()
+    if ext not in _RESULT_EXTS:
+        ext = ".mp3" if audio else ".mp4"
+    return f"{'aud' if audio else 'vid'}_{uuid.uuid4().hex[:12]}{ext}"
 
 
 def start_video_poller(conv_id: str, message_id: int, media_id: str, job_id: str) -> None:
@@ -46,11 +60,7 @@ def _poll_video(conv_id: str, message_id: int, media_id: str, job_id: str) -> No
 
         status = job.get("status")
         if status == "completed":
-            name = (
-                f"aud_{uuid.uuid4().hex[:12]}.mp3"
-                if item.get("kind") == "audio"
-                else f"vid_{uuid.uuid4().hex[:12]}.mp4"
-            )
+            name = _result_name(item.get("kind"), job)
             try:
                 source.download_video(job_id, _conv_dir(conv_id) / name)
             except Exception as e:  # noqa: BLE001

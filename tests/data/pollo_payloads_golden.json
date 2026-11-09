@@ -2474,6 +2474,57 @@
    ],
    "url": "https://pollo.ai/api/platform/v1/generation/bytedance/seed-audio-1-0/text2speech"
   },
+  "seedaudioref10v1": {
+   "cases": [
+    {
+     "error": "ValueError",
+     "kw": {
+      "prompt": "hello"
+     }
+    },
+    {
+     "kw": {
+      "prompt": "hello",
+      "voice_ref_url": "https://a.example/clip.mp3"
+     },
+     "ok": {
+      "input": {
+       "prompt": "hello",
+       "voiceRefs": [
+        {
+         "audioUrl": "https://a.example/clip.mp3",
+         "name": "voice",
+         "type": "audio"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "kw": {
+      "pitch": -2,
+      "prompt": "hello",
+      "speed": 1.5,
+      "voice_ref_url": "https://a.example/clip.mp3"
+     },
+     "ok": {
+      "input": {
+       "pitch": -2,
+       "prompt": "hello",
+       "speed": 1.5,
+       "voiceRefs": [
+        {
+         "audioUrl": "https://a.example/clip.mp3",
+         "name": "voice",
+         "type": "audio"
+        }
+       ]
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/bytedance/seed-audio-1-0/ref2audio"
+  },
   "sunov45plusv1": {
    "cases": [
     {
@@ -3058,6 +3109,97 @@
     }
    ],
    "url": "https://pollo.ai/api/platform/v1/generation/ideogram/ideogram-v2-turbo/image"
+  },
+  "imagebgremovev1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": ""
+     },
+     "ok": {
+      "input": {
+       "image": "https://img.example/x.png"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": null,
+      "images": [
+       "https://img.example/x.png",
+       "https://img.example/x.png"
+      ],
+      "prompt": ""
+     },
+     "ok": {
+      "input": {
+       "image": "https://img.example/x.png"
+      }
+     }
+    },
+    {
+     "error": "ValueError",
+     "kw": {
+      "image_url": null,
+      "prompt": ""
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/image-background-remove"
+  },
+  "imageupscalev1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "images": [
+       "https://img.example/x.png"
+      ],
+      "prompt": ""
+     },
+     "ok": {
+      "input": {
+       "image": "https://img.example/x.png",
+       "scale": 2
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "",
+      "resolution": "8x"
+     },
+     "ok": {
+      "input": {
+       "image": "https://img.example/x.png",
+       "scale": 8
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "",
+      "resolution": "3x"
+     },
+     "ok": {
+      "input": {
+       "image": "https://img.example/x.png",
+       "scale": 2
+      }
+     }
+    },
+    {
+     "error": "ValueError",
+     "kw": {
+      "image_url": null,
+      "prompt": ""
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/image-upscale"
   },
   "klingv3imagev1": {
    "cases": [
@@ -4188,6 +4330,39 @@
     }
    ],
    "url": "https://pollo.ai/api/platform/v1/generation/pollo-ai/action-imitation-v2/motion"
+  },
+  "faceswapv1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "faceImage": "https://img.example/x.png",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "error": "ValueError",
+     "kw": {
+      "image_url": null,
+      "prompt": "",
+      "video_url": "https://v.example/src.mp4"
+     }
+    },
+    {
+     "error": "ValueError",
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": ""
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/face-swap"
   },
   "flux3extendv1": {
    "cases": [
@@ -6834,65 +7009,6 @@
    ],
    "url": "https://pollo.ai/api/platform/v1/generation/upscale"
   },
-  "recastv1": {
-   "cases": [
-    {
-     "error": "ValueError",
-     "kw": {
-      "image_url": null,
-      "prompt": "a fox runs",
-      "video_url": "https://v.example/src.mp4"
-     }
-    },
-    {
-     "kw": {
-      "image_url": "https://img.example/x.png",
-      "prompt": "a fox runs",
-      "video_url": "https://v.example/src.mp4"
-     },
-     "ok": {
-      "input": {
-       "image": "https://img.example/x.png",
-       "mode": "std",
-       "video": "https://v.example/src.mp4"
-      }
-     }
-    },
-    {
-     "error": "ValueError",
-     "kw": {
-      "aspect_ratio": "16:9",
-      "image_url": null,
-      "length": 8,
-      "prompt": "a fox runs",
-      "resolution": "720p",
-      "video_url": "https://v.example/src.mp4"
-     }
-    },
-    {
-     "kw": {
-      "audio_url": "https://a.example/a.mp3",
-      "generate_audio": false,
-      "image_tail": "https://img.example/t.png",
-      "image_url": "https://img.example/x.png",
-      "mode": "std",
-      "negative_prompt": "blurry",
-      "prompt": "a fox runs",
-      "seed": 42,
-      "video_url": "https://v.example/src.mp4",
-      "web_search": true
-     },
-     "ok": {
-      "input": {
-       "image": "https://img.example/x.png",
-       "mode": "std",
-       "video": "https://v.example/src.mp4"
-      }
-     }
-    }
-   ],
-   "url": "https://pollo.ai/api/platform/v1/generation/alibaba/wan-2-2-animate-mix/motion"
-  },
   "runwayacttwov1": {
    "cases": [
     {
@@ -8113,6 +8229,117 @@
    ],
    "url": "https://pollo.ai/api/platform/v1/generation/google/veo-3-1/video"
   },
+  "videobgremovev1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "outputFormat": "webm",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "",
+      "resolution": "mov",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "outputFormat": "mov",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "",
+      "resolution": "720p",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "outputFormat": "webm",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "error": "ValueError",
+     "kw": {
+      "image_url": null,
+      "prompt": ""
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/video-background-remove"
+  },
+  "videosubtitleremovev1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "language": "en",
+       "tier": "standard",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": null,
+      "mode": "advanced",
+      "prompt": "",
+      "resolution": "ja",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "language": "ja",
+       "tier": "advanced",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": null,
+      "mode": "std",
+      "prompt": "",
+      "resolution": "xx",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "language": "en",
+       "tier": "standard",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "error": "ValueError",
+     "kw": {
+      "image_url": null,
+      "prompt": ""
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/video-subtitle-remove"
+  },
   "viduq2proeditv1": {
    "cases": [
     {
@@ -8794,6 +9021,65 @@
     }
    ],
    "url": "https://pollo.ai/api/platform/v1/generation/alibaba/wan-v3-0/video"
+  },
+  "wananimatemixv1": {
+   "cases": [
+    {
+     "error": "ValueError",
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs",
+      "video_url": "https://v.example/src.mp4"
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs",
+      "video_url": "https://v.example/src.mp4"
+     },
+     "ok": {
+      "input": {
+       "image": "https://img.example/x.png",
+       "mode": "std",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    },
+    {
+     "error": "ValueError",
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p",
+      "video_url": "https://v.example/src.mp4"
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "video_url": "https://v.example/src.mp4",
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "image": "https://img.example/x.png",
+       "mode": "std",
+       "video": "https://v.example/src.mp4"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/alibaba/wan-2-2-animate-mix/motion"
   },
   "wananimatemovev1": {
    "cases": [

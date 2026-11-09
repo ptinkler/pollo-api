@@ -2573,6 +2573,76 @@ class TestPolloImageModels:
         settings = client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["settings"]
         assert settings["audio_model"] == "pollo/elevenv3v1" and settings["audio_options"]["voice"] == "v1"
 
+    def _fake_audio_generator(self, monkeypatch, chat, pollo):
+        class Gen:
+            payload_attrs = {"prompt": "x"}
+
+            def __init__(self, key, **kw):
+                pollo["generators"].append((key, kw))
+
+            def get_payload(self):
+                return {}
+
+            def send_request(self):
+                return type(
+                    "R", (), {"status_code": 200, "text": "", "json": lambda s: {"data": {"taskId": "task-1"}}}
+                )()
+
+        monkeypatch.setattr(pollo_provider, "get_audio_generator", lambda key, **kw: Gen(key, **kw))
+        monkeypatch.setattr(chat.polling, "start_video_poller", lambda *a: None)
+
+    def test_auto_mode_chat_model_can_call_generate_audio(self, client, conv, chat, monkeypatch, pollo):
+        self._fake_audio_generator(monkeypatch, chat, pollo)
+        rounds = iter([_tool_chunks("generate_audio", {"prompt": "Hello there"}, text="On it."), _text_chunks("x")])
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(rounds))
+        msg = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "say hello", "mode": "auto", **self.AUDIO, "audio_options": {"voice": "v1"}},
+            )
+        )[-1]["message"]
+        assert msg["media"][0]["kind"] == "audio" and msg["media"][0]["job_id"] == "pollo:task-1"
+        assert pollo["generators"][0][1]["prompt"] == "Hello there"
+
+    def test_audio_estimate_prices_by_the_text(self, client, chat, monkeypatch, pollo):
+        seen = {}
+
+        def fake(model, kind, *args):
+            seen.update(model=model, kind=kind, args=args)
+            return {"credits": 3}
+
+        monkeypatch.setattr(pollo_provider, "estimate_cost", fake)
+        r = client.post(
+            "/api/chat/estimate",
+            json={"model": "pollo/elevenv3v1", "kind": "audio", "prompt": "hi", "audio_options": {"voice": "v1"}},
+        )
+        assert r.json() == {"estimate": {"credits": 3}}
+        assert seen["kind"] == "audio" and seen["args"][-2:] == ("hi", {"voice": "v1"})
+
+    def test_a_tool_needs_no_prompt_but_an_image(self, client, conv, chat, monkeypatch, pollo):
+        chat.catalogue._models_cache.update(
+            at=0.0,
+            data={
+                "image": [
+                    {"id": "pollo/imageupscalev1", "name": "Pollo: Image Upscale", "tool": "upscale", "no_prompt": True}
+                ]
+            },
+        )
+        body = {"content": "", "mode": "image", **SETTINGS, "image_model": "pollo/imageupscalev1"}
+        r = client.post(f"/api/chat/conversations/{conv['id']}/messages", json=body)
+        assert r.status_code == 200  # an empty message is fine for a tool…
+        assert "needs an image" in _events(r)[-1]["message"]["error"]  # …but it must have an image
+
+    def test_poller_keeps_the_result_extension(self, chat, db, conv, monkeypatch, pollo):
+        msg = db.add_chat_message(
+            conv["id"],
+            "assistant",
+            media=[{"id": "pt1", "kind": "video", "source": "generated", "status": "pending", "job_id": "pollo:t-6"}],
+        )
+        pollo["statuses"] = iter([[("succeed", None, "https://cdn/cut.webm?sig=1", 2)]] * 2)
+        chat.polling._poll_video(conv["id"], msg.id, "pt1", "pollo:t-6")
+        assert db.get_chat_message(msg.id).media[0]["file"].endswith(".webm")
+
     def test_audio_mode_needs_a_prompt_and_a_model(self, client, conv, chat, monkeypatch, pollo):
         msgs = _events(
             client.post(

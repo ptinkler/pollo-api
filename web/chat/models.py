@@ -106,12 +106,14 @@ class TurnSettings(BaseModel):
 
 class EstimateRequest(BaseModel):
     model: str
-    kind: str  # image | video
+    kind: str  # image | video | audio
     duration: int | None = None
     aspect_ratio: str | None = None
     resolution: str | None = None
     generate_audio: bool | None = None
     n_images: int = 0
+    prompt: str = ""  # audio prices by the text
+    audio_options: AudioOptions = AudioOptions()
 
 
 class SendMessage(TurnSettings):
