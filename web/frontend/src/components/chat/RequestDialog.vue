@@ -32,7 +32,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           <button class="req-btn" @click="copy(both, 'req')">
             {{ copiedKey === 'req' ? '✓ Copied' : '⧉ Copy JSON' }}
           </button>
-          <RouterLink class="req-btn" :to="{ name: 'request-log' }" @click="emit('close')">All requests</RouterLink>
+          <RouterLink class="req-btn" :to="{ name: 'studio-requests' }" @click="emit('close')">All requests</RouterLink>
           <button class="req-btn" title="Close" @click="emit('close')">✕</button>
         </div>
         <p v-if="error" class="req-error">{{ error }}</p>
