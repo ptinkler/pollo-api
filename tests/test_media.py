@@ -194,15 +194,17 @@ class TestImport:
         ).json()
         assert len(r["images"]) == 1
 
-    def test_videos_cant_be_imported(self, client, conv):
+    def test_videos_attach_to_chat_but_not_characters(self, client, conv):
         import web.core.config as config
 
         (config.ROOT_DIR / "chat" / conv.id / "vid.mp4").write_bytes(b"fake mp4")
-        r = client.post(
-            "/api/media/import",
-            json={"media_id": f"chat:{conv.id}:vid.mp4", "target": "chat", "conversation_id": conv.id},
-        )
-        assert r.status_code == 400
+        mid = f"chat:{conv.id}:vid.mp4"
+        # A video can be attached to a chat (as a reference-to-video ref)…
+        chat = client.post("/api/media/import", json={"media_id": mid, "target": "chat", "conversation_id": conv.id})
+        assert chat.status_code == 200
+        # …but not added to a character (images only).
+        char = client.post("/api/media/import", json={"media_id": mid, "target": "character", "character_id": 1})
+        assert char.status_code == 400
 
 
 class TestDelete:

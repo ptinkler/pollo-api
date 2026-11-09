@@ -31,11 +31,14 @@ Output per model: docs? | enabled? | refs(cap/types) | mismatches vs our config.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
 import sys
 import urllib.request
+from datetime import date
+from pathlib import Path
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))  # repo root, for `web.*`
@@ -160,15 +163,158 @@ def _enablement(keys: list[str], api_key: str) -> dict[str, str]:
     return {k: _probe_estimate(k, api_key)[0] for k in keys}
 
 
+# ── --write: safe, surgical edits to our source (you review the git diff) ──
+# Only the mechanical, derivable fields are touched: `hidden` (enablement) and
+# `ref_mode` in pollo_models.py, and `HAS_REFS` in v1_video.py. Curated bits —
+# labels, deliberate "Superseded" hides, ref_mode's own quirks like
+# `no_audio_with_video` — are merged around, never overwritten.
+_REMOVE = object()
+_REPO = os.path.dirname(_HERE)
+MODELS_FILE = os.path.join(_REPO, "web", "providers", "pollo_models.py")
+ENGINE_FILE = os.path.join(_REPO, "web", "providers", "pollo_engine", "v1_video.py")
+# A hide we may clear is one justified by enablement; a deliberate hide is kept.
+_ENABLEMENT_HIDE = re.compile(r"enabled|403|404|unavailable|access", re.I)
+
+
+def py_literal(v) -> str:
+    """A Python literal using double quotes and True/False (ruff-style)."""
+    if isinstance(v, bool):
+        return "True" if v else "False"
+    if isinstance(v, dict):
+        return "{" + ", ".join(f'"{k}": {py_literal(x)}' for k, x in v.items()) + "}"
+    if isinstance(v, (list, tuple)):
+        return "[" + ", ".join(py_literal(x) for x in v) + "]"
+    if isinstance(v, str):
+        return '"' + v.replace('"', '\\"') + '"'
+    return str(v)
+
+
+def _block_range(lines: list[str], key: str) -> tuple[int, int] | None:
+    """(first, last) line index of a `    "key": {` … `    },` entry."""
+    opener = re.compile(r'^    "' + re.escape(key) + r'": \{')
+    for i, ln in enumerate(lines):
+        if opener.match(ln):
+            for j in range(i + 1, len(lines)):
+                if re.match(r"^    \},?$", lines[j]):
+                    return i, j
+            return None
+    return None
+
+
+def _field_range(lines: list[str], start: int, end: int, field: str) -> tuple[int, int] | None:
+    """(first, last) line index of a `        "field": …,` member, following a
+    multi-line dict/list value to its closing line via brace balance."""
+    pat = re.compile(r'^        "' + re.escape(field) + r'":')
+    for i in range(start + 1, end):
+        if pat.match(lines[i]):
+            depth = 0
+            for j in range(i, end):
+                depth += sum(lines[j].count(c) for c in "{[") - sum(lines[j].count(c) for c in "}]")
+                code = re.sub(r"\s+#.*$", "", lines[j])  # ignore a trailing comment
+                if depth <= 0 and code.rstrip().endswith(","):
+                    return i, j
+            return i, i
+    return None
+
+
+def apply_edits(path: str, edits: dict[str, dict], warnings: list[str]) -> int:
+    """Apply {model_key: {field: literal-str | _REMOVE}} to a source file,
+    re-scanning after each change so indices stay valid. Returns edit count."""
+    lines = Path(path).read_text(encoding="utf-8").split("\n")
+    n = 0
+    for key, fields in edits.items():
+        for field, val in fields.items():
+            blk = _block_range(lines, key)
+            if not blk:
+                warnings.append(f"{os.path.basename(path)}: {key!r} not found — skipped {field}")
+                continue
+            s, e = blk
+            fr = _field_range(lines, s, e, field)
+            if val is _REMOVE:
+                if fr:
+                    del lines[fr[0] : fr[1] + 1]
+                    n += 1
+            elif fr:
+                lines[fr[0] : fr[1] + 1] = [f'        "{field}": {val},']
+                n += 1
+            else:
+                lines.insert(s + 1, f'        "{field}": {val},')
+                n += 1
+    Path(path).write_text("\n".join(lines), encoding="utf-8")
+    return n
+
+
+def plan_writes(ours: dict, docs: dict[str, dict], enabled: dict[str, str]) -> tuple[dict, dict, list[str]]:
+    """(pollo_models.py edits, v1_video.py edits, human-only notes). ref_mode is
+    only ever added/updated from the docs, never removed (the spec is
+    incomplete); hides are only cleared when they were enablement-justified."""
+    models_edits: dict[str, dict] = {}
+    engine_edits: dict[str, dict] = {}
+    notes: list[str] = []
+    today = date.today().isoformat()
+    for slug, o in ours.items():
+        key, info, d = o["key"], o["info"], docs.get(slug)
+        # Enablement → hidden (needs the probe)
+        verdict = enabled.get(key)
+        hide = info.get("hidden")
+        if verdict == "ENABLED" and hide and _ENABLEMENT_HIDE.search(hide):
+            models_edits.setdefault(key, {})["hidden"] = _REMOVE
+        elif verdict == "DISABLED" and not hide:
+            reason = f'"Not enabled for API access on this key (403)"  # audit {today}'
+            models_edits.setdefault(key, {})["hidden"] = reason
+        # Features → ref_mode (+ engine HAS_REFS), merged so curated keys survive
+        doc_refs = d.get("refs") if d else None
+        if doc_refs:
+            cur = info.get("ref_mode") or {}
+            merged = {**cur, "types": doc_refs["types"], "max": doc_refs["max"]}
+            if doc_refs.get("limits"):
+                merged["limits"] = doc_refs["limits"]
+            if merged != cur:
+                models_edits.setdefault(key, {})["ref_mode"] = py_literal(merged)
+            if not o["cfg"].get("HAS_REFS"):
+                engine_edits.setdefault(key, {})["HAS_REFS"] = "True"
+        elif info.get("ref_mode"):
+            notes.append(f"{key}: we declare ref_mode but docs show none — review by hand (may be a docs gap)")
+    return models_edits, engine_edits, notes
+
+
+def _write(ours: dict, docs: dict, enabled: dict) -> None:
+    """Apply the mechanical fixes to our source, then report; you review the diff."""
+    import subprocess
+
+    models_edits, engine_edits, notes = plan_writes(ours, docs, enabled)
+    warnings: list[str] = []
+    n = apply_edits(MODELS_FILE, models_edits, warnings) + apply_edits(ENGINE_FILE, engine_edits, warnings)
+    for w in warnings:
+        print(f"  ! {w}")
+    if notes:
+        print("\nHand-review (not auto-applied):")
+        for note in notes:
+            print(f"  - {note}")
+    # Re-flow to our formatting; harmless if ruff isn't installed.
+    with contextlib.suppress(Exception):
+        subprocess.run(["ruff", "format", MODELS_FILE, ENGINE_FILE], cwd=_REPO, check=False, capture_output=True)
+    print(f"\nApplied {n} edit(s) to pollo_models.py / v1_video.py. Review with `git diff` before committing.")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--spec", help="path to a saved openapi.json (else fetched from docs.pollo.ai)")
     ap.add_argument("--key", default=os.getenv("POLLO_API_KEY"), help="probe live availability (or POLLO_API_KEY)")
+    ap.add_argument(
+        "--write",
+        action="store_true",
+        help="apply the mechanical fixes (hidden/ref_mode/HAS_REFS) to our source — review the git diff after",
+    )
     args = ap.parse_args()
 
     docs = parse_docs(_load_spec(args.spec))
     ours = _our_models()
     enabled = _enablement([v["key"] for v in ours.values()], args.key) if args.key else {}
+
+    if args.write:
+        _write(ours, docs, enabled)
+        return 0
 
     print(f"\n{'model (our key)':26} {'slug':22} docs enabled refs            notes")
     print("-" * 110)

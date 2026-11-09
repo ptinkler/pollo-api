@@ -5,6 +5,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { shortModel, fmtCost } from '../../utils/format'
+import RequestDialog from '../chat/RequestDialog.vue'
 
 const props = defineProps({
   // { url, kind, file, prompt?, model?, cost?, created_at?, favourite?, conversation_title? }
@@ -17,6 +18,7 @@ const emit = defineEmits(['close', 'favourite', 'use-image', 'use-settings', 're
 
 const isVideo = computed(() => props.item?.kind === 'video')
 const isError = computed(() => props.item?.status === 'error')
+const requestOpen = ref(false) // the "exactly what was sent" dialog
 const loop = ref(false) // videos don't autoplay; the user opts into looping
 const when = computed(() => {
   const d = props.item?.created_at && new Date(props.item.created_at)
@@ -96,6 +98,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               <button v-if="canManage" class="gm-btn icon danger" title="Delete" @click="emit('delete', item)">
                 <svg class="ic"><use href="#s-trash" /></svg>
               </button>
+              <button
+                v-if="item.request"
+                class="gm-btn icon req"
+                title="Show exactly what was sent to the provider"
+                @click="requestOpen = true"
+              >
+                { }
+              </button>
             </div>
             <!-- Only a picture can start another picture or a video -->
             <div v-if="!isError && item.kind === 'image'" class="gm-pair">
@@ -135,10 +145,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         </div>
       </div>
     </div>
+    <RequestDialog
+      v-if="requestOpen && item"
+      :request="item.request"
+      :response="item.response"
+      :error="isError ? item.error : ''"
+      @close="requestOpen = false"
+    />
   </Teleport>
 </template>
 
 <style scoped>
+.gm-btn.icon.req {
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 13px;
+}
 .gm-sent {
   margin-top: 10px;
   font-size: 12.5px;

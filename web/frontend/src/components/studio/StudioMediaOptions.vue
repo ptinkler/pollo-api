@@ -1,6 +1,7 @@
 <!-- Inspector section: image/video media options, shown by mode + model. -->
 <script setup>
 import { inject } from 'vue'
+import LengthSlider from '../form/LengthSlider.vue'
 
 const {
   imageOpts,
@@ -47,10 +48,24 @@ const {
       </select>
     </div>
     <div class="orow">
-      <select v-if="videoShowsDuration" v-model="videoOpts.duration" class="msel">
-        <option value="">Duration: auto</option>
-        <option v-for="d in durationOptions" :key="d" :value="d">{{ d }}s</option>
-      </select>
+      <div v-if="videoShowsDuration && durationOptions.length" class="dur">
+        <label class="autochk">
+          <input
+            type="checkbox"
+            :checked="videoOpts.duration === '' || videoOpts.duration == null"
+            @change="
+              videoOpts.duration = $event.target.checked ? '' : durationOptions[Math.floor(durationOptions.length / 2)]
+            "
+          />
+          Auto
+        </label>
+        <LengthSlider
+          v-if="videoOpts.duration !== '' && videoOpts.duration != null"
+          :model-value="Number(videoOpts.duration)"
+          :lengths="durationOptions"
+          @update:model-value="videoOpts.duration = $event"
+        />
+      </div>
       <label v-if="videoInfo?.generate_audio" class="audio"
         ><input v-model="videoOpts.generate_audio" type="checkbox" /> Audio</label
       >
@@ -62,5 +77,23 @@ const {
 /* second option row in a section sits below the first */
 .orow + .orow {
   margin-top: 8px;
+}
+.dur {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+}
+.dur :deep(.length-picker-group) {
+  flex: 1;
+  min-width: 0;
+}
+.autochk {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--smuted);
+  white-space: nowrap;
 }
 </style>

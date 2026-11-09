@@ -117,9 +117,11 @@ export function useChatAttachments({
   // a picked video imports as a video reference, not an image.
   function addFromLibrary(items) {
     for (const item of items) {
+      // A video needs a playable URL for the <video> thumbnail; an image uses its thumb.
+      const preview = item.kind === 'video' ? item.url || item.thumb_url : item.thumb_url || item.url
       attachEach(
         [item],
-        it => it.thumb_url || it.url || '',
+        () => preview || '',
         (it, id) => importMedia(it.id, { target: 'chat', conversation_id: id }),
         item.kind === 'video',
         item.kind === 'audio',

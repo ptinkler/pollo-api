@@ -540,16 +540,17 @@ class ImportMedia(BaseModel):
 
 @router.post("/import")
 def api_import_media(data: ImportMedia):
-    """Copy an image from the library to where it's being used:
-    chat      → {"file": "<file>"} to attach to the next message
-    character → the character, with the image added"""
+    """Copy a library item to where it's being used:
+    chat      → {"file": "<file>"} to attach to the next message (image or video)
+    character → the character, with the image added (images only)"""
     origin, path, parts = resolve(data.media_id)
-    if _kind(path) != "image":
-        raise HTTPException(400, "Only images can be used here")
+    kind = _kind(path)
     db = get_db()
     ext = path.suffix.lower()
 
     if data.target == "chat":
+        if kind not in ("image", "video"):  # videos can be reference-to-video refs
+            raise HTTPException(400, "Only images and videos can be attached")
         conv_id = data.conversation_id or ""
         if not db.get_conversation(conv_id):
             raise HTTPException(404, "Conversation not found")
@@ -559,6 +560,8 @@ def api_import_media(data: ImportMedia):
         _invalidate_list()
         return {"file": name}
 
+    if kind != "image":
+        raise HTTPException(400, "Only images can be used here")
     char = db.get_character(data.character_id or 0)
     if not char:
         raise HTTPException(404, "Character not found")
