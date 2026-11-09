@@ -86,6 +86,10 @@ export const uploadChatAttachment = (convId, file) =>
 export const uploadChatVideoAttachment = (convId, file) =>
   apiUpload(`/api/chat/conversations/${enc(convId)}/attachments/video`, file)
 
+// A lip-sync audio track
+export const uploadChatAudioAttachment = (convId, file) =>
+  apiUpload(`/api/chat/conversations/${enc(convId)}/attachments/audio`, file)
+
 // Drop an uploaded-but-unsent attachment's file (the server keeps any still in use)
 export const discardChatAttachment = (convId, file) =>
   apiDelete(`/api/chat/conversations/${enc(convId)}/attachments/${enc(file)}`)

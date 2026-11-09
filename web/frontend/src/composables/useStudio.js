@@ -435,7 +435,7 @@ export function useStudio({ models, settings, showToast }) {
     if (!canSend.value) return
     const content = draft.value.trim()
     const sent = attachments.value.filter(a => a.file)
-    const nImages = sent.filter(a => !a.video).length
+    const nImages = sent.filter(a => !a.video && !a.audio).length
     if (nImages > imageLimit()) {
       return showToast(
         `This video model takes ${imageLimit()} image${imageLimit() === 1 ? '' : 's'} — remove some, or pick a reference-image model (e.g. a “Ref” model)`,
@@ -449,7 +449,12 @@ export function useStudio({ models, settings, showToast }) {
       content,
       lane: lane.value,
       status: 'done',
-      media: sent.map(a => ({ id: a.key, kind: a.video ? 'video' : 'image', status: 'done', file: a.file })),
+      media: sent.map(a => ({
+        id: a.key,
+        kind: a.audio ? 'audio' : a.video ? 'video' : 'image',
+        status: 'done',
+        file: a.file,
+      })),
     })
     messages.value.push(tempUser)
     draft.value = ''
@@ -565,7 +570,7 @@ export function useStudio({ models, settings, showToast }) {
         model,
         kind,
         ...o,
-        n_images: attachments.value.filter(a => !a.video).length,
+        n_images: attachments.value.filter(a => !a.video && !a.audio).length,
       })
       if (seq === estimateSeq) estimate.value = r.estimate
     } catch {

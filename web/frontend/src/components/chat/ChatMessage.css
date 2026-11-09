@@ -233,6 +233,13 @@
   border: 1px solid var(--border);
 }
 
+/* Lip-sync audio track attached to a user message */
+.attachment-audio {
+  width: 240px;
+  height: 40px;
+  vertical-align: middle;
+}
+
 .markdown {
   line-height: 1.65;
   word-break: break-word;

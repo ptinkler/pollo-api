@@ -4,6 +4,7 @@ import {
   chatMediaPreviewUrl,
   discardChatAttachment,
   uploadChatAttachment,
+  uploadChatAudioAttachment,
   uploadChatVideoAttachment,
 } from './useChat'
 import { importMedia } from './useMedia'
@@ -15,7 +16,7 @@ export const MAX_ATTACHMENTS = 8
 // { key, file (once on the server), preview, uploading }.
 export function useChatAttachments({ convId, ensureConversation, showToast, limit = () => MAX_ATTACHMENTS }) {
   const attachments = ref([])
-  const images = () => attachments.value.filter(a => !a.video).length
+  const images = () => attachments.value.filter(a => !a.video && !a.audio).length
   const room = () => Math.min(MAX_ATTACHMENTS - attachments.value.length, limit() - images())
   const files = computed(() => attachments.value.filter(a => a.file).map(a => a.file))
   const uploading = computed(() => attachments.value.some(a => a.uploading))
@@ -26,8 +27,8 @@ export function useChatAttachments({ convId, ensureConversation, showToast, limi
       ? `This model takes ${limit()} image${limit() === 1 ? '' : 's'} — pick a reference-image (“Ref”) model for more`
       : `Up to ${MAX_ATTACHMENTS} attachments per message`
 
-  function add(preview, file = null, video = false) {
-    const att = reactive({ key: Math.random().toString(36).slice(2), file, preview, video, uploading: !file })
+  function add(preview, file = null, video = false, audio = false) {
+    const att = reactive({ key: Math.random().toString(36).slice(2), file, preview, video, audio, uploading: !file })
     attachments.value.push(att)
     return att
   }
@@ -44,16 +45,17 @@ export function useChatAttachments({ convId, ensureConversation, showToast, limi
   }
 
   // Each source becomes an attachment at once; `send(source, chatId)` puts it on the server
-  async function attachEach(sources, preview, send, video = false) {
+  async function attachEach(sources, preview, send, video = false, audio = false) {
+    const single = video || audio // a video / audio rides singly, outside the image-count cap
     let id
     try {
       id = await ensureConversation()
     } catch (e) {
       return showToast(e.message, 'error')
     }
-    if (!video && sources.length > room()) showToast(fullMessage(), 'error')
-    for (const source of video ? sources : sources.slice(0, Math.max(room(), 0))) {
-      const att = add(preview(source), null, video)
+    if (!single && sources.length > room()) showToast(fullMessage(), 'error')
+    for (const source of single ? sources : sources.slice(0, Math.max(room(), 0))) {
+      const att = add(preview(source), null, video, audio)
       send(source, id)
         .then(r => {
           att.file = r.file
@@ -68,8 +70,9 @@ export function useChatAttachments({ convId, ensureConversation, showToast, limi
     }
   }
 
-  // Files from the device (picked, pasted or dropped): images, and one source
-  // video (the first mp4; a message carries a single source video)
+  // Files from the device (picked, pasted or dropped): images, one source
+  // video (the first mp4), and one lip-sync audio track (the first audio file).
+  // A message carries a single video and a single audio.
   function addFiles(list) {
     const video = [...list].find(f => f.type === 'video/mp4')
     if (video && !attachments.value.some(a => a.video)) {
@@ -77,6 +80,16 @@ export function useChatAttachments({ convId, ensureConversation, showToast, limi
         [video],
         f => URL.createObjectURL(f),
         (f, id) => uploadChatVideoAttachment(id, f),
+        true,
+      )
+    }
+    const audio = [...list].find(f => f.type.startsWith('audio/'))
+    if (audio && !attachments.value.some(a => a.audio)) {
+      attachEach(
+        [audio],
+        () => '',
+        (f, id) => uploadChatAudioAttachment(id, f),
+        false,
         true,
       )
     }

@@ -17,12 +17,15 @@ const props = defineProps({
   estimate: { type: Object, default: null },
   // The selected video model takes a source video (Recast / motion models)
   videoInput: { type: Boolean, default: false },
+  // The selected video model takes an audio track (lip-sync models)
+  audioInput: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:draft', 'update:mode', 'send', 'files', 'remove', 'clear', 'library', 'enhance'])
 
 const drag = ref(false)
 const ta = ref(null)
 const vid = ref(null)
+const aud = ref(null)
 const img = ref(null)
 const menu = ref(false)
 const peek = ref(null)
@@ -38,7 +41,7 @@ const pick = fn => {
 const tags = computed(() => {
   let n = 0
   return props.attachments
-    .filter(a => !a.video)
+    .filter(a => !a.video && !a.audio)
     .map(a => ({ key: a.key, preview: a.preview, label: `Image ${++n}`, video: a.video }))
 })
 function mention(label) {
@@ -100,10 +103,12 @@ function onDrop(e) {
             <button @click="pick(() => emit('library'))">🖼 From Media…</button>
             <button @click="pick(() => img?.click())">⬆ Upload image</button>
             <button v-if="mode === 'video' && videoInput" @click="pick(() => vid?.click())">🎞 Upload video</button>
+            <button v-if="mode === 'video' && audioInput" @click="pick(() => aud?.click())">🔊 Upload audio</button>
           </div>
         </div>
         <div v-for="a in attachments" :key="a.key" class="att" :class="{ uploading: a.uploading }">
-          <video v-if="a.video" :src="a.preview" muted playsinline @click="peek = a"></video>
+          <div v-if="a.audio" class="att-audio" title="Lip-sync audio track">🔊</div>
+          <video v-else-if="a.video" :src="a.preview" muted playsinline @click="peek = a"></video>
           <img v-else :src="a.preview" alt="attachment" title="Click to enlarge" @click="peek = a" />
           <button class="attx" title="Remove" @click="emit('remove', a)">×</button>
         </div>
@@ -149,6 +154,7 @@ function onDrop(e) {
           <svg class="ic"><use href="#s-clip" /></svg>
         </button>
         <input ref="vid" type="file" accept="video/mp4" hidden @change="onVideo" />
+        <input ref="aud" type="file" accept="audio/*" hidden @change="onVideo" />
         <input ref="img" type="file" accept="image/*" multiple hidden @change="onVideo" />
         <button
           v-if="mode === 'image' || mode === 'video'"
@@ -260,6 +266,14 @@ function onDrop(e) {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+.att-audio {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  background: var(--saccent-soft);
 }
 .plus {
   position: relative;

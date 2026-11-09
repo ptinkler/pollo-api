@@ -228,7 +228,9 @@ const requestItem = ref(null)
           >
             📌
           </button>
+          <audio v-if="item.kind === 'audio'" :src="url(item)" class="attachment-audio" controls></audio>
           <img
+            v-else
             :src="preview(item)"
             class="attachment-thumb"
             alt="attachment"
@@ -236,7 +238,7 @@ const requestItem = ref(null)
             decoding="async"
             @click="emit('open-media', { url: url(item), kind: 'image', file: item.file })"
           />
-          <span class="use-btns">
+          <span v-if="item.kind !== 'audio'" class="use-btns">
             <button
               title="New picture from this image (attaches it to your next message)"
               @click="emit('use-image', { file: item.file, mode: 'image' })"
