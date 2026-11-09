@@ -35,9 +35,10 @@ def _unb64(s: str) -> bytes:
 
 
 def _media_roots() -> list[Path]:
-    """Directories a self-host link may serve from — chat uploads/outputs and
-    the per-user library. Resolved so a signed-but-crafted path can't escape."""
-    return [(config.ROOT_DIR / "chat").resolve(), (config.ROOT_DIR / "library").resolve()]
+    """Directories a self-host link may serve from — every source a Pollo upload
+    can draw from: chat uploads/outputs, character reference images, and the
+    per-user library. Resolved so a signed-but-crafted path can't escape."""
+    return [(config.ROOT_DIR / d).resolve() for d in ("chat", "characters", "library")]
 
 
 def _under_media_root(path: Path) -> bool:

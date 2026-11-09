@@ -130,6 +130,7 @@ async def test_selfhost(data: SelfhostTest, user=Depends(require_user)):
     """Confirm a self-host base URL is reachable from the outside the way Pollo
     would reach it: stage a tiny file, sign a link at that base, fetch it back
     through the public-URL guard, and check the bytes come through."""
+    import contextlib
     import secrets
 
     import httpx
@@ -162,3 +163,5 @@ async def test_selfhost(data: SelfhostTest, user=Depends(require_user)):
         return {"ok": False, "detail": f"Couldn't reach the URL: {e}"}
     finally:
         test_file.unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            test_dir.rmdir()  # remove the staging dir when empty

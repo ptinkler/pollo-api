@@ -88,6 +88,18 @@ class TestSelfHost:
         r = client.get(f"/api/public-media/{token}")
         assert r.status_code == 200 and r.content == b"hello"
 
+    def test_serves_from_character_refs_root(self, tmp_path, monkeypatch):
+        # Character reference images (ROOT_DIR/characters) are a valid Pollo
+        # image-ref source, so the self-host route must serve them too.
+        monkeypatch.setattr(config, "ROOT_DIR", tmp_path)
+        chars = tmp_path / "characters" / "7"
+        chars.mkdir(parents=True)
+        f = chars / "face.png"
+        f.write_bytes(b"png")
+        url = public_media.selfhost_url(f, "https://my.box", ttl_seconds=120)
+        token = url.rsplit("/", 1)[1]
+        assert TestClient(_app()).get(f"/api/public-media/{token}").content == b"png"
+
     def test_expired_token_404(self, tmp_path, monkeypatch):
         monkeypatch.setattr(config, "ROOT_DIR", tmp_path)
         media = tmp_path / "chat"
