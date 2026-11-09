@@ -10,13 +10,7 @@ from web.core.config import POLLO_API_BASE
 
 from ._shared import _aspect_ratio, _bool_env, _valid_length
 
-LEGACY_REF: dict[str, str] = {
-    "pollodanceref": "pollo/pollo-dance-2-0/ref2video",
-    "pollodancereffast": "pollo/pollo-dance-2-0-fast/ref2video",
-    "seedanceref": "bytedance/seedance-2-0/ref2video",
-    "seedancereffast": "bytedance/seedance-2-0-fast/ref2video",
-    "seedanceminiref": "bytedance/seedance-2-0-mini/ref2video",
-}
+LEGACY_REF: dict[str, str] = {}
 _REF_VALID_LENGTHS = tuple(range(4, 16))
 
 

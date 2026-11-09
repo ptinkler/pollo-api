@@ -46,8 +46,6 @@ LEGACY_VIDEO: dict[str, dict[str, Any]] = {
         "INCLUDE_ASPECT_RATIO": False,
         "builder": "pollo",
     },
-    "pollodance20": {**_DANCE, "pm": "pollo/pollo-dance-2-0"},
-    "pollodance20fast": {**_DANCE, "pm": "pollo/pollo-dance-2-0-fast"},
     "seedance20": {**_DANCE, "pm": "bytedance/seedance-2-0"},
     "seedance20fast": {**_DANCE, "pm": "bytedance/seedance-2-0-fast"},
     "seedance20mini": {**_DANCE, "pm": "bytedance/seedance-2-0-mini"},

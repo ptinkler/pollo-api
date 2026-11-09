@@ -17,6 +17,7 @@ const props = defineProps({
   kinds: { type: Array, default: () => ['image'] }, // which media kinds to show / accept
   limits: { type: Object, default: null }, // per-kind caps, e.g. { image: 10, video: 5 } (overrides `max`)
   origin: { type: String, default: 'all' }, // where-from filter it opens on
+  source: { type: String, default: 'all' }, // source filter it opens on ('upload' = your uploads, not generated)
 })
 const emit = defineEmits(['pick', 'close'])
 const showToast = inject('showToast', () => {})
@@ -47,6 +48,7 @@ watch(
     if (!open) return
     selected.value = new Set()
     filters.origin = props.origin
+    filters.source = props.source
     loading.value = true
     try {
       items.value = await fetchMedia()

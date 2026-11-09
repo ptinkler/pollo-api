@@ -145,14 +145,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         </div>
       </div>
     </div>
-    <RequestDialog
-      v-if="requestOpen && item"
-      :request="item.request"
-      :response="item.response"
-      :error="isError ? item.error : ''"
-      @close="requestOpen = false"
-    />
   </Teleport>
+  <!-- Its own Teleport, so it must NOT be nested inside the modal's Teleport
+       (nested teleports to <body> crash on teardown — emitsOptions null). -->
+  <RequestDialog
+    v-if="requestOpen && item"
+    :request="item.request"
+    :response="item.response"
+    :error="isError ? item.error : ''"
+    @close="requestOpen = false"
+  />
 </template>
 
 <style scoped>

@@ -1,7 +1,6 @@
 <!-- Inspector section: image/video media options, shown by mode + model. -->
 <script setup>
-import { inject } from 'vue'
-import LengthSlider from '../form/LengthSlider.vue'
+import { computed, inject } from 'vue'
 
 const {
   imageOpts,
@@ -18,6 +17,19 @@ const {
   videoShowsRatio,
   videoShowsDuration,
 } = inject('composerSettings')
+
+// Duration is one slider: position 0 = Auto, then each allowed length.
+const isAuto = d => d === '' || d == null
+const durText = computed(() => (isAuto(videoOpts.duration) ? 'Auto' : `${videoOpts.duration}s`))
+const durIndex = computed(() => {
+  if (isAuto(videoOpts.duration)) return 0
+  const i = durationOptions.value.indexOf(Number(videoOpts.duration))
+  return i === -1 ? 0 : i + 1
+})
+function onDuration(e) {
+  const i = Number(e.target.value)
+  videoOpts.duration = i === 0 ? '' : durationOptions.value[i - 1]
+}
 </script>
 
 <template>
@@ -49,21 +61,18 @@ const {
     </div>
     <div class="orow">
       <div v-if="videoShowsDuration && durationOptions.length" class="dur">
-        <label class="autochk">
-          <input
-            type="checkbox"
-            :checked="videoOpts.duration === '' || videoOpts.duration == null"
-            @change="
-              videoOpts.duration = $event.target.checked ? '' : durationOptions[Math.floor(durationOptions.length / 2)]
-            "
-          />
-          Auto
-        </label>
-        <LengthSlider
-          v-if="videoOpts.duration !== '' && videoOpts.duration != null"
-          :model-value="Number(videoOpts.duration)"
-          :lengths="durationOptions"
-          @update:model-value="videoOpts.duration = $event"
+        <label class="dlabel"
+          >Duration <span class="dval">{{ durText }}</span></label
+        >
+        <input
+          type="range"
+          class="drange"
+          min="0"
+          :max="durationOptions.length"
+          step="1"
+          :value="durIndex"
+          :title="durText"
+          @input="onDuration"
         />
       </div>
       <label v-if="videoInfo?.generate_audio" class="audio"
@@ -81,19 +90,27 @@ const {
 .dur {
   display: flex;
   align-items: center;
-  gap: 14px;
-  flex: 1;
-}
-.dur :deep(.length-picker-group) {
+  gap: 10px;
   flex: 1;
   min-width: 0;
 }
-.autochk {
+.dlabel {
   display: inline-flex;
-  align-items: center;
-  gap: 5px;
+  align-items: baseline;
+  gap: 6px;
   font-size: 12px;
   color: var(--smuted);
   white-space: nowrap;
+}
+.dval {
+  color: var(--saccent);
+  font-weight: 600;
+  min-width: 34px;
+}
+.drange {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--saccent);
+  cursor: pointer;
 }
 </style>

@@ -71,21 +71,23 @@ def _build(key: str, api_key: str):
 
 
 def _classify(status: int, text: str) -> tuple[str, str]:
-    """(verdict, note) from an estimate response. The question is only whether
-    the model is gated for this key — so anything that got PAST auth (a price,
-    or a 400 rejecting our placeholder media) counts as ENABLED. Only an
-    auth/enablement refusal (401/403/404/"not enabled") is DISABLED."""
+    """(verdict, note) from a probe response. IMPORTANT: a placeholder probe is
+    only conclusive two ways — a price/taskId (ENABLED) or an enablement refusal
+    (DISABLED). Media-input models (motion / edit / faceswap / extend) fetch the
+    media FIRST, so a fake URL yields a 400 "can't read the video" BEFORE the
+    enablement check — the 403 is never reached. Those are UNKNOWN here; only a
+    real submit with valid media settles them (e.g. Wan Animate Mix reads as
+    reachable but actually 403s on a real generation)."""
     low = text.lower()
     if status == 401:
         return "KEY?", "401 — check the API key itself"
     if status in (403, 404) or "not enabled" in low or "not authorized" in low or "no access" in low:
         return "DISABLED", f"{status} / not enabled for API access on this key"
     if status == 200:
-        return "ENABLED", "estimate priced the request"
-    # Reached the model (past auth) but it rejected our fake placeholder media —
-    # video-input models need a real video URL to price. Still proves the model
-    # itself isn't gated for this key.
-    return "ENABLED", f"reachable (HTTP {status}); placeholder media rejected: {text[:90]}"
+        return "ENABLED", "priced the request"
+    # Any other answer (typically a 400 rejecting our fake media) didn't reach
+    # the enablement check — we can't tell without real media.
+    return "UNKNOWN", f"can't confirm without real media (HTTP {status}): {text[:70]}"
 
 
 def _probe_estimate(key: str, api_key: str) -> tuple[str, str]:
@@ -125,11 +127,9 @@ def _probe_live(key: str, api_key: str) -> tuple[str, str]:
     task_id = (body.get("data") or {}).get("taskId") if isinstance(body.get("data"), dict) else None
     if task_id:
         return "ENABLED", f"accepted, taskId={task_id} (a job was created — may cost credits)"
-    verdict, note = _classify(resp.status_code, resp.text)
-    # A non-403 rejection (bad media, missing field) still means the model is reachable.
-    if verdict not in ("DISABLED", "KEY?"):
-        return "ENABLED", f"reachable, rejected inputs: {note}"
-    return verdict, note
+    # Only a real taskId or an enablement refusal is conclusive; a media-rejection
+    # 400 means the enablement check wasn't reached (see _classify).
+    return _classify(resp.status_code, resp.text)
 
 
 def main() -> int:
@@ -137,18 +137,38 @@ def main() -> int:
     ap.add_argument("--key", default=os.getenv("POLLO_API_KEY"), help="Pollo API key (or set POLLO_API_KEY)")
     ap.add_argument("--family", default="motion", help="model type to probe (default: motion/recast)")
     ap.add_argument("--all-video", action="store_true", help="probe every v1 video model, not just one family")
-    ap.add_argument("--live", action="store_true", help="really submit — GROUND TRUTH, SPENDS CREDITS when enabled")
+    ap.add_argument("--live", action="store_true", help="really submit — GROUND TRUTH, SPENDS REAL MONEY when enabled")
+    ap.add_argument(
+        "--yes-bill-me",
+        action="store_true",
+        help="required with --live: you accept that REAL, non-refundable jobs are created and billed",
+    )
     args = ap.parse_args()
 
     if not args.key:
         ap.error("no API key — pass --key or set POLLO_API_KEY")
+
+    # Hard guard: --live creates REAL generation jobs. Pollo has no cancel/refund,
+    # so every enabled model billed is money spent. Media-input models (motion /
+    # edit / faceswap / extend) can ONLY be tested this way — there is no free
+    # enablement check for them, so DON'T probe them live unless you accept that.
+    if args.live and not args.yes_bill_me:
+        ap.error(
+            "--live SUBMITS REAL JOBS THAT COST REAL MONEY (Pollo can't cancel or refund them). "
+            "Every model that turns out enabled is billed in full. Re-run with --yes-bill-me only if "
+            "you explicitly accept those charges. Prefer the free estimate probe (omit --live); note it "
+            "cannot determine enablement for media-input models — test those one at a time in the app."
+        )
 
     keys = _models(None if args.all_video else args.family, args.all_video)
     if not keys:
         print(f"No models match family={args.family!r}.")
         return 1
 
-    mode = "LIVE submit (spends credits)" if args.live else "free estimate probe"
+    mode = "free estimate probe"
+    if args.live:
+        mode = "LIVE submit"
+        print(f"⚠  LIVE: creating real non-refundable jobs for up to {len(keys)} models — every enabled one is BILLED.")
     scope = "all v1 video models" if args.all_video else f"family={args.family!r}"
     print(f"Probing {len(keys)} models ({scope}) via {mode}\n")
     probe = _probe_live if args.live else _probe_estimate
@@ -160,8 +180,11 @@ def main() -> int:
         results.append((verdict, key, label, note))
         print(f"  {verdict:8}  {key:24}  {label:24}  {note}")
 
-    enabled = sum(1 for r in results if r[0] == "ENABLED")
-    print(f"\n{enabled}/{len(results)} enabled.")
+    tally = {v: sum(1 for r in results if r[0] == v) for v in {r[0] for r in results}}
+    summary = ", ".join(f"{n} {v.lower()}" for v, n in sorted(tally.items()))
+    print(f"\n{summary}.")
+    if tally.get("UNKNOWN"):
+        print("UNKNOWN = media-input model; a placeholder can't confirm enablement — test it in-app with real media.")
     return 0
 
 

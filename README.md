@@ -88,11 +88,7 @@ WIREGUARD_ADDRESSES=...
 
 | Model | Type | Notes |
 |-------|------|-------|
-| Pollo Dance 2.0 | img2vid | Full length/ratio control |
-| Pollo Dance 2.0 Fast | img2vid | Faster variant |
 | Pollo 2.0 | img2vid | 5s or 10s only |
-| Pollo Dance Ref | ref2video | Multi-reference character/subject |
-| Pollo Dance Ref Fast | ref2video | Faster variant |
 
 ## Development
 

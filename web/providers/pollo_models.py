@@ -23,24 +23,6 @@ lengths, ratios, resolutions and which options each one takes.
 # and image_tail never exist there). "max_length_with_video" caps duration
 # when a video ref is present; "exclusive" ref types can't be combined.
 MODEL_INFO = {
-    "pollodance20": {
-        "label": "Pollo Dance 2.0",
-        "type": "img2vid",
-        "lengths": list(range(4, 16)),
-        "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
-        "options": ["generate_audio", "web_search", "seed", "image_tail"],
-        "deprecated": True,
-        "legacy": True,
-    },
-    "pollodance20fast": {
-        "label": "Pollo Dance 2.0 Fast",
-        "type": "img2vid",
-        "lengths": list(range(4, 16)),
-        "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
-        "options": ["generate_audio", "web_search", "seed", "image_tail"],
-        "deprecated": True,
-        "legacy": True,
-    },
     "pollo20": {
         "label": "Pollo 2.0",
         "type": "img2vid",
@@ -55,24 +37,6 @@ MODEL_INFO = {
         "lengths": [4, 5, 6, 7, 8, 9, 10, 11, 12, 15],
         "resolutions": ["720p", "1080p"],
         "options": ["generate_audio", "web_search"],
-        "legacy": True,
-    },
-    "pollodanceref": {
-        "label": "Pollo Dance Ref",
-        "type": "ref",
-        "lengths": list(range(4, 16)),
-        "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
-        "options": ["generate_audio", "video_num", "refs", "image_meta"],
-        "deprecated": True,
-        "legacy": True,
-    },
-    "pollodancereffast": {
-        "label": "Pollo Dance Ref Fast",
-        "type": "ref",
-        "lengths": list(range(4, 16)),
-        "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
-        "options": ["generate_audio", "video_num", "refs", "image_meta"],
-        "deprecated": True,
         "legacy": True,
     },
     "seedance20": {
@@ -117,31 +81,6 @@ MODEL_INFO = {
         "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9", "adaptive"],
         "resolutions": ["480p"],
         "options": ["generate_audio", "web_search", "seed", "image_tail"],
-        "legacy": True,
-    },
-    "seedanceref": {
-        "label": "Seedance 2.0 Ref",
-        "type": "ref",
-        "lengths": list(range(4, 16)),
-        "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
-        "options": ["generate_audio", "video_num", "refs", "image_meta"],
-        "legacy": True,
-    },
-    "seedancereffast": {
-        "label": "Seedance 2.0 Ref Fast",
-        "type": "ref",
-        "lengths": list(range(4, 16)),
-        "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
-        "options": ["generate_audio", "video_num", "refs", "image_meta"],
-        "legacy": True,
-    },
-    "seedanceminiref": {
-        "label": "Seedance 2.0 Mini Ref",
-        "type": "ref",
-        "lengths": list(range(4, 16)),
-        "ratios": ["4:3", "3:4", "1:1", "16:9", "9:16", "21:9"],
-        "options": ["generate_audio", "video_num", "refs", "image_meta"],
-        "deprecated": True,
         "legacy": True,
     },
     "minimaxh3": {
@@ -236,34 +175,6 @@ MODEL_INFO = {
         "ratios": ["16:9", "9:16"],
         "options": ["generate_audio", "mode"],
     },
-    "pollodance20v1": {
-        "label": "Pollo Dance 2.0",
-        "type": "img2vid",
-        "lengths": list(range(4, 16)),
-        "resolutions": ["480p", "720p", "1080p"],
-        "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
-        "options": ["generate_audio", "web_search", "seed", "image_tail", "refs"],
-        "ref_mode": {
-            "types": ["image", "video", "audio"],
-            "max": 13,
-            "limits": {"image": 9, "video": 3, "audio": 3},
-            "hide_options": ["seed"],
-        },
-    },
-    "pollodance20fastv1": {
-        "label": "Pollo Dance 2.0 Fast",
-        "type": "img2vid",
-        "lengths": list(range(4, 16)),
-        "resolutions": ["480p", "720p"],
-        "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
-        "options": ["generate_audio", "web_search", "seed", "image_tail", "refs"],
-        "ref_mode": {
-            "types": ["image", "video", "audio"],
-            "max": 13,
-            "limits": {"image": 9, "video": 3, "audio": 3},
-            "hide_options": ["seed"],
-        },
-    },
     "pollo30v1": {
         "label": "Pollo 3.0",
         "type": "img2vid",
@@ -346,6 +257,7 @@ MODEL_INFO = {
     # video_input (the chat's latest video, or an uploaded one) — no reference
     # image. The user picks how many seconds to add (duration) and a resolution.
     "seedance25extendv1": {
+        "hidden": "Not enabled for API access on this key (403)",  # 2026-11-09 real-media generation probe
         "label": "Seedance 2.5 Extend",
         "type": "extend",
         "lengths": list(range(4, 31)),
@@ -356,25 +268,80 @@ MODEL_INFO = {
     },
     # lengths/resolutions fall back to the engine config (v1_video.py).
     "pollov2extenderv1": {"label": "Pollo 2 Extender", "type": "extend", "options": [], "video_input": True},
-    "geminiomniextendv1": {"label": "Gemini Omni Extend", "type": "extend", "options": [], "video_input": True},
-    "flux3extendv1": {"label": "Flux 3 Extend", "type": "extend", "options": ["generate_audio"], "video_input": True},
+    "geminiomniextendv1": {
+        "label": "Gemini Omni Extend",
+        "type": "extend",
+        "options": [],
+        "video_input": True,
+        "hidden": "Not enabled for API access on this key (403)",
+    },
+    "flux3extendv1": {
+        "label": "Flux 3 Extend",
+        "type": "extend",
+        "options": ["generate_audio"],
+        "video_input": True,
+        "hidden": "Not enabled for API access on this key (403)",
+    },
     "viduq2proextendv1": {"label": "Vidu Q2 Pro Extend", "type": "extend", "options": [], "video_input": True},
     "viduq2turboextendv1": {"label": "Vidu Q2 Turbo Extend", "type": "extend", "options": [], "video_input": True},
     # "type": "video_edit" rewrites a source video from a text instruction.
     # Selectable like Extend: source video on video_input, the edit instruction
     # is the prompt. No duration/aspect ratio; resolution falls back to the
     # engine config (v1_video.py).
-    "wanedit27v1": {"label": "Wan 2.7 Edit", "type": "video_edit", "options": [], "video_input": True},
-    "wanedit30v1": {"label": "Wan 3.0 Edit", "type": "video_edit", "options": [], "video_input": True},
-    "wanedit30primev1": {"label": "Wan 3.0 Prime Edit", "type": "video_edit", "options": [], "video_input": True},
-    "geminiomnieditv1": {"label": "Gemini Omni Edit", "type": "video_edit", "options": [], "video_input": True},
-    "happyhorse10v1": {"label": "HappyHorse 1.0 Edit", "type": "video_edit", "options": [], "video_input": True},
-    "viduq2proeditv1": {"label": "Vidu Q2 Pro Edit", "type": "video_edit", "options": [], "video_input": True},
-    "runwayalepheditv1": {"label": "Runway Gen-4 Aleph Edit", "type": "video_edit", "options": [], "video_input": True},
+    "wanedit27v1": {
+        "label": "Wan 2.7 Edit",
+        "type": "video_edit",
+        "options": [],
+        "video_input": True,
+        "hidden": "Not enabled for API access on this key (403)",
+    },
+    "wanedit30v1": {
+        "label": "Wan 3.0 Edit",
+        "type": "video_edit",
+        "options": [],
+        "video_input": True,
+        "hidden": "Not enabled for API access on this key (403)",
+    },
+    "wanedit30primev1": {
+        "label": "Wan 3.0 Prime Edit",
+        "type": "video_edit",
+        "options": [],
+        "video_input": True,
+        "hidden": "Not enabled for API access on this key (403)",
+    },
+    "geminiomnieditv1": {
+        "label": "Gemini Omni Edit",
+        "type": "video_edit",
+        "options": [],
+        "video_input": True,
+        "hidden": "Not enabled for API access on this key (403)",
+    },
+    "happyhorse10v1": {
+        "label": "HappyHorse 1.0 Edit",
+        "type": "video_edit",
+        "options": [],
+        "video_input": True,
+        "hidden": "Not enabled for API access on this key (403)",
+    },
+    "viduq2proeditv1": {
+        "label": "Vidu Q2 Pro Edit",
+        "type": "video_edit",
+        "options": [],
+        "video_input": True,
+        "hidden": "Not enabled for API access on this key (403)",
+    },
+    "runwayalepheditv1": {
+        "label": "Runway Gen-4 Aleph Edit",
+        "type": "video_edit",
+        "options": [],
+        "video_input": True,
+        "hidden": "Not enabled for API access on this key (403)",
+    },
     # "type": "upscale" enlarges / enhances a source video (video_input). No
     # prompt, duration or aspect ratio: the resolution picker carries Pollo's
     # `scale` (original / 2x / 4x / hd / 4K) and `modes` the enhancement mode.
     "pollovideoupscalev1": {
+        "hidden": "Not enabled for API access on this key (403)",  # 2026-11-09 real-media generation probe
         "label": "Pollo Video Upscale",
         "type": "upscale",
         "resolutions": ["original", "2x", "4x", "hd", "4K"],
@@ -400,6 +367,7 @@ MODEL_INFO = {
         "video_input": True,
     },
     "videosubtitleremovev1": {
+        "hidden": "Not enabled for API access on this key (403)",  # 2026-11-09 real-media generation probe
         "label": "Video Subtitle Remover",
         "type": "subtitle_remove",
         "resolutions": ["en", "zh", "all", "ja", "ko", "ar"],
@@ -411,6 +379,7 @@ MODEL_INFO = {
     "faceswapv1": {"label": "Face Swap", "type": "faceswap", "options": [], "video_input": True},
     # Wan 2.2 Animate Mix: a motion model like the ones below.
     "wananimatemixv1": {
+        "hidden": "Not enabled for API access on this key (403)",  # 2026-11-09 real-media generation probe
         "label": "Wan 2.2 Animate Mix",
         "type": "motion",
         "options": ["mode"],
@@ -421,6 +390,7 @@ MODEL_INFO = {
     # (first_frame) with the motion of a source video (video_input). Same shape
     # as above; tagged "motion". Some models take a std/pro mode, some don't.
     "wananimatemovev1": {
+        "hidden": "Not enabled for API access on this key (403)",  # 2026-11-09 real-media generation probe
         "label": "Wan Animate Move",
         "type": "motion",
         "options": ["mode"],
@@ -428,6 +398,7 @@ MODEL_INFO = {
         "video_input": True,
     },
     "klingmotion26v1": {
+        "hidden": "Not enabled for API access on this key (403)",  # 2026-11-09 real-media generation probe
         "label": "Kling 2.6 Motion",
         "type": "motion",
         "options": ["mode"],
@@ -435,6 +406,7 @@ MODEL_INFO = {
         "video_input": True,
     },
     "klingmotion3v1": {
+        "hidden": "Not enabled for API access on this key (403)",  # 2026-11-09 real-media generation probe
         "label": "Kling 3.0 Motion",
         "type": "motion",
         "options": ["mode"],
@@ -442,15 +414,47 @@ MODEL_INFO = {
         "video_input": True,
     },
     "actionimitationv1": {"label": "Action Imitation", "type": "motion", "options": [], "video_input": True},
-    "actionimitationv2v1": {"label": "Action Imitation v2", "type": "motion", "options": [], "video_input": True},
-    "runwayacttwov1": {"label": "Runway Act-Two", "type": "motion", "options": [], "video_input": True},
+    "actionimitationv2v1": {
+        "label": "Action Imitation v2",
+        "type": "motion",
+        "options": [],
+        "video_input": True,
+        "hidden": "Not enabled for API access on this key (403)",
+    },
+    "runwayacttwov1": {
+        "label": "Runway Act-Two",
+        "type": "motion",
+        "options": [],
+        "video_input": True,
+        "hidden": "Not enabled for API access on this key (403)",
+    },
     # "type": "lipsync" drives a reference image (first_frame) with an uploaded
     # audio track (audio_input). No source video; resolution falls back to the
     # engine config (v1_video.py) where the model offers one.
-    "omnihumanv1": {"label": "OmniHuman", "type": "lipsync", "options": []},
-    "omnihuman15v1": {"label": "OmniHuman 1.5", "type": "lipsync", "options": []},
-    "hedracharv3v1": {"label": "Hedra Character 3", "type": "lipsync", "options": []},
-    "h3lipsyncv1": {"label": "Pollo H3 Lip-sync", "type": "lipsync", "options": []},
+    "omnihumanv1": {
+        "label": "OmniHuman",
+        "type": "lipsync",
+        "options": [],
+        "hidden": "Not enabled for API access on this key (403)",
+    },
+    "omnihuman15v1": {
+        "label": "OmniHuman 1.5",
+        "type": "lipsync",
+        "options": [],
+        "hidden": "Not enabled for API access on this key (403)",
+    },
+    "hedracharv3v1": {
+        "label": "Hedra Character 3",
+        "type": "lipsync",
+        "options": [],
+        "hidden": "Not enabled for API access on this key (403)",
+    },
+    "h3lipsyncv1": {
+        "label": "Pollo H3 Lip-sync",
+        "type": "lipsync",
+        "options": [],
+        "hidden": "Not enabled for API access on this key (403)",
+    },
     "minimaxh3v1": {
         "label": "MiniMax H3",
         "type": "img2vid",

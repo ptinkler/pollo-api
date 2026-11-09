@@ -102,6 +102,43 @@ export function useStudio({ models, settings, showToast }) {
     uploading,
   } = attach
 
+  // Recast ergonomics: when a source video is attached to a reference-to-video
+  // model and duration is left on Auto, match the output to the clip's length.
+  // (Auto otherwise sends the model's short default — the backend turns an unset
+  // duration into ~5s, so a 30s source would render only 5s.) Read client-side.
+  function readVideoDuration(url) {
+    return new Promise(resolve => {
+      const v = document.createElement('video')
+      v.preload = 'metadata'
+      v.onloadedmetadata = () => resolve(v.duration || null)
+      v.onerror = () => resolve(null)
+      v.src = url
+    })
+  }
+  watch(
+    () => [
+      selected.video,
+      attachments.value
+        .filter(a => a.video && a.preview)
+        .map(a => a.key)
+        .join(),
+    ],
+    async () => {
+      if (mode.value !== 'video' || !settings.videoInfo.value?.ref_mode) return
+      const d = settings.videoOpts.duration
+      if (d !== '' && d != null) return // user chose a duration — don't override
+      const vid = attachments.value.find(a => a.video && a.preview)
+      if (!vid) return
+      const secs = await readVideoDuration(vid.preview)
+      if (!secs || (settings.videoOpts.duration !== '' && settings.videoOpts.duration != null)) return
+      const opts = settings.durationOptions.value || []
+      settings.videoOpts.duration = opts.length
+        ? opts.reduce((p, c) => (Math.abs(c - secs) < Math.abs(p - secs) ? c : p))
+        : Math.round(secs)
+    },
+    { deep: true },
+  )
+
   // Defaults (global + space) a thread inherits, less any hidden here, plus pauses
   const defaults = useChatDefaults()
   const { inherited: allInherited, globalSettings, loadDefaults, setCurrentSpace } = defaults

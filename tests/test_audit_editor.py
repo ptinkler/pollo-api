@@ -78,6 +78,30 @@ def test_replace_multiline_refmode_preserving_curated(tmp_path):
     assert rm["max"] == 15 and rm["limits"]["image"] == 10 and rm["no_audio_with_video"] is True
 
 
+def test_value_with_trailing_comment_stays_valid(tmp_path):
+    # The comma must land before the comment, not inside it.
+    val = '"Not enabled for API access (403)"  # 2026-11-09 probe'
+    out, n, _ = _write_apply(tmp_path, {"alpha": {"hidden": val}})
+    assert n == 1
+    assert '"hidden": "Not enabled for API access (403)",  # 2026-11-09 probe' in out
+    ns = {}
+    exec(out, ns)  # noqa: S102 — still valid Python
+    assert ns["MODEL_INFO"]["alpha"]["hidden"] == "Not enabled for API access (403)"
+
+
+def test_one_line_inline_entry(tmp_path):
+    src = 'MODEL_INFO = {\n    "inline": {"label": "In", "type": "motion", "video_input": True},\n}\n'
+    f = tmp_path / "m.py"
+    f.write_text(src, encoding="utf-8")
+    warnings = []
+    n = audit.apply_edits(str(f), {"inline": {"hidden": '"gated (403)"  # note'}}, warnings)
+    out = f.read_text(encoding="utf-8")
+    assert n == 1 and not warnings
+    ns = {}
+    exec(out, ns)  # noqa: S102
+    assert ns["MODEL_INFO"]["inline"] == {"label": "In", "type": "motion", "video_input": True, "hidden": "gated (403)"}
+
+
 def test_unknown_model_warns_and_skips(tmp_path):
     out, n, warns = _write_apply(tmp_path, {"missing": {"hidden": audit._REMOVE}})
     assert n == 0 and warns and out == SAMPLE  # file untouched

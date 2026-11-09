@@ -2701,7 +2701,7 @@ class TestPolloImageModels:
         assert pollo["generators"][0][1]["aspect_ratio"] == "3:4"
 
     def test_follow_image_ratio_preferred_when_the_model_has_one(self, client, conv, chat, monkeypatch, pollo):
-        self._video_from_image(client, conv, chat, (60, 80), "pollo/pollodance20v1")
+        self._video_from_image(client, conv, chat, (60, 80), "pollo/seedance25v1")
         assert pollo["generators"][0][1]["aspect_ratio"] == "adaptive"
 
     def test_animating_ignores_the_chat_models_ratio_guess(self, client, conv, chat, db, monkeypatch, pollo):
@@ -3732,6 +3732,6 @@ class TestEstimate:
         assert got == {"estimate": {"credits": 8, "full_credits": 10}}
         assert seen["url"].endswith("/estimate") and seen["key"] == "pk-test"
         # a Ref model (legacy ref2video) has no estimate endpoint; other providers aren't priced here
-        ref = client.post("/api/chat/estimate", json={**body, "model": "pollo/seedancereffast"}).json()
+        ref = client.post("/api/chat/estimate", json={**body, "model": "pollo/nonexistentref"}).json()
         assert ref == {"estimate": None}
         assert client.post("/api/chat/estimate", json={**body, "model": "venice/x"}).json() == {"estimate": None}

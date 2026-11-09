@@ -93,6 +93,14 @@ describe('MediaPicker', () => {
     w.unmount()
   })
 
+  it('opens on the source it was given (uploads only)', async () => {
+    const w = await open({ source: 'upload' })
+    // ITEMS has one upload (lib:a.png) and one generated (chat:c:g.png)
+    expect(document.body.querySelectorAll('.tile')).toHaveLength(1)
+    expect(document.body.querySelector('select[aria-label="Source"]').value).toBe('upload')
+    w.unmount()
+  })
+
   it('single mode swaps the selection', async () => {
     const w = await open({ multiple: false })
     const tiles = document.body.querySelectorAll('.tile')

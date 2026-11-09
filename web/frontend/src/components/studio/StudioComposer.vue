@@ -38,6 +38,10 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc))
 const audioClip = computed(() => props.mode === 'audio' && props.audioInput)
 const mediaMode = computed(() => props.mode === 'image' || props.mode === 'video')
 const refsActive = computed(() => !!props.refMode && props.mode === 'video')
+// Pollo prices reference-to-video by the uploaded video's length, which the
+// placeholder estimate can't measure — so the number is meaningless with a
+// video ref (e.g. a 30s clip can cost ~10× the estimate). Warn instead.
+const videoRefUnpriced = computed(() => refsActive.value && props.attachments.some(a => a.video))
 const placeholder = computed(() =>
   refsActive.value
     ? 'Add instructions, e.g. replace the person in [@video1] with [@image1]'
@@ -342,7 +346,13 @@ function onDrop(e) {
         </button>
         <span class="note">{{ uploading ? 'Uploading…' : hint }}</span>
         <span
-          v-if="estimate && (mediaMode || mode === 'audio')"
+          v-if="videoRefUnpriced"
+          class="est warn"
+          title="Pollo prices this by the uploaded video's length, which the estimate can't measure — a long clip can cost many times this."
+          >⚠ cost scales with source video</span
+        >
+        <span
+          v-else-if="estimate && (mediaMode || mode === 'audio')"
           class="est"
           :title="
             estimate.full_credits > estimate.credits
@@ -382,6 +392,10 @@ function onDrop(e) {
   font-size: 12.5px;
   color: var(--saccent);
   white-space: nowrap;
+}
+.est.warn {
+  color: var(--sdanger, #e5a000);
+  cursor: help;
 }
 .compose {
   padding: 8px 22px 20px;

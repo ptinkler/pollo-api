@@ -666,6 +666,7 @@ onMounted(() => {
       :title="pickerTitle"
       :kinds="pickerKinds"
       :limits="pickerLimits"
+      source="upload"
       @pick="addFromLibrary"
       @close="pickerOpen = false"
     />

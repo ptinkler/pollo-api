@@ -190,15 +190,32 @@ def py_literal(v) -> str:
 
 
 def _block_range(lines: list[str], key: str) -> tuple[int, int] | None:
-    """(first, last) line index of a `    "key": {` … `    },` entry."""
+    """(first, last) line index of a `    "key": {` … `    },` entry. A one-line
+    inline entry (`    "key": {…},`) returns (i, i)."""
     opener = re.compile(r'^    "' + re.escape(key) + r'": \{')
     for i, ln in enumerate(lines):
         if opener.match(ln):
+            if sum(ln.count(c) for c in "{[") - sum(ln.count(c) for c in "}]") <= 0:
+                return i, i  # balanced on one line
             for j in range(i + 1, len(lines)):
                 if re.match(r"^    \},?$", lines[j]):
                     return i, j
             return None
     return None
+
+
+def _edit_inline(line: str, field: str, val: str) -> str:
+    """Add/replace a member inside a one-line entry `    "key": {…},` (an inline
+    value can't carry a comment, so any comment is dropped)."""
+    val = re.sub(r"\s+#.*$", "", val)
+    m = re.match(r'^(\s*".*?": \{)(.*?)(\},?\s*)$', line)
+    prefix, inner, suffix = m.group(1), m.group(2).rstrip(), m.group(3)
+    existing = re.search(r'("' + re.escape(field) + r'": )[^,}]+', inner)
+    if existing:
+        inner = inner[: existing.start(1)] + existing.group(1) + val + inner[existing.end() :]
+    else:
+        inner = f'{inner}{", " if inner else ""}"{field}": {val}'
+    return f"{prefix}{inner}{suffix}"
 
 
 def _field_range(lines: list[str], start: int, end: int, field: str) -> tuple[int, int] | None:
@@ -229,17 +246,26 @@ def apply_edits(path: str, edits: dict[str, dict], warnings: list[str]) -> int:
                 warnings.append(f"{os.path.basename(path)}: {key!r} not found — skipped {field}")
                 continue
             s, e = blk
+            if s == e:  # one-line inline entry
+                if val is not _REMOVE:
+                    lines[s] = _edit_inline(lines[s], field, val)
+                    n += 1
+                continue
             fr = _field_range(lines, s, e, field)
             if val is _REMOVE:
                 if fr:
                     del lines[fr[0] : fr[1] + 1]
                     n += 1
-            elif fr:
-                lines[fr[0] : fr[1] + 1] = [f'        "{field}": {val},']
-                n += 1
+                continue
+            # The comma terminates the member and must sit before any trailing
+            # comment, else it gets commented out and breaks the dict.
+            cm = re.match(r"^(.*?)(\s+#.*)$", val)
+            newline = f'        "{field}": {cm.group(1)},{cm.group(2)}' if cm else f'        "{field}": {val},'
+            if fr:
+                lines[fr[0] : fr[1] + 1] = [newline]
             else:
-                lines.insert(s + 1, f'        "{field}": {val},')
-                n += 1
+                lines.insert(s + 1, newline)
+            n += 1
     Path(path).write_text("\n".join(lines), encoding="utf-8")
     return n
 
