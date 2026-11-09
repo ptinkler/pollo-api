@@ -12,7 +12,14 @@ import {
 } from '../../composables/useAccount'
 
 const prefs = reactive({ primary: 'litterbox', backup: null, expiry_minutes: 60, selfhost_base: '' })
-const meta = reactive({ expiry_options: [60, 720, 1440, 4320], expiry_configurable: [], public_base_url_set: false })
+// Fallback mirrors the backend (web/upload_settings.py) so the form behaves
+// sanely before the fetch lands or if it fails — litterbox/selfhost retention
+// is user-settable, so don't default "Keep for" to locked.
+const meta = reactive({
+  expiry_options: [60, 720, 1440, 4320],
+  expiry_configurable: ['litterbox', 'selfhost'],
+  public_base_url_set: false,
+})
 const saving = ref(false)
 const message = ref('')
 const testing = ref(false)
