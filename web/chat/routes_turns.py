@@ -108,7 +108,13 @@ def api_send_message(conv_id: str, data: SendMessage):
     for name in data.attachments[:8]:
         if not (conv_dir / safe_filename(name)).is_file():
             raise HTTPException(400, f"Attachment not found: {name}")
-        kind = "video" if name.lower().endswith(".mp4") else "image"
+        lower = name.lower()
+        if lower.endswith(".mp4"):
+            kind = "video"
+        elif lower.endswith((".mp3", ".wav", ".m4a", ".aac")):
+            kind = "audio"  # a lip-sync track, driven onto a portrait
+        else:
+            kind = "image"
         media.append(_saved_media(kind, "upload", name))
 
     db = get_db()

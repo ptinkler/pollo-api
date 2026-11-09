@@ -365,6 +365,17 @@ MODEL_INFO = {
     "flux3extendv1": {"label": "Flux 3 Extend", "type": "extend", "options": ["generate_audio"], "video_input": True},
     "viduq2proextendv1": {"label": "Vidu Q2 Pro Extend", "type": "extend", "options": [], "video_input": True},
     "viduq2turboextendv1": {"label": "Vidu Q2 Turbo Extend", "type": "extend", "options": [], "video_input": True},
+    # "type": "video_edit" rewrites a source video from a text instruction.
+    # Selectable like Extend: source video on video_input, the edit instruction
+    # is the prompt. No duration/aspect ratio; resolution falls back to the
+    # engine config (v1_video.py).
+    "wanedit27v1": {"label": "Wan 2.7 Edit", "type": "video_edit", "options": [], "video_input": True},
+    "wanedit30v1": {"label": "Wan 3.0 Edit", "type": "video_edit", "options": [], "video_input": True},
+    "wanedit30primev1": {"label": "Wan 3.0 Prime Edit", "type": "video_edit", "options": [], "video_input": True},
+    "geminiomnieditv1": {"label": "Gemini Omni Edit", "type": "video_edit", "options": [], "video_input": True},
+    "happyhorse10v1": {"label": "HappyHorse 1.0 Edit", "type": "video_edit", "options": [], "video_input": True},
+    "viduq2proeditv1": {"label": "Vidu Q2 Pro Edit", "type": "video_edit", "options": [], "video_input": True},
+    "runwayalepheditv1": {"label": "Runway Gen-4 Aleph Edit", "type": "video_edit", "options": [], "video_input": True},
     # "type": "recast" = Pollo Recast (wan-2-2-animate-mix): replaces the
     # subject in a source video with one reference image, keeping the motion.
     # A selectable model (unlike "extend"): the source video rides in on
@@ -380,6 +391,40 @@ MODEL_INFO = {
         "modes": ["std", "pro"],
         "video_input": True,
     },
+    # "type": "motion" = act / motion transfer: animate a reference image
+    # (first_frame) with the motion of a source video (video_input). Same shape
+    # as Recast; tagged "motion". Some models take a std/pro mode, some don't.
+    "wananimatemovev1": {
+        "label": "Wan Animate Move",
+        "type": "motion",
+        "options": ["mode"],
+        "modes": ["std", "pro"],
+        "video_input": True,
+    },
+    "klingmotion26v1": {
+        "label": "Kling 2.6 Motion",
+        "type": "motion",
+        "options": ["mode"],
+        "modes": ["std", "pro"],
+        "video_input": True,
+    },
+    "klingmotion3v1": {
+        "label": "Kling 3.0 Motion",
+        "type": "motion",
+        "options": ["mode"],
+        "modes": ["std", "pro"],
+        "video_input": True,
+    },
+    "actionimitationv1": {"label": "Action Imitation", "type": "motion", "options": [], "video_input": True},
+    "actionimitationv2v1": {"label": "Action Imitation v2", "type": "motion", "options": [], "video_input": True},
+    "runwayacttwov1": {"label": "Runway Act-Two", "type": "motion", "options": [], "video_input": True},
+    # "type": "lipsync" drives a reference image (first_frame) with an uploaded
+    # audio track (audio_input). No source video; resolution falls back to the
+    # engine config (v1_video.py) where the model offers one.
+    "omnihumanv1": {"label": "OmniHuman", "type": "lipsync", "options": []},
+    "omnihuman15v1": {"label": "OmniHuman 1.5", "type": "lipsync", "options": []},
+    "hedracharv3v1": {"label": "Hedra Character 3", "type": "lipsync", "options": []},
+    "h3lipsyncv1": {"label": "Pollo H3 Lip-sync", "type": "lipsync", "options": []},
     "minimaxh3v1": {
         "label": "MiniMax H3",
         "type": "img2vid",

@@ -599,12 +599,22 @@ class Turn:
             out["last_frame"] = last_frame
         if info.get("video_input"):
             out["source_video"] = self._latest_video()
+        if info.get("audio_input"):
+            out["source_audio"] = self._latest_audio()
         return out
 
     def _latest_video(self) -> str | None:
         """The most recent finished video (this turn first, then history)."""
+        return self._latest_media_file("video")
+
+    def _latest_audio(self) -> str | None:
+        """The most recent audio attachment (this turn first, then history) —
+        the uploaded track a lip-sync model drives a portrait with."""
+        return self._latest_media_file("audio")
+
+    def _latest_media_file(self, kind: str) -> str | None:
         for item in [*reversed(self.media), *(i for m in reversed(self.history) for i in reversed(m.media))]:
-            if item["kind"] == "video" and item.get("status") == "done" and item.get("file"):
+            if item["kind"] == kind and item.get("status") == "done" and item.get("file"):
                 return item["file"]
         return None
 

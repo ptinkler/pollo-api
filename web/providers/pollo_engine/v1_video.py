@@ -1,4 +1,4 @@
-"""V1 video API bodies: the generic family plus Kling, extend and recast."""
+"""V1 video API bodies: the generic family plus Kling, extend, edit, lipsync and recast."""
 
 from __future__ import annotations
 
@@ -523,6 +523,64 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "DEFAULT_RESOLUTION": "720p",
         "builder": "extend",
     },
+    # Video-edit models (added 2026-11): edit a source video from a text
+    # instruction (`video` and `prompt` are both required). Minimal shape —
+    # {video, prompt} plus a resolution where the model offers one; images/seed/
+    # audio refinements are left for a later pass.
+    "wanedit27v1": {
+        "V1_PROVIDER": "alibaba",
+        "V1_MODEL": "wan-v2-7",
+        "endpoint": "video-edit",
+        "VALID_RESOLUTIONS": ("720p", "1080p"),
+        "DEFAULT_RESOLUTION": "720p",
+        "builder": "edit",
+    },
+    "wanedit30v1": {
+        "V1_PROVIDER": "alibaba",
+        "V1_MODEL": "wan-v3-0",
+        "endpoint": "video-edit",
+        "VALID_RESOLUTIONS": ("480p", "720p", "1080p"),
+        "DEFAULT_RESOLUTION": "720p",
+        "builder": "edit",
+    },
+    "wanedit30primev1": {
+        "V1_PROVIDER": "alibaba",
+        "V1_MODEL": "wan-v3-0-prime",
+        "endpoint": "video-edit",
+        "VALID_RESOLUTIONS": ("480p", "720p", "1080p"),
+        "DEFAULT_RESOLUTION": "720p",
+        "builder": "edit",
+    },
+    "geminiomnieditv1": {
+        "V1_PROVIDER": "google",
+        "V1_MODEL": "gemini-omni-1-1-flash",
+        "endpoint": "video-edit",
+        "VALID_RESOLUTIONS": ("360p", "720p", "1080p", "4K"),
+        "DEFAULT_RESOLUTION": "720p",
+        "builder": "edit",
+    },
+    "happyhorse10v1": {
+        "V1_PROVIDER": "alibaba",
+        "V1_MODEL": "happyhorse-1-0",
+        "endpoint": "video-edit",
+        "VALID_RESOLUTIONS": ("720p", "1080p"),
+        "DEFAULT_RESOLUTION": "720p",
+        "builder": "edit",
+    },
+    "viduq2proeditv1": {
+        "V1_PROVIDER": "vidu",
+        "V1_MODEL": "viduq2-pro",
+        "endpoint": "video-edit",
+        "VALID_RESOLUTIONS": ("540p", "720p", "1080p"),
+        "DEFAULT_RESOLUTION": "720p",
+        "builder": "edit",
+    },
+    "runwayalepheditv1": {
+        "V1_PROVIDER": "runway",
+        "V1_MODEL": "runway-gen-4-aleph",
+        "endpoint": "video-edit",
+        "builder": "edit",
+    },
     "recastv1": {
         "V1_PROVIDER": "alibaba",
         "V1_MODEL": "wan-2-2-animate-mix",
@@ -530,6 +588,82 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "HAS_MODE": True,
         "DEFAULT_MODE": "std",
         "builder": "recast",
+    },
+    # Motion / act (added 2026-11): a reference image animated by the motion of a
+    # source video. Same {image, video (+mode)} shape as Recast (builder reused);
+    # the MODEL_INFO "type": "motion" sets the tag and submit routing.
+    "wananimatemovev1": {
+        "V1_PROVIDER": "alibaba",
+        "V1_MODEL": "wan-2-2-animate-move",
+        "endpoint": "motion",
+        "HAS_MODE": True,
+        "DEFAULT_MODE": "std",
+        "builder": "recast",
+    },
+    "klingmotion26v1": {
+        "V1_PROVIDER": "kling-ai",
+        "V1_MODEL": "kling-v2-6",
+        "endpoint": "motion",
+        "HAS_MODE": True,
+        "DEFAULT_MODE": "std",
+        "builder": "recast",
+    },
+    "klingmotion3v1": {
+        "V1_PROVIDER": "kling-ai",
+        "V1_MODEL": "kling-v3",
+        "endpoint": "motion",
+        "HAS_MODE": True,
+        "DEFAULT_MODE": "std",
+        "builder": "recast",
+    },
+    "actionimitationv1": {
+        "V1_PROVIDER": "pollo-ai",
+        "V1_MODEL": "action-imitation",
+        "endpoint": "motion",
+        "builder": "recast",
+    },
+    "actionimitationv2v1": {
+        "V1_PROVIDER": "pollo-ai",
+        "V1_MODEL": "action-imitation-v2",
+        "endpoint": "motion",
+        "builder": "recast",
+    },
+    "runwayacttwov1": {
+        "V1_PROVIDER": "runway",
+        "V1_MODEL": "runway-act-two",
+        "endpoint": "motion",
+        "builder": "recast",
+    },
+    # Lip-sync (added 2026-11): drive a reference image (a portrait) with an
+    # audio track. Shape {image, audio} (+prompt, +resolution where offered).
+    "omnihumanv1": {
+        "V1_PROVIDER": "bytedance",
+        "V1_MODEL": "omnihuman",
+        "endpoint": "lipsync",
+        "builder": "lipsync",
+    },
+    "omnihuman15v1": {
+        "V1_PROVIDER": "bytedance",
+        "V1_MODEL": "omnihuman-v1-5",
+        "endpoint": "lipsync",
+        "builder": "lipsync",
+    },
+    "hedracharv3v1": {
+        "V1_PROVIDER": "hedra",
+        "V1_MODEL": "hedra-character-v3",
+        "endpoint": "lipsync",
+        "VALID_RESOLUTIONS": ("540p", "720p"),
+        "DEFAULT_RESOLUTION": "540p",
+        "builder": "lipsync",
+    },
+    "h3lipsyncv1": {
+        "V1_PROVIDER": "pollo-ai",
+        "V1_MODEL": "h3-lipsync",
+        "endpoint": "lipsync",
+        "VALID_RESOLUTIONS": ("480p", "720p", "1080p"),
+        "DEFAULT_RESOLUTION": "720p",
+        "NEEDS_PROMPT": True,
+        "builder": "lipsync",
     },
 }
 
@@ -690,13 +824,49 @@ def _extend_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: di
     return {"input": attrs}
 
 
-def _recast_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw) -> dict[str, Any]:
+def _edit_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw) -> dict[str, Any]:
     video_url = kw.get("video_url")
     if not video_url:
-        raise ValueError("Recast needs the source video's URL")
+        raise ValueError("Editing needs the source video's URL")
+    if not prompt:
+        raise ValueError("Editing needs an instruction prompt")
+    attrs: dict[str, Any] = {"video": video_url, "prompt": prompt}
+    if c["VALID_RESOLUTIONS"] and s["resolution"]:
+        attrs["resolution"] = s["resolution"]
+    return {"input": attrs}
+
+
+def _lipsync_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw) -> dict[str, Any]:
+    """Lip sync: a reference image driven by an audio track — {image, audio}
+    (+prompt where given / required, +resolution where the model offers one)."""
+    audio_url = kw.get("audio_url")
     if not image_url:
-        raise ValueError("Recast needs a reference image URL")
-    return {"input": {"image": image_url, "video": video_url, "mode": s["mode"] or c["DEFAULT_MODE"]}}
+        raise ValueError("Lip sync needs a reference image URL")
+    if not audio_url:
+        raise ValueError("Lip sync needs an audio URL")
+    if c.get("NEEDS_PROMPT") and not prompt:
+        raise ValueError("Lip sync needs a prompt")
+    attrs: dict[str, Any] = {"image": image_url, "audio": audio_url}
+    if prompt:
+        attrs["prompt"] = prompt
+    if c["VALID_RESOLUTIONS"] and s["resolution"]:
+        attrs["resolution"] = s["resolution"]
+    return {"input": attrs}
+
+
+def _recast_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw) -> dict[str, Any]:
+    """Recast and motion/act share this shape: a reference image animated by a
+    source video. `mode` (std/pro) is sent only when the model offers one — a
+    few (action-imitation, runway-act-two) take just image + video."""
+    video_url = kw.get("video_url")
+    if not video_url:
+        raise ValueError("This model needs the source video's URL")
+    if not image_url:
+        raise ValueError("This model needs a reference image URL")
+    attrs: dict[str, Any] = {"image": image_url, "video": video_url}
+    if c["HAS_MODE"]:
+        attrs["mode"] = s["mode"] or c["DEFAULT_MODE"]
+    return {"input": attrs}
 
 
 def v1_video_payload(model_id: str, *, prompt: str, image_url: str | None, **kw) -> dict[str, Any]:
@@ -710,6 +880,10 @@ def v1_video_payload(model_id: str, *, prompt: str, image_url: str | None, **kw)
         return _kling_payload(c, prompt, image_url, s)
     if builder == "extend":
         return _extend_payload(c, prompt, image_url, s, **kw)
+    if builder == "edit":
+        return _edit_payload(c, prompt, image_url, s, **kw)
+    if builder == "lipsync":
+        return _lipsync_payload(c, prompt, image_url, s, **kw)
     if builder == "recast":
         return _recast_payload(c, prompt, image_url, s, **kw)
     raise ValueError(f"unknown builder {builder!r} for {model_id}")

@@ -14,7 +14,7 @@ from web.core.metadata import get_db, iso
 
 from .. import characters, media, request_log
 from ..providers import openrouter, venice
-from ..uploads import read_image_upload, read_video_upload, safe_filename, store_deduped
+from ..uploads import read_audio_upload, read_image_upload, read_video_upload, safe_filename, store_deduped
 from .catalogue import get_models
 from .constants import (
     _KINDS,
@@ -553,13 +553,22 @@ async def api_upload_video_attachment(conv_id: str, file: UploadFile = File(...)
     return {"file": store_deduped(_conv_dir(conv_id), "upv_", content, ext)}
 
 
+@router.post("/conversations/{conv_id}/attachments/audio")
+async def api_upload_audio_attachment(conv_id: str, file: UploadFile = File(...)):
+    """A lip-sync audio upload. Saved with a 'upa_' prefix so the message
+    endpoint records it as an audio (not image) media item."""
+    _require_conv(conv_id)
+    content, ext = await read_audio_upload(file)
+    return {"file": store_deduped(_conv_dir(conv_id), "upa_", content, ext)}
+
+
 @router.delete("/conversations/{conv_id}/attachments/{filename}")
 def api_discard_attachment(conv_id: str, filename: str):
     """Drop an attachment that was uploaded but never sent (removed from the
     composer). Files any message or library entry still uses are kept."""
     _require_conv(conv_id)
     name = safe_filename(filename)
-    if not name.startswith(("up_", "upv_")):
+    if not name.startswith(("up_", "upv_", "upa_")):
         return {"deleted": False}
     db = get_db()
     in_use = any(name in media._referenced_files(i) for m in db.get_chat_messages(conv_id) for i in m.media) or any(

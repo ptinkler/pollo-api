@@ -63,6 +63,9 @@ def tags_for(kind: str, m: dict[str, Any]) -> list[str]:
 # function stays simple). "standard" / img-animation is handled in the helper.
 _POLLO_TYPE_TAGS = {
     "extend": ("video_extend",),
+    "video_edit": ("video_edit",),
+    "motion": ("motion",),
+    "lipsync": ("lipsync",),
     "recast": ("motion", "video_edit"),
     "ref": ("ref2vid",),
     "img2vid": ("img2vid", "text2vid"),
@@ -76,7 +79,7 @@ _VENICE_FAMILY_TAGS = {
     "angles": ("img2vid",),
 }
 # Families/types where a "first_frame" is a role other than "animate this image"
-_EDIT_TYPES = {"recast", "ref", "extend"}
+_EDIT_TYPES = {"recast", "motion", "ref", "extend", "video_edit", "lipsync"}
 _VENICE_EDIT_FAMS = {"video", "motion", "upscale", "reference"}
 
 

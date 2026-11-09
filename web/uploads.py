@@ -19,6 +19,19 @@ MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024
 VIDEO_UPLOAD_TYPES = {"video/mp4": ".mp4"}
 MAX_VIDEO_UPLOAD_BYTES = 200 * 1024 * 1024
 
+# Audio uploads (chat's lip-sync track); content type → saved extension
+AUDIO_UPLOAD_TYPES = {
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/wave": ".wav",
+    "audio/mp4": ".m4a",
+    "audio/x-m4a": ".m4a",
+    "audio/aac": ".aac",
+}
+MAX_AUDIO_UPLOAD_BYTES = 50 * 1024 * 1024
+
 
 def safe_filename(name: str) -> str:
     """A bare filename from a URL path, or 400 — no directories, traversal or dotfiles."""
@@ -75,6 +88,18 @@ async def read_video_upload(file: UploadFile) -> tuple[bytes, str]:
     # that the bytes are really a video, not a renamed file.
     if b"ftyp" not in content[:64]:
         raise HTTPException(400, "File is not a valid MP4 video")
+    return content, ext
+
+
+async def read_audio_upload(file: UploadFile) -> tuple[bytes, str]:
+    """Validate an uploaded audio track (type, size); returns (bytes, file
+    extension to save it with)."""
+    ext = AUDIO_UPLOAD_TYPES.get(file.content_type or "")
+    if not ext:
+        raise HTTPException(400, f"Unsupported file type: {file.content_type}. Use MP3, WAV, M4A or AAC.")
+    content = await file.read()
+    if len(content) > MAX_AUDIO_UPLOAD_BYTES:
+        raise HTTPException(400, f"File too large (max {MAX_AUDIO_UPLOAD_BYTES // 1024 // 1024} MB)")
     return content, ext
 
 

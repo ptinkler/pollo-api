@@ -22,6 +22,17 @@ class TestVideoTags:
         assert tags_for("video", {"type": "ref"}) == ["ref2vid"]
         assert tags_for("video", {"type": "extend"}) == ["video_extend"]
 
+    def test_pollo_video_edit(self):
+        assert tags_for("video", {"type": "video_edit", "frame_images": []}) == ["video_edit"]
+
+    def test_pollo_motion_is_motion_only(self):
+        # act/motion: the first_frame is the image being animated, not img2vid
+        assert tags_for("video", {"type": "motion", "frame_images": ["first_frame"]}) == ["motion"]
+
+    def test_pollo_lipsync(self):
+        # lip sync: the first_frame is the portrait, driven by audio — not img2vid
+        assert tags_for("video", {"type": "lipsync", "frame_images": ["first_frame"]}) == ["lipsync"]
+
     def test_venice_families(self):
         assert tags_for("video", {"family": "motion"}) == ["motion"]
         assert tags_for("video", {"family": "upscale"}) == ["upscale"]

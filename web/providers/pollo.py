@@ -129,18 +129,27 @@ def list_video_models() -> list[dict[str, Any]]:
         # duration/resolution/aspect ratio (the source video sets those). Extend
         # continues a source video too, but the user picks the added duration
         # and resolution — it takes no image and no aspect ratio.
-        recast = meta.get("type") == "recast"
-        extend = meta.get("type") == "extend"
+        typ = meta.get("type")
+        recast = typ in ("recast", "motion")  # animate a reference image with a source video
+        extend = typ == "extend"  # continue a source video
+        edit = typ == "video_edit"  # edit a source video from a prompt
+        lipsync = typ == "lipsync"  # drive a portrait with an audio track
+        no_image = extend or edit  # source-video families that take no first frame
+        # only the plain generators carry their own duration / aspect ratio;
+        # the source-video / audio families derive the length from their input
+        own_duration = not (recast or edit or lipsync)
+        own_ratio = not (recast or extend or edit or lipsync)
         out.append(
             {
                 "id": PREFIX + key,
                 "name": f"Pollo: {meta.get('label') or key}",
-                "type": meta.get("type"),
-                "durations": None if recast else (meta.get("lengths") or list(cls.VALID_LENGTHS) or None),
+                "type": typ,
+                "durations": (meta.get("lengths") or list(cls.VALID_LENGTHS) or None) if own_duration else None,
                 "resolutions": None if recast else (meta.get("resolutions") or list(cls.VALID_RESOLUTIONS) or None),
-                "aspect_ratios": None if (recast or extend) else (meta.get("ratios") or list(cls.VALID_RATIOS) or None),
-                # recast: the reference image rides on first_frame; extend takes none
-                "frame_images": [] if extend else ["first_frame"],
+                "aspect_ratios": (meta.get("ratios") or list(cls.VALID_RATIOS) or None) if own_ratio else None,
+                # recast/lipsync: the reference image rides on first_frame; extend/edit take none
+                "frame_images": [] if no_image else ["first_frame"],
+                "audio_input": lipsync,  # takes an uploaded audio track (lip sync)
                 # ref2video models take several named reference images
                 "reference_images": meta.get("type") == "ref",
                 "max_refs": REF_MAX_IMAGES if meta.get("type") == "ref" else None,
@@ -189,6 +198,15 @@ def _upload_video(path: Path) -> str:
         raise PolloError(f"Couldn't upload the video for Pollo: {e}") from e
 
 
+def _upload_audio(path: Path) -> str:
+    """Upload a lip-sync audio track to a temporary public host (Pollo only
+    takes URLs). Uses the larger-file host, like videos."""
+    try:
+        return image_hosts.upload_file(path, prefer_large=True)
+    except ValueError as e:
+        raise PolloError(f"Couldn't upload the audio for Pollo: {e}") from e
+
+
 def generate_image(
     model_id: str,
     prompt: str,
@@ -225,6 +243,54 @@ def generate_image(
     )
 
 
+# "needs a source video" label per source-video family (preserves wording)
+_SRC_VIDEO_NEEDS = {"recast": "Recast", "motion": "Motion", "extend": "Extending", "video_edit": "Editing"}
+# families that animate a reference image with a source video (image + video)
+_IMAGE_AND_VIDEO = ("recast", "motion")
+
+
+def _submit_source_video_job(
+    key: str,
+    typ: str | None,
+    *,
+    prompt: str,
+    source_video: Path | None,
+    first_frame: Path | None,
+    resolution: str | None,
+    duration: int | None,
+    generate_audio: bool | None,
+    mode: str | None,
+) -> dict | None:
+    """Submit a job for a family that works on a source video — Recast / Motion
+    (video + reference image + mode), Extend (video, adds duration) or Video Edit
+    (video + instruction prompt). Returns the job dict, or None if `typ` isn't one
+    of those (so the caller falls through to the image/text path)."""
+    if typ not in (*_IMAGE_AND_VIDEO, "extend", "video_edit"):
+        return None
+    if not source_video:
+        raise PolloError(f"{_SRC_VIDEO_NEEDS[typ]} needs a source video")
+    if typ in _IMAGE_AND_VIDEO and not first_frame:
+        raise PolloError(f"{_SRC_VIDEO_NEEDS[typ]} needs a reference image")
+    if typ == "video_edit" and not (prompt or "").strip():
+        raise PolloError("Editing needs an instruction prompt")
+    # The source video goes to the host that takes larger files; both are URLs.
+    kw: dict[str, Any] = {
+        "api_key": keyctx.provider_key("pollo"),
+        "project": "chat",
+        "prompt": prompt,
+        "video_url": _upload_video(source_video),
+    }
+    if typ in _IMAGE_AND_VIDEO:  # recast / motion: animate the reference image
+        kw.update(image_url=_upload(first_frame), mode=mode)
+    else:
+        kw.update(image_url=None, resolution=resolution)
+        if typ == "extend":  # extend lets the user pick added duration + audio
+            kw.update(length=duration, generate_audio=generate_audio)
+    generator = get_video_generator(key, **kw)
+    task_id = _submit(generator)
+    return {"id": JOB_PREFIX + task_id, "params": _sent_params(generator)}
+
+
 def submit_video(
     model_id: str,
     prompt: str,
@@ -234,6 +300,7 @@ def submit_video(
     generate_audio: bool | None = None,
     first_frame: Path | None = None,
     source_video: Path | None = None,
+    source_audio: Path | None = None,
     mode: str | None = None,
     refs: list[Path] | None = None,
 ) -> dict:
@@ -241,45 +308,39 @@ def submit_video(
     settings actually sent}, shaped like openrouter.submit_video's result.
     A first frame is uploaded to a temporary public host first (Pollo only takes URLs)."""
     key = _generator_key(model_id, _video_generators())
-    if MODEL_INFO.get(key, {}).get("type") == "recast":
-        # Pollo Recast: a source video + one reference image (the first frame)
-        # + a std/pro mode. Both are uploaded to public URLs; the source video
-        # goes to the host that takes larger files.
-        if not source_video:
-            raise PolloError("Recast needs a source video")
+    typ = MODEL_INFO.get(key, {}).get("type")
+    if typ == "lipsync":
+        # Lip sync: a reference image (first frame) driven by an uploaded audio
+        # track. Both are uploaded to public URLs.
         if not first_frame:
-            raise PolloError("Recast needs a reference image")
+            raise PolloError("Lip sync needs a reference image")
+        if not source_audio:
+            raise PolloError("Lip sync needs an audio file")
         generator = get_video_generator(
             key,
             api_key=keyctx.provider_key("pollo"),
             project="chat",
             prompt=prompt,
             image_url=_upload(first_frame),
-            video_url=_upload_video(source_video),
-            mode=mode,
-        )
-        task_id = _submit(generator)
-        return {"id": JOB_PREFIX + task_id, "params": _sent_params(generator)}
-    if MODEL_INFO.get(key, {}).get("type") == "extend":
-        # Video Extend: continue a source video (no reference image). The source
-        # video is uploaded to a public URL; the model adds `duration` seconds at
-        # the chosen resolution.
-        if not source_video:
-            raise PolloError("Extending needs a source video")
-        generator = get_video_generator(
-            key,
-            api_key=keyctx.provider_key("pollo"),
-            project="chat",
-            prompt=prompt,
-            image_url=None,
-            video_url=_upload_video(source_video),
+            audio_url=_upload_audio(source_audio),
             resolution=resolution,
-            length=duration,
-            generate_audio=generate_audio,
         )
         task_id = _submit(generator)
         return {"id": JOB_PREFIX + task_id, "params": _sent_params(generator)}
-    if MODEL_INFO.get(key, {}).get("type") == "ref":
+    job = _submit_source_video_job(
+        key,
+        typ,
+        prompt=prompt,
+        source_video=source_video,
+        first_frame=first_frame,
+        resolution=resolution,
+        duration=duration,
+        generate_audio=generate_audio,
+        mode=mode,
+    )
+    if job is not None:
+        return job
+    if typ == "ref":
         # ref2video: every reference image (the first frame too) becomes a named
         # "Image N" reference the prompt can mention, like Pollo's own site
         files = list(dict.fromkeys([*([first_frame] if first_frame else []), *(refs or [])]))[:REF_MAX_IMAGES]
