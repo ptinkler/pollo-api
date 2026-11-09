@@ -3,6 +3,7 @@
 <script setup>
 import { ref, computed, onMounted, inject } from 'vue'
 import { useRouter } from 'vue-router'
+import { confirmDialog } from '../../composables/useDialog'
 import CharacterEditor from '../characters/CharacterEditor.vue'
 import { fetchCharacters, promoteCharacter, deleteCharacter, characterAvatar } from '../../composables/useCharacters'
 
@@ -50,7 +51,15 @@ async function promote(c) {
   }
 }
 async function remove(c) {
-  if (!confirm(`Delete “${c.name}” and its images?`)) return
+  if (
+    !(await confirmDialog({
+      title: `Delete “${c.name}”?`,
+      message: 'Its images are deleted too.',
+      confirmLabel: 'Delete',
+      danger: true,
+    }))
+  )
+    return
   try {
     await deleteCharacter(c.id)
     onDeleted(c.id)

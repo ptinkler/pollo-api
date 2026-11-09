@@ -21,6 +21,7 @@ TAGS: dict[str, str] = {
     "img2vid": "Image→Video",
     "text2vid": "Text→Video",
     "ref2vid": "References→Video",
+    "video_refs": "Video refs (recast)",
     "first_last": "First+Last frame",
     "video_edit": "Video edit",
     "video_extend": "Video extend",
@@ -116,6 +117,11 @@ def _video_tags(m: dict[str, Any], add: Callable[..., None]) -> None:
         add("text2vid")
     if m.get("reference_images"):
         add("ref2vid")
+    refs = m.get("ref_mode") or {}  # v1 models' reference-to-video branch
+    if refs:
+        add("ref2vid")
+    if "video" in (refs.get("types") or []):
+        add("video_refs")  # takes a source video as a reference: replace/restyle part of a clip
     if "last_frame" in frames:
         add("first_last")
     if m.get("generate_audio"):

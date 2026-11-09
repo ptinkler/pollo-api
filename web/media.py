@@ -21,19 +21,22 @@ the library never breaks what used it.
 
 import asyncio
 import contextlib
+import functools
 import hashlib
 import io
 import json
 import threading
 import time
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
 import anyio
+import cv2
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from PIL import Image, ImageOps
 from pydantic import BaseModel
 
@@ -97,6 +100,26 @@ def _kind(path: Path | str) -> str | None:
 def _mtime_iso(path: Path) -> str | None:
     try:
         return datetime.fromtimestamp(path.stat().st_mtime).astimezone().isoformat()
+    except OSError:
+        return None
+
+
+@functools.lru_cache(maxsize=4096)
+def _video_seconds(path: str, mtime_ns: int) -> float | None:
+    """A video's length in seconds, from its header (cached per file version)."""
+    cap = cv2.VideoCapture(path)
+    try:
+        fps, frames = cap.get(cv2.CAP_PROP_FPS), cap.get(cv2.CAP_PROP_FRAME_COUNT)
+        return round(frames / fps, 1) if fps > 0 and frames > 0 else None
+    finally:
+        cap.release()
+
+
+def _duration(path: Path, kind: str | None) -> float | None:
+    if kind != "video":
+        return None
+    try:
+        return _video_seconds(str(path), path.stat().st_mtime_ns)
     except OSError:
         return None
 
@@ -212,6 +235,7 @@ def _library_items() -> list[dict[str, Any]]:
             "url": f"/api/media/library/{p.name}",
             "thumb_url": _thumb_url(f"lib:{p.name}"),
             "created_at": _mtime_iso(p),
+            "duration": _duration(p, _kind(p)),
         }
         for p in d.iterdir()
         if p.is_file() and _kind(p)
@@ -230,9 +254,11 @@ def _chat_records(msgs, lib_items, titles: dict[str, str]) -> list[dict[str, Any
             return
         if not (_chat_dir(conv_id) / file).is_file():
             return
+        kind = item.get("kind") or _kind(file)
         items[file] = {
             "id": f"chat:{conv_id}:{file}",
-            "kind": item.get("kind") or _kind(file),
+            "kind": kind,
+            "duration": _duration(_chat_dir(conv_id) / file, kind),
             "source": "upload" if item.get("source") == "upload" else "generated",
             "origin": "chat",
             "name": file,
@@ -295,6 +321,7 @@ def _chat_orphans(msgs, lib_items, titles: dict[str, str]) -> list[dict[str, Any
                     "url": f"/api/chat/media/{d.name}/{p.name}",
                     "thumb_url": _thumb_url(media_id),
                     "created_at": _mtime_iso(p),
+                    "duration": _duration(p, kind),
                     "conversation_id": d.name if d.name in titles else None,
                     "conversation_title": titles.get(d.name),
                 }
@@ -401,8 +428,57 @@ async def api_upload_media(file: UploadFile = File(...)):
     return next(i for i in _library_items() if i["name"] == name)
 
 
+class MediaIds(BaseModel):
+    ids: list[str]
+
+
+BULK_MAX = 500
+
+
+@router.post("/bulk-delete")
+def api_bulk_delete_media(data: MediaIds):
+    """Delete several items (see api_delete_media). Ones already gone are skipped."""
+    deleted, failed = [], []
+    for media_id in data.ids[:BULK_MAX]:
+        try:
+            _delete_item(media_id)
+            deleted.append(media_id)
+        except HTTPException:
+            failed.append(media_id)
+    return {"deleted": deleted, "failed": failed}
+
+
+@router.post("/bulk-download")
+def api_bulk_download_media(data: MediaIds):
+    """The chosen items in one zip (stored, not compressed: images and videos
+    are already compressed)."""
+    buf = io.BytesIO()
+    used: set[str] = set()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+        for media_id in data.ids[:BULK_MAX]:
+            try:
+                _, path, _ = resolve(media_id)
+            except HTTPException:
+                continue
+            name, n = path.name, 1
+            while name in used:  # same file name from two chats
+                n += 1
+                name = f"{path.stem}-{n}{path.suffix}"
+            used.add(name)
+            zf.write(path, name)
+    return Response(
+        buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="media.zip"'},
+    )
+
+
 @router.delete("/{media_id:path}")
 def api_delete_media(media_id: str):
+    return _delete_item(media_id)
+
+
+def _delete_item(media_id: str) -> dict:
     """Delete an item's file — and what records it: a generation's job, or
     the chat message's media item. Copies already made from it (character
     images, attachments, Generate sources) are separate files and stay."""

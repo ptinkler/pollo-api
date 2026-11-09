@@ -14,6 +14,17 @@ from .models import ChatConversation, ChatLibraryItem, ChatMessage
 _APPEND = object()
 
 
+def _media_row(conv_id: str, at, item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "conversation_id": conv_id,
+        "at": at,
+        "model": item.get("model"),
+        "kind": item.get("kind") or "image",
+        "usd": item.get("cost") or 0,
+        "credits": item.get("credits") or 0,
+    }
+
+
 class MessageMixin:
     def add_chat_message(
         self,
@@ -215,6 +226,43 @@ class MessageMixin:
                 usd += lib.item.get("cost") or 0
                 credits += lib.item.get("credits") or 0
             return round(usd, 6), int(credits)
+
+    def spend_rows(self, conversation_ids: list[str]) -> list[dict[str, Any]]:
+        """One row per charge across the given chats, for the usage breakdown:
+        {conversation_id, at, model, kind, usd, credits}. A Pollo media item is
+        one row (credits); a message's dollar cost (OpenRouter/Venice, media
+        included) is one row. Media detached into the library still counts."""
+        rows: list[dict[str, Any]] = []
+        if not conversation_ids:
+            return rows
+        with self._session() as session:
+            msgs = session.query(
+                ChatMessage.conversation_id,
+                ChatMessage.created_at,
+                ChatMessage.model,
+                ChatMessage.cost,
+                ChatMessage.media_json,
+            ).filter(ChatMessage.conversation_id.in_(conversation_ids))
+            for conv_id, at, model, cost, media_json in msgs:
+                if cost:
+                    rows.append(
+                        {
+                            "conversation_id": conv_id,
+                            "at": at,
+                            "model": model,
+                            "kind": "chat",
+                            "usd": cost,
+                            "credits": 0,
+                        }
+                    )
+                for item in json.loads(media_json) if media_json else []:
+                    if item.get("credits"):
+                        rows.append(_media_row(conv_id, at, item))
+            libs = session.query(ChatLibraryItem).filter(ChatLibraryItem.conversation_id.in_(conversation_ids))
+            for lib in libs:
+                if lib.item.get("credits") or lib.item.get("cost"):
+                    rows.append(_media_row(lib.conversation_id, lib.created_at, lib.item))
+        return rows
 
     def get_chat_messages(self, conversation_id: str) -> list[ChatMessage]:
         with self._session() as session:

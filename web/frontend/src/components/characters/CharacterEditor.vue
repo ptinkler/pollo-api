@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, inject } from 'vue'
 import MediaPicker from '../media/MediaPicker.vue'
+import { confirmDialog } from '../../composables/useDialog'
 import BaseDialog from '../BaseDialog.vue'
 import DefaultToggles from '../chat/DefaultToggles.vue'
 import { importMedia } from '../../composables/useMedia'
@@ -141,7 +142,15 @@ async function promote() {
 }
 
 async function remove() {
-  if (!confirm(`Delete “${props.character.name}” and its images?`)) return
+  if (
+    !(await confirmDialog({
+      title: `Delete “${props.character.name}”?`,
+      message: 'Its images are deleted too.',
+      confirmLabel: 'Delete',
+      danger: true,
+    }))
+  )
+    return
   try {
     await deleteCharacter(props.character.id)
     emit('deleted', props.character.id)

@@ -7,6 +7,7 @@ defineEmits(['close', 'navigate', 'defaults', 'import'])
 const TOOLS = [
   { route: 'characters', label: 'Characters', note: 'Reusable characters for chats and generations' },
   { route: 'instructions', label: 'Instructions', note: 'Snippets and groups sent to the chat model' },
+  { route: 'presets', label: 'Presets', note: 'Saved model and option sets' },
   { route: 'usage', label: 'Credit usage', note: 'Balances for every provider' },
   { route: 'request-log', label: 'Request log', note: 'What was sent to each provider' },
 ]

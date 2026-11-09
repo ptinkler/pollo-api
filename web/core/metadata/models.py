@@ -340,9 +340,11 @@ class ChatSettings(DefaultsBucket, Base):
     user_id: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
     id: Mapped[int] = mapped_column(primary_key=True)  # always 1
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+    # The text model that names new chats (None = the chat's own model)
+    title_model: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     def to_dict(self) -> dict[str, Any]:
-        return self.defaults_dict()
+        return {**self.defaults_dict(), "title_model": self.title_model}
 
 
 class ChatMessage(Base):

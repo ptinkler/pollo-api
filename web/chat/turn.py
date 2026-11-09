@@ -5,6 +5,7 @@ module, persists everything, and starts video pollers for async jobs."""
 import contextlib
 import json
 import os
+import re
 import threading
 from datetime import datetime
 from typing import Any
@@ -740,8 +741,12 @@ class Turn:
         if not first:
             return None
         job: dict[str, Any] = {"prompt": first.content, "title": None, "cost": 0.0, "thread": None}
-        model = os.environ.get("CHAT_TITLE_MODEL") or self.s.text_model
-        direct = self.s.mode in ("image", "video", "audio")  # no text model involved: the prompt titles the chat
+        # The user's title model (Settings), else CHAT_TITLE_MODEL, else the chat model
+        chosen = self.db.get_settings().title_model or os.environ.get("CHAT_TITLE_MODEL")
+        model = chosen or self.s.text_model
+        # Direct image/video/audio sends involve no text model, so without a chosen
+        # title model the prompt itself (tidied) titles the chat
+        direct = self.s.mode in ("image", "video", "audio") and not chosen
         if model and not direct and (venice.is_configured() if venice.is_venice(model) else openrouter.is_configured()):
 
             def work():
@@ -765,7 +770,8 @@ class Turn:
                 title = job["title"]
                 self.cost += job["cost"] or 0
         if not title:
-            title = " ".join(job["prompt"].split())
+            # [@video1] reference tags read as plain words in a title
+            title = " ".join(re.sub(r"\[@([^\]]+)\]", r"\1", job["prompt"]).split())
             if len(title) > 60:
                 title = title[:57].rsplit(" ", 1)[0] + "…"
         conv = self.db.get_conversation(self.conv_id)

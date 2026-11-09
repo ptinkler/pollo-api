@@ -105,6 +105,21 @@ describe('StudioInstructionsPage', () => {
 })
 
 describe('InstructionPicker', () => {
+  it('opens the editor for a new snippet or group from the add menu', async () => {
+    const w = mount(InstructionPicker, { props: { instructions: [], groups: [], snippetIds: [], groupIds: [] } })
+    await w.find('.add').trigger('click')
+    const items = w.findAll('.menu .item')
+    await items.find(i => i.text().includes('New snippet')).trigger('click')
+    expect(w.emitted('edit')[0]).toEqual([{ kind: 'snippet', id: null }])
+    await w.find('.add').trigger('click')
+    await w
+      .findAll('.menu .item')
+      .find(i => i.text().includes('New group'))
+      .trigger('click')
+    expect(w.emitted('edit')[1]).toEqual([{ kind: 'group', id: null }])
+    w.unmount()
+  })
+
   it('opens an attached snippet or group when its chip is clicked', async () => {
     const w = mount(InstructionPicker, {
       props: { instructions: snippets, groups, snippetIds: [2], groupIds: [7] },
@@ -134,7 +149,12 @@ describe('InstructionPicker', () => {
     expect(w.emitted('hide')).toEqual([[{ kind: 'snippet', id: 1 }]])
     // The hidden one is offered to switch back on, not to attach as the chat's own
     await w.find('.add').trigger('click')
-    expect(w.findAll('.menu .item').map(i => i.text())).toEqual(['No emoji🌐', '⚙ All instructions…'])
+    expect(w.findAll('.menu .item').map(i => i.text())).toEqual([
+      'No emoji🌐',
+      '+ New snippet',
+      '+ New group',
+      'All instructions',
+    ])
     await w.find('.menu .item.hidden-default').trigger('click')
     expect(w.emitted('unhide')).toEqual([[{ kind: 'snippet', id: 3 }]])
     w.unmount()
@@ -165,7 +185,12 @@ describe('InstructionPicker', () => {
     const w = mount(InstructionPicker, { props: { instructions: many, groups: [], snippetIds: [], groupIds: [] } })
     await w.find('.add').trigger('click')
     await w.find('.menu-search').setValue('7')
-    expect(w.findAll('.menu .item').map(i => i.text())).toEqual(['Snippet 7', '⚙ All instructions…'])
+    expect(w.findAll('.menu .item').map(i => i.text())).toEqual([
+      'Snippet 7',
+      '+ New snippet',
+      '+ New group',
+      'All instructions',
+    ])
     w.unmount()
   })
 })

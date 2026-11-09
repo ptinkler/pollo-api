@@ -4,6 +4,8 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { fetchUserKeys } from '../../composables/useAccount'
+import { fetchSpendBreakdown } from '../../composables/useChat'
+import { fmtCost, creditsToUsd, shortModel } from '../../utils/format'
 
 const props = defineProps({
   // { pollo, openrouter, venice, veniceCredits } — nulls show as —
@@ -23,7 +25,31 @@ async function loadKeys() {
     loading.value = false
   }
 }
-onMounted(loadKeys)
+
+// What the money went on, per model, over a chosen period (Pollo credits are
+// converted to dollars so every provider adds up)
+const PERIODS = [
+  { days: 7, label: '7 days' },
+  { days: 30, label: '30 days' },
+  { days: 0, label: 'All time' },
+]
+const days = ref(30)
+const breakdown = ref(null)
+async function loadBreakdown() {
+  try {
+    breakdown.value = await fetchSpendBreakdown(days.value)
+  } catch {
+    breakdown.value = null
+  }
+}
+function setDays(d) {
+  days.value = d
+  loadBreakdown()
+}
+onMounted(() => {
+  loadKeys()
+  loadBreakdown()
+})
 
 const fmtCredits = v => (v == null ? '—' : Math.round(v).toLocaleString())
 const fmtBal = v => (v == null ? '—' : `$${v.toFixed(2)}`)
@@ -32,9 +58,9 @@ const providers = computed(() => [
   {
     id: 'pollo',
     label: 'Pollo',
-    unit: 'credits',
-    value: fmtCredits(props.balances.pollo),
-    note: 'Image & video generation',
+    unit: 'balance',
+    value: props.balances.pollo == null ? '—' : fmtBal(creditsToUsd(props.balances.pollo)),
+    note: `${fmtCredits(props.balances.pollo)} credits · image & video generation`,
   },
   {
     id: 'openrouter',
@@ -84,12 +110,113 @@ function keySet(id) {
         </div>
       </div>
 
+      <div class="bd">
+        <div class="bd-head">
+          <h2>Where it went</h2>
+          <div class="bd-periods">
+            <button v-for="p in PERIODS" :key="p.days" :class="{ on: days === p.days }" @click="setDays(p.days)">
+              {{ p.label }}
+            </button>
+          </div>
+        </div>
+        <p v-if="!breakdown" class="bd-none">Couldn't load the breakdown.</p>
+        <p v-else-if="!breakdown.rows.length" class="bd-none">Nothing spent in this period.</p>
+        <table v-else class="bd-table">
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Kind</th>
+              <th class="num">Items</th>
+              <th class="num">Spent</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in breakdown.rows" :key="r.model + r.kind">
+              <td>{{ shortModel(r.model) }}</td>
+              <td>{{ r.kind }}</td>
+              <td class="num">{{ r.count }}</td>
+              <td class="num">
+                {{ fmtCost(r.usd) }}<span v-if="r.credits" class="bd-cr"> · {{ r.credits }} cr</span>
+              </td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="3">Total</td>
+              <td class="num">{{ fmtCost(breakdown.total_usd) }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
       <button class="manage" @click="emit('manage-keys')">Manage provider keys</button>
     </div>
   </div>
 </template>
 
 <style scoped>
+.bd {
+  margin-bottom: 18px;
+}
+.bd-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.bd-head h2 {
+  font-size: 15px;
+  font-weight: 650;
+}
+.bd-periods {
+  display: flex;
+  gap: 6px;
+}
+.bd-periods button {
+  padding: 5px 11px;
+  border: 1px solid var(--sborder);
+  border-radius: 8px;
+  background: none;
+  color: var(--smuted);
+  cursor: pointer;
+  font-size: 12px;
+}
+.bd-periods button.on {
+  background: var(--saccent-soft);
+  color: var(--saccent);
+  border-color: transparent;
+}
+.bd-none {
+  color: var(--smuted);
+  font-size: 13px;
+}
+.bd-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.bd-table th,
+.bd-table td {
+  padding: 7px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--sborder2);
+}
+.bd-table th {
+  color: var(--smuted);
+  font-weight: 500;
+  font-size: 12px;
+}
+.bd-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.bd-table tfoot td {
+  font-weight: 650;
+  border-bottom: 0;
+}
+.bd-cr {
+  color: var(--sfaint);
+}
 .usage {
   flex: 1;
   overflow-y: auto;

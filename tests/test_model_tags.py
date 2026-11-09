@@ -100,3 +100,11 @@ def test_catalogue_attaches_tags_to_every_model(monkeypatch):
     finally:
         # get_models() caches module-side; drop the fake data so it can't leak
         catalogue._models_cache.update(at=0.0, data=None)
+
+
+def test_ref_mode_models_are_tagged_for_references_and_video_refs():
+    video_ref = {"type": "img2vid", "frame_images": ["first_frame"], "ref_mode": {"types": ["image", "video"]}}
+    image_ref = {"type": "img2vid", "frame_images": ["first_frame"], "ref_mode": {"types": ["image"]}}
+    assert {"ref2vid", "video_refs"} <= set(tags_for("video", video_ref))
+    tags = tags_for("video", image_ref)
+    assert "ref2vid" in tags and "video_refs" not in tags

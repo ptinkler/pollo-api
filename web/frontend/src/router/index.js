@@ -25,6 +25,7 @@ const routes = [
   page('/usage', 'studio-usage', 'Credit usage — Pollo'),
   page('/characters', 'studio-characters', 'Characters — Pollo'),
   page('/instructions', 'studio-instructions', 'Instructions — Pollo'),
+  page('/presets', 'studio-presets', 'Presets — Pollo'),
   page('/requests', 'studio-requests', 'Request log — Pollo'),
   page('/space/:spaceId', 'studio-space', 'Space — Pollo'),
   page('/:id/:view(chat|gallery)?', 'studio-thread', 'Pollo Studio'),

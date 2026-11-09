@@ -73,6 +73,20 @@ class TestListing:
         assert client.delete(f"/api/media/{item['id']}").status_code == 200
         assert item["id"] not in _items(client)
 
+    def test_bulk_download_and_delete(self, client):
+        import zipfile
+
+        ids = [
+            client.post("/api/media/upload", files={"file": (f"{n}.png", _png(n), "image/png")}).json()["id"]
+            for n in ("red", "blue")
+        ]
+        r = client.post("/api/media/bulk-download", json={"ids": [*ids, "lib:missing.png"]})
+        assert r.headers["content-type"] == "application/zip"
+        assert len(zipfile.ZipFile(io.BytesIO(r.content)).namelist()) == 2  # the missing one is skipped
+        r = client.post("/api/media/bulk-delete", json={"ids": [*ids, "lib:missing.png"]}).json()
+        assert sorted(r["deleted"]) == sorted(ids) and r["failed"] == ["lib:missing.png"]
+        assert not set(ids) & set(_items(client))
+
     def test_rejects_non_images(self, client):
         assert client.post("/api/media/upload", files={"file": ("a.txt", b"x", "text/plain")}).status_code == 400
 

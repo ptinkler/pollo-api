@@ -3,6 +3,7 @@
 <script setup>
 import { ref } from 'vue'
 import StudioAccount from './StudioAccount.vue'
+import StudioTitleModel from './StudioTitleModel.vue'
 import StudioKeys from './StudioKeys.vue'
 import StudioUploads from './StudioUploads.vue'
 import StudioVpnCard from './StudioVpnCard.vue'
@@ -46,6 +47,8 @@ const THEMES = [
           </div>
         </div>
       </section>
+
+      <StudioTitleModel />
 
       <StudioAccount @user="onUser" @sign-out="$emit('sign-out')" />
 

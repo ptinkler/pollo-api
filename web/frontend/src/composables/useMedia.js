@@ -1,5 +1,5 @@
 import { reactive, computed } from 'vue'
-import { apiGet, apiPost, apiDelete, apiUpload } from './useApi'
+import { apiGet, apiPost, apiDelete, apiUpload, apiDownload } from './useApi'
 
 // The media library (see web/media.py): every upload and creation — library
 // uploads, Generate projects' uploads/creations, chats' uploads/creations.
@@ -21,6 +21,8 @@ export function fetchMediaPage({ offset = 0, limit = 0, kind, source, origin, q 
   return apiGet(`/api/media${qs ? `?${qs}` : ''}`).then(r => ({ items: r.items, total: r.total ?? r.items.length }))
 }
 export const uploadMedia = file => apiUpload('/api/media/upload', file)
+export const deleteMediaMany = ids => apiPost('/api/media/bulk-delete', { ids })
+export const downloadMediaMany = ids => apiDownload('/api/media/bulk-download', { ids }, 'media.zip')
 export const deleteMedia = id => apiDelete(`/api/media/${enc(id)}`)
 
 /** Chat generations a content filter blocked: { moderated, black } counts, and clearing them all. */

@@ -1,15 +1,15 @@
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, nextTick } from 'vue'
 
 // The chat composer's settings: models, mode, the memory and image sliders
 // and the media options. Remembered per browser (the last ones used) and per
 // chat (restored when it's opened).
 
 export const MODES = [
-  { id: 'auto', label: 'Auto', icon: '✦', hint: 'Chat model decides when to make images or videos' },
-  { id: 'text', label: 'Chat', icon: '💬', hint: 'Text replies only' },
-  { id: 'image', label: 'Image', icon: '🖼', hint: 'Send the prompt straight to the image model' },
-  { id: 'video', label: 'Video', icon: '🎬', hint: 'Send the prompt (and image) straight to the video model' },
-  { id: 'audio', label: 'Audio', icon: '🔊', hint: 'Send the prompt straight to the speech / music model' },
+  { id: 'auto', label: 'Auto', icon: '✦' },
+  { id: 'text', label: 'Chat', icon: '💬' },
+  { id: 'image', label: 'Image', icon: '🖼' },
+  { id: 'video', label: 'Video', icon: '🎬' },
+  { id: 'audio', label: 'Audio', icon: '🔊' },
 ]
 const DEFAULT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9']
 // First id containing one of these wins when nothing is remembered yet
@@ -106,6 +106,8 @@ export function useComposerSettings(models) {
     generate_audio: true,
     ...prefs.videoOpts,
   })
+  // Length of the attached source clip, snapped to what the model allows (set by useStudio)
+  const clipDuration = ref(null)
   // Speech / music settings; '' / null = the model's own default
   const audioOpts = reactive({
     voice: '',
@@ -176,8 +178,14 @@ export function useComposerSettings(models) {
   watch(imageInfo, info => {
     if (info) dropUnsupported(imageOpts, imageRatioOptions.value, imageResOptions.value)
   })
-  watch(videoInfo, info => {
-    if (info) dropUnsupported(videoOpts, videoRatioOptions.value, videoResOptions.value, durationOptions.value)
+  watch(videoInfo, (info, prev) => {
+    if (!info) return
+    dropUnsupported(videoOpts, videoRatioOptions.value, videoResOptions.value, durationOptions.value)
+    // Audio starts on for every model that offers it, so a choice made on one
+    // model never silently carries over (e.g. an "off" left from another). Only
+    // when the model really changes — not when the catalogue first loads on a
+    // page refresh, which would undo the remembered choice (and a loaded preset).
+    if (info.generate_audio && prev && prev.id !== info.id) videoOpts.generate_audio = true
   })
 
   function cycleMode() {
@@ -221,6 +229,70 @@ export function useComposerSettings(models) {
     if (st.audio_options) Object.assign(audioOpts, st.audio_options)
   }
 
+  // Presets: a named snapshot of the models + media options + mode, loaded in
+  // one click. Per browser (localStorage), like the rest of the composer prefs.
+  const PRESETS_KEY = 'studio.presets'
+  const presets = ref(readPresets())
+  function readPresets() {
+    try {
+      const list = JSON.parse(localStorage.getItem(PRESETS_KEY))
+      return Array.isArray(list) ? list : []
+    } catch {
+      return []
+    }
+  }
+  function storePresets() {
+    try {
+      localStorage.setItem(PRESETS_KEY, JSON.stringify(presets.value))
+    } catch {
+      /* storage unavailable */
+    }
+  }
+  const snapshot = () => ({
+    mode: mode.value,
+    models: { ...selected },
+    imageOpts: { ...imageOpts },
+    videoOpts: { ...videoOpts },
+    audioOpts: { ...audioOpts },
+  })
+  // The saved preset the setup currently matches (so the picker can show it),
+  // or '' once anything has been changed away from it
+  const keyed = s =>
+    JSON.stringify([s.mode, s.models, s.imageOpts, s.videoOpts, s.audioOpts], (k, v) =>
+      v && typeof v === 'object' && !Array.isArray(v)
+        ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1)))
+        : v,
+    )
+  const activePresetId = computed(() => {
+    const now = keyed(snapshot())
+    return presets.value.find(p => keyed(p) === now)?.id || ''
+  })
+  function savePreset(name, snap = snapshot()) {
+    const preset = { id: Date.now().toString(36), name, ...snap }
+    // Same name replaces, so re-saving updates a preset
+    presets.value = [...presets.value.filter(p => p.name !== name), preset]
+    storePresets()
+  }
+  // Change a preset: its name and/or its settings (a snapshot)
+  function updatePreset(id, patch) {
+    presets.value = presets.value.map(p => (p.id === id ? { ...p, ...patch } : p))
+    storePresets()
+  }
+  function deletePreset(id) {
+    presets.value = presets.value.filter(p => p.id !== id)
+    storePresets()
+  }
+  async function loadPreset(preset) {
+    Object.assign(selected, preset.models)
+    if (MODES.some(m => m.id === preset.mode)) mode.value = preset.mode
+    // Let the model-change watchers (drop unsupported options, reset audio) run
+    // first, then put the preset's own options back on top.
+    await nextTick()
+    Object.assign(imageOpts, preset.imageOpts)
+    Object.assign(videoOpts, preset.videoOpts)
+    Object.assign(audioOpts, preset.audioOpts)
+  }
+
   function setRefChoices(choices) {
     refChoices.on = [...(choices?.on || [])]
     refChoices.off = [...(choices?.off || [])]
@@ -250,7 +322,8 @@ export function useComposerSettings(models) {
       video_options: {
         aspect_ratio: videoOpts.aspect_ratio || null,
         resolution: videoOpts.resolution || null,
-        duration: videoOpts.duration ? Number(videoOpts.duration) : null,
+        // '' = Auto: the attached clip's length (reference-to-video), else the model's default
+        duration: videoOpts.duration ? Number(videoOpts.duration) : clipDuration.value,
         generate_audio: videoInfo.value?.generate_audio ? videoOpts.generate_audio : null,
       },
       audio_options: audioSettings(),
@@ -293,8 +366,16 @@ export function useComposerSettings(models) {
     showAudioOpts,
     currentMode,
     cycleMode,
+    presets,
+    snapshot,
+    savePreset,
+    activePresetId,
+    updatePreset,
+    deletePreset,
+    loadPreset,
     applyDefaults,
     applyChat,
     turnSettings,
+    clipDuration,
   }
 }

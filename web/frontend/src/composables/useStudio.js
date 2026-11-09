@@ -1,3 +1,4 @@
+import { confirmDialog, promptDialog } from './useDialog'
 import { ref, reactive, computed, watch } from 'vue'
 import {
   fetchConversations,
@@ -37,6 +38,31 @@ import { useChatDefaults } from './useChatDefaults'
 // All of Studio's state + behaviour, kept out of the view so the components
 // stay presentational. `settings` is a useComposerSettings() instance (shared
 // with the inspector's model pickers); `models` is its catalogue, filled here.
+const attKind = a => (a.audio ? 'audio' : a.video ? 'video' : 'image')
+
+// What a video model takes, by attachment kind
+function acceptedKinds(info) {
+  const types = new Set(info.ref_mode?.types || [])
+  return {
+    image: types.has('image') || !!info.reference_images || !!info.frame_images?.length,
+    video: types.has('video') || !!info.video_input,
+    audio: types.has('audio') || !!info.audio_input,
+  }
+}
+
+// Keys of attachments the model can't use: a kind it doesn't take, or past its per-kind cap
+function unusedKeys(list, info, caps) {
+  const accepts = acceptedKinds(info)
+  const seen = { image: 0, video: 0, audio: 0 }
+  const out = new Set()
+  for (const a of list) {
+    const kind = attKind(a)
+    seen[kind]++
+    if (!accepts[kind] || seen[kind] > caps[kind]) out.add(a.key)
+  }
+  return out
+}
+
 export function useStudio({ models, settings, showToast }) {
   const { selected, mode, turnSettings, applyChat, applyDefaults } = settings
 
@@ -102,10 +128,19 @@ export function useStudio({ models, settings, showToast }) {
     uploading,
   } = attach
 
-  // Recast ergonomics: when a source video is attached to a reference-to-video
-  // model and duration is left on Auto, match the output to the clip's length.
-  // (Auto otherwise sends the model's short default — the backend turns an unset
-  // duration into ~5s, so a 30s source would render only 5s.) Read client-side.
+  // Attachments the selected video model can't take (kept in the composer so a
+  // model switch never loses them, but shown as unused and left out of the send).
+  // Only video mode is strict; chat/auto/image use attachments as they always did.
+  const unusedAttachments = computed(() => {
+    const info = mode.value === 'video' ? settings.videoInfo.value : null
+    if (!info) return new Set()
+    const caps = { image: imageLimit(), video: refTypeLimit('video'), audio: refTypeLimit('audio') }
+    return unusedKeys(attachments.value, info, caps)
+  })
+
+  // Reference-to-video with a source clip (recast): the output runs as long as
+  // the clip, so on Auto the length is the clip's, snapped to what the model
+  // allows. Picking a length by hand overrides it. Read client-side.
   function readVideoDuration(url) {
     return new Promise(resolve => {
       const v = document.createElement('video')
@@ -124,15 +159,14 @@ export function useStudio({ models, settings, showToast }) {
         .join(),
     ],
     async () => {
+      settings.clipDuration.value = null
       if (mode.value !== 'video' || !settings.videoInfo.value?.ref_mode) return
-      const d = settings.videoOpts.duration
-      if (d !== '' && d != null) return // user chose a duration — don't override
       const vid = attachments.value.find(a => a.video && a.preview)
       if (!vid) return
       const secs = await readVideoDuration(vid.preview)
-      if (!secs || (settings.videoOpts.duration !== '' && settings.videoOpts.duration != null)) return
+      if (!secs) return
       const opts = settings.durationOptions.value || []
-      settings.videoOpts.duration = opts.length
+      settings.clipDuration.value = opts.length
         ? opts.reduce((p, c) => (Math.abs(c - secs) < Math.abs(p - secs) ? c : p))
         : Math.round(secs)
     },
@@ -485,7 +519,7 @@ export function useStudio({ models, settings, showToast }) {
   async function send() {
     if (!canSend.value) return
     const content = draft.value.trim()
-    const sent = attachments.value.filter(a => a.file)
+    const sent = attachments.value.filter(a => a.file && !unusedAttachments.value.has(a.key))
     const nImages = sent.filter(a => !a.video && !a.audio).length
     if (nImages > imageLimit()) {
       return showToast(
@@ -533,12 +567,11 @@ export function useStudio({ models, settings, showToast }) {
   }
   const resendMessage = msg => editMessage(msg, msg.content || '')
 
-  function deleteQuestion({ other_versions: versions, other_messages: after }) {
+  function deleteDetail({ other_versions: versions, other_messages: after }) {
     const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
     const removes = [versions && plural(versions, 'other version'), after && plural(after, 'message')].filter(Boolean)
     const where = versions ? ' that followed them' : ' on other branches'
-    const extra = removes.length ? ` This also removes ${removes.join(' and ')}${after ? where : ''}.` : ''
-    return `Delete this prompt and its reply?${extra} Images and videos stay in Media.`
+    return removes.length ? `This also removes ${removes.join(' and ')}${after ? where : ''}.` : ''
   }
   // Deleting works on the prompt; given a reply (the gallery hands us the
   // message holding the media) it deletes the prompt that produced it.
@@ -546,8 +579,15 @@ export function useStudio({ models, settings, showToast }) {
     if (sending.value) return
     const promptId = msg.role === 'assistant' && msg.parent_id ? msg.parent_id : msg.id
     try {
-      if (!confirm(deleteQuestion(await fetchDeleteInfo(promptId)))) return
-      showChat(await deleteChatExchange(promptId))
+      const r = await confirmDialog({
+        title: 'Delete this prompt and its reply?',
+        message: deleteDetail(await fetchDeleteInfo(promptId)),
+        confirmLabel: 'Delete',
+        danger: true,
+        checkbox: { label: 'Also delete its images and videos', checked: true },
+      })
+      if (!r) return
+      showChat(await deleteChatExchange(promptId, { deleteMedia: r.checked }))
     } catch (e) {
       showToast(e.message, 'error')
     }
@@ -779,9 +819,16 @@ export function useStudio({ models, settings, showToast }) {
     }
   }
   async function removeThread(t) {
-    if (!confirm(`Delete “${t.title || 'Untitled'}”? Its images and videos stay in Media.`)) return
+    const r = await confirmDialog({
+      title: `Delete “${t.title || 'Untitled'}”?`,
+      message: "The conversation is removed. This can't be undone.",
+      confirmLabel: 'Delete',
+      danger: true,
+      checkbox: { label: 'Also delete all its media (images, videos, uploads)', checked: true },
+    })
+    if (!r) return
     try {
-      await deleteConversation(t.id)
+      await deleteConversation(t.id, { deleteMedia: r.checked })
       threads.value = threads.value.filter(x => x.id !== t.id)
       if (active.value === t.id) newThread()
     } catch (e) {
@@ -798,7 +845,7 @@ export function useStudio({ models, settings, showToast }) {
   }
 
   async function addSpace() {
-    const name = prompt('New space name')
+    const name = await promptDialog({ title: 'New space', label: 'Name', confirmLabel: 'Create' })
     if (!name?.trim()) return
     try {
       const space = await createSpace({ name: name.trim() })
@@ -817,7 +864,13 @@ export function useStudio({ models, settings, showToast }) {
     }
   }
   async function removeSpace(s) {
-    if (!confirm(`Delete space “${s.name}”? Its threads move to Unfiled.`)) return
+    const ok = await confirmDialog({
+      title: `Delete space “${s.name}”?`,
+      message: 'Its threads move to Unfiled.',
+      confirmLabel: 'Delete',
+      danger: true,
+    })
+    if (!ok) return
     try {
       await deleteSpace(s.id)
       await loadLists()
@@ -836,6 +889,7 @@ export function useStudio({ models, settings, showToast }) {
     loading,
     sending,
     estimate,
+    unusedAttachments,
     lane,
     streamingId,
     draft,

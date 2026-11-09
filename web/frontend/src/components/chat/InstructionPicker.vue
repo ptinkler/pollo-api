@@ -129,6 +129,12 @@ function togglePause(kind, item) {
   emit(isPaused(kind, item.id) ? 'resume' : 'pause', { kind, id: item.id })
 }
 
+// Open the editor for a new snippet / group (same modal as editing one)
+function create(kind) {
+  close()
+  emit('edit', { kind, id: null })
+}
+
 function manage() {
   close()
   emit('manage')
@@ -285,7 +291,11 @@ function manage() {
           query.trim() ? 'Nothing matches' : instructions.length || groups.length ? 'All attached' : 'None saved yet'
         }}
       </p>
-      <button v-if="manageable" class="item create" @click="manage">⚙ All instructions…</button>
+      <div v-if="manageable" class="menu-foot">
+        <button class="item action" @click="create('snippet')">+ New snippet</button>
+        <button class="item action" @click="create('group')">+ New group</button>
+        <button class="item action" @click="manage">All instructions</button>
+      </div>
     </div>
   </div>
 </template>
@@ -478,12 +488,19 @@ function manage() {
   white-space: nowrap;
 }
 
-.item.create {
-  color: var(--accent2);
-  font-weight: 600;
-  border-top: 1px solid var(--border);
-  border-radius: 0 0 8px 8px;
+/* Actions at the foot of the menu: quiet rows under a divider */
+.menu-foot {
   margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.item.action {
+  color: var(--text2);
+}
+
+.item.action:hover {
+  color: var(--text);
 }
 
 .tag {

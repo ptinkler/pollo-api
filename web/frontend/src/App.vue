@@ -1,5 +1,6 @@
 <script setup>
 import { provide } from 'vue'
+import AppDialog from './components/AppDialog.vue'
 import LoginModal from './components/LoginModal.vue'
 import ToastContainer from './components/ToastContainer.vue'
 import { useToast } from './composables/useToast'
@@ -13,5 +14,6 @@ provide('showToast', showToast)
 <template>
   <router-view />
   <LoginModal />
+  <AppDialog />
   <ToastContainer :toasts="toasts" @remove="removeToast" />
 </template>

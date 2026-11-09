@@ -65,6 +65,20 @@ async function apiSend(method, endpoint, data) {
   return response.json()
 }
 
+/** POST JSON, get a file back; saves it under `filename` through a temporary link. */
+export async function apiDownload(endpoint, data, filename) {
+  const response = await fetchWithRetry(
+    `${BASE_URL}${endpoint}`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) },
+    0,
+  )
+  if (!response.ok) throw new Error(`Download failed: ${response.status}`)
+  const url = URL.createObjectURL(await response.blob())
+  const a = Object.assign(document.createElement('a'), { href: url, download: filename })
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 10000)
+}
+
 export const apiPost = (endpoint, data = {}) => apiSend('POST', endpoint, data)
 export const apiPut = (endpoint, data = {}) => apiSend('PUT', endpoint, data)
 export const apiPatch = (endpoint, data = {}) => apiSend('PATCH', endpoint, data)

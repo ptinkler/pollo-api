@@ -1,11 +1,13 @@
 <!-- Studio center pane: the media library (all generated images/videos),
      reusing MediaGrid + useMedia with server-side paging. -->
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, inject, onMounted } from 'vue'
+import { confirmDialog } from '../../composables/useDialog'
 import MediaGrid from '../media/MediaGrid.vue'
-import { fetchMediaPage } from '../../composables/useMedia'
+import { fetchMediaPage, deleteMediaMany, downloadMediaMany } from '../../composables/useMedia'
 
 defineEmits(['close'])
+const showToast = inject('showToast')
 
 const PAGE = 30
 const KINDS = [
@@ -34,6 +36,45 @@ const origin = ref('all')
 const q = ref('')
 const loading = ref(false)
 const preview = ref(null)
+const picked = ref(new Set()) // ids chosen for a bulk action
+const busy = ref(false)
+function toggle(item) {
+  const next = new Set(picked.value)
+  if (!next.delete(item.id)) next.add(item.id)
+  picked.value = next
+}
+const selectAll = () => (picked.value = new Set(items.value.map(i => i.id)))
+const clearPicked = () => (picked.value = new Set())
+async function bulkDownload() {
+  busy.value = true
+  try {
+    await downloadMediaMany([...picked.value])
+  } catch (e) {
+    showToast(e.message, 'error')
+  } finally {
+    busy.value = false
+  }
+}
+async function bulkDelete() {
+  const n = picked.value.size
+  const ok = await confirmDialog({
+    title: `Delete ${n} item${n === 1 ? '' : 's'}?`,
+    message: "This removes the files and can't be undone.",
+    confirmLabel: 'Delete',
+    danger: true,
+  })
+  if (!ok) return
+  busy.value = true
+  try {
+    await deleteMediaMany([...picked.value])
+    clearPicked()
+    await load()
+  } catch (e) {
+    showToast(e.message, 'error')
+  } finally {
+    busy.value = false
+  }
+}
 
 function params(offset) {
   return {
@@ -110,7 +151,24 @@ onMounted(load)
     <div class="mbody">
       <div v-if="loading && !items.length" class="empty">Loading…</div>
       <div v-else-if="!items.length" class="empty">No media yet.</div>
-      <MediaGrid v-else :items="items" :has-more="items.length < total" @open="preview = $event" @more="loadMore" />
+      <MediaGrid
+        v-else
+        :items="items"
+        :selected="picked"
+        checkboxes
+        :has-more="items.length < total"
+        @open="preview = $event"
+        @toggle="toggle"
+        @more="loadMore"
+      />
+    </div>
+
+    <div v-if="picked.size" class="bulkbar">
+      <span>{{ picked.size }} selected</span>
+      <button :disabled="busy" @click="bulkDownload">Download</button>
+      <button :disabled="busy" class="danger" @click="bulkDelete">Delete</button>
+      <button @click="selectAll">Select all loaded</button>
+      <button @click="clearPicked">Clear</button>
     </div>
 
     <div v-if="preview" class="ovl" @click="preview = null">
@@ -121,6 +179,34 @@ onMounted(load)
 </template>
 
 <style scoped>
+.bulkbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 22px;
+  border-top: 1px solid var(--sborder2);
+  background: var(--spanel2);
+}
+.bulkbar span {
+  flex: 1;
+  color: var(--sfg);
+  font-size: 13px;
+}
+.bulkbar button {
+  padding: 6px 13px;
+  border: 1px solid var(--sborder);
+  border-radius: 8px;
+  background: none;
+  color: var(--sfg);
+  cursor: pointer;
+  font-size: 12.5px;
+}
+.bulkbar button.danger {
+  color: var(--sdanger, #e5484d);
+}
+.bulkbar button:disabled {
+  opacity: 0.5;
+}
 .media {
   flex: 1;
   display: flex;

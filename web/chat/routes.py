@@ -5,11 +5,13 @@ off the shared router in deps.py and lean on helpers.py for the common bits."""
 import shutil
 import threading
 import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
+from web.core import config
 from web.core.metadata import get_db, iso
 
 from .. import characters, media, request_log
@@ -48,6 +50,7 @@ from .models import (
     InstructionIn,
     SpaceIn,
     SwitchBranch,
+    TitleModelIn,
 )
 
 
@@ -228,6 +231,12 @@ def api_update_settings(data: DefaultsIn):
     return get_db().save_settings(**_defaults_fields(data)).to_dict()
 
 
+@router.put("/settings/title-model")
+def api_set_title_model(data: TitleModelIn):
+    """The text model that names new chats (empty = the chat's own model)."""
+    return get_db().save_settings(title_model=(data.title_model or "").strip() or None).to_dict()
+
+
 @router.get("/instructions")
 def api_list_instructions():
     return {
@@ -327,6 +336,30 @@ def api_get_conversation(conv_id: str):
         "conversation": {**conv.to_dict(), "forked_from": origin, "spend": _spend(conv)},
         "messages": [{**m, "forks": forks.get(m["id"], [])} for m in _shown_branch(conv_id)],
     }
+
+
+@router.get("/spend/breakdown")
+def api_spend_breakdown(days: int = 0):
+    """What the user's money went on: per model (and kind) over the last `days`
+    days (0 = all time). Pollo's credits are converted to USD at its fixed rate
+    so everything adds up in one currency; the credits stay alongside."""
+    db = get_db()
+    cutoff = datetime.now() - timedelta(days=days) if days > 0 else None
+    groups: dict[tuple[str, str], dict] = {}
+    for r in db.spend_rows([c.id for c in db.list_conversations(limit=100000)]):
+        if cutoff and r["at"] and r["at"] < cutoff:
+            continue
+        g = groups.setdefault(
+            (r["model"] or "unknown", r["kind"]),
+            {"model": r["model"] or "unknown", "kind": r["kind"], "usd": 0.0, "credits": 0, "count": 0},
+        )
+        g["usd"] += r["usd"] + r["credits"] * config.POLLO_USD_PER_CREDIT
+        g["credits"] += r["credits"]
+        g["count"] += 1
+    rows = sorted(groups.values(), key=lambda g: -g["usd"])
+    for g in rows:
+        g["usd"] = round(g["usd"], 4)
+    return {"days": days, "total_usd": round(sum(g["usd"] for g in rows), 4), "rows": rows}
 
 
 @router.get("/conversations/{conv_id}/spend")
@@ -523,13 +556,15 @@ def api_update_conversation(conv_id: str, data: ConversationUpdate):
 
 
 @router.delete("/conversations/{conv_id}")
-def api_delete_conversation(conv_id: str):
+def api_delete_conversation(conv_id: str, delete_media: bool = True):
+    """Delete a chat. Its images/videos/uploads go with it unless delete_media=false
+    (the files then stay and show up under "Orphaned" in the Media library)."""
     _require_conv(conv_id)
     characters.delete_for_conversation(conv_id, get_db())
     get_db().delete_conversation(conv_id)
     # Its files go in the background: hundreds of images take a while on a NAS
     folder = _chat_root() / conv_id
-    if folder.exists():
+    if delete_media and folder.exists():
         folder.rename(folder.with_name(f".deleting-{conv_id}"))  # out of the way at once
         threading.Thread(target=_empty_trash, daemon=True).start()
     return {"deleted": conv_id}
@@ -691,11 +726,11 @@ def api_delete_exchange_info(message_id: int):
 
 
 @router.delete("/messages/{message_id}")
-def api_delete_exchange(message_id: int):
+def api_delete_exchange(message_id: int, delete_media: bool = False):
     """Delete a prompt's turn (every version of the prompt and its replies)
     from the chat, so the models no longer see it; what followed on the shown
-    branch is kept. Generated images and videos move to the library.
-    Returns the conversation as now shown."""
+    branch is kept. Generated images and videos move to the library, or are
+    deleted with delete_media=true. Returns the conversation as now shown."""
     db = get_db()
     msg = db.get_chat_message(message_id)
     if not msg:
@@ -703,7 +738,12 @@ def api_delete_exchange(message_id: int):
     if msg.role != "user":
         raise HTTPException(400, "Delete the prompt; its reply goes with it")
     _require_idle(msg.conversation_id)
-    db.delete_chat_exchange(msg.conversation_id, message_id)
+    detached = db.delete_chat_exchange(msg.conversation_id, message_id)
+    if delete_media:
+        for item in detached:
+            if item.get("file"):
+                (_conv_dir(msg.conversation_id) / safe_filename(item["file"])).unlink(missing_ok=True)
+            db.delete_chat_library_item(item["id"])
     return {
         "conversation": db.get_conversation(msg.conversation_id).to_dict(),
         "messages": _shown_branch(msg.conversation_id),

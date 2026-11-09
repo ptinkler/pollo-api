@@ -8,6 +8,7 @@ import {
   updateInstructionGroup,
   deleteInstructionGroup,
 } from '../../composables/useChat'
+import { confirmDialog } from '../../composables/useDialog'
 import BaseDialog from '../BaseDialog.vue'
 import DefaultToggles from './DefaultToggles.vue'
 import { instructionColor } from '../../utils/format'
@@ -110,7 +111,7 @@ async function remove() {
   const what = isGroup.value
     ? `the group “${current.value.name}”? Its snippets are kept.`
     : `“${current.value.name}”? It's also taken out of chats, groups and defaults.`
-  if (!confirm(`Delete ${what}`)) return
+  if (!(await confirmDialog({ title: 'Delete', message: what, confirmLabel: 'Delete', danger: true }))) return
   try {
     await (isGroup.value ? deleteInstructionGroup : deleteInstruction)(editingId.value)
     emit('changed', { kind: props.target.kind, item: null })
@@ -120,8 +121,12 @@ async function remove() {
   }
 }
 
-function close() {
-  if (!dirty.value || confirm('Discard unsaved changes?')) emit('close')
+async function close() {
+  if (
+    !dirty.value ||
+    (await confirmDialog({ title: 'Discard unsaved changes?', confirmLabel: 'Discard', danger: true }))
+  )
+    emit('close')
 }
 </script>
 

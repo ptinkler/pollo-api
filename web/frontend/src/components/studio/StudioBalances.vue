@@ -2,7 +2,7 @@
      is clickable — balances open the usage page, Spent opens a per-model breakdown. -->
 <script setup>
 import { computed, ref } from 'vue'
-import { shortModel, fmtCost } from '../../utils/format'
+import { shortModel, fmtCost, creditsToUsd } from '../../utils/format'
 
 const props = defineProps({
   balances: { type: Object, default: () => ({}) },
@@ -16,7 +16,12 @@ const fmtCredits = v => (v == null ? '—' : Math.round(v).toLocaleString())
 const fmtBal = v => (v == null ? '—' : `$${v.toFixed(2)}`)
 
 const pills = computed(() => [
-  { id: 'pollo', label: 'Pollo', value: fmtCredits(props.balances.pollo), tip: 'Pollo credits remaining' },
+  {
+    id: 'pollo',
+    label: 'Pollo',
+    value: props.balances.pollo == null ? '—' : fmtBal(creditsToUsd(props.balances.pollo)),
+    tip: `Pollo balance (${fmtCredits(props.balances.pollo)} credits)`,
+  },
   { id: 'openrouter', label: 'OpenRouter', value: fmtBal(props.balances.openrouter), tip: 'OpenRouter balance' },
   { id: 'venice', label: 'Venice', value: fmtBal(props.balances.venice), tip: 'Venice balance' },
 ])
@@ -24,9 +29,9 @@ const pills = computed(() => [
 const label = computed(() => {
   const s = props.spend
   if (!s) return ''
-  const usd = (s.usd || 0) + (s.inherited_usd || 0)
+  // Pollo's credits count in dollars too, so one figure covers every provider
   const cr = (s.credits || 0) + (s.inherited_credits || 0)
-  return [usd && fmtCost(usd), cr && `${cr} cr`].filter(Boolean).join(' · ')
+  return fmtCost((s.usd || 0) + (s.inherited_usd || 0) + creditsToUsd(cr))
 })
 
 // USD per model for this thread's own messages (inherited spend is one line)
@@ -66,17 +71,10 @@ const byModel = computed(() => {
       </div>
       <div v-if="spend?.inherited_usd || spend?.inherited_credits" class="row">
         <span class="m">Inherited from the branched chat</span>
-        <b>{{
-          [
-            spend.inherited_usd && fmtCost(spend.inherited_usd),
-            spend.inherited_credits && `${spend.inherited_credits} cr`,
-          ]
-            .filter(Boolean)
-            .join(' · ')
-        }}</b>
+        <b>{{ fmtCost((spend.inherited_usd || 0) + creditsToUsd(spend.inherited_credits)) }}</b>
       </div>
       <div v-if="spend?.credits" class="row">
-        <span class="m">Pollo credits</span><b>{{ spend.credits }} cr</b>
+        <span class="m">Pollo ({{ spend.credits }} cr)</span><b>{{ fmtCost(creditsToUsd(spend.credits)) }}</b>
       </div>
       <div v-if="!byModel.length && !spend?.credits" class="row"><span class="m">Nothing yet</span></div>
       <button class="pop-link" @click="((open = false), emit('usage'))">Full usage →</button>

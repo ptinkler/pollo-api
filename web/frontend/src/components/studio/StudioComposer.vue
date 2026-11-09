@@ -4,12 +4,12 @@
      inline pills; the [@name] text remains the source of truth. -->
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { fmtCost, creditsToUsd } from '../../utils/format'
 
 const props = defineProps({
   modes: { type: Array, default: () => [] },
   mode: { type: String, default: 'auto' },
   draft: { type: String, default: '' },
-  hint: { type: String, default: '' },
   sending: { type: Boolean, default: false },
   canSend: { type: Boolean, default: false },
   attachments: { type: Array, default: () => [] },
@@ -17,6 +17,8 @@ const props = defineProps({
   enhancing: { type: Boolean, default: false },
   // Pollo's price for the current setup: { credits, full_credits } or null
   estimate: { type: Object, default: null },
+  // Keys of attachments the selected model can't use (dimmed, not sent)
+  unused: { type: Object, default: () => new Set() },
   // The selected video model takes a source video (Recast / motion models)
   videoInput: { type: Boolean, default: false },
   // The selected video model takes an audio track (lip-sync models)
@@ -38,15 +40,14 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc))
 const audioClip = computed(() => props.mode === 'audio' && props.audioInput)
 const mediaMode = computed(() => props.mode === 'image' || props.mode === 'video')
 const refsActive = computed(() => !!props.refMode && props.mode === 'video')
-// Pollo prices reference-to-video by the uploaded video's length, which the
-// placeholder estimate can't measure — so the number is meaningless with a
-// video ref (e.g. a 30s clip can cost ~10× the estimate). Warn instead.
-const videoRefUnpriced = computed(() => refsActive.value && props.attachments.some(a => a.video))
 const placeholder = computed(() =>
   refsActive.value
     ? 'Add instructions, e.g. replace the person in [@video1] with [@image1]'
     : 'Message, or describe an image / video…',
 )
+function removeUnused() {
+  props.attachments.filter(a => props.unused.has(a.key)).forEach(a => emit('remove', a))
+}
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1)
 const attType = a => (a.audio ? 'audio' : a.video ? 'video' : 'image')
 
@@ -113,20 +114,26 @@ function makePill(refItem) {
   return span
 }
 
-function renderDraft(text) {
-  const el = ed.value
-  if (!el) return
-  el.textContent = ''
+// Text → nodes: [@name] becomes a pill when that reference is attached, else stays text
+function draftNodes(text) {
+  const nodes = []
   let last = 0
   let m
   MENTION.lastIndex = 0
   while ((m = MENTION.exec(text))) {
-    if (m.index > last) el.appendChild(document.createTextNode(text.slice(last, m.index)))
+    if (m.index > last) nodes.push(document.createTextNode(text.slice(last, m.index)))
     const refItem = refItems.value.find(r => r.name === m[1])
-    el.appendChild(refItem ? makePill(refItem) : document.createTextNode(m[0]))
+    nodes.push(refItem ? makePill(refItem) : document.createTextNode(m[0]))
     last = MENTION.lastIndex
   }
-  if (last < text.length) el.appendChild(document.createTextNode(text.slice(last)))
+  if (last < text.length) nodes.push(document.createTextNode(text.slice(last)))
+  return nodes
+}
+function renderDraft(text) {
+  const el = ed.value
+  if (!el) return
+  el.textContent = ''
+  for (const node of draftNodes(text)) el.appendChild(node)
 }
 
 function nodeText(node) {
@@ -226,6 +233,30 @@ function onKey(e) {
     insertNode(document.createTextNode('\n'))
   }
 }
+// Copy / cut: put the selection on the clipboard as plain text with each pill
+// written as its [@name] — the browser's own copy drops the pills (they're
+// non-editable elements with no text of their own), leaving blanks.
+function selectionText() {
+  const sel = window.getSelection()
+  if (!sel?.rangeCount || sel.isCollapsed || !ed.value?.contains(sel.anchorNode)) return null
+  const holder = document.createElement('div')
+  holder.appendChild(sel.getRangeAt(0).cloneContents())
+  return nodeText(holder)
+}
+function onCopy(e) {
+  const text = selectionText()
+  if (text == null) return
+  e.clipboardData.setData('text/plain', text)
+  e.preventDefault()
+}
+function onCut(e) {
+  const text = selectionText()
+  if (text == null) return
+  e.clipboardData.setData('text/plain', text)
+  e.preventDefault()
+  window.getSelection().getRangeAt(0).deleteContents()
+  syncDraft()
+}
 // Pasted screenshots become attachments; everything else pastes as plain text
 // (so copied rich markup can't get into the contenteditable).
 function onPaste(e) {
@@ -237,7 +268,8 @@ function onPaste(e) {
   const text = e.clipboardData?.getData('text/plain')
   if (text != null) {
     e.preventDefault()
-    insertNode(document.createTextNode(text))
+    // [@name] in pasted text turns into pills for the references that are attached
+    for (const node of draftNodes(text)) insertNode(node)
   }
 }
 function onDrop(e) {
@@ -263,8 +295,14 @@ function onDrop(e) {
           v-for="a in attachments"
           :key="a.key"
           class="att"
-          :class="{ uploading: a.uploading, ins: canInsert(a) }"
-          :title="canInsert(a) ? 'Click to add this reference to the prompt' : ''"
+          :class="{ uploading: a.uploading, ins: canInsert(a), unused: unused.has(a.key) }"
+          :title="
+            unused.has(a.key)
+              ? 'This model can\'t use this — it won\'t be sent'
+              : canInsert(a)
+                ? 'Click to add this reference to the prompt'
+                : ''
+          "
           @click="insertAtt(a)"
         >
           <div class="att-media">
@@ -287,6 +325,11 @@ function onDrop(e) {
             <img v-else :src="a.preview" alt="" />
           </div>
         </div>
+      </div>
+      <div v-if="unused.size" class="unused-note">
+        {{ unused.size }} attachment{{ unused.size === 1 ? '' : 's' }} won't be sent — this model can't use
+        {{ unused.size === 1 ? 'it' : 'them' }}.
+        <button class="clearall" @click="removeUnused">Remove</button>
       </div>
       <div v-if="attachments.length" class="clearrow">
         <button class="clearall" title="Remove every attached image and video" @click="emit('clear')">Clear all</button>
@@ -313,6 +356,8 @@ function onDrop(e) {
         @input="syncDraft"
         @keydown="onKey"
         @paste="onPaste"
+        @copy="onCopy"
+        @cut="onCut"
       ></div>
 
       <div class="cbar">
@@ -344,22 +389,16 @@ function onDrop(e) {
         >
           {{ enhancing ? '…' : '✨' }}
         </button>
-        <span class="note">{{ uploading ? 'Uploading…' : hint }}</span>
+        <span class="note">{{ uploading ? 'Uploading…' : '' }}</span>
         <span
-          v-if="videoRefUnpriced"
-          class="est warn"
-          title="Pollo prices this by the uploaded video's length, which the estimate can't measure — a long clip can cost many times this."
-          >⚠ cost scales with source video</span
-        >
-        <span
-          v-else-if="estimate && (mediaMode || mode === 'audio')"
+          v-if="estimate && (mediaMode || mode === 'audio')"
           class="est"
           :title="
             estimate.full_credits > estimate.credits
-              ? `Pollo's estimate (${estimate.full_credits} before discount)`
-              : 'Pollo\'s estimate for these settings'
+              ? `Pollo's estimate: ${estimate.credits} credits (${estimate.full_credits} before discount)`
+              : `Pollo's estimate: ${estimate.credits} credits`
           "
-          >≈ {{ estimate.credits }} cr</span
+          >≈ {{ fmtCost(creditsToUsd(estimate.credits)) }}</span
         >
         <button class="sendbtn" :disabled="!canSend" @click="emit('send')">{{ sending ? 'Sending…' : 'Send' }}</button>
       </div>
@@ -407,7 +446,7 @@ function onDrop(e) {
   border: 1px solid var(--sborder);
   background: var(--sbg);
   border-radius: 14px;
-  padding: 10px 12px;
+  padding: 10px 12px 8px;
 }
 .cbox.drag {
   border-color: var(--saccent);
@@ -423,6 +462,15 @@ function onDrop(e) {
   position: relative;
   width: 52px;
   height: 52px;
+}
+.att.unused {
+  opacity: 0.4;
+  filter: grayscale(1);
+}
+.unused-note {
+  padding: 2px 12px 6px;
+  font-size: 12px;
+  color: var(--yellow);
 }
 .att.ins {
   cursor: pointer;
@@ -542,7 +590,7 @@ function onDrop(e) {
   width: 100%;
   color: var(--sfg);
   outline: none;
-  min-height: 24px;
+  min-height: 22px;
   max-height: 45vh;
   overflow-y: auto;
   font: inherit;
@@ -584,7 +632,7 @@ function onDrop(e) {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding-top: 8px;
+  padding-top: 6px;
 }
 .atwrap {
   position: relative;

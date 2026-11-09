@@ -13,13 +13,15 @@ export const fetchConversations = (q = '') => apiGet(`/api/chat/conversations${q
 export const fetchConversationSpend = id => apiGet(`/api/chat/conversations/${enc(id)}/spend`)
 // Pollo's official TTS voices: { voices: [{voiceId, voiceName, language, gender, ...}], total }
 export const fetchAudioVoices = (params = '') => apiGet(`/api/chat/audio/voices${params}`)
+export const fetchSpendBreakdown = days => apiGet(`/api/chat/spend/breakdown?days=${days}`)
 export const estimateChatCost = data => apiPost('/api/chat/estimate', data)
 export const enhanceChatPrompt = data => apiPost('/api/chat/enhance-prompt', data)
 export const fetchConversation = id => apiGet(`/api/chat/conversations/${enc(id)}`)
 // Newest image file per conversation id, for gallery cover thumbnails: { thumbs: {id: file} }
 export const fetchConversationThumbs = ids => apiGet(`/api/chat/conversations/thumbs?ids=${enc(ids.join(','))}`)
 export const createConversation = (data = {}) => apiPost('/api/chat/conversations', data)
-export const deleteConversation = id => apiDelete(`/api/chat/conversations/${enc(id)}`)
+export const deleteConversation = (id, { deleteMedia = true } = {}) =>
+  apiDelete(`/api/chat/conversations/${enc(id)}?delete_media=${deleteMedia}`)
 export const fetchChatMessage = id => apiGet(`/api/chat/messages/${id}`)
 export const cancelChatMessage = id => apiPost(`/api/chat/messages/${id}/cancel`)
 // Show the branch through this message (edits/retries are kept as sibling branches)
@@ -42,7 +44,8 @@ export const fetchActiveGenerations = (known = []) => apiPost('/api/chat/generat
 // Every generated image/video across all threads, newest first (see /api/chat/library)
 export const fetchChatLibrary = () => apiGet('/api/chat/library')
 // Delete a prompt's turn (all versions of it and its replies); generated media moves to the library
-export const deleteChatExchange = messageId => apiDelete(`/api/chat/messages/${messageId}`)
+export const deleteChatExchange = (messageId, { deleteMedia = false } = {}) =>
+  apiDelete(`/api/chat/messages/${messageId}?delete_media=${deleteMedia}`)
 // What that would also remove: { other_versions, other_messages }
 export const fetchDeleteInfo = messageId => apiGet(`/api/chat/messages/${messageId}/delete-info`)
 
@@ -64,6 +67,8 @@ export const deleteSpace = id => apiDelete(`/api/chat/spaces/${id}`)
 // Global defaults bucket (characters + instructions added to every new chat)
 export const fetchSettings = () => apiGet('/api/chat/settings')
 export const updateSettings = data => apiPut('/api/chat/settings', data)
+// The text model that names new chats ('' / null = the chat's own model)
+export const setTitleModel = title_model => apiPut('/api/chat/settings/title-model', { title_model })
 
 export const patchConversation = (id, data) => apiPatch(`/api/chat/conversations/${enc(id)}`, data)
 

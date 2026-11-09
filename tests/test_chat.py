@@ -1145,6 +1145,36 @@ class TestEditAndLibrary:
         client.delete(f"/api/chat/conversations/{conv['id']}")
         assert db.get_chat_library_item("i2") is None
 
+    def test_deleting_conversation_can_keep_its_files(self, client, conv, chat):
+        folder = chat._conv_dir(conv["id"])
+        (folder / "keep.png").write_bytes(b"x")
+        client.delete(f"/api/chat/conversations/{conv['id']}?delete_media=false")
+        assert (folder / "keep.png").exists()
+
+    def test_deleting_conversation_deletes_files_by_default(self, client, conv, chat):
+        import time
+
+        folder = chat._conv_dir(conv["id"])
+        (folder / "gone.png").write_bytes(b"x")
+        client.delete(f"/api/chat/conversations/{conv['id']}")
+        for _ in range(50):  # the folder is removed on a background thread
+            if not folder.exists():
+                break
+            time.sleep(0.05)
+        assert not folder.exists()
+
+    def test_deleting_an_exchange_can_delete_its_media(self, client, conv, chat, db):
+        user = db.add_chat_message(conv["id"], "user", "draw")
+        (chat._conv_dir(conv["id"]) / "img_x.png").write_bytes(b"x")
+        db.add_chat_message(
+            conv["id"],
+            "assistant",
+            media=[{"id": "m1", "kind": "image", "source": "generated", "status": "done", "file": "img_x.png"}],
+        )
+        client.delete(f"/api/chat/messages/{user.id}?delete_media=true")
+        assert not (chat._conv_dir(conv["id"]) / "img_x.png").exists()
+        assert db.get_chat_library_item("m1") is None
+
 
 def test_resend_same_prompt_gets_fresh_reply(client, conv, chat, monkeypatch):
     """Retry on a prompt = edit with unchanged text: a new branch with a fresh reply."""
@@ -2107,6 +2137,7 @@ class TestCustomInstructions:
             "default_character_ids": [],
             "default_instruction_ids": [],
             "default_instruction_group_ids": [],
+            "title_model": None,
         }
         updated = client.put("/api/chat/settings", json={"default_instruction_ids": [s["id"]]}).json()
         assert updated["default_instruction_ids"] == [s["id"]]
@@ -3735,3 +3766,31 @@ class TestEstimate:
         ref = client.post("/api/chat/estimate", json={**body, "model": "pollo/nonexistentref"}).json()
         assert ref == {"estimate": None}
         assert client.post("/api/chat/estimate", json={**body, "model": "venice/x"}).json() == {"estimate": None}
+
+
+class TestSpendBreakdown:
+    def test_groups_by_model_and_converts_credits_to_usd(self, client, conv, db):
+        db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "",
+            media=[
+                {"id": "a", "kind": "video", "status": "done", "model": "pollo/seedance25v1", "credits": 10},
+                {"id": "b", "kind": "video", "status": "done", "model": "pollo/seedance25v1", "credits": 5},
+            ],
+        )
+        body = client.get("/api/chat/spend/breakdown").json()
+        row = next(r for r in body["rows"] if r["model"] == "pollo/seedance25v1")
+        assert row["credits"] == 15 and row["count"] == 2 and row["usd"] == 0.9  # 15 cr x $0.06
+        assert body["total_usd"] >= 0.9
+        assert client.get("/api/chat/spend/breakdown?days=7").status_code == 200
+
+
+class TestTitleModel:
+    def test_setting_round_trips(self, client):
+        assert client.get("/api/chat/settings").json()["title_model"] is None
+        r = client.put("/api/chat/settings/title-model", json={"title_model": "x/cheap"}).json()
+        assert r["title_model"] == "x/cheap"
+        # saving the default lists doesn't touch it
+        assert client.put("/api/chat/settings", json={}).json()["title_model"] == "x/cheap"
+        assert client.put("/api/chat/settings/title-model", json={"title_model": ""}).json()["title_model"] is None

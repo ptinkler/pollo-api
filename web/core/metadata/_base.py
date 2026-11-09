@@ -118,7 +118,7 @@ class _DBBase:
         "chat_instructions": {"user_id": "VARCHAR(50)"},
         "chat_instruction_groups": {"user_id": "VARCHAR(50)"},
         "chat_spaces": {"user_id": "VARCHAR(50)"},
-        "chat_settings": {"user_id": "VARCHAR(50)"},
+        "chat_settings": {"user_id": "VARCHAR(50)", "title_model": "VARCHAR(200)"},
         "chat_library_items": {"user_id": "VARCHAR(50)"},
         "chat_import_skips": {"user_id": "VARCHAR(50)"},
         "users": {"password_hash": "TEXT", "upload_prefs_json": "TEXT"},

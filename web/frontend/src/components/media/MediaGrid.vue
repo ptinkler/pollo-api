@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { mediaOrigin } from '../../composables/useMedia'
+import { fmtDuration } from '../../utils/format'
 
 // A grid of media-library items with infinite scroll: tiles are added a
 // small batch at a time as you near the bottom, and each tile's small
@@ -93,14 +94,14 @@ function onThumbError(item, e) {
       :href="selectable ? undefined : item.url"
       class="tile"
       :class="{ selected: selected.has(item.id) }"
-      :title="item.prompt || item.name"
+      :title="[item.prompt || item.name, mediaOrigin(item)].filter(Boolean).join(' — ')"
       @click="selectable ? emit('toggle', item, $event) : ($event.preventDefault(), emit('open', item))"
     >
       <span v-if="failed.has(item.id)" class="no-thumb">{{ item.kind === 'video' ? '🎬' : '🖼' }}</span>
       <img v-else :src="item.thumb_url" alt="" loading="lazy" decoding="async" @error="onThumbError(item, $event)" />
       <span v-if="item.kind === 'video'" class="badge video">▶</span>
       <span class="badge source">{{ item.source === 'upload' ? '⬆' : '✨' }}</span>
-      <span class="caption">{{ mediaOrigin(item) }}</span>
+      <span v-if="item.kind === 'video' && item.duration" class="duration">{{ fmtDuration(item.duration) }}</span>
       <span
         v-if="selectable || checkboxes"
         class="check"
@@ -184,19 +185,16 @@ function onThumbError(item, e) {
   right: 5px;
 }
 
-.caption {
+.duration {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  padding: 10px 6px 4px;
+  right: 5px;
+  bottom: 5px;
   font-size: 0.68rem;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.65);
   color: #fff;
-  text-align: left;
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .check {

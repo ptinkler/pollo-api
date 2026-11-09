@@ -2,6 +2,7 @@
 <script setup>
 import { inject } from 'vue'
 import ModelPicker from '../chat/ModelPicker.vue'
+import StudioPresets from './StudioPresets.vue'
 
 defineProps({
   models: { type: Object, required: true },
@@ -14,6 +15,7 @@ const { selected } = inject('composerSettings')
 <template>
   <div class="isection">
     <div class="ilabel">Models</div>
+    <StudioPresets />
     <div class="pickers">
       <ModelPicker
         v-model="selected.text"

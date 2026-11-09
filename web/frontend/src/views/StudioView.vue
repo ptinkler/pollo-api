@@ -25,6 +25,7 @@ import StudioSpace from '../components/studio/StudioSpace.vue'
 import StudioMedia from '../components/studio/StudioMedia.vue'
 import StudioUsage from '../components/studio/StudioUsage.vue'
 import StudioCharactersPage from '../components/studio/StudioCharactersPage.vue'
+import StudioPresetsPage from '../components/studio/StudioPresetsPage.vue'
 import StudioInstructionsPage from '../components/studio/StudioInstructionsPage.vue'
 import StudioRequestLog from '../components/studio/StudioRequestLog.vue'
 import StudioSettings from '../components/studio/StudioSettings.vue'
@@ -58,7 +59,7 @@ const models = reactive({ text: [], image: [], video: [], audio: [] })
 provide('chatModels', models) // ChatMessage's "Try another model"
 const settings = useComposerSettings(models)
 provide('composerSettings', settings) // read by the inspector's model/options sections
-const { mode, currentMode } = settings
+const { mode } = settings
 
 const studio = useStudio({ models, settings, showToast })
 const {
@@ -72,6 +73,7 @@ const {
   draft,
   lane,
   estimate,
+  unusedAttachments,
   lightbox,
   activeKind,
   favourites,
@@ -388,6 +390,7 @@ const STUDIO_PANE_PATH = {
   characters: '/characters',
   instructions: '/instructions',
   'request-log': '/requests',
+  presets: '/presets',
 }
 function onSettingsNavigate(dest) {
   const path = STUDIO_PANE_PATH[dest]
@@ -402,6 +405,7 @@ const PANE_FOR_ROUTE = {
   'studio-media': 'media',
   'studio-usage': 'usage',
   'studio-characters': 'characters',
+  'studio-presets': 'presets',
   'studio-instructions': 'instructions',
   'studio-requests': 'requests',
   'studio-favourites': 'favourites',
@@ -517,6 +521,7 @@ onMounted(() => {
       />
 
       <StudioCharactersPage v-else-if="centerView === 'characters'" @close="goThread" />
+      <StudioPresetsPage v-else-if="centerView === 'presets'" @close="goThread" />
 
       <StudioInstructionsPage v-else-if="centerView === 'instructions'" @close="goThread" />
 
@@ -601,13 +606,13 @@ onMounted(() => {
           v-model:draft="draft"
           v-model:mode="mode"
           :modes="composerModes"
-          :hint="currentMode.hint"
           :sending="sending"
           :can-send="canSend"
           :attachments="attachments"
           :uploading="uploading"
           :enhancing="enhancing"
           :estimate="estimate"
+          :unused="unusedAttachments"
           :video-input="!!settings.activeInfo.value?.video_input"
           :audio-input="!!settings.activeInfo.value?.audio_input"
           :ref-mode="settings.activeInfo.value?.ref_mode || null"

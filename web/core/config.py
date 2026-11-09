@@ -28,4 +28,6 @@ POLLO_API_BASE = "https://pollo.ai/api/platform/generation"
 # "seedream" -> "bytedance") and payload schema than the pre-v1 endpoints
 # under POLLO_API_BASE, which Pollo now calls the "legacy" API.
 POLLO_API_V1_BASE = "https://pollo.ai/api/platform/v1/generation"
+# Pollo bills in credits; its API converts them to USD at this fixed rate (costUsd in a task's status)
+POLLO_USD_PER_CREDIT = 0.06
 POLLO_API_TIMEOUT = 30  # per-request timeout in seconds for individual HTTP calls

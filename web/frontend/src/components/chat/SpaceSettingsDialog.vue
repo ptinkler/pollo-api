@@ -1,5 +1,6 @@
 <script setup>
 import { computed, inject, nextTick, ref, watch } from 'vue'
+import { confirmDialog } from '../../composables/useDialog'
 import BaseDialog from '../BaseDialog.vue'
 import CharacterPicker from '../characters/CharacterPicker.vue'
 import InstructionPicker from './InstructionPicker.vue'
@@ -66,8 +67,12 @@ watch(
   },
 )
 
-function close() {
-  if (!dirty.value || confirm('Discard unsaved changes?')) emit('close')
+async function close() {
+  if (
+    !dirty.value ||
+    (await confirmDialog({ title: 'Discard unsaved changes?', confirmLabel: 'Discard', danger: true }))
+  )
+    emit('close')
 }
 
 async function save() {
@@ -95,7 +100,15 @@ async function save() {
 }
 
 async function remove() {
-  if (!confirm(`Delete the space “${props.target.name}”? Its chats are kept and move to Chats.`)) return
+  if (
+    !(await confirmDialog({
+      title: `Delete the space “${props.target.name}”?`,
+      message: 'Its chats are kept and move to Chats.',
+      confirmLabel: 'Delete',
+      danger: true,
+    }))
+  )
+    return
   try {
     await deleteSpace(props.target.id)
     emit('changed', null)

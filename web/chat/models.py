@@ -55,6 +55,10 @@ class DefaultsIn(BaseModel):
     default_instruction_group_ids: list[int] = []
 
 
+class TitleModelIn(BaseModel):
+    title_model: str | None = None  # None / empty = use the chat's own model
+
+
 class SpaceIn(DefaultsIn):
     name: str = Field(min_length=1, max_length=255)
 

@@ -6,6 +6,7 @@ export const TAG_LABELS = {
   img2vid: 'Image→Video',
   text2vid: 'Text→Video',
   ref2vid: 'References→Video',
+  video_refs: 'Video refs (recast)',
   first_last: 'First+Last frame',
   video_edit: 'Video edit',
   video_extend: 'Video extend',
