@@ -163,6 +163,9 @@ def list_video_models() -> list[dict[str, Any]]:
                 # ref2video models take several named reference images
                 "reference_images": meta.get("type") == "ref",
                 "max_refs": REF_MAX_IMAGES if meta.get("type") == "ref" else None,
+                # v1 reference-to-video branch (image/video/audio refs, [@name]
+                # mentions): the allowed types, total cap and per-type limits.
+                "ref_mode": meta.get("ref_mode") or None,
                 "video_input": bool(meta.get("video_input")),
                 "modes": meta.get("modes") or None,
                 "generate_audio": "generate_audio" in meta.get("options", []),
@@ -269,6 +272,49 @@ def _upload_audio(path: Path) -> str:
         return image_hosts.upload_file(path)
     except ValueError as e:
         raise PolloError(f"Couldn't upload the audio for Pollo: {e}") from e
+
+
+def _upload_ref_item(item: dict) -> dict:
+    """Upload one reference element (image / video / audio) and return it as a
+    Pollo ref: {url, name, type}. The upload URL is cached and reused across
+    retries (web/image_hosts.py), so re-rendering doesn't re-upload."""
+    typ = item.get("type") or "image"
+    path = item["path"]
+    url = _upload_video(path) if typ == "video" else _upload_audio(path) if typ == "audio" else _upload(path)
+    ref: dict[str, Any] = {"url": url, "type": typ}
+    if item.get("name"):
+        ref["name"] = item["name"]
+    return ref
+
+
+def _submit_ref_video_job(
+    key: str,
+    *,
+    prompt: str,
+    ref_items: list[dict],
+    aspect_ratio: str | None,
+    resolution: str | None,
+    duration: int | None,
+    generate_audio: bool | None,
+) -> dict:
+    """Reference-to-video: a named list of image/video/audio refs the prompt
+    mentions as [@name] (Kling 4.0 / Flash / 3.0 Omni, MiniMax H3…). The engine
+    routes to the refs branch whenever `refs` is present (_generic_payload)."""
+    refs = [_upload_ref_item(ri) for ri in ref_items]
+    generator = get_video_generator(
+        key,
+        api_key=keyctx.provider_key("pollo"),
+        project="chat",
+        prompt=prompt,
+        image_url=None,
+        refs=refs,
+        aspect_ratio=aspect_ratio,
+        resolution=resolution,
+        length=duration,
+        generate_audio=generate_audio,
+    )
+    task_id = _submit(generator)
+    return {"id": JOB_PREFIX + task_id, "params": _sent_params(generator)}
 
 
 def generate_image(
@@ -383,12 +429,25 @@ def submit_video(
     source_audio: Path | None = None,
     mode: str | None = None,
     refs: list[Path] | None = None,
+    ref_items: list[dict] | None = None,
 ) -> dict:
     """Start a Pollo video job. Returns {"id": "pollo:<taskId>", "params": the
     settings actually sent}, shaped like openrouter.submit_video's result.
-    A first frame is uploaded to a temporary public host first (Pollo only takes URLs)."""
+    A first frame is uploaded to a temporary public host first (Pollo only takes URLs).
+    `ref_items` (named image/video/audio refs — {path, name, type}) routes a
+    ref_mode model to its reference-to-video branch, superseding first_frame."""
     key = _generator_key(model_id, _video_generators())
     typ = MODEL_INFO.get(key, {}).get("type")
+    if ref_items and MODEL_INFO.get(key, {}).get("ref_mode"):
+        return _submit_ref_video_job(
+            key,
+            prompt=prompt,
+            ref_items=ref_items,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
+            duration=duration,
+            generate_audio=generate_audio,
+        )
     if typ == "lipsync":
         # Lip sync: a reference image (first frame) driven by an uploaded audio
         # track. Both are uploaded to public URLs.

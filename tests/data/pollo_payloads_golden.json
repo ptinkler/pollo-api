@@ -5582,6 +5582,116 @@
    ],
    "url": "https://pollo.ai/api/platform/v1/generation/kling-ai/kling-v3/video"
   },
+  "klingv4flashv1": {
+   "cases": [
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "9:16",
+       "duration": 5,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": "https://img.example/x.png",
+      "prompt": "a fox runs"
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "image": "https://img.example/x.png",
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "aspect_ratio": "16:9",
+      "image_url": null,
+      "length": 8,
+      "prompt": "a fox runs",
+      "resolution": "720p"
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "16:9",
+       "duration": 8,
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "audio_url": "https://a.example/a.mp3",
+      "generate_audio": false,
+      "image_tail": "https://img.example/t.png",
+      "image_url": "https://img.example/x.png",
+      "mode": "std",
+      "negative_prompt": "blurry",
+      "prompt": "a fox runs",
+      "seed": 42,
+      "web_search": true
+     },
+     "ok": {
+      "input": {
+       "duration": 5,
+       "image": "https://img.example/x.png",
+       "imageTail": "https://img.example/t.png",
+       "prompt": "a fox runs",
+       "resolution": "720p"
+      }
+     }
+    },
+    {
+     "kw": {
+      "image_url": null,
+      "prompt": "replace [@video1] with [@image1]",
+      "refs": [
+       {
+        "name": "video1",
+        "type": "video",
+        "url": "https://h/v.mp4"
+       },
+       {
+        "name": "image1",
+        "type": "image",
+        "url": "https://h/i.png"
+       }
+      ]
+     },
+     "ok": {
+      "input": {
+       "aspectRatio": "9:16",
+       "duration": 5,
+       "prompt": "replace [@video1] with [@image1]",
+       "refs": [
+        {
+         "name": "video1",
+         "type": "video",
+         "url": "https://h/v.mp4"
+        },
+        {
+         "name": "image1",
+         "type": "image",
+         "url": "https://h/i.png"
+        }
+       ],
+       "resolution": "720p"
+      }
+     }
+    }
+   ],
+   "url": "https://pollo.ai/api/platform/v1/generation/kling-ai/kling-v4-flash/video"
+  },
   "klingv4v1": {
    "cases": [
     {

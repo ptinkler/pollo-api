@@ -72,14 +72,24 @@ export function useStudio({ models, settings, showToast }) {
     if (mode.value !== 'video') return MAX_ATTACHMENTS
     const v = settings.videoInfo.value
     if (!v) return MAX_ATTACHMENTS
+    // Reference-to-video: as many images as the model's ref_mode allows.
+    if (v.ref_mode) return v.ref_mode.limits?.image ?? v.ref_mode.max ?? MAX_ATTACHMENTS
     if (v.reference_images) return v.max_refs || MAX_ATTACHMENTS
     return v.frame_images?.includes('last_frame') ? 2 : 1
+  }
+  // Video / audio reference caps — a ref_mode model takes several (its per-type
+  // limit); everything else takes one.
+  const refTypeLimit = kind => {
+    const v = mode.value === 'video' ? settings.videoInfo.value : null
+    return v?.ref_mode ? (v.ref_mode.limits?.[kind] ?? v.ref_mode.max ?? 1) : 1
   }
   const attach = useChatAttachments({
     convId: active,
     ensureConversation: ensureThread,
     showToast,
     limit: imageLimit,
+    videoLimit: () => refTypeLimit('video'),
+    audioLimit: () => refTypeLimit('audio'),
   })
   const {
     attachments,

@@ -454,6 +454,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "HAS_IMAGE_TAIL": True,
         "HAS_GENERATE_AUDIO": True,
         "RESOLUTION_IS_MODE": True,
+        "HAS_REFS": True,  # reference-to-video: image/video refs, [@name] mentions
+        "REF_TYPES": ("image", "video"),  # no audio voice ref on Omni (docs 2026-11)
+        "MAX_REFS": 7,
         "builder": "kling",
     },
     "klingv4v1": {
@@ -463,6 +466,20 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "VALID_RATIOS": ("21:9", "16:9", "9:16", "1:1", "adaptive"),
         "DEFAULT_RESOLUTION": "720p",
         "HAS_IMAGE_TAIL": True,
+        "HAS_REFS": True,  # reference-to-video: image/video/audio refs, [@name] mentions
+        "MAX_REFS": 15,
+        "builder": "kling",
+    },
+    "klingv4flashv1": {
+        "V1_MODEL": "kling-v4-flash",
+        "VALID_LENGTHS": tuple(range(3, 21)),
+        "VALID_RESOLUTIONS": ("720p",),
+        "VALID_RATIOS": ("21:9", "16:9", "9:16", "1:1", "adaptive"),
+        "DEFAULT_RESOLUTION": "720p",
+        "HAS_IMAGE_TAIL": True,
+        "HAS_REFS": True,
+        "REF_TYPES": ("image", "video"),  # audio voice refs unsupported by Flash (docs 2026-11)
+        "MAX_REFS": 15,
         "builder": "kling",
     },
     "seedance25extendv1": {
@@ -736,6 +753,10 @@ def _normalize_refs(refs: list[dict[str, Any]] | None) -> list[dict[str, Any]] |
         item: dict[str, Any] = {"url": url}
         if ref.get("type"):
             item["type"] = ref["type"]
+        # The handle the prompt mentions as [@name] (Kling 4.0 / Omni, MiniMax
+        # H3…). Pollo defaults it to ref1, ref2… by position when omitted.
+        if ref.get("name"):
+            item["name"] = ref["name"]
         out.append(item)
     return out or None
 

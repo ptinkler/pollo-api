@@ -1,5 +1,7 @@
 <!-- Studio compose bar: attachments + mode pills + prompt box + send.
-     Presentational — attachment list/upload state come from props. -->
+     Presentational — attachment list/upload state come from props.
+     The prompt is a contenteditable so reference mentions ([@name]) show as
+     inline pills; the [@name] text remains the source of truth. -->
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 
@@ -19,75 +21,224 @@ const props = defineProps({
   videoInput: { type: Boolean, default: false },
   // The selected video model takes an audio track (lip-sync models)
   audioInput: { type: Boolean, default: false },
+  // The selected video model's reference-to-video config (image/video/audio
+  // refs the prompt mentions as [@name]): { types, max, limits } or null.
+  refMode: { type: Object, default: null },
 })
 const emit = defineEmits(['update:draft', 'update:mode', 'send', 'files', 'remove', 'clear', 'library', 'enhance'])
 
 const drag = ref(false)
-const ta = ref(null)
+const ed = ref(null) // the contenteditable prompt
 const vid = ref(null)
 const aud = ref(null)
 const img = ref(null)
 const menu = ref(false)
+const atMenu = ref(false) // the @-mention picker
 const peek = ref(null)
-const onEsc = e => e.key === 'Escape' && (peek.value = null)
+const onEsc = e => e.key === 'Escape' && ((peek.value = null), (atMenu.value = false))
 onMounted(() => document.addEventListener('keydown', onEsc))
 onBeforeUnmount(() => document.removeEventListener('keydown', onEsc))
 // Audio mode with a voice-clone model: the only attachment is the reference clip
 const audioClip = computed(() => props.mode === 'audio' && props.audioInput)
 const mediaMode = computed(() => props.mode === 'image' || props.mode === 'video')
+const refsActive = computed(() => !!props.refMode && props.mode === 'video')
+const placeholder = computed(() =>
+  refsActive.value
+    ? 'Add instructions, e.g. replace the person in [@video1] with [@image1]'
+    : 'Message, or describe an image / video…',
+)
 const pick = fn => {
   menu.value = false
   fn()
 }
-// "Image 1", "Image 2"… — the names a prompt can use to point at each reference
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1)
+const attType = a => (a.audio ? 'audio' : a.video ? 'video' : 'image')
+
+// Reference-to-video: each allowed attachment becomes a mentionable ref named
+// by type + order (image1, video1, audio1…) — the handle the prompt uses as
+// [@name]. Caps come from the model's ref_mode; ordering matches the backend
+// (web/chat/turn.py _ref_items) so a pill always resolves to the same
+// attachment.
+const refItems = computed(() => {
+  if (!refsActive.value) return []
+  const types = new Set(props.refMode.types || ['image', 'video', 'audio'])
+  const limits = props.refMode.limits || {}
+  const counts = {}
+  const out = []
+  for (const a of props.attachments) {
+    const type = attType(a)
+    const n = (counts[type] || 0) + 1
+    if (a.uploading || !types.has(type) || (limits[type] && n > limits[type])) continue
+    counts[type] = n
+    out.push({ key: a.key, name: `${type}${n}`, label: `${cap(type)} ${n}`, type, preview: a.preview })
+    if (props.refMode.max && out.length >= props.refMode.max) break
+  }
+  return out
+})
+// Legacy ref2video ("Image N", plain text) — only when the model isn't a v1
+// ref_mode one; images only.
 const tags = computed(() => {
+  if (refsActive.value) return []
   let n = 0
   return props.attachments
     .filter(a => !a.video && !a.audio)
-    .map(a => ({ key: a.key, preview: a.preview, label: `Image ${++n}`, video: a.video }))
+    .map(a => ({ key: a.key, preview: a.preview, label: `Image ${++n}` }))
 })
-function mention(label) {
-  const d = props.draft
-  emit('update:draft', `${d}${d && !d.endsWith(' ') ? ' ' : ''}${label} `)
-  ta.value?.focus()
+
+// ― contenteditable plumbing: [@name] text is the source of truth; a pill is
+// just how a known mention is shown. We edit the DOM imperatively (re-rendering
+// on every keystroke would fight the caret) and serialize back to [@name]. ―
+const MENTION = /\[@([a-zA-Z0-9_]+)\]/g
+
+function makePill(refItem) {
+  const span = document.createElement('span')
+  span.className = 'pill'
+  span.contentEditable = 'false'
+  span.dataset.name = refItem.name
+  if (refItem.type === 'image' && refItem.preview) {
+    const im = document.createElement('img')
+    im.src = refItem.preview
+    span.appendChild(im)
+  } else {
+    const ic = document.createElement('span')
+    ic.className = 'pill-ic'
+    ic.textContent = refItem.type === 'audio' ? '🔊' : '🎞'
+    span.appendChild(ic)
+  }
+  span.appendChild(document.createTextNode(refItem.label))
+  return span
 }
+
+function renderDraft(text) {
+  const el = ed.value
+  if (!el) return
+  el.textContent = ''
+  let last = 0
+  let m
+  MENTION.lastIndex = 0
+  while ((m = MENTION.exec(text))) {
+    if (m.index > last) el.appendChild(document.createTextNode(text.slice(last, m.index)))
+    const refItem = refItems.value.find(r => r.name === m[1])
+    el.appendChild(refItem ? makePill(refItem) : document.createTextNode(m[0]))
+    last = MENTION.lastIndex
+  }
+  if (last < text.length) el.appendChild(document.createTextNode(text.slice(last)))
+}
+
+function nodeText(node) {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent
+  if (node.nodeName === 'BR') return '\n'
+  if (node.classList?.contains('pill')) return `[@${node.dataset.name}]`
+  let t = ''
+  for (const c of node.childNodes) t += nodeText(c)
+  return t
+}
+function serialize() {
+  let out = ''
+  for (const node of ed.value?.childNodes || []) out += nodeText(node)
+  return out
+}
+function syncDraft() {
+  emit('update:draft', serialize())
+}
+
+function placeCaretEnd() {
+  const el = ed.value
+  if (!el) return
+  const range = document.createRange()
+  range.selectNodeContents(el)
+  range.collapse(false)
+  const sel = window.getSelection()
+  sel.removeAllRanges()
+  sel.addRange(range)
+}
+
+function insertNode(node, trailingSpace = false) {
+  const el = ed.value
+  el.focus()
+  const sel = window.getSelection()
+  let range
+  if (sel.rangeCount && el.contains(sel.anchorNode)) {
+    range = sel.getRangeAt(0)
+  } else {
+    range = document.createRange()
+    range.selectNodeContents(el)
+    range.collapse(false)
+  }
+  range.deleteContents()
+  range.insertNode(node)
+  let after = node
+  if (trailingSpace) {
+    const space = document.createTextNode(' ')
+    node.after(space)
+    after = space
+  }
+  range.setStartAfter(after)
+  range.collapse(true)
+  sel.removeAllRanges()
+  sel.addRange(range)
+  syncDraft()
+}
+
+function insertMention(refItem) {
+  atMenu.value = false
+  insertNode(makePill(refItem), true)
+}
+// Legacy chips insert plain "Image N" text (no pill).
+function mention(label) {
+  insertNode(document.createTextNode(label + ' '))
+}
+
+// Re-render only on external draft changes (enhance, clear, resend) — not our
+// own edits — so the caret isn't disturbed mid-type.
+watch(
+  () => props.draft,
+  v => {
+    if (ed.value && v !== serialize()) {
+      renderDraft(v)
+      nextTick(placeCaretEnd)
+    }
+  },
+)
+// Attachments changed: stale pills may need to re-pill or drop back to text.
+watch(
+  () => refItems.value.map(r => `${r.name}:${r.key}`).join(','),
+  () => {
+    if (ed.value) {
+      renderDraft(serialize())
+      syncDraft()
+    }
+  },
+)
+onMounted(() => renderDraft(props.draft))
+
 function onVideo(e) {
   emit('files', e.target.files)
   e.target.value = ''
-}
-
-// Grow the prompt box with its content up to the CSS max-height, then scroll.
-function autogrow() {
-  const el = ta.value
-  if (!el) return
-  el.style.height = 'auto'
-  el.style.height = `${el.scrollHeight}px`
-}
-watch(
-  () => props.draft,
-  () => nextTick(autogrow),
-)
-onMounted(autogrow)
-
-// A method (not two inline statements) so a prettier reformat can't break the
-// template handler by splitting it across lines without a separator.
-function onInput(e) {
-  emit('update:draft', e.target.value)
-  autogrow()
 }
 
 function onKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     emit('send')
+  } else if (e.key === 'Enter' && e.shiftKey) {
+    e.preventDefault()
+    insertNode(document.createTextNode('\n'))
   }
 }
-// Pasted screenshots / copied images become attachments (text pastes pass through)
+// Pasted screenshots become attachments; everything else pastes as plain text
+// (so copied rich markup can't get into the contenteditable).
 function onPaste(e) {
   const imgs = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith('image/'))
-  if (!imgs.length) return
-  e.preventDefault()
-  emit('files', imgs)
+  if (imgs.length) {
+    e.preventDefault()
+    return emit('files', imgs)
+  }
+  const text = e.clipboardData?.getData('text/plain')
+  if (text != null) {
+    e.preventDefault()
+    insertNode(document.createTextNode(text))
+  }
 }
 function onDrop(e) {
   drag.value = false
@@ -106,8 +257,10 @@ function onDrop(e) {
               <button @click="pick(() => emit('library'))">🖼 From Media…</button>
               <button @click="pick(() => img?.click())">⬆ Upload image</button>
             </template>
-            <button v-if="mode === 'video' && videoInput" @click="pick(() => vid?.click())">🎞 Upload video</button>
-            <button v-if="(mode === 'video' || audioClip) && audioInput" @click="pick(() => aud?.click())">
+            <button v-if="mode === 'video' && (videoInput || refMode)" @click="pick(() => vid?.click())">
+              🎞 Upload video
+            </button>
+            <button v-if="(mode === 'video' && (audioInput || refMode)) || audioClip" @click="pick(() => aud?.click())">
               🔊 Upload audio
             </button>
           </div>
@@ -124,7 +277,7 @@ function onDrop(e) {
       </div>
       <div v-if="tags.length" class="tags">
         <button v-for="t in tags" :key="t.key" class="tag" title="Insert into the prompt" @click="mention(t.label)">
-          <img v-if="!t.video" :src="t.preview" alt="" />{{ t.label }}
+          <img :src="t.preview" alt="" />{{ t.label }}
         </button>
       </div>
 
@@ -140,17 +293,28 @@ function onDrop(e) {
         </button>
       </div>
 
-      <textarea
-        ref="ta"
-        :value="draft"
-        rows="1"
-        placeholder="Message, or describe an image / video…"
-        @input="onInput"
+      <div
+        ref="ed"
+        class="ed"
+        contenteditable="true"
+        role="textbox"
+        :data-placeholder="placeholder"
+        @input="syncDraft"
         @keydown="onKey"
         @paste="onPaste"
-      ></textarea>
+      ></div>
 
       <div class="cbar">
+        <div v-if="refsActive && refItems.length" class="atwrap">
+          <button class="clip at" title="Mention a reference image or video" @click="atMenu = !atMenu">@</button>
+          <div v-if="atMenu" class="atmenu" @mouseleave="atMenu = false">
+            <button v-for="r in refItems" :key="r.key" @click="insertMention(r)">
+              <img v-if="r.type === 'image'" :src="r.preview" alt="" />
+              <span v-else class="pill-ic">{{ r.type === 'audio' ? '🔊' : '🎞' }}</span
+              >{{ r.label }}
+            </button>
+          </div>
+        </div>
         <button
           v-if="!mediaMode && mode !== 'audio'"
           class="clip"
@@ -389,23 +553,98 @@ function onDrop(e) {
   color: var(--saccent);
   border-color: transparent;
 }
-textarea {
+.ed {
   width: 100%;
-  border: none;
-  background: none;
   color: var(--sfg);
-  resize: none;
   outline: none;
   min-height: 24px;
   max-height: 45vh;
   overflow-y: auto;
   font: inherit;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ed:empty::before {
+  content: attr(data-placeholder);
+  color: var(--sfaint);
+  pointer-events: none;
+}
+/* Inline reference mention, e.g. [@video1] shown as a pill */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: baseline;
+  margin: 0 1px;
+  padding: 1px 7px 1px 2px;
+  border-radius: 6px;
+  background: var(--saccent-soft);
+  color: var(--saccent);
+  font-size: 0.92em;
+  user-select: none;
+  white-space: nowrap;
+}
+.pill img {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+.pill-ic {
+  font-size: 13px;
 }
 .cbar {
   display: flex;
   align-items: center;
   gap: 10px;
   padding-top: 8px;
+}
+.atwrap {
+  position: relative;
+}
+.clip.at {
+  font-size: 18px;
+  font-weight: 700;
+}
+.atmenu {
+  position: absolute;
+  bottom: 40px;
+  left: 0;
+  z-index: 20;
+  min-width: 150px;
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--spanel2, var(--sbg2));
+  border: 1px solid var(--sborder);
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+}
+.atmenu button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  text-align: left;
+  border: none;
+  background: none;
+  color: var(--sfg);
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.atmenu button:hover {
+  background: var(--shover);
+}
+.atmenu img {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  object-fit: cover;
 }
 .clip {
   width: 30px;

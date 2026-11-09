@@ -149,7 +149,14 @@ class Turn:
         info = _model_info("video", self.s.video_model) or {}
         if not prompt and info.get("no_prompt"):
             prompt = info.get("name") or "Video tool"  # the source file is the whole input
-        if not prompt and not frames:
+        # Reference-to-video: a prompt that mentions refs as [@name], or any
+        # attached video/audio, routes to the model's refs branch with a named
+        # list of all attachments. A lone image with no mention stays plain
+        # image-to-video.
+        ref_mode = info.get("ref_mode")
+        has_av = any(m.get("file") and m["kind"] in ("video", "audio") for m in (user.media if user else []))
+        ref_items = self._ref_items(ref_mode) if ref_mode and ("[@" in prompt or has_av) else None
+        if not prompt and not frames and not ref_items:
             raise openrouter.OpenRouterError("Video mode needs a prompt or an image")
         # Attached images: the first frame, the last frame (first+last-frame
         # models) and, for reference models, all of them are references
@@ -161,7 +168,32 @@ class Turn:
             chars=self.characters,
             last_frame=frames[1] if len(frames) > 1 else None,
             attached=frames,
+            ref_items=ref_items,
         )
+
+    def _ref_items(self, ref_mode: dict) -> list[dict]:
+        """A named refs list from this turn's attachments for a reference-to-
+        video model: each image/video/audio becomes {file, name, type} with a
+        handle (image1, video1…) the prompt mentions as [@name], capped per the
+        model's ref_mode per-type limits and total max. Order matches the
+        composer, so [@video1] resolves to the same attachment on both sides."""
+        user = self._last_user()
+        types = set(ref_mode.get("types") or ("image", "video", "audio"))
+        limits = ref_mode.get("limits") or {}
+        total_max = ref_mode.get("max")
+        counts: dict[str, int] = {}
+        items: list[dict] = []
+        for m in user.media if user else []:
+            kind = m.get("kind")
+            if not m.get("file") or kind not in types:
+                continue
+            counts[kind] = counts.get(kind, 0) + 1
+            if limits.get(kind) and counts[kind] > limits[kind]:
+                continue  # over this type's cap — leave it out (its [@name] won't resolve)
+            items.append({"file": m["file"], "name": f"{kind}{counts[kind]}", "type": kind})
+            if total_max and len(items) >= total_max:
+                break
+        return items
 
     def _direct_audio(self) -> None:
         user = self._last_user()
@@ -609,12 +641,17 @@ class Turn:
         chars: list | None = None,
         last_frame: str | None = None,
         attached: list[str] | None = None,
+        ref_items: list[dict] | None = None,
     ) -> None:
         if not self.s.video_model:
             raise openrouter.OpenRouterError("No video model selected")
         duration, aspect_ratio, resolution = _fit_video_params(
             self.s.video_model, duration, aspect_ratio, self.s.video_options.resolution
         )
+        # Reference-to-video supersedes the singular first frame: the attachments
+        # all ride in the named refs list instead.
+        if ref_items:
+            first_frame = None
         params = {
             "duration": duration,
             "aspect_ratio": aspect_ratio,
@@ -622,6 +659,8 @@ class Turn:
             "first_frame": first_frame,
             "generate_audio": self.s.video_options.generate_audio,
         }
+        if ref_items:
+            params["ref_items"] = ref_items
         if chars:
             params["characters"] = [c.id for c in chars]
         params.update(self._video_inputs(first_frame, last_frame, attached or [], chars or []))

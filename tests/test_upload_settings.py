@@ -1,6 +1,7 @@
 """Per-user source-media hosting: prefs resolution, host dispatch order, and
 the signed self-host serving route."""
 
+import time
 import types
 
 import pytest
@@ -67,6 +68,51 @@ class TestDispatchOrder:
 
     def test_litterbox_expiry_bucketed(self):
         assert image_hosts._litterbox_time(70) == "1h" and image_hosts._litterbox_time(4000) == "72h"
+
+
+class TestUploadCache:
+    def test_reuses_url_without_reuploading(self, tmp_path, monkeypatch):
+        image_hosts._url_cache.clear()
+        f = tmp_path / "clip.mp4"
+        f.write_bytes(b"video-bytes")
+        calls = []
+        monkeypatch.setattr(image_hosts, "_upload_to_litterbox", lambda p, e=60: calls.append(p) or "https://host/x")
+        prefs = {"primary": "litterbox", "backup": None, "expiry_minutes": 60}
+        assert image_hosts.upload_file(f, prefs) == "https://host/x"
+        assert image_hosts.upload_file(f, prefs) == "https://host/x"  # retry: served from cache
+        assert len(calls) == 1  # uploaded only once
+
+    def test_editing_the_file_forces_reupload(self, tmp_path, monkeypatch):
+        image_hosts._url_cache.clear()
+        f = tmp_path / "clip.mp4"
+        f.write_bytes(b"v1")
+        calls = []
+        monkeypatch.setattr(
+            image_hosts, "_upload_to_litterbox", lambda p, e=60: calls.append(1) or f"https://host/{len(calls)}"
+        )
+        prefs = {"primary": "litterbox", "backup": None, "expiry_minutes": 60}
+        assert image_hosts.upload_file(f, prefs) == "https://host/1"
+        f.write_bytes(b"different-bytes-and-size")  # content/size change invalidates the key
+        assert image_hosts.upload_file(f, prefs) == "https://host/2"
+        assert len(calls) == 2
+
+    def test_expired_entry_is_not_reused(self, tmp_path, monkeypatch):
+        image_hosts._url_cache.clear()
+        f = tmp_path / "clip.mp4"
+        f.write_bytes(b"bytes")
+        calls = []
+        monkeypatch.setattr(
+            image_hosts, "_upload_to_litterbox", lambda p, e=60: calls.append(1) or f"https://host/{len(calls)}"
+        )
+        prefs = {"primary": "litterbox", "backup": None, "expiry_minutes": 60}
+        assert image_hosts.upload_file(f, prefs) == "https://host/1"
+        # Force the one cached entry to look lapsed, then confirm a fresh upload.
+        with image_hosts._url_cache_lock:
+            (k,) = list(image_hosts._url_cache)
+            url, _ = image_hosts._url_cache[k]
+            image_hosts._url_cache[k] = (url, time.time() - 1)
+        assert image_hosts.upload_file(f, prefs) == "https://host/2"
+        assert len(calls) == 2
 
 
 class TestSelfHost:

@@ -588,6 +588,7 @@ onMounted(() => {
           :estimate="estimate"
           :video-input="!!settings.activeInfo.value?.video_input"
           :audio-input="!!settings.activeInfo.value?.audio_input"
+          :ref-mode="settings.activeInfo.value?.ref_mode || null"
           @send="onGenerate"
           @files="addFiles"
           @remove="removeAttachment"

@@ -540,7 +540,21 @@ MODEL_INFO = {
     "wan25v1": {"label": "Wan 2.5", "type": "img2vid", "options": ["generate_audio", "seed"]},
     "wan26v1": {"label": "Wan 2.6", "type": "img2vid", "options": ["generate_audio", "seed"]},
     "grokvideo15v1": {"label": "Grok Imagine Video 1.5", "type": "img2vid", "options": []},
-    "klingv4v1": {"label": "Kling 4.0", "type": "img2vid", "options": ["image_tail"]},
+    "klingv4v1": {
+        "label": "Kling 4.0",
+        "type": "img2vid",
+        "options": ["image_tail", "refs"],
+        "ref_mode": {"types": ["image", "video", "audio"], "max": 15, "limits": {"image": 10, "video": 5, "audio": 3}},
+    },
+    "klingv4flashv1": {
+        "label": "Kling 4.0 Flash",
+        "type": "img2vid",
+        "lengths": list(range(3, 21)),
+        "resolutions": ["720p"],
+        "ratios": ["21:9", "16:9", "9:16", "1:1", "adaptive"],
+        "options": ["image_tail", "refs"],
+        "ref_mode": {"types": ["image", "video"], "max": 15, "limits": {"image": 10, "video": 5}},
+    },
     "klingv21v1": {
         "label": "Kling 2.1",
         "type": "img2vid",
@@ -606,7 +620,9 @@ MODEL_INFO = {
         "lengths": list(range(3, 16)),
         "resolutions": ["std", "pro", "4K"],  # quality tiers, sent as Kling's "mode"
         "ratios": ["16:9", "9:16", "1:1"],
-        "options": ["generate_audio", "image_tail"],
+        "options": ["generate_audio", "image_tail", "refs"],
+        # With a video ref: ≤4 images + ≤1 video; without a video: up to 7 images (docs 2026-11)
+        "ref_mode": {"types": ["image", "video"], "max": 7, "limits": {"image": 4, "video": 1}},
     },
     "pollojourneyv1": {
         "label": "Pollo Journey 8.2",

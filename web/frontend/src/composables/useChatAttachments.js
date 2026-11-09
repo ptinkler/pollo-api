@@ -14,9 +14,18 @@ export const MAX_ATTACHMENTS = 8
 // Images attached to the next message: uploaded from the device, copied in
 // from the media library, or already in the chat. Each is
 // { key, file (once on the server), preview, uploading }.
-export function useChatAttachments({ convId, ensureConversation, showToast, limit = () => MAX_ATTACHMENTS }) {
+export function useChatAttachments({
+  convId,
+  ensureConversation,
+  showToast,
+  limit = () => MAX_ATTACHMENTS,
+  videoLimit = () => 1,
+  audioLimit = () => 1,
+}) {
   const attachments = ref([])
   const images = () => attachments.value.filter(a => !a.video && !a.audio).length
+  const videos = () => attachments.value.filter(a => a.video).length
+  const audios = () => attachments.value.filter(a => a.audio).length
   const room = () => Math.min(MAX_ATTACHMENTS - attachments.value.length, limit() - images())
   const files = computed(() => attachments.value.filter(a => a.file).map(a => a.file))
   const uploading = computed(() => attachments.value.some(a => a.uploading))
@@ -70,23 +79,24 @@ export function useChatAttachments({ convId, ensureConversation, showToast, limi
     }
   }
 
-  // Files from the device (picked, pasted or dropped): images, one source
-  // video (the first mp4), and one lip-sync audio track (the first audio file).
-  // A message carries a single video and a single audio.
+  // Files from the device (picked, pasted or dropped): images, source videos
+  // and audio tracks. Most models take a single video + single audio; a
+  // reference-to-video model takes several of each (up to its ref_mode caps,
+  // via videoLimit / audioLimit).
   function addFiles(list) {
-    const video = [...list].find(f => f.type === 'video/mp4')
-    if (video && !attachments.value.some(a => a.video)) {
+    const vids = [...list].filter(f => f.type === 'video/mp4').slice(0, Math.max(videoLimit() - videos(), 0))
+    if (vids.length) {
       attachEach(
-        [video],
+        vids,
         f => URL.createObjectURL(f),
         (f, id) => uploadChatVideoAttachment(id, f),
         true,
       )
     }
-    const audio = [...list].find(f => f.type.startsWith('audio/'))
-    if (audio && !attachments.value.some(a => a.audio)) {
+    const auds = [...list].filter(f => f.type.startsWith('audio/')).slice(0, Math.max(audioLimit() - audios(), 0))
+    if (auds.length) {
       attachEach(
-        [audio],
+        auds,
         () => '',
         (f, id) => uploadChatAudioAttachment(id, f),
         false,
