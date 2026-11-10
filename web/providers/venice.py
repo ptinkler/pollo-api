@@ -38,6 +38,7 @@ from typing import Any
 import httpx
 
 from .. import request_log, sse
+from ..core.cache import MISS, TTLCache
 from .openrouter import CHAT_TIMEOUT, IMAGE_TIMEOUT, OpenRouterError, _keepalive_socket_options
 
 VENICE_BASE = os.getenv("VENICE_BASE_URL", "https://api.venice.ai/api/v1").rstrip("/")
@@ -75,14 +76,16 @@ _client = httpx.Client(transport=httpx.HTTPTransport(socket_options=_keepalive_s
 _catalogue: dict[str, dict[str, Any]] = {}
 _catalogue_lock = threading.Lock()
 _balance: dict[str, float | None] = {}  # tenant -> the x-venice-balance-usd header's last value
-_video_quotes: dict[str, float] = {}  # job id → quoted USD, recorded as its cost when done
-_download_urls: dict[str, str] = {}  # job id → download link (private models)
-_VIDEO_DIR = Path(tempfile.gettempdir()) / "venice-videos"
+# Per-job state the poller needs after submit. A job is followed for minutes,
+# not days, so JOB_STATE_TTL is generous; the cap stops a long-lived process
+# accumulating an entry per video ever made.
+JOB_STATE_TTL = 24 * 3600
+_video_quotes = TTLCache(JOB_STATE_TTL, maxsize=2048)  # job id -> quoted USD, its cost once done
+_download_urls = TTLCache(JOB_STATE_TTL, maxsize=2048)  # job id -> download link (private models)
+_VIDEO_DIR = Path(tempfile.gettempdir()) / "venice-videos"  # finished videos, between retrieve and download
 QUOTE_TTL = 24 * 3600
 QUOTE_SECONDS = 5  # videos are priced (for sorting) at ~5s, lowest resolution
-_quotes: dict[
-    tuple, tuple[float, float | None]
-] = {}  # (model, duration, resolution) → (when, USD)   # finished videos between retrieve and download
+_quotes = TTLCache(QUOTE_TTL, maxsize=1024)  # (model, duration, resolution) -> USD, or None if unpriced
 
 
 class VeniceError(OpenRouterError):
@@ -404,9 +407,9 @@ def _price_videos(video: list[dict]) -> None:
     def quote(job):
         _, model, duration, res = job
         key = (model, duration, res)
-        cached = _quotes.get(key)
-        if cached and time.time() - cached[0] < QUOTE_TTL:
-            return cached[1]
+        cached = _quotes.get(key, MISS)
+        if cached is not MISS:
+            return cached
         body = {"model": model, "duration": f"{duration}s" if duration else "auto"}
         if res:
             body["resolution"] = res
@@ -414,7 +417,7 @@ def _price_videos(video: list[dict]) -> None:
             usd = _usd(_request("POST", "/video/quote", json=body).json().get("quote"))
         except VeniceError:
             usd = None
-        _quotes[key] = (time.time(), usd)
+        _quotes.put(key, usd)
         return usd
 
     with ThreadPoolExecutor(max_workers=8) as pool:
@@ -736,9 +739,9 @@ def submit_video(
         raise VeniceError("Venice didn't return a job id")
     job_id = f"{JOB_PREFIX}{model}:{data['queue_id']}"
     if data.get("download_url"):
-        _download_urls[job_id] = data["download_url"]
+        _download_urls.put(job_id, data["download_url"])
     if quote is not None:
-        _video_quotes[job_id] = quote
+        _video_quotes.put(job_id, quote)
     audio = body.get("audio", bool(c.get("audio")) or None)
     return {
         "id": job_id,
@@ -914,7 +917,7 @@ def get_video(job_id: str) -> dict:
     status = str(data.get("status") or "").upper()
     if status in ("FAILED", "ERROR", "CANCELLED"):
         return {"status": "failed", "error": f"Venice: {data.get('error') or data.get('message') or 'video failed'}"}
-    if status == "COMPLETED" and job_id in _download_urls:
+    if status == "COMPLETED" and _download_urls.get(job_id) is not None:
         return {"status": "completed", "usage": {"cost": _video_quotes.get(job_id)}}
     return {"status": "in_progress"}
 

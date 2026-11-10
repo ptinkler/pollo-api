@@ -7,7 +7,6 @@ CONSISTENCY_REFS = 2  # recent images passed to the image model to keep characte
 # as references (edit source + recent + pins + attachments). Character images
 # come on top, uncapped (each model trims to its own maximum).
 DEFAULT_IMAGE_LIMIT = 6
-MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024  # larger images are downscaled before sending
 MODELS_CACHE_TTL = 30 * 60
 CHAT_ROUND_SECONDS = 300  # cap on one LLM call (long stories stream for a while)
 VIDEO_POLL_INTERVAL = 10

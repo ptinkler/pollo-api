@@ -10,12 +10,12 @@ from typing import Any
 
 from web.core.metadata import get_db
 
-from .. import characters, request_log
-from ..providers import openrouter, pollo, venice
-from ..uploads import is_blank_image
+from .. import characters, providers, request_log
+from ..providers import openrouter, pollo, provider_for
+from ..uploads import file_to_data_url, is_blank_image
 from .catalogue import _auto_ratio, _model_info
 from .constants import DEFAULT_IMAGE_LIMIT, IMAGE_EXTS, TITLE_SECONDS
-from .helpers import _conv_dir, _effective_ids, _file_to_data_url
+from .helpers import _conv_dir, _effective_ids
 from .models import RefChoices
 from .tools import AUDIO_TOOL_RESULT, IMAGE_TOOL_RESULT, TITLE_PROMPT, VIDEO_TOOL_RESULT
 
@@ -27,18 +27,27 @@ CARRIED_LABEL = {
 }
 
 
-def _generate_title(model: str, prompt: str) -> tuple[str | None, float]:
-    """(a short title for a chat starting with `prompt`, its cost in USD)."""
-    stream_chat = venice.stream_chat if venice.is_venice(model) else openrouter.stream_chat
+# Reasoning models wrap their thinking in these; it is never part of the answer.
+_THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
+def _ask(model: str, prompt: str, max_seconds: float) -> tuple[str, float]:
+    """One short, non-streamed-to-the-UI completion: (the whole reply, its cost
+    in USD). For the asides a turn makes on its own — naming a chat, rewriting
+    a prompt — not for the chat itself, which streams (see Turn._stream_round)."""
     text, cost = "", 0.0
-    for chunk in stream_chat(
-        model, [{"role": "user", "content": TITLE_PROMPT.format(prompt=prompt[:2000])}], max_seconds=TITLE_SECONDS
-    ):
+    for chunk in provider_for(model).stream_chat(model, [{"role": "user", "content": prompt}], max_seconds=max_seconds):
         usage = chunk.get("usage")
         if usage and usage.get("cost"):
             cost += float(usage["cost"])
         for choice in chunk.get("choices") or []:
             text += (choice.get("delta") or {}).get("content") or ""
+    return text, cost
+
+
+def _generate_title(model: str, prompt: str) -> tuple[str | None, float]:
+    """(a short title for a chat starting with `prompt`, its cost in USD)."""
+    text, cost = _ask(model, TITLE_PROMPT.format(prompt=prompt[:2000]), TITLE_SECONDS)
     return _clean_title(text), cost
 
 
@@ -54,16 +63,8 @@ ENHANCE_PROMPT = (
 def _enhance_prompt(model: str, prompt: str, kind: str) -> tuple[str, float]:
     """(the prompt rewritten by the chat model, its cost in USD). Raises
     ValueError when the model returns nothing usable."""
-    stream_chat = venice.stream_chat if venice.is_venice(model) else openrouter.stream_chat
-    messages = [{"role": "user", "content": ENHANCE_PROMPT.format(kind=kind, prompt=prompt[:4000])}]
-    text, cost = "", 0.0
-    for chunk in stream_chat(model, messages, max_seconds=ENHANCE_SECONDS):
-        usage = chunk.get("usage")
-        if usage and usage.get("cost"):
-            cost += float(usage["cost"])
-        for choice in chunk.get("choices") or []:
-            text += (choice.get("delta") or {}).get("content") or ""
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip().strip("\"'`").strip()
+    text, cost = _ask(model, ENHANCE_PROMPT.format(kind=kind, prompt=prompt[:4000]), ENHANCE_SECONDS)
+    text = _THINK.sub("", text).strip().strip("\"'`").strip()
     if not text:
         raise ValueError("The model returned no prompt")
     return text, cost
@@ -72,7 +73,7 @@ def _enhance_prompt(model: str, prompt: str, kind: str) -> tuple[str, float]:
 def _clean_title(text: str) -> str | None:
     """The model's reply as a title: its first line, without a "Title:" label,
     quotes, markdown or a full stop. None if nothing usable is left."""
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)  # reasoning models
+    text = _THINK.sub("", text)
     line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
     line = re.sub(r"^(?:\*\*)?title(?:\*\*)?\s*:\s*", "", line, flags=re.IGNORECASE)
     line = line.strip(" \t\"'`*#_“”‘’").rstrip(".").strip()
@@ -199,7 +200,7 @@ def _pixels_for(conv_dir: Path, files: set[str]):
     def pixels(item: dict) -> dict | None:
         f = item.get("file")
         if f in files and (conv_dir / f).is_file():
-            return {"type": "image_url", "image_url": {"url": _file_to_data_url(conv_dir / f)}}
+            return {"type": "image_url", "image_url": {"url": file_to_data_url(conv_dir / f)}}
         return None
 
     return pixels
@@ -254,7 +255,7 @@ def _image_context(
             messages.append({"role": "assistant", "content": reply_text.strip()})
         paths = [_ref_file(conv_id, f) for f in refs]
         parts: list[dict] = [{"type": "text", "text": prompt}]
-        parts += [{"type": "image_url", "image_url": {"url": _file_to_data_url(p)}} for p in paths if p.is_file()]
+        parts += [{"type": "image_url", "image_url": {"url": file_to_data_url(p)}} for p in paths if p.is_file()]
         messages.append({"role": "user", "content": parts})
     elif chars:
         # Image mode: the user's message is last; their characters' images go with it
@@ -263,7 +264,7 @@ def _image_context(
             messages[-1] = {
                 **messages[-1],
                 "content": messages[-1]["content"]
-                + [{"type": "image_url", "image_url": {"url": _file_to_data_url(p)}} for p in paths if p.is_file()],
+                + [{"type": "image_url", "image_url": {"url": file_to_data_url(p)}} for p in paths if p.is_file()],
             }
     return messages
 
@@ -402,27 +403,15 @@ def _run_image_generation(
     # An unset ratio ("Ratio: auto") becomes the model's own auto value when it
     # has one, so it stays automatic instead of falling back to 16:9.
     aspect_ratio = params.get("aspect_ratio") or _auto_ratio("image", model)
-    credits, sent = None, {}
-    if venice.is_venice(model):
-        images, cost, sent = venice.generate_image(
-            model, prompt, aspect_ratio=aspect_ratio, resolution=params.get("resolution"), ref_paths=refs
-        )
-    elif pollo.is_pollo(model):
-        images, credits, sent = pollo.generate_image(
-            model, prompt, aspect_ratio=aspect_ratio, resolution=params.get("resolution"), ref_paths=refs
-        )
-        cost = None
-    elif context is not None:
-        images, cost = openrouter.generate_image_chat(model, context, aspect_ratio=aspect_ratio, session_id=conv_id)
-    else:
-        images, cost = openrouter.generate_image(
-            model,
-            prompt,
-            aspect_ratio=aspect_ratio,
-            resolution=params.get("resolution"),
-            input_images=[_file_to_data_url(f) for f in refs] or None,
-            session_id=conv_id,
-        )
+    images, cost, credits, sent = providers.generate_image(
+        model,
+        prompt,
+        aspect_ratio=aspect_ratio,
+        resolution=params.get("resolution"),
+        ref_paths=refs,
+        context=context,
+        session_id=conv_id,
+    )
     kept = [(data, media_type) for data, media_type in images if not is_blank_image(data)]
     if images and not kept:
         raise openrouter.OpenRouterError(BLACK_IMAGE_ERROR)
@@ -447,46 +436,25 @@ def _submit_video(conv_id: str, model: str, prompt: str, params: dict[str, Any])
     # An unset ratio uses the model's own auto value when it has one (matching
     # the image path); animating an image still derives the ratio from the frame.
     aspect_ratio = params.get("aspect_ratio") or (None if frame else _auto_ratio("video", model))
-    if venice.is_venice(model):
-        conv_dir = _conv_dir(conv_id)
-        return venice.submit_video(
-            model,
-            prompt,
-            duration=params.get("duration"),
-            aspect_ratio=aspect_ratio,
-            resolution=params.get("resolution"),
-            generate_audio=params.get("generate_audio"),
-            first_frame=frame,
-            last_frame=_ref_file(conv_id, params["last_frame"]) if params.get("last_frame") else None,
-            refs=[_ref_file(conv_id, r) for r in params.get("refs") or []],
-            source_video=conv_dir / params["source_video"] if params.get("source_video") else None,
-        )
-    if pollo.is_pollo(model):
-        return pollo.submit_video(
-            model,
-            prompt,
-            duration=params.get("duration"),
-            aspect_ratio=aspect_ratio,
-            resolution=params.get("resolution"),
-            generate_audio=params.get("generate_audio"),
-            first_frame=frame,
-            source_video=_conv_dir(conv_id) / params["source_video"] if params.get("source_video") else None,
-            source_audio=_conv_dir(conv_id) / params["source_audio"] if params.get("source_audio") else None,
-            mode=params.get("mode"),
-            # Reference-to-video: named image/video/audio refs the prompt mentions
-            # as [@name] (resolve each file to a path; keep its name and type).
-            ref_items=[
-                {"path": _ref_file(conv_id, r["file"]), "name": r.get("name"), "type": r.get("type")}
-                for r in params.get("ref_items") or []
-            ],
-        )
-    return openrouter.submit_video(
+    conv_dir = _conv_dir(conv_id)
+    return providers.submit_video(
         model,
         prompt,
         duration=params.get("duration"),
         aspect_ratio=aspect_ratio,
         resolution=params.get("resolution"),
         generate_audio=params.get("generate_audio"),
-        first_frame=_file_to_data_url(frame) if frame else None,
+        first_frame=frame,
+        last_frame=_ref_file(conv_id, params["last_frame"]) if params.get("last_frame") else None,
+        source_video=conv_dir / params["source_video"] if params.get("source_video") else None,
+        source_audio=conv_dir / params["source_audio"] if params.get("source_audio") else None,
+        mode=params.get("mode"),
+        refs=[_ref_file(conv_id, r) for r in params.get("refs") or []],
+        # Reference-to-video: named image/video/audio refs the prompt mentions
+        # as [@name] (resolve each file to a path; keep its name and type).
+        ref_items=[
+            {"path": _ref_file(conv_id, r["file"]), "name": r.get("name"), "type": r.get("type")}
+            for r in params.get("ref_items") or []
+        ],
         session_id=conv_id,
     )

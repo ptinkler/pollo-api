@@ -13,7 +13,7 @@ from typing import Any
 from web.core.metadata import get_db
 
 from .. import characters
-from ..providers import openrouter, venice
+from ..providers import openrouter, provider_for
 from . import generation, polling
 from .audio import audio_params, submit_audio_generation
 from .catalogue import _auto_ratio, _fit_video_params, _model_info
@@ -284,8 +284,7 @@ class Turn:
         finish = None
         if self.content and not self.content.endswith("\n\n"):
             self._append("\n\n")
-        stream_chat = venice.stream_chat if venice.is_venice(self.s.text_model) else openrouter.stream_chat
-        for chunk in stream_chat(
+        for chunk in provider_for(self.s.text_model).stream_chat(
             self.s.text_model,
             messages,
             tools,
@@ -750,7 +749,7 @@ class Turn:
         # Direct image/video/audio sends involve no text model, so without a chosen
         # title model the prompt itself (tidied) titles the chat
         direct = self.s.mode in ("image", "video", "audio") and not chosen
-        if model and not direct and (venice.is_configured() if venice.is_venice(model) else openrouter.is_configured()):
+        if model and not direct and provider_for(model).is_configured():
 
             def work():
                 # No title from the model: the prompt stands in

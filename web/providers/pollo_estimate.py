@@ -9,12 +9,11 @@ uploaded for an estimate. Checked 2026-10-18: they don't cost credits.
 """
 
 import json
-import threading
-import time
 from typing import Any
 
 import requests
 
+from web.core.cache import MISS, TTLCache
 from web.core.cloudflare import is_cloudflare_block
 
 # Stand-ins for the request's media: what's priced is that there is an
@@ -29,8 +28,9 @@ PLACEHOLDERS = {
 CACHE_SECONDS = 600
 TIMEOUT = 15
 
-_cache: dict[str, tuple[float, dict | None]] = {}
-_lock = threading.Lock()
+# A refusal is cached too (it won't change while the form does), so a cached
+# None is a real answer — hence MISS to tell it from a miss.
+_cache = TTLCache(CACHE_SECONDS, maxsize=1024)
 
 
 def estimate(generator) -> dict | None:
@@ -42,23 +42,20 @@ def estimate(generator) -> dict | None:
         return None
     payload = generator.get_payload()
     key = json.dumps([url, payload], sort_keys=True)
-    with _lock:
-        hit = _cache.get(key)
-    if hit and time.monotonic() - hit[0] < CACHE_SECONDS:
-        return hit[1]
+    hit = _cache.get(key, MISS)
+    if hit is not MISS:
+        return hit
     try:
         result, cacheable = _ask(url, payload, generator.api_key)
     except requests.RequestException:
         return None  # not reachable: ask again next time
     if cacheable:
-        with _lock:
-            _cache[key] = (time.monotonic(), result)
+        _cache.put(key, result)
     return result
 
 
 def clear_cache() -> None:
-    with _lock:
-        _cache.clear()
+    _cache.clear()
 
 
 def _ask(url: str, payload: dict, api_key: str | None) -> tuple[dict | None, bool]:

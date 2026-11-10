@@ -17,6 +17,8 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from web.core.env import bool_env
 from web.core.metadata import get_db
 
+from .auth import set_user_cookie
+
 router = APIRouter(prefix="/api/auth")
 
 # A throwaway local account: one-click sign-in, no password/OAuth, so a lost
@@ -89,8 +91,6 @@ async def dev_login(response: Response, request: Request):
             detail="DEV_LOGIN is refused: this database already has encrypted keys (looks like production). "
             "Use a fresh dev database.",
         )
-    from .api import _set_user_cookie  # lazy: avoid an import cycle with api.py
-
     user = dev_user()
-    _set_user_cookie(response, request, user.id)
+    set_user_cookie(response, request, user.id)
     return {"ok": True, "email": user.email, "name": user.name}

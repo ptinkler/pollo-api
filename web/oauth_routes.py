@@ -14,13 +14,11 @@ from fastapi.responses import RedirectResponse
 from web.core.metadata import get_db
 
 from . import users
-from .auth import USER_COOKIE, make_user_session
+from .auth import set_user_cookie
 from .dev_login import dev_login_enabled
 from .oauth import configured_providers, normalize_profile, oauth
 
 router = APIRouter(prefix="/api/auth")
-
-USER_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
 
 
 def _user_dict(u) -> dict:
@@ -87,15 +85,6 @@ async def callback(provider: str, request: Request):
         return RedirectResponse(url="/?auth=denied", status_code=302)
 
     user = db.upsert_oauth_user(profile, is_admin=is_admin)
-    from .api import _cookie_secure  # lazy: avoid an import cycle with api.py
-
     resp = RedirectResponse(url="/", status_code=302)
-    resp.set_cookie(
-        key=USER_COOKIE,
-        value=make_user_session(user.id),
-        httponly=True,
-        samesite="lax",  # must survive the cross-site redirect back from the provider
-        secure=_cookie_secure(request),
-        max_age=USER_COOKIE_MAX_AGE,
-    )
+    set_user_cookie(resp, request, user.id)  # samesite=lax survives the redirect back
     return resp

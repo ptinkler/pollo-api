@@ -11,7 +11,6 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import cv2
 import uvicorn
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,12 +24,12 @@ sys.path.insert(0, str(ROOT_DIR))
 os.chdir(ROOT_DIR)
 
 from web.core import config  # noqa: E402, F401 — imported first: loads .env before anything reads it
-from web.core.env import bool_env, bool_env_or_none  # noqa: E402
+from web.core.env import bool_env  # noqa: E402
 from web.core.get_task import get_credit_balance
 from web.core.metadata import get_db
 
 from . import characters, keyctx, media, vpn
-from .auth import USER_COOKIE, make_user_session
+from .auth import USER_COOKIE, set_user_cookie
 from .chat import router as chat_router
 from .chat import startup_resume_chat
 from .chatgpt_import import router as chatgpt_import_router
@@ -150,31 +149,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
-COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
-
 # Login brute-force throttle: per-client-IP sliding window (in-memory).
 LOGIN_MAX_ATTEMPTS = 10
 LOGIN_WINDOW_SECONDS = 300
 _login_attempts: dict[str, list[float]] = {}
 _login_lock = threading.Lock()
-
-
-def _cookie_secure(request: Request) -> bool:
-    """Whether the session cookie should be marked Secure (HTTPS-only).
-
-    Secure by default, so a TLS deployment (e.g. the NAS) needs no config. The
-    one automatic exemption is plain-HTTP access to a loopback host, where
-    local dev would otherwise break — browsers treat localhost as secure, so
-    the cookie still works there. COOKIE_SECURE=true/false overrides either
-    way: set it false only to serve auth over plain HTTP on a LAN."""
-    override = bool_env_or_none("COOKIE_SECURE")
-    if override is not None:
-        return override
-    forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
-    if request.url.scheme == "https" or forwarded == "https":
-        return True
-    host = (request.url.hostname or "").lower()
-    return host not in {"localhost", "127.0.0.1", "::1"}
 
 
 def _client_ip(request: Request) -> str:
@@ -213,17 +192,6 @@ def _login_rate_limited(request: Request, email: str) -> bool:
         return over_ip or over_email
 
 
-def _set_user_cookie(response: Response, request: Request, user_id: str) -> None:
-    response.set_cookie(
-        key=USER_COOKIE,
-        value=make_user_session(user_id),
-        httponly=True,
-        samesite="lax",  # lax so the OAuth redirect back from the provider keeps it
-        secure=_cookie_secure(request),
-        max_age=COOKIE_MAX_AGE,
-    )
-
-
 @app.post("/api/auth/login")
 async def api_auth_login(data: LoginRequest, response: Response, request: Request):
     email = data.email.strip().lower()
@@ -239,7 +207,7 @@ async def api_auth_login(data: LoginRequest, response: Response, request: Reques
         from .passwords import hash_password
 
         db.set_user_password(user.id, hash_password(data.password))
-    _set_user_cookie(response, request, user.id)
+    set_user_cookie(response, request, user.id)
     return {"ok": True, "email": user.email, "name": user.name}
 
 
@@ -260,23 +228,6 @@ async def api_auth_status(user_session: str | None = Cookie(None)):
         "authenticated": user is not None,
         "user": {"email": user.email, "name": user.name, "is_admin": user.is_admin} if user else None,
     }
-
-
-def _extract_first_frame_uncached(video_path: Path) -> bytes | None:
-    """Extract the first frame from a video using OpenCV, returns JPEG bytes.
-    No caching - always extracts fresh."""
-    try:
-        cap = cv2.VideoCapture(str(video_path))
-        if not cap.isOpened():
-            return None
-        ret, frame = cap.read()
-        cap.release()
-        if not ret or frame is None:
-            return None
-        _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        return jpeg.tobytes()
-    except Exception:
-        return None
 
 
 # Track jobs currently being recovered to prevent concurrent recovery attempts

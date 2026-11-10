@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 from web.core.metadata import get_db
 
 from .. import media
-from ..providers import openrouter, pollo, venice
+from ..providers import provider_for_job
 from .constants import CHAT_PREVIEW_SIZE, IMAGE_EXTS, VIDEO_MAX_POLL_ERRORS, VIDEO_POLL_INTERVAL, VIDEO_POLL_TIMEOUT
 from .generation import _MODERATION
 from .helpers import _add_message_cost, _chat_root, _conv_dir
@@ -39,7 +39,7 @@ def start_video_poller(conv_id: str, message_id: int, media_id: str, job_id: str
 @_with_owner_keys
 def _poll_video(conv_id: str, message_id: int, media_id: str, job_id: str) -> None:
     db = get_db()
-    source = pollo if pollo.is_pollo_job(job_id) else venice if venice.is_venice_job(job_id) else openrouter
+    source = provider_for_job(job_id)
     deadline = time.time() + VIDEO_POLL_TIMEOUT
     errors = 0
     while time.time() < deadline:

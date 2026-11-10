@@ -13,7 +13,12 @@ import hmac
 import os
 import time
 
-SESSION_TTL = 60 * 60 * 24 * 30  # 30 days — matches the login cookie's max-age
+from fastapi import Request, Response
+
+from web.core.env import bool_env_or_none
+
+# The session token and the cookie carrying it expire together.
+SESSION_TTL = 60 * 60 * 24 * 30  # 30 days
 
 USER_COOKIE = "user_session"
 
@@ -44,6 +49,37 @@ def make_user_session(user_id: str) -> str:
     payload = f"{user_id}.{int(time.time()) + SESSION_TTL}"
     sig = hmac.new(_user_secret(), payload.encode(), hashlib.sha256).digest()
     return f"{payload}.{_b64(sig)}"
+
+
+def cookie_secure(request: Request) -> bool:
+    """Whether the session cookie should be marked Secure (HTTPS-only).
+
+    Secure by default, so a TLS deployment (e.g. the NAS) needs no config. The
+    one automatic exemption is plain-HTTP access to a loopback host, where
+    local dev would otherwise break — browsers treat localhost as secure, so
+    the cookie still works there. COOKIE_SECURE=true/false overrides either
+    way: set it false only to serve auth over plain HTTP on a LAN."""
+    override = bool_env_or_none("COOKIE_SECURE")
+    if override is not None:
+        return override
+    forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    if request.url.scheme == "https" or forwarded == "https":
+        return True
+    host = (request.url.hostname or "").lower()
+    return host not in {"localhost", "127.0.0.1", "::1"}
+
+
+def set_user_cookie(response: Response, request: Request, user_id: str) -> None:
+    """Sign this user in on `response`. The one place the login cookie is set —
+    password login, OAuth and dev login all come through here."""
+    response.set_cookie(
+        key=USER_COOKIE,
+        value=make_user_session(user_id),
+        httponly=True,
+        samesite="lax",  # lax so the OAuth redirect back from the provider keeps it
+        secure=cookie_secure(request),
+        max_age=SESSION_TTL,
+    )
 
 
 def resolve_user_session(token: str | None) -> str | None:

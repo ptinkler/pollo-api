@@ -65,13 +65,6 @@ ORPHAN_GRACE = 3600
 _PARAM_FILES = ("first_frame", "last_frame", "source_video")  # chat media params naming one file
 
 
-def _web_api():
-    # web.api imports this module's router, so import it lazily
-    from . import api
-
-    return api
-
-
 def library_dir() -> Path:
     # Read config at call time so tests can redirect ROOT_DIR. Per-user
     # (<data>/library/<user_id>/) so one user's uploads never show to another;
@@ -101,6 +94,23 @@ def _mtime_iso(path: Path) -> str | None:
     try:
         return datetime.fromtimestamp(path.stat().st_mtime).astimezone().isoformat()
     except OSError:
+        return None
+
+
+def first_frame_jpeg(video_path: Path) -> bytes | None:
+    """A video's first frame as JPEG bytes, or None if it can't be read.
+    Uncached — the caller caches the thumbnail it makes from this."""
+    try:
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            return None
+        ret, frame = cap.read()
+        cap.release()
+        if not ret or frame is None:
+            return None
+        _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        return jpeg.tobytes()
+    except Exception:  # noqa: BLE001 — an unreadable video simply has no frame
         return None
 
 
@@ -261,7 +271,7 @@ def make_thumb(path: Path, size: int = THUMB_SIZE) -> Path | None:
         return out
     try:
         if _kind(path) == "video":
-            frame = _web_api()._extract_first_frame_uncached(path)
+            frame = first_frame_jpeg(path)
             if not frame:
                 return None
             img = Image.open(io.BytesIO(frame))

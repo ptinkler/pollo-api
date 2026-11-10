@@ -4,21 +4,17 @@ the live default-inheritance resolution."""
 
 from __future__ import annotations
 
-import base64
-import io
-import mimetypes
 import uuid
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
-from PIL import Image
 
 from web.core import config
 from web.core.metadata import get_db
 
 from ..providers import openrouter, venice
-from .constants import _KINDS, _REMEMBERED_SETTINGS, MAX_INLINE_IMAGE_BYTES
+from .constants import _KINDS, _REMEMBERED_SETTINGS
 from .models import TurnSettings
 
 
@@ -40,21 +36,6 @@ def _new_media(kind: str, source: str, **fields) -> dict[str, Any]:
 def _saved_media(kind: str, source: str, file: str, **fields) -> dict[str, Any]:
     """A media item whose file is already on disk."""
     return {**_new_media(kind, source, **fields), "status": "done", "file": file}
-
-
-def _file_to_data_url(path: Path) -> str:
-    """Encode a local image as a data URL, downscaling big ones so request
-    bodies stay reasonable (providers cap inline image sizes)."""
-    raw = path.read_bytes()
-    mime = mimetypes.guess_type(path.name)[0] or "image/png"
-    if len(raw) > MAX_INLINE_IMAGE_BYTES or mime == "image/gif":
-        img = Image.open(io.BytesIO(raw))
-        img = img.convert("RGB")
-        img.thumbnail((2048, 2048))
-        buf = io.BytesIO()
-        img.save(buf, "JPEG", quality=90)
-        raw, mime = buf.getvalue(), "image/jpeg"
-    return f"data:{mime};base64,{base64.b64encode(raw).decode()}"
 
 
 def _require_conv(conv_id: str):

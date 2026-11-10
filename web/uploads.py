@@ -1,8 +1,9 @@
 """
-Image upload and filename helpers shared by the Generate page (web/api.py)
-and chat (web/chat.py).
+Reading and storing uploaded media, and encoding a stored file for a provider
+that wants it inline. Shared by the HTTP routes and the provider layer.
 """
 
+import base64
 import hashlib
 import io
 import mimetypes
@@ -31,6 +32,10 @@ AUDIO_UPLOAD_TYPES = {
     "audio/aac": ".aac",
 }
 MAX_AUDIO_UPLOAD_BYTES = 50 * 1024 * 1024
+
+# Images above this go to a provider downscaled, so request bodies stay
+# reasonable (providers cap inline image sizes).
+MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024
 
 
 def safe_filename(name: str) -> str:
@@ -101,6 +106,21 @@ async def read_audio_upload(file: UploadFile) -> tuple[bytes, str]:
     if len(content) > MAX_AUDIO_UPLOAD_BYTES:
         raise HTTPException(400, f"File too large (max {MAX_AUDIO_UPLOAD_BYTES // 1024 // 1024} MB)")
     return content, ext
+
+
+def file_to_data_url(path: Path) -> str:
+    """Encode a local image as a data URL, downscaling big ones (and GIFs,
+    which several providers reject) so request bodies stay reasonable."""
+    raw = path.read_bytes()
+    mime = mimetypes.guess_type(path.name)[0] or "image/png"
+    if len(raw) > MAX_INLINE_IMAGE_BYTES or mime == "image/gif":
+        img = Image.open(io.BytesIO(raw))
+        img = img.convert("RGB")
+        img.thumbnail((2048, 2048))
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=90)
+        raw, mime = buf.getvalue(), "image/jpeg"
+    return f"data:{mime};base64,{base64.b64encode(raw).decode()}"
 
 
 def store_deduped(directory: Path, prefix: str, content: bytes, ext: str) -> str:

@@ -1,6 +1,7 @@
 """Tests for web.media — the library of every upload and creation."""
 
 import io
+from unittest.mock import MagicMock, patch
 
 import pytest
 from PIL import Image
@@ -364,23 +365,67 @@ class TestThumbnails:
         assert client.get(item["thumb_url"]).content == r.content
 
     def test_video_thumb_uses_the_first_frame(self, client, conv, monkeypatch):
-        import web.api as api_mod
         import web.core.config as config
+        import web.media as media_mod
 
         (config.ROOT_DIR / "chat" / conv.id / "vid.mp4").write_bytes(b"fake mp4")
         buf = io.BytesIO()
         Image.new("RGB", (640, 360), "orange").save(buf, "JPEG")
-        monkeypatch.setattr(api_mod, "_extract_first_frame_uncached", lambda p: buf.getvalue())
+        monkeypatch.setattr(media_mod, "first_frame_jpeg", lambda p: buf.getvalue())
         r = client.get(f"/api/media/thumb/chat:{conv.id}:vid.mp4")
         assert r.status_code == 200 and Image.open(io.BytesIO(r.content)).size == (569, 320)
 
     def test_unreadable_file_has_no_thumb(self, client, conv, monkeypatch):
-        import web.api as api_mod
         import web.core.config as config
+        import web.media as media_mod
 
         (config.ROOT_DIR / "chat" / conv.id / "vid.mp4").write_bytes(b"fake mp4")
-        monkeypatch.setattr(api_mod, "_extract_first_frame_uncached", lambda p: None)
+        monkeypatch.setattr(media_mod, "first_frame_jpeg", lambda p: None)
         assert client.get(f"/api/media/thumb/chat:{conv.id}:vid.mp4").status_code == 404
+
+
+class TestFirstFrameJpeg:
+    """first_frame_jpeg: the video frame the library's thumbnails are made from."""
+
+    def test_unopenable_file(self, tmp_path):
+        import web.media as media_mod
+
+        fp = tmp_path / "notavideo.mp4"
+        fp.write_bytes(b"definitely not a video")
+        assert media_mod.first_frame_jpeg(fp) is None
+
+    def test_read_fails(self, tmp_path):
+        import web.media as media_mod
+
+        fp = tmp_path / "readfail.mp4"
+        fp.write_bytes(b"\x00" * 100)
+        cap = MagicMock()
+        cap.isOpened.return_value = True
+        cap.read.return_value = (False, None)
+        with patch("web.media.cv2.VideoCapture", return_value=cap):
+            assert media_mod.first_frame_jpeg(fp) is None
+        cap.release.assert_called_once()
+
+    def test_success(self, tmp_path):
+        import numpy as np
+
+        import web.media as media_mod
+
+        fp = tmp_path / "success.mp4"
+        fp.write_bytes(b"\x00" * 100)
+        cap = MagicMock()
+        cap.isOpened.return_value = True
+        cap.read.return_value = (True, np.zeros((2, 2, 3), dtype=np.uint8))
+        with patch("web.media.cv2.VideoCapture", return_value=cap):
+            assert media_mod.first_frame_jpeg(fp) is not None
+
+    def test_exception(self, tmp_path):
+        import web.media as media_mod
+
+        fp = tmp_path / "exc.mp4"
+        fp.write_bytes(b"\x00" * 100)
+        with patch("web.media.cv2.VideoCapture", side_effect=Exception("cv2 error")):
+            assert media_mod.first_frame_jpeg(fp) is None
 
     def test_delete_drops_the_cached_thumb(self, client):
         import web.media as media_mod
