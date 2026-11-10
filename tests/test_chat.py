@@ -3851,3 +3851,168 @@ class TestTitleModel:
         # saving the default lists doesn't touch it
         assert client.put("/api/chat/settings", json={}).json()["title_model"] == "x/cheap"
         assert client.put("/api/chat/settings/title-model", json={"title_model": ""}).json()["title_model"] is None
+
+
+class TestEditAndRewordInPlace:
+    """Editing a picture on its card, and writing a reply's words again,
+    without re-running the turn that made them."""
+
+    def _reply_with_image(self, db, conv, **extra):
+        db.add_chat_message(conv["id"], "user", "draw a fox")
+        return db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "Here is your fox.",
+            model="t/model",
+            media=[
+                {
+                    "id": "m1",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "done",
+                    "file": "img_old.png",
+                    "prompt": "a fox",
+                    "model": "i/model",
+                    "cost": 0.02,
+                    "params": {"aspect_ratio": "16:9", "resolution": None, "refs": ["img_ref.png"]},
+                    **extra,
+                }
+            ],
+        )
+
+    def _reply(self, db, conv, **extra):
+        msg = self._reply_with_image(db, conv, **extra)
+        db.update_chat_message(msg.id, cost=0.01)  # the words it already cost
+        # the files must really be there: generation drops references it can't find
+        import web.core.config as config
+
+        d = config.ROOT_DIR / "chat" / conv["id"]
+        d.mkdir(parents=True, exist_ok=True)
+        for name in ("img_old.png", "img_ref.png"):
+            (d / name).write_bytes(_png_bytes())
+        return msg
+
+    def _inline(self, chat, monkeypatch):
+        class Inline:
+            def __init__(self, target, args, **kw):
+                self.target, self.args = target, args
+
+            def start(self):
+                self.target(*self.args)
+
+        monkeypatch.setattr(threading, "Thread", Inline)
+
+    def _capture(self, monkeypatch, got):
+        monkeypatch.setattr(
+            openrouter,
+            "generate_image",
+            lambda model, prompt, **kw: (
+                got.update(model=model, prompt=prompt, **kw),
+                ([(_png_bytes(), "image/png")], 0.03),
+            )[1],
+        )
+
+    def test_edit_sends_the_picture_back_and_replaces_it(self, client, conv, chat, db, monkeypatch):
+        msg = self._reply(db, conv)
+        self._inline(chat, monkeypatch)
+        got = {}
+        self._capture(monkeypatch, got)
+        r = client.post(
+            f"/api/chat/messages/{msg.id}/media/m1/regenerate",
+            json={"prompt": "give it a hat", "edit": True, "replace": True},
+        )
+        assert r.status_code == 200
+        assert got["prompt"] == "give it a hat"
+        media = db.get_chat_message(msg.id).media
+        # the picture itself leads the references; the one it was made from is dropped
+        assert media[0]["params"]["refs"] == ["img_old.png"]
+        assert len(got["input_images"]) == 1
+        assert len(media) == 1  # replaced, not added beside
+        assert media[0]["id"] == "m1" and media[0]["status"] == "done"
+        assert media[0]["file"] != "img_old.png" and media[0]["prompt"] == "give it a hat"
+
+    def test_the_replaced_picture_is_kept_as_a_version(self, client, conv, chat, db, monkeypatch):
+        msg = self._reply(db, conv)
+        self._inline(chat, monkeypatch)
+        self._capture(monkeypatch, {})
+        client.post(
+            f"/api/chat/messages/{msg.id}/media/m1/regenerate",
+            json={"prompt": "give it a hat", "edit": True, "replace": True},
+        )
+        item = db.get_chat_message(msg.id).media[0]
+        assert [v["file"] for v in item["versions"]] == ["img_old.png"]
+        assert item["versions"][0]["prompt"] == "a fox"
+
+    def test_an_earlier_version_is_not_treated_as_an_orphan(self, client, conv, chat, db, monkeypatch):
+        """Its file must stay referenced, or the media sweep would offer to delete it."""
+        import web.media as media_mod
+
+        msg = self._reply(db, conv)
+        self._inline(chat, monkeypatch)
+        self._capture(monkeypatch, {})
+        client.post(
+            f"/api/chat/messages/{msg.id}/media/m1/regenerate",
+            json={"prompt": "give it a hat", "edit": True, "replace": True},
+        )
+        item = db.get_chat_message(msg.id).media[0]
+        assert "img_old.png" in media_mod._referenced_files(item)
+
+    def test_redo_re_rolls_the_prompt_without_the_picture(self, client, conv, chat, db, monkeypatch):
+        msg = self._reply(db, conv)
+        self._inline(chat, monkeypatch)
+        got = {}
+        self._capture(monkeypatch, got)
+        client.post(
+            f"/api/chat/messages/{msg.id}/media/m1/regenerate",
+            json={"prompt": "a fox, wider shot", "replace": True},
+        )
+        assert got["prompt"] == "a fox, wider shot"
+        # not an edit: the picture isn't sent back, the original reference stands
+        assert db.get_chat_message(msg.id).media[0]["params"]["refs"] == ["img_ref.png"]
+
+    def test_editing_without_a_picture_is_refused(self, client, conv, chat, db):
+        msg = self._reply(db, conv, file=None, status="error", error="nope")
+        r = client.post(
+            f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={"prompt": "x", "edit": True, "replace": True}
+        )
+        assert r.status_code == 400
+
+    def test_gallery_re_roll_still_adds_a_second_picture(self, client, conv, chat, db, monkeypatch):
+        """Without `replace` the old behaviour stands, for the gallery."""
+        msg = self._reply(db, conv)
+        self._inline(chat, monkeypatch)
+        self._capture(monkeypatch, {})
+        client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={})
+        media = db.get_chat_message(msg.id).media
+        assert len(media) == 2 and media[0]["file"] == "img_old.png"
+
+    def test_reword_replaces_the_words_and_keeps_the_picture(self, client, conv, chat, db, monkeypatch):
+        msg = self._reply(db, conv)
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: _text_chunks("A fox, as requested."))
+        monkeypatch.setattr(
+            openrouter, "generate_image", lambda *a, **k: pytest.fail("rewording must not remake the picture")
+        )
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/reword", json={"message_id": msg.id, **SETTINGS}))
+        after = db.get_chat_message(msg.id)
+        assert after.content == "A fox, as requested."
+        assert len(after.media) == 1 and after.media[0]["file"] == "img_old.png"
+
+    def test_reword_keeps_what_the_picture_cost(self, client, conv, chat, db, monkeypatch):
+        msg = self._reply(db, conv)
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: _text_chunks("Reworded."))
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/reword", json={"message_id": msg.id, **SETTINGS}))
+        # the image's 0.02 survives and the new words are added; crucially the
+        # old 0.01 of words is replaced, not kept (that would give 0.031)
+        assert db.get_chat_message(msg.id).cost == 0.021
+
+    def test_reword_puts_the_old_words_back_if_nothing_comes_out(self, client, conv, chat, db, monkeypatch):
+        msg = self._reply(db, conv)
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: _text_chunks(""))
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/reword", json={"message_id": msg.id, **SETTINGS}))
+        assert db.get_chat_message(msg.id).content == "Here is your fox."
+
+    def test_reword_refuses_a_user_message(self, client, conv, chat, db):
+        db.add_chat_message(conv["id"], "user", "hello")
+        user = db.get_chat_messages(conv["id"])[-1]
+        r = client.post(f"/api/chat/conversations/{conv['id']}/reword", json={"message_id": user.id, **SETTINGS})
+        assert r.status_code == 400

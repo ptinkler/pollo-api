@@ -16,7 +16,7 @@ defineEmits([
   'resend',
   'branch',
   'use-image',
-  'use-text',
+  'reword',
   'regenerate',
   'pin',
   'delete',
@@ -70,7 +70,7 @@ watch(
         @resend="$emit('resend', m)"
         @branch="$emit('branch', $event)"
         @use-image="$emit('use-image', $event)"
-        @use-text="$emit('use-text', $event)"
+        @reword="$emit('reword', m)"
         @regenerate="payload => $emit('regenerate', m, payload)"
         @pin="payload => $emit('pin', m, payload)"
         @delete="$emit('delete', m)"

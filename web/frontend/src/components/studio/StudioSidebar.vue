@@ -112,9 +112,9 @@ const bySpace = computed(() => {
       <button class="rail-btn" title="Expand" @click="emit('update:collapsed', false)">
         <svg class="ic lg"><use href="#s-chev" /></svg>
       </button>
-      <button class="rail-btn" title="New chat" @click="emit('new', 'chat')">
+      <a class="rail-btn" title="New chat" href="/" @click.prevent="emit('new', 'chat')">
         <svg class="ic lg"><use href="#s-plus" /></svg>
-      </button>
+      </a>
       <button class="rail-btn" title="Threads" @click="emit('update:collapsed', false)">
         <svg class="ic lg"><use href="#s-chat" /></svg>
       </button>
@@ -133,12 +133,12 @@ const bySpace = computed(() => {
       </div>
       <div class="pbody">
         <div class="newrow">
-          <button class="newbtn" @click="emit('new', 'chat')">
+          <a class="newbtn" href="/" @click.prevent="emit('new', 'chat')">
             <svg class="ic"><use href="#s-plus" /></svg> New chat
-          </button>
-          <button class="newbtn" @click="emit('new', 'gallery')">
+          </a>
+          <a class="newbtn" href="/?new=gallery" @click.prevent="emit('new', 'gallery')">
             <svg class="ic"><use href="#s-image" /></svg> New gallery
-          </button>
+          </a>
         </div>
         <div class="sbox nsearch">
           <svg class="ic"><use href="#s-search" /></svg>
@@ -157,14 +157,15 @@ const bySpace = computed(() => {
           <button class="pillbtn" :class="{ on: filter === 'gallery' }" @click="emit('update:filter', 'gallery')">
             Gallery
           </button>
-          <button
+          <a
             class="pillbtn ficon"
             :class="{ on: filter === 'favourites' }"
             title="Favourites"
-            @click="emit('update:filter', 'favourites')"
+            href="/favourites"
+            @click.prevent="emit('update:filter', 'favourites')"
           >
             <svg class="ic"><use href="#s-star" /></svg>
-          </button>
+          </a>
           <button class="pillbtn ficon" title="More filters — coming soon" disabled>
             <svg class="ic"><use href="#s-filter" /></svg>
           </button>
@@ -227,10 +228,10 @@ const bySpace = computed(() => {
               @keydown.esc="cancelRename"
               @blur="commitRenameSpace(g.space)"
             />
-            <button v-else class="fmain" @click="emit('open-space', g.space)">
+            <a v-else class="fmain" :href="`/space/${g.space.id}`" @click.prevent="emit('open-space', g.space)">
               <svg class="ic"><use href="#s-folder" /></svg><span class="lbl">{{ g.space.name }}</span
               ><span class="count">{{ g.items.length }}</span>
-            </button>
+            </a>
             <div class="nactions">
               <button class="nact" title="Space defaults" @click.stop="emit('space-settings', g.space)">
                 <svg class="ic sm"><use href="#s-cog" /></svg>
@@ -325,15 +326,15 @@ const bySpace = computed(() => {
         </div>
       </div>
       <div class="pfoot">
-        <button class="footbtn" @click="emit('media')">
+        <a class="footbtn" href="/media" @click.prevent="emit('media')">
           <svg class="ic"><use href="#s-image" /></svg> Media
-        </button>
-        <button class="footbtn" @click="emit('tools')">
+        </a>
+        <a class="footbtn" href="/tools" @click.prevent="emit('tools')">
           <svg class="ic"><use href="#s-spark" /></svg> Tools &amp; library
-        </button>
-        <button class="footbtn" @click="emit('settings')">
+        </a>
+        <a class="footbtn" href="/settings" @click.prevent="emit('settings')">
           <svg class="ic"><use href="#s-cog" /></svg> Settings
-        </button>
+        </a>
       </div>
     </div>
   </aside>
@@ -363,6 +364,17 @@ const bySpace = computed(() => {
   padding: 12px 0;
   background: var(--srail);
 }
+/* These are <a> so they can be opened in a new tab; they must still look and
+   sit exactly like the buttons they replaced. */
+.rail-btn,
+.newbtn,
+.footbtn,
+.fmain,
+.pillbtn.ficon {
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
 .rail-btn {
   width: 36px;
   height: 36px;

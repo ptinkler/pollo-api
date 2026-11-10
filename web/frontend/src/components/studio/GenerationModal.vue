@@ -14,7 +14,16 @@ const props = defineProps({
   // Studio theme ('dark' | 'light'), so the body-teleported modal keeps the --s* vars.
   theme: { type: String, default: '' },
 })
-const emit = defineEmits(['close', 'favourite', 'use-image', 'use-settings', 'regenerate', 'delete', 'open-thread'])
+const emit = defineEmits([
+  'close',
+  'favourite',
+  'use-image',
+  'use-settings',
+  'regenerate',
+  'delete',
+  'open-thread',
+  'make-character',
+])
 
 const isVideo = computed(() => props.item?.kind === 'video')
 const isError = computed(() => props.item?.status === 'error')
@@ -113,40 +122,56 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                 { }
               </button>
             </div>
-            <!-- Only a picture can start another picture or a video -->
-            <div v-if="!isError && item.kind === 'image'" class="gm-pair">
+            <div class="gm-grid">
+              <!-- Only a picture can start another picture, a video or a character -->
+              <template v-if="!isError && item.kind === 'image'">
+                <button
+                  class="gm-btn"
+                  title="Attach this picture and switch to Image mode"
+                  @click="emit('use-image', { file: item.file, mode: 'image', conversation_id: item.conversation_id })"
+                >
+                  <svg class="ic"><use href="#s-image" /></svg>Edit
+                </button>
+                <button
+                  class="gm-btn"
+                  title="Attach this picture and switch to Video mode"
+                  @click="emit('use-image', { file: item.file, mode: 'video', conversation_id: item.conversation_id })"
+                >
+                  <svg class="ic"><use href="#s-film" /></svg>Animate
+                </button>
+                <button
+                  class="gm-btn"
+                  title="Start a character from this picture"
+                  @click="emit('make-character', item)"
+                >
+                  <svg class="ic"><use href="#s-user" /></svg>Character
+                </button>
+              </template>
               <button
-                class="gm-btn"
-                @click="emit('use-image', { file: item.file, mode: 'image', conversation_id: item.conversation_id })"
-              >
-                🖼 Edit
-              </button>
-              <button
-                class="gm-btn"
-                @click="emit('use-image', { file: item.file, mode: 'video', conversation_id: item.conversation_id })"
-              >
-                🎬 Animate
-              </button>
-            </div>
-            <div v-if="canManage" class="gm-pair">
-              <button
+                v-if="canManage"
                 class="gm-btn"
                 title="Fill the composer with this generation's settings"
                 @click="emit('use-settings', item)"
               >
-                <svg class="ic"><use href="#s-cog" /></svg>Use settings
+                <svg class="ic"><use href="#s-cog" /></svg>Settings
               </button>
-              <button class="gm-btn" :class="{ primary: isError }" @click="emit('regenerate', item)">
+              <button
+                v-if="canManage"
+                class="gm-btn wide"
+                :class="{ primary: isError }"
+                @click="emit('regenerate', item)"
+              >
                 <svg class="ic"><use href="#s-refresh" /></svg>{{ isError ? 'Retry' : 'Regenerate' }}
               </button>
+              <a
+                v-if="!canManage && item.conversation_id"
+                class="gm-btn wide"
+                :href="`/${item.conversation_id}`"
+                @click.prevent="emit('open-thread', item.conversation_id)"
+              >
+                <svg class="ic"><use href="#s-chat" /></svg>Open thread
+              </a>
             </div>
-            <button
-              v-if="!canManage && item.conversation_id"
-              class="gm-btn"
-              @click="emit('open-thread', item.conversation_id)"
-            >
-              Open thread
-            </button>
           </div>
         </div>
       </div>
@@ -164,6 +189,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 </template>
 
 <style scoped>
+a.gm-btn {
+  text-decoration: none;
+}
 .gm-btn.icon.req {
   font-family: monospace;
   font-weight: 700;
@@ -343,14 +371,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   width: 16px;
   height: 16px;
 }
-.gm-icons,
-.gm-pair {
+.gm-icons {
   display: flex;
   gap: 6px;
 }
-.gm-pair .gm-btn {
-  flex: 1;
+/* Every text action is a cell, so the column stays even however many show */
+.gm-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.gm-grid .gm-btn {
   justify-content: center;
+}
+.gm-grid .gm-btn.wide {
+  grid-column: 1 / -1;
 }
 .gm-btn.icon {
   flex: 1;

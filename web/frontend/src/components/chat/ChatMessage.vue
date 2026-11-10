@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, nextTick, inject, onMounted, onBeforeUnmount } from 'vue'
+import { computed, reactive, ref, nextTick, inject, onMounted, onBeforeUnmount } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { chatMediaPreviewUrl, chatMediaUrl } from '../../composables/useChat'
@@ -27,7 +27,7 @@ const emit = defineEmits([
   'regenerate',
   'branch',
   'use-image',
-  'use-text',
+  'reword',
   'pin',
   'delete',
   'fork',
@@ -144,14 +144,7 @@ function preview(item) {
 const MODE_TAGS = { image: '🖼 Image', video: '🎬 Video', text: '💬 Text only' }
 const modeTag = computed(() => MODE_TAGS[props.message.mode] || '')
 
-// "Picture / video from this": hand an image, or this reply's text, to the
-// composer in Image/Video mode. A selection inside the reply narrows the text.
 const replyEl = ref(null)
-function replyText() {
-  const sel = window.getSelection?.()
-  const picked = sel && !sel.isCollapsed && replyEl.value?.contains(sel.anchorNode) ? sel.toString().trim() : ''
-  return picked || displayText.value
-}
 // Only saved images (not a reply still streaming) can be pinned as references
 const canPin = item => item.kind === 'image' && !!item.file && typeof props.message.id === 'number'
 const pinTitle = item =>
@@ -159,7 +152,52 @@ const pinTitle = item =>
     ? 'Pinned: sent as a reference with every new image. Click to unpin'
     : 'Pin as a reference: send it with every new image in this chat'
 
-const useText = mode => emit('use-text', { text: replyText(), mode })
+const vFocusSelect = { mounted: el => (el.focus(), el.select()) }
+
+// Can this picture/clip be made again? (ours, finished, and the reply is idle)
+// What the big view (GenerationModal) needs: everything the card knows, plus
+// where it lives, so its actions can act on the right message.
+const bigView = item => ({
+  ...shownItem(item),
+  url: url(shownItem(item)),
+  message_id: props.message.id,
+  conversation_id: props.convId,
+})
+
+const canRemake = item =>
+  item.status === 'done' && item.source === 'generated' && !!item.prompt && props.message.status !== 'streaming'
+
+// Earlier pictures this card has shown, oldest first; the live one is last.
+// The arrows only change what you are looking at — the newest stays the real one.
+const versionsOf = item => item.versions || []
+const shownIndex = reactive({})
+const versionAt = item => shownIndex[item.id] ?? versionsOf(item).length
+const shownItem = item => {
+  const i = versionAt(item)
+  return i < versionsOf(item).length ? { ...item, ...versionsOf(item)[i] } : item
+}
+const stepVersion = (item, by) => {
+  const next = versionAt(item) + by
+  if (next >= 0 && next <= versionsOf(item).length) shownIndex[item.id] = next
+}
+
+// The box the pencil and Redo open: one prompt, applied to this picture alone.
+// `edit` sends the picture back as the reference; Redo just re-runs the words.
+const promptBox = ref(null)
+const openPrompt = (item, edit) => (promptBox.value = { mediaId: item.id, edit, text: edit ? '' : item.prompt || '' })
+function submitPrompt(item) {
+  const box = promptBox.value
+  if (!box?.text.trim()) return
+  promptBox.value = null
+  delete shownIndex[item.id] // show the new picture, not whatever version was open
+  emit('regenerate', {
+    mediaId: item.id,
+    model: item.model || null,
+    prompt: box.text.trim(),
+    edit: box.edit,
+    replace: true,
+  })
+}
 
 // Branches: other versions of this turn (from edits/retries)
 const siblings = computed(() => props.message.siblings || [])
@@ -228,7 +266,7 @@ const requestItem = ref(null)
             :aria-pressed="!!item.pinned"
             @click.stop="emit('pin', { mediaId: item.id, pinned: !item.pinned })"
           >
-            📌
+            <svg class="ic sm"><use href="#s-pin" /></svg>
           </button>
           <audio v-if="item.kind === 'audio'" :src="url(item)" class="attachment-audio" controls></audio>
           <img
@@ -238,20 +276,20 @@ const requestItem = ref(null)
             alt="attachment"
             loading="lazy"
             decoding="async"
-            @click="emit('open-media', { url: url(item), kind: 'image', file: item.file })"
+            @click="emit('open-media', bigView(item))"
           />
           <span v-if="item.kind !== 'audio'" class="use-btns">
             <button
-              title="New picture from this image (attaches it to your next message)"
+              title="Attach this picture and switch to Image mode"
               @click="emit('use-image', { file: item.file, mode: 'image' })"
             >
-              🖼
+              <svg class="ic sm"><use href="#s-image" /></svg>
             </button>
             <button
-              title="Animate this image into a video (attaches it to your next message)"
+              title="Attach this picture and switch to Video mode"
               @click="emit('use-image', { file: item.file, mode: 'video' })"
             >
-              🎬
+              <svg class="ic sm"><use href="#s-film" /></svg>
             </button>
           </span>
         </div>
@@ -348,12 +386,27 @@ const requestItem = ref(null)
             <template v-if="item.status === 'done' && item.file">
               <img
                 v-if="item.kind === 'image'"
-                :src="preview(item)"
+                :src="preview(shownItem(item))"
                 :alt="item.prompt || 'generated image'"
                 loading="lazy"
                 decoding="async"
-                @click="emit('open-media', { url: url(item), kind: 'image', prompt: item.prompt, file: item.file })"
+                @click="emit('open-media', bigView(item))"
               />
+              <div v-if="versionsOf(item).length" class="ver-nav" @click.stop>
+                <button :disabled="versionAt(item) === 0" title="Earlier version" @click="stepVersion(item, -1)">
+                  ‹
+                </button>
+                <span :title="versionAt(item) < versionsOf(item).length ? shownItem(item).prompt : 'Latest'">
+                  {{ versionAt(item) + 1 }}/{{ versionsOf(item).length + 1 }}
+                </span>
+                <button
+                  :disabled="versionAt(item) === versionsOf(item).length"
+                  title="Later version"
+                  @click="stepVersion(item, 1)"
+                >
+                  ›
+                </button>
+              </div>
               <audio v-else-if="item.kind === 'audio'" :src="url(item)" class="media-audio" controls></audio>
               <video v-else :src="url(item)" controls loop playsinline preload="metadata"></video>
               <button
@@ -363,26 +416,28 @@ const requestItem = ref(null)
                 :aria-pressed="!!item.pinned"
                 @click.stop="emit('pin', { mediaId: item.id, pinned: !item.pinned })"
               >
-                📌
+                <svg class="ic sm"><use href="#s-pin" /></svg>
               </button>
               <div class="media-overlay">
                 <template v-if="item.kind === 'image'">
                   <button
                     class="media-btn"
-                    title="New picture from this image (attaches it to your next message)"
+                    title="Attach this picture and switch to Image mode"
                     @click.stop="emit('use-image', { file: item.file, mode: 'image' })"
                   >
-                    🖼
+                    <svg class="ic"><use href="#s-image" /></svg>
                   </button>
                   <button
                     class="media-btn"
-                    title="Animate this image into a video (attaches it to your next message)"
+                    title="Attach this picture and switch to Video mode"
                     @click.stop="emit('use-image', { file: item.file, mode: 'video' })"
                   >
-                    🎬
+                    <svg class="ic"><use href="#s-film" /></svg>
                   </button>
                 </template>
-                <a :href="url(item)" :download="item.file" class="media-btn" title="Download" @click.stop>⤓</a>
+                <a :href="url(item)" :download="item.file" class="media-btn" title="Download" @click.stop>
+                  <svg class="ic"><use href="#s-download" /></svg>
+                </a>
               </div>
             </template>
 
@@ -454,12 +509,18 @@ const requestItem = ref(null)
                 >
               </span>
               <button
-                v-if="
-                  item.status === 'done' && item.source === 'generated' && item.prompt && message.status !== 'streaming'
-                "
+                v-if="canRemake(item) && item.kind === 'image' && item.file"
                 class="caption-btn"
-                title="Generate this image/video again from the same prompt (keeps this one)"
-                @click="emit('regenerate', { mediaId: item.id, model: item.model || null })"
+                title="Edit this picture: describe the change and it is replaced here"
+                @click="openPrompt(item, true)"
+              >
+                ✎ Edit
+              </button>
+              <button
+                v-if="canRemake(item)"
+                class="caption-btn"
+                title="Make it again: tweak the prompt and it is replaced here"
+                @click="openPrompt(item, false)"
               >
                 ↻ Redo
               </button>
@@ -479,6 +540,25 @@ const requestItem = ref(null)
               >
                 { } Request
               </button>
+            </div>
+            <div v-if="promptBox?.mediaId === item.id" class="prompt-box">
+              <textarea
+                v-model="promptBox.text"
+                v-focus-select
+                rows="2"
+                :placeholder="promptBox.edit ? 'Describe the change…' : 'Prompt for the new version…'"
+                @keydown.enter.exact.prevent="submitPrompt(item)"
+                @keydown.esc="promptBox = null"
+              ></textarea>
+              <div class="prompt-box-actions">
+                <span class="prompt-box-hint">
+                  {{ promptBox.edit ? 'Edits this picture' : 'Makes a new one from the prompt alone' }}
+                </span>
+                <button class="meta-btn" @click="promptBox = null">Cancel</button>
+                <button class="edit-send" :disabled="!promptBox.text.trim()" @click="submitPrompt(item)">
+                  {{ promptBox.edit ? 'Edit' : 'Redo' }}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -512,25 +592,13 @@ const requestItem = ref(null)
             <button v-if="displayText" class="meta-btn" title="Copy reply" @click="copy(displayText, 'reply')">
               {{ copiedKey === 'reply' ? '✓' : '⧉' }}
             </button>
-            <!-- mousedown.prevent keeps a selection in the reply alive for the click -->
-            <!-- These reuse the reply's words; the buttons on an image reuse the image -->
             <button
-              v-if="displayText"
+              v-if="canRetry && message.media?.length"
               class="meta-btn"
-              title="Put this reply's text (or the part you've selected) in the message box as an Image-mode prompt"
-              @mousedown.prevent
-              @click="useText('image')"
+              title="Write these words again, keeping the pictures this reply made"
+              @click="emit('reword')"
             >
-              ✎🖼
-            </button>
-            <button
-              v-if="displayText"
-              class="meta-btn"
-              title="Put this reply's text (or the part you've selected) in the message box as a Video-mode prompt"
-              @mousedown.prevent
-              @click="useText('video')"
-            >
-              ✎🎬
+              ↻ Words
             </button>
             <button
               v-if="canRetry"

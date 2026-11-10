@@ -4,12 +4,24 @@
 <script setup>
 defineEmits(['close', 'navigate', 'defaults', 'import'])
 
+// `path` so each row is a real link (right-click, new tab); `route` is what the
+// click emits for in-app navigation. They must agree — see STUDIO_PANE_PATH.
 const TOOLS = [
-  { route: 'characters', label: 'Characters', note: 'Reusable characters for chats and generations' },
-  { route: 'instructions', label: 'Instructions', note: 'Snippets and groups sent to the chat model' },
-  { route: 'presets', label: 'Presets', note: 'Saved model and option sets' },
-  { route: 'usage', label: 'Credit usage', note: 'Balances for every provider' },
-  { route: 'request-log', label: 'Request log', note: 'What was sent to each provider' },
+  {
+    route: 'characters',
+    path: '/characters',
+    label: 'Characters',
+    note: 'Reusable characters for chats and generations',
+  },
+  {
+    route: 'instructions',
+    path: '/instructions',
+    label: 'Instructions',
+    note: 'Snippets and groups sent to the chat model',
+  },
+  { route: 'presets', path: '/presets', label: 'Presets', note: 'Saved model and option sets' },
+  { route: 'usage', path: '/usage', label: 'Credit usage', note: 'Balances for every provider' },
+  { route: 'request-log', path: '/requests', label: 'Request log', note: 'What was sent to each provider' },
 ]
 </script>
 
@@ -33,13 +45,13 @@ const TOOLS = [
           >
           <svg class="ic"><use href="#s-chev" /></svg>
         </button>
-        <button v-for="t in TOOLS" :key="t.route" class="link" @click="$emit('navigate', t.route)">
+        <a v-for="t in TOOLS" :key="t.route" class="link" :href="t.path" @click.prevent="$emit('navigate', t.route)">
           <span class="lmain"
             ><span class="llabel">{{ t.label }}</span
             ><span class="lnote">{{ t.note }}</span></span
           >
           <svg class="ic"><use href="#s-chev" /></svg>
-        </button>
+        </a>
         <button class="link" @click="$emit('import')">
           <span class="lmain"
             ><span class="llabel">Import chats…</span
@@ -63,6 +75,7 @@ const TOOLS = [
   padding: 6px;
 }
 .link {
+  text-decoration: none;
   display: flex;
   align-items: center;
   justify-content: space-between;

@@ -1,14 +1,42 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { ref } from 'vue'
-import MediaLightbox from '../components/chat/MediaLightbox.vue'
+import GenerationModal from '../components/studio/GenerationModal.vue'
 import { useChatAttachments, MAX_ATTACHMENTS } from '../composables/useChatAttachments'
 
-describe('MediaLightbox', () => {
-  it('offers uses for a chat image and closes on Escape', async () => {
-    const w = mount(MediaLightbox, { props: { item: { url: '/x.png', file: 'x.png' } }, attachTo: document.body })
-    document.querySelector('.lightbox-btn').click()
-    expect(w.emitted('use-image')).toEqual([[{ file: 'x.png', mode: 'image' }]])
+describe('GenerationModal: the big view, also used for chat images', () => {
+  const chatImage = {
+    url: '/x.png',
+    file: 'x.png',
+    kind: 'image',
+    status: 'done',
+    prompt: 'a fox',
+    message_id: 7,
+    conversation_id: 'c1',
+  }
+  const open = () => mount(GenerationModal, { props: { item: chatImage }, attachTo: document.body })
+  const btn = label => [...document.querySelectorAll('.gm-btn')].find(b => b.textContent.trim() === label)
+
+  it('offers Edit, Animate and Character on a picture', async () => {
+    const w = open()
+    btn('Edit').click()
+    expect(w.emitted('use-image')).toEqual([[{ file: 'x.png', mode: 'image', conversation_id: 'c1' }]])
+    btn('Animate').click()
+    expect(w.emitted('use-image')[1][0].mode).toBe('video')
+    btn('Character').click()
+    expect(w.emitted('make-character')).toEqual([[chatImage]])
+    w.unmount()
+  })
+
+  it('uses icons, not emoji, for those actions', () => {
+    const w = open()
+    expect(btn('Edit').querySelector('svg use').getAttribute('href')).toBe('#s-image')
+    expect(btn('Animate').querySelector('svg use').getAttribute('href')).toBe('#s-film')
+    w.unmount()
+  })
+
+  it('closes on Escape', () => {
+    const w = open()
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     expect(w.emitted('close')).toHaveLength(1)
     w.unmount()

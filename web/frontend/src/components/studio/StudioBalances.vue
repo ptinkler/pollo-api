@@ -51,16 +51,17 @@ const byModel = computed(() => {
     <button v-if="label" class="bseg spent" title="Spent in this thread — click for breakdown" @click="open = !open">
       Spent <b>{{ label }}</b>
     </button>
-    <button
+    <a
       v-for="p in pills"
       :key="p.id"
       class="bseg"
       :class="p.id"
       :title="`${p.tip} — click for usage`"
-      @click="emit('usage')"
+      href="/usage"
+      @click.prevent="emit('usage')"
     >
       {{ p.label }} <b>{{ p.value }}</b>
-    </button>
+    </a>
 
     <div v-if="open" class="pop-back" @click="open = false"></div>
     <div v-if="open" class="pop">
@@ -91,6 +92,7 @@ const byModel = computed(() => {
   overflow: visible;
 }
 .bseg {
+  text-decoration: none;
   font: inherit;
   font-size: 12px;
   color: var(--smuted);

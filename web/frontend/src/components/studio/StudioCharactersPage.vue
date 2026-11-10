@@ -115,9 +115,9 @@ onMounted(load)
             <img v-if="characterAvatar(c)" :src="characterAvatar(c)" alt="" class="mini" />
             <span v-else class="mini blank">👤</span>
             <button class="link" @click="edit(c)">{{ c.name }}</button>
-            <button class="chat-link" @click="router.push(`/studio/${c.conversation_id}`)">
+            <a class="chat-link" :href="`/${c.conversation_id}`" @click.prevent="router.push(`/${c.conversation_id}`)">
               in “{{ c.conversation_title || 'a chat' }}”
-            </button>
+            </a>
             <span class="spacer"></span>
             <button class="btn btn-sm" @click="promote(c)">Save</button>
             <button class="btn btn-sm btn-danger-quiet" @click="remove(c)">Delete</button>
@@ -215,6 +215,7 @@ onMounted(load)
   color: var(--saccent);
 }
 .chat-link {
+  text-decoration: none;
   background: none;
   border: none;
   color: var(--smuted);

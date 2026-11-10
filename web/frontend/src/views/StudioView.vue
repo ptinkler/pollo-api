@@ -33,7 +33,6 @@ import StudioTools from '../components/studio/StudioTools.vue'
 import StudioIconSprite from '../components/studio/StudioIconSprite.vue'
 import StudioBalances from '../components/studio/StudioBalances.vue'
 import MediaPicker from '../components/media/MediaPicker.vue'
-import MediaLightbox from '../components/chat/MediaLightbox.vue'
 import CharacterEditor from '../components/characters/CharacterEditor.vue'
 import InstructionEditor from '../components/chat/InstructionEditor.vue'
 import SpaceSettingsDialog from '../components/chat/SpaceSettingsDialog.vue'
@@ -74,7 +73,6 @@ const {
   lane,
   estimate,
   unusedAttachments,
-  lightbox,
   activeKind,
   favourites,
   loadFavourites,
@@ -106,7 +104,7 @@ const {
   enhancing,
   enhanceDraft,
   useImage,
-  useText,
+  reword,
   toggleFav,
   renameThread,
   removeThread,
@@ -287,6 +285,12 @@ function openThreadFromModal(convId) {
   galleryItem.value = null
   openThreadView(convId)
 }
+// "Make a character from this picture" — the lightbox offered this but nothing
+// was listening, so the button did nothing.
+function makeCharacterFromModal(item) {
+  galleryItem.value = null
+  newCharacter([item.file])
+}
 
 const leftCollapsed = ref(false)
 const rightCollapsed = ref(false)
@@ -376,9 +380,11 @@ function openThreadView(id) {
 }
 function newThreadView(kind = 'chat') {
   pendingKind = kind
+  // ?new=gallery so the link opens as a gallery in a new tab too
+  const to = kind === 'gallery' ? '/?new=gallery' : '/'
   if (route.name === 'studio')
     newThread(kind) // already on the home route: just reset
-  else router.push('/')
+  else router.push(to)
 }
 // One toggle does both jobs: it switches the view *and* makes that the view the
 // thread opens on next time (there is no separate "default view" switch).
@@ -432,7 +438,9 @@ async function syncFromRoute() {
   centerView.value = 'thread'
   const id = route.params.id || null
   if (!id) {
-    newThread(pendingKind)
+    // ?new=gallery lets "New gallery" work as a link (opened in a new tab,
+    // bookmarked), not just as a click that set pendingKind on the way here
+    newThread(route.query.new === 'gallery' ? 'gallery' : pendingKind)
     pendingKind = 'chat'
     return
   }
@@ -589,14 +597,14 @@ onMounted(() => {
           @resend="resendMessage"
           @branch="switchBranch"
           @use-image="useImage"
-          @use-text="useText"
+          @reword="reword"
           @regenerate="regenerateMedia"
           @pin="pinMedia"
           @delete="deleteExchange"
           @fork="forkFrom"
           @open-chat="openThreadView"
           @stop="stop"
-          @open-media="lightbox = $event"
+          @open-media="openGeneration"
         />
         <StudioGenerations
           v-else
@@ -680,8 +688,6 @@ onMounted(() => {
       @close="pickerOpen = false"
     />
 
-    <MediaLightbox :item="lightbox" @close="lightbox = null" @use-image="useImage" />
-
     <GenerationModal
       :item="galleryItem"
       :can-manage="galleryManage"
@@ -693,6 +699,7 @@ onMounted(() => {
       @regenerate="regenerateFromModal"
       @delete="deleteFromModal"
       @open-thread="openThreadFromModal"
+      @make-character="makeCharacterFromModal"
     />
 
     <GenerationQueueDock

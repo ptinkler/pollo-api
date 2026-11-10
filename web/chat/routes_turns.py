@@ -203,21 +203,47 @@ def _start_turn(
         "user_message": _message_out(user_msg) if user_msg else None,
         "assistant_message": _message_out(assistant),
     }
+    return _stream_turn(conv_id, settings, assistant.id, start)
+
+
+def _stream_turn(
+    conv_id: str,
+    settings: TurnSettings,
+    assistant_id: int,
+    start: dict,
+    initial_cost: float = 0.0,
+    restore: str | None = None,
+) -> StreamingResponse:
+    """Run a Turn against `assistant_id` and stream its events as SSE. Used
+    both for a brand-new reply and for generating an existing one again.
+
+    `restore` is the text the message had before: if the run comes back with
+    nothing (it failed, or was stopped before a word arrived), it is put back,
+    so regenerating a reply's words can't lose the ones it had."""
     events: queue.Queue = queue.Queue()
     cancel = threading.Event()
-    _cancel_events[assistant.id] = cancel
+    _cancel_events[assistant_id] = cancel
 
     def worker():
         try:
-            Turn(conv_id, settings, assistant.id, events.put, cancel).run()
+            Turn(conv_id, settings, assistant_id, events.put, cancel, initial_cost=initial_cost).run()
+            if restore:
+                msg = get_db().get_chat_message(assistant_id)
+                if msg and not (msg.content or "").strip():
+                    events.put(
+                        {
+                            "type": "done",
+                            "message": _message_out(get_db().update_chat_message(assistant_id, content=restore)),
+                        }
+                    )
         finally:
-            _cancel_events.pop(assistant.id, None)
+            _cancel_events.pop(assistant_id, None)
             events.put(None)
 
     # Run in a copy of the current context so the turn's DB writes/reads are
     # scoped to the signed-in user (tenant) and use their keys — a plain thread
     # would not inherit those contextvars.
-    _ctx_thread(worker, name=f"chat-turn-{assistant.id}").start()
+    _ctx_thread(worker, name=f"chat-turn-{assistant_id}").start()
 
     def stream() -> Iterator[str]:
         yield _sse(start)
@@ -234,6 +260,42 @@ def _start_turn(
     return StreamingResponse(
         stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )
+
+
+class RewordMessage(TurnSettings):
+    message_id: int  # the assistant reply whose words to generate again
+
+
+@router.post("/conversations/{conv_id}/reword")
+def api_reword(conv_id: str, data: RewordMessage):
+    """Write this reply's words again, keeping the pictures it already made.
+
+    Unlike Retry, which starts a whole new turn on a new branch (new words AND
+    new media), this re-runs only the chat model, with its tools withheld, and
+    overwrites the text on the same message. The media items are left exactly
+    as they are, so a reply whose picture is right but whose words aren't can
+    be fixed without paying for the picture again."""
+    _require_openrouter("text")
+    conv = _require_conv(conv_id)
+    db = get_db()
+    msg = db.get_chat_message(data.message_id)
+    if not msg or msg.conversation_id != conv_id or msg.role != "assistant":
+        raise HTTPException(400, "Can only reword an assistant message in this conversation")
+    if msg.status == "streaming":
+        raise HTTPException(409, "Wait for the reply to finish first")
+    _require_idle(conv_id, msg.lane)
+    if any(i.get("status") == "pending" for i in msg.media):
+        raise HTTPException(409, "Wait for this reply's media to finish first")
+    _remember_settings(conv, data)
+    # Only the words are generated again, whatever mode the composer is in.
+    settings = data.model_copy(update={"mode": "text"})
+    # Its pictures keep their cost; the words it had are replaced by new ones.
+    media_cost = sum(float(i.get("cost") or 0) for i in msg.media)
+    previous = msg.content
+    db.update_chat_message(data.message_id, content="", status="streaming", error=None)
+    start = {"type": "start", "user_message": None, "assistant_message": _message_out(msg), "replaces": msg.id}
+    start["assistant_message"] = {**start["assistant_message"], "content": "", "status": "streaming"}
+    return _stream_turn(conv_id, settings, msg.id, start, initial_cost=media_cost, restore=previous)
 
 
 class PinMedia(BaseModel):
@@ -272,6 +334,19 @@ def api_favourite_media(message_id: int, media_id: str, data: FavouriteMedia):
 
 class RegenerateMedia(BaseModel):
     model: str | None = None  # None = same model as the failed attempt
+    prompt: str | None = None  # None = the prompt it was made with
+    # Edit: send the image itself back as the reference, so the model changes
+    # this picture instead of making a new one from the prompt alone.
+    edit: bool = False
+    # Replace the item rather than adding a new one beside it: the picture it
+    # had moves into `versions`, so nothing is lost and the card can flip back.
+    replace: bool = False
+
+
+def _as_version(item: dict) -> dict:
+    """What a card keeps about a picture it has replaced."""
+    keep = ("file", "prompt", "model", "cost", "credits", "params", "request", "response")
+    return {k: item[k] for k in keep if item.get(k) is not None}
 
 
 @router.post("/messages/{message_id}/media/{media_id}/regenerate")
@@ -290,19 +365,56 @@ def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia):
         raise HTTPException(404, "Media not found")
     if item.get("status") not in ("error", "done"):
         raise HTTPException(400, "Wait for the generation to finish first")
-    if not item.get("prompt"):
+    prompt = (data.prompt or "").strip() or item.get("prompt")
+    if not prompt:
         raise HTTPException(400, "This item has no stored prompt to retry")
+    if data.edit and not item.get("file"):
+        raise HTTPException(400, "There is no picture here to edit yet")
     model = data.model or item.get("model")
-    if item["status"] == "done":
+    params = dict(item.get("params") or {})
+    if data.edit:
+        # The picture being edited leads the reference list; the references it
+        # was itself made from are dropped, so the model edits this one image.
+        params["refs"] = [item["file"], *(r for r in params.get("refs") or [] if str(r).startswith("char:"))]
+    if data.replace:
+        # Keep what it looked like before, then clear the result fields so the
+        # worker fills them in on the same item.
+        versions = [*(item.get("versions") or []), _as_version(item)]
+        blank = dict.fromkeys(("file", "cost", "credits", "error", "job_id", "request", "response"))
+        item = {**item, **blank, "status": "pending", "model": model, "prompt": prompt, "params": params}
+        item["versions"] = versions
+        msg = db.update_chat_media_item(
+            message_id,
+            media_id,
+            **{k: item[k] for k in (*blank, "status", "model", "prompt", "params", "versions")},
+            moderated=False,
+        )
+    elif item["status"] == "done":
         # Re-roll just this image/video: the original stays, a new one joins the reply
-        gone = ("file", "cost", "credits", "error", "job_id", "favourite", "pinned", "log")
+        gone = ("file", "cost", "credits", "error", "job_id", "favourite", "pinned", "log", "versions")
         item = {k: v for k, v in item.items() if k not in gone}
-        item = {**item, "id": uuid.uuid4().hex[:8], "status": "pending", "model": model}
+        item = {
+            **item,
+            "id": uuid.uuid4().hex[:8],
+            "status": "pending",
+            "model": model,
+            "prompt": prompt,
+            "params": params,
+        }
         media_id = item["id"]
         msg = db.append_chat_media_item(message_id, item)
     else:
+        item = {**item, "prompt": prompt, "params": params, "model": model}
         msg = db.update_chat_media_item(
-            message_id, media_id, status="pending", error=None, moderated=False, model=model, job_id=None
+            message_id,
+            media_id,
+            status="pending",
+            error=None,
+            moderated=False,
+            model=model,
+            job_id=None,
+            prompt=prompt,
+            params=params,
         )
     threading.Thread(
         target=_regenerate_worker,

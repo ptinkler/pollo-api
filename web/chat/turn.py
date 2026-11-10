@@ -59,7 +59,15 @@ from .workers import _ctx_thread
 class Turn:
     """Runs one assistant turn and persists it. `emit` receives UI events."""
 
-    def __init__(self, conv_id: str, settings: TurnSettings, message_id: int, emit, cancel: threading.Event):
+    def __init__(
+        self,
+        conv_id: str,
+        settings: TurnSettings,
+        message_id: int,
+        emit,
+        cancel: threading.Event,
+        initial_cost: float = 0.0,
+    ):
         self.conv_id = conv_id
         self.s = settings
         self.message_id = message_id
@@ -74,7 +82,9 @@ class Turn:
         if self._characters_usable():  # attached ones stay attached, just unused, otherwise
             self.characters = characters.load(_effective_ids(conv, "character"), self.db)
         self.content = ""
-        self.cost = 0.0
+        # What this reply has already cost (its pictures, when only the words
+        # are being generated again), so the total stays right.
+        self.cost = initial_cost
         self.media: list[dict] = []
 
     # ― entry point ―

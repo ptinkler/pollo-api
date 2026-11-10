@@ -377,11 +377,14 @@ def _chat_records(msgs, lib_items, titles: dict[str, str]) -> list[dict[str, Any
 
 
 def _referenced_files(item: dict) -> list[str]:
-    """Files a chat media item uses: its own, and the references it was made
-    from (kept so it can be retried)."""
-    params = item.get("params") or {}
-    refs = [*(params.get("refs") or []), *(params.get(k) for k in _PARAM_FILES)]
-    return [f for f in [item.get("file"), *refs] if isinstance(f, str) and f]
+    """Files a chat media item uses: its own, the references it was made from
+    (kept so it can be retried), and the pictures it replaced (kept so the card
+    can flip back through its earlier versions)."""
+    files = [item.get("file")]
+    for source in (item, *(item.get("versions") or [])):
+        params = source.get("params") or {}
+        files += [source.get("file"), *(params.get("refs") or []), *(params.get(k) for k in _PARAM_FILES)]
+    return [f for f in files if isinstance(f, str) and f]
 
 
 def _chat_orphans(msgs, lib_items, titles: dict[str, str]) -> list[dict[str, Any]]:

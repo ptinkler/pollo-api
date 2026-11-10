@@ -30,8 +30,11 @@ export const switchChatBranch = (convId, messageId) =>
 // New chat from a prompt: the messages up to it, it and its reply — nothing after
 export const forkConversation = (convId, messageId) =>
   apiPost(`/api/chat/conversations/${enc(convId)}/fork`, { message_id: messageId })
-export const regenerateChatMedia = (messageId, mediaId, model = null) =>
-  apiPost(`/api/chat/messages/${messageId}/media/${enc(mediaId)}/regenerate`, { model })
+// Make this image/video again. `prompt` overrides the one it was made with,
+// `edit` sends the picture itself back as the reference (change this image),
+// and `replace` swaps it in place, keeping the old one as an earlier version.
+export const regenerateChatMedia = (messageId, mediaId, { model = null, prompt, edit, replace } = {}) =>
+  apiPost(`/api/chat/messages/${messageId}/media/${enc(mediaId)}/regenerate`, { model, prompt, edit, replace })
 // Pinned images go to the image model as references with every new image on this branch
 export const pinChatMedia = (messageId, mediaId, pinned) =>
   apiPost(`/api/chat/messages/${messageId}/media/${enc(mediaId)}/pin`, { pinned })
@@ -159,3 +162,7 @@ export const retryChatMessage = (convId, body, onEvent, signal) =>
 
 export const editChatMessage = (convId, body, onEvent, signal) =>
   streamTurn(`/api/chat/conversations/${enc(convId)}/edit`, body, onEvent, signal)
+
+// Write a reply's words again, keeping the pictures it already made
+export const rewordChatMessage = (convId, body, onEvent, signal) =>
+  streamTurn(`/api/chat/conversations/${enc(convId)}/reword`, body, onEvent, signal)

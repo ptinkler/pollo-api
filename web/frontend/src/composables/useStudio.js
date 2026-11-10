@@ -16,6 +16,7 @@ import {
   sendChatMessage,
   retryChatMessage,
   editChatMessage,
+  rewordChatMessage,
   regenerateChatMedia,
   enhanceChatPrompt,
   estimateChatCost,
@@ -83,7 +84,6 @@ export function useStudio({ models, settings, showToast }) {
   const sending = computed(() => lane.value !== 'gallery' && sendingIds.value.has(active.value))
   const streamingId = ref(null)
   const draft = ref('')
-  const lightbox = ref(null)
   const spend = ref(null)
   const favourites = ref([]) // cross-thread gallery of favourited generations
   // The thread being created from scratch opens on this view ('chat' | 'gallery')
@@ -422,7 +422,11 @@ export function useStudio({ models, settings, showToast }) {
         const i = tempUser ? messages.value.indexOf(tempUser) : messageIndex(ev.user_message.id)
         if (i !== -1) messages.value.splice(i, 1, ev.user_message)
       }
-      messages.value.push(ev.assistant_message)
+      // A reply being written again is already in the list: replace it rather
+      // than pushing a duplicate (its content comes back blank, ready for deltas).
+      const at = messageIndex(ev.assistant_message.id)
+      if (at === -1) messages.value.push(ev.assistant_message)
+      else messages.value.splice(at, 1, ev.assistant_message)
       if (!ev.assistant_message.lane) streamingId.value = ev.assistant_message.id
     },
     delta(ev) {
@@ -751,17 +755,22 @@ export function useStudio({ models, settings, showToast }) {
       enhancing.value = false
     }
   }
-  async function regenerateMedia(msg, { mediaId, model }) {
+  async function regenerateMedia(msg, { mediaId, model, prompt, edit, replace }) {
     if (!model) {
       const kind = (msg.media || []).find(i => i.id === mediaId)?.kind
       if (kind && selected[kind]) model = selected[kind]
     }
     try {
-      replaceMessage(await regenerateChatMedia(msg.id, mediaId, model))
+      replaceMessage(await regenerateChatMedia(msg.id, mediaId, { model, prompt, edit, replace }))
       polling.ensure()
     } catch (e) {
       showToast(e.message, 'error')
     }
+  }
+  // Write a reply's words again, keeping the pictures it already made
+  async function reword(msg) {
+    if (sending.value || messageIndex(msg.id) === -1) return
+    await runTurn(rewordChatMessage, active.value, { ...turnSettings(), message_id: msg.id }, null)
   }
   async function pinMedia(msg, { mediaId, pinned: on }) {
     try {
@@ -804,18 +813,11 @@ export function useStudio({ models, settings, showToast }) {
       aborts.get(active.value)?.abort()
     }
   }
-  // "Animate / edit this image" and "picture/video from this reply": attach the
-  // image (or append the text) and switch to the chosen mode
+  // "Edit this image" / "animate this image": attach it and switch to that mode
   function useImage({ file, mode: target, conversation_id: fromConv } = {}) {
-    lightbox.value = null
     if (file && !addChatImage(file, fromConv)) return
     if (target) mode.value = target
   }
-  function useText({ text, mode: target } = {}) {
-    if (text) draft.value = draft.value.trim() ? `${draft.value.trim()}\n\n${text}` : text
-    if (target) mode.value = target
-  }
-
   async function toggleFav(t) {
     const next = !t.pinned
     try {
@@ -912,7 +914,6 @@ export function useStudio({ models, settings, showToast }) {
     lane,
     streamingId,
     draft,
-    lightbox,
     attachments,
     uploading,
     addFiles,
@@ -983,7 +984,7 @@ export function useStudio({ models, settings, showToast }) {
     stop,
     deleteExchange,
     useImage,
-    useText,
+    reword,
     toggleFav,
     renameThread,
     removeThread,

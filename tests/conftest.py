@@ -1,6 +1,43 @@
-"""Global test fixtures — prevent tests from touching the real database or assets."""
+"""Global test fixtures — prevent tests from touching the real database, the
+real assets, the developer's .env, or the network."""
 
 import pytest
+
+# Every setting the app reads from the environment. A developer's .env is
+# loaded at import (web/core/config.py), so without this a test would behave
+# differently on their machine than in CI — and DEV_LOGIN in particular sends
+# /api/keys down a path that opens a SECOND connection to the same SQLite
+# file, which blocks for 30s on `PRAGMA locking_mode=EXCLUSIVE` and then 500s.
+# A test that wants one of these sets it itself.
+_APP_ENV = (
+    "ADMIN_EMAILS",
+    "ALLOWED_EMAILS",
+    "CHAT_TITLE_MODEL",
+    "COOKIE_SECURE",
+    "DEV_EMAIL",
+    "DEV_LOGIN",
+    "ENABLE_API_DOCS",
+    "GLUETUN_API_KEY",
+    "KEYS_SECRET",
+    "OPENROUTER_BASE_URL",
+    "OPEN_SIGNUP",
+    "PASSWORD_PEPPER",
+    "POLLO_DATA_DIR",
+    "PUBLIC_BASE_URL",
+    "SESSION_SECRET",
+    "UPLOAD_BACKUP",
+    "UPLOAD_EXPIRY_MINUTES",
+    "UPLOAD_PRIMARY",
+    "UPLOAD_SELFHOST_BASE",
+    "VENICE_BASE_URL",
+)
+
+
+@pytest.fixture(autouse=True)
+def _clean_env(monkeypatch):
+    """Run every test against a bare environment, whatever is in .env."""
+    for name in _APP_ENV:
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -64,3 +101,23 @@ def _tenant(request, monkeypatch):
         yield admin
     finally:
         metadata.reset_tenant(token)
+
+
+@pytest.fixture(autouse=True)
+def _no_outbound_http(monkeypatch):
+    """Fail loudly instead of reaching a real API.
+
+    Everything a test needs is mocked, so a real request means something is
+    wrong — usually a background thread (a video poller, a turn worker) that
+    outlived the test that started it and is now running with the mocks undone.
+    Left alone that shows up as an unrelated test timing out 30 seconds later,
+    which is very hard to trace back; this names it on the spot."""
+    import requests
+
+    def blocked(*args, **kwargs):
+        target = args[1] if len(args) > 1 else (args[0] if args else kwargs.get("url", "?"))
+        raise AssertionError(f"a test tried to reach the network: {target}")
+
+    for name in ("request", "get", "post", "put", "delete", "head"):
+        monkeypatch.setattr(requests, name, blocked, raising=False)
+    monkeypatch.setattr(requests.Session, "request", blocked, raising=False)

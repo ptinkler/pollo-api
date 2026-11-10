@@ -1,0 +1,114 @@
+/**
+ * Navigation must be real links.
+ *
+ * Anything that takes you to a URL has to be an <a href>, so right-click
+ * "open in new tab", middle-click and ctrl-click all work. A <button> with a
+ * click handler looks the same and silently loses all three.
+ */
+import { describe, it, expect } from 'vitest'
+import { mount } from '@vue/test-utils'
+import StudioSidebar from '../components/studio/StudioSidebar.vue'
+import StudioBalances from '../components/studio/StudioBalances.vue'
+
+const sidebar = () =>
+  mount(StudioSidebar, {
+    props: {
+      threads: [{ id: 't1', title: 'A thread', kind: 'chat' }],
+      spaces: [{ id: 3, name: 'Novel' }],
+      activeId: null,
+      collapsed: false,
+      search: '',
+      filter: 'all',
+    },
+  })
+
+const hrefOf = (w, text) =>
+  w
+    .findAll('a')
+    .find(a => a.text().trim() === text || a.attributes('title') === text)
+    ?.attributes('href')
+
+describe('sidebar navigation is linkable', () => {
+  it.each([
+    ['New chat', '/'],
+    ['New gallery', '/?new=gallery'],
+    ['Media', '/media'],
+    ['Tools & library', '/tools'],
+    ['Settings', '/settings'],
+    ['Favourites', '/favourites'],
+  ])('%s points at %s', (label, href) => {
+    expect(hrefOf(sidebar(), label)).toBe(href)
+  })
+
+  it('a space row links to that space', () => {
+    expect(sidebar().find('a.fmain').attributes('href')).toBe('/space/3')
+  })
+
+  it('a thread row links to that thread', () => {
+    expect(sidebar().find('a.nitem').attributes('href')).toBe('/t1')
+  })
+
+  it('still navigates in-app, without a full page load', async () => {
+    const w = sidebar()
+    const link = w.findAll('a').find(a => a.text().trim() === 'Media')
+    await link.trigger('click')
+    expect(w.emitted('media')).toHaveLength(1) // handled, and .prevent stops the browser
+  })
+})
+
+describe('balance tiles are linkable', () => {
+  it('open the usage page', () => {
+    const w = mount(StudioBalances, {
+      props: { balances: { openrouter: 1, venice: null, veniceCredits: null, pollo: 10 }, spend: null, messages: [] },
+    })
+    const tile = w.find('a.bseg')
+    expect(tile.attributes('href')).toBe('/usage')
+  })
+})
+
+/**
+ * Buttons use the icon sprite, not emoji.
+ *
+ * Emoji render differently per platform and sit badly beside the stroke icons,
+ * so an action button carries an <svg><use href="#s-…"> instead. Text (a
+ * caption, a mode tag) may still use them.
+ */
+import ChatMessage from '../components/chat/ChatMessage.vue'
+
+const EMOJI = /\p{Extended_Pictographic}/u
+
+describe('action buttons use the icon sprite', () => {
+  it('no emoji on a generated image card or its overlay', () => {
+    const w = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        message: {
+          id: 5,
+          role: 'assistant',
+          content: '',
+          status: 'done',
+          media: [{ id: 'm1', kind: 'image', source: 'generated', status: 'done', file: 'a.png', prompt: 'a fox' }],
+        },
+      },
+    })
+    const labels = w.findAll('button, a.media-btn').map(b => b.text())
+    expect(labels.filter(l => EMOJI.test(l))).toEqual([])
+  })
+
+  it('the picture/video/download overlay is all sprite icons', () => {
+    const w = mount(ChatMessage, {
+      props: {
+        convId: 'c1',
+        message: {
+          id: 6,
+          role: 'assistant',
+          content: '',
+          status: 'done',
+          media: [{ id: 'm2', kind: 'image', source: 'generated', status: 'done', file: 'b.png' }],
+        },
+      },
+    })
+    const used = w.findAll('.media-overlay use').map(u => u.attributes('href'))
+    expect(used).toEqual(['#s-image', '#s-film', '#s-download'])
+  })
+})
