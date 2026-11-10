@@ -112,3 +112,26 @@ describe('action buttons use the icon sprite', () => {
     expect(used).toEqual(['#s-image', '#s-film', '#s-download'])
   })
 })
+
+describe('a failed card suggests one action, not three', () => {
+  const failed = {
+    props: {
+      convId: 'c1',
+      message: {
+        id: 70,
+        role: 'assistant',
+        content: '',
+        status: 'done',
+        media: [{ id: 'm1', kind: 'image', source: 'generated', status: 'error', error: 'nope', prompt: 'a fox' }],
+      },
+    },
+  }
+
+  it('only Retry is primary; the alternatives are plain', () => {
+    const w = mount(ChatMessage, failed)
+    const primary = w.findAll('.retry-btn.primary')
+    expect(primary).toHaveLength(1)
+    expect(primary[0].text()).toContain('Retry')
+    expect(w.find('button[title="Change the prompt and try again"]').classes()).not.toContain('primary')
+  })
+})

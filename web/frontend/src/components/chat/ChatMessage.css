@@ -601,14 +601,25 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: var(--saccent);
-  border: none;
+  background: none;
+  border: 1px solid var(--border);
   border-radius: var(--r);
-  padding: 4px 11px;
-  color: white;
-  font-size: 12px;
-  font-weight: 600;
+  padding: 4px 10px;
+  color: var(--text);
+  font-size: 0.78rem;
   cursor: pointer;
+}
+
+.retry-btn:hover {
+  border-color: var(--accent);
+}
+
+/* The one action the card is suggesting */
+.retry-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
 }
 
 .msg-error {

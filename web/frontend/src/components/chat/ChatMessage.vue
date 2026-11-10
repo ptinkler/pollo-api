@@ -465,7 +465,7 @@ const requestItem = ref(null)
                 class="error-actions"
               >
                 <button
-                  class="retry-btn"
+                  class="retry-btn primary"
                   title="Run the same prompt again on the currently selected model"
                   @click="emit('regenerate', { mediaId: item.id, model: null })"
                 >
