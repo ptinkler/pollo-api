@@ -74,8 +74,20 @@ const shownItems = computed(() => (showOrphans.value ? orphans.value : items.val
 </script>
 
 <template>
-  <div class="gwrap">
-    <div class="orphbar">
+  <GenerationGrid
+    :items="shownItems"
+    :empty="
+      showOrphans
+        ? loadingOrphans
+          ? 'Scanning…'
+          : 'No orphaned files in this thread.'
+        : 'No generations in this thread yet.'
+    "
+    @open="onOpen"
+    @favourite="onFavourite"
+  >
+    <!-- Sits with the grid's own filters rather than floating above them -->
+    <template #filters>
       <button
         class="pillbtn"
         :class="{ on: showOrphans }"
@@ -84,32 +96,6 @@ const shownItems = computed(() => (showOrphans.value ? orphans.value : items.val
       >
         Orphaned<template v-if="showOrphans && !loadingOrphans"> ({{ orphans.length }})</template>
       </button>
-    </div>
-    <GenerationGrid
-      :items="shownItems"
-      :empty="
-        showOrphans
-          ? loadingOrphans
-            ? 'Scanning…'
-            : 'No orphaned files in this thread.'
-          : 'No generations in this thread yet.'
-      "
-      @open="onOpen"
-      @favourite="onFavourite"
-    />
-  </div>
+    </template>
+  </GenerationGrid>
 </template>
-
-<style scoped>
-.gwrap {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-.orphbar {
-  padding: 6px 18px 0;
-  display: flex;
-  justify-content: flex-end;
-}
-</style>

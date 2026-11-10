@@ -380,7 +380,10 @@ function newThreadView(kind = 'chat') {
     newThread(kind) // already on the home route: just reset
   else router.push('/')
 }
+// One toggle does both jobs: it switches the view *and* makes that the view the
+// thread opens on next time (there is no separate "default view" switch).
 function setThreadView(v) {
+  if (activeKind.value !== v) setThreadKind(v)
   if (active.value) router.push(`/${active.value}/${v}`)
   else threadView.value = v // unsaved new thread has no id to route
 }
@@ -549,27 +552,21 @@ onMounted(() => {
         <div class="top">
           <div class="ttitle">{{ activeTitle }}</div>
           <div class="seg" role="group" aria-label="Thread view">
-            <button :class="{ on: threadView === 'chat' }" title="Chat view" @click="setThreadView('chat')">
+            <button
+              :class="{ on: threadView === 'chat' }"
+              title="Chat — the thread opens here from now on"
+              @click="setThreadView('chat')"
+            >
               <svg class="ic"><use href="#s-chat" /></svg>
             </button>
-            <button :class="{ on: threadView === 'gallery' }" title="Gallery view" @click="setThreadView('gallery')">
+            <button
+              :class="{ on: threadView === 'gallery' }"
+              title="Gallery — the thread opens here from now on"
+              @click="setThreadView('gallery')"
+            >
               <svg class="ic"><use href="#s-image" /></svg>
             </button>
           </div>
-          <button
-            class="kindswitch"
-            :data-on="activeKind === 'gallery' ? 'gallery' : 'chat'"
-            :title="`Opens on ${activeKind === 'gallery' ? 'Gallery' : 'Chat'} by default — click to switch`"
-            @click="setThreadKind(activeKind === 'gallery' ? 'chat' : 'gallery')"
-          >
-            <span class="knob"></span>
-            <span class="kopt"
-              ><svg class="ic"><use href="#s-chat" /></svg
-            ></span>
-            <span class="kopt"
-              ><svg class="ic"><use href="#s-image" /></svg
-            ></span>
-          </button>
           <div class="spacer"></div>
           <StudioBalances :balances="balances" :spend="spend" :messages="messages" @usage="router.push('/usage')" />
           <button

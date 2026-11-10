@@ -696,13 +696,31 @@ def _task_state(task_id: str) -> dict:
     if status == "cloudflare_blocked" or (status == "error" and (fail_msg or "").startswith("HTTP ")):
         return {"status": "transient", "error": f"Pollo: {fail_msg}"}
     if status in ERROR_STATUSES:
-        return {"status": "failed", "error": f"Pollo: {fail_msg or 'generation failed'}"}
+        # Pollo bills a failed generation, so the credits come back with the
+        # verdict and the poller records them — a charge the usage page missed
+        # otherwise. The results also go back as the response, so the request
+        # view shows the failure rather than the "accepted" reply from submit.
+        return {
+            "status": "failed",
+            "error": f"Pollo: {fail_msg or 'generation failed'}",
+            "credits": sum(r[3] for r in results if r[3] is not None) or None,
+            "response": _task_response(results),
+        }
     if not all(r[0] in SUCCESS_STATUSES for r in results):
         return {"status": "in_progress"}
     urls = [r[2] for r in results if r[2]]
     if not urls:
         return {"status": "failed", "error": "Pollo finished but returned no file"}
     return {"status": "completed", "urls": urls, "credits": sum(r[3] for r in results if r[3] is not None) or None}
+
+
+def _task_response(results: list) -> dict:
+    """A task's results as the plain shape Pollo sent them, for the request view."""
+    return {
+        "generations": [
+            {"status": st, "failMsg": msg, "url": url, "credit": credit} for st, msg, url, credit in results
+        ]
+    }
 
 
 def _wait(task_id: str) -> dict:

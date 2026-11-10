@@ -43,6 +43,14 @@ class TestPrefsResolution:
         assert upload_settings.resolve_prefs(_user("not json"))["primary"] == upload_settings.default_prefs()["primary"]
 
 
+@pytest.fixture
+def _no_url_check(monkeypatch):
+    """Dispatch/cache tests stub the hosts themselves, so there's no real URL
+    to fetch — the served-file check is exercised in TestServedCheck."""
+    monkeypatch.setattr(image_hosts, "_verify_served", lambda host, url, filepath: None)
+
+
+@pytest.mark.usefixtures("_no_url_check")
 class TestDispatchOrder:
     def test_primary_then_backup(self, monkeypatch):
         calls = []
@@ -70,6 +78,7 @@ class TestDispatchOrder:
         assert image_hosts._litterbox_time(70) == "1h" and image_hosts._litterbox_time(4000) == "72h"
 
 
+@pytest.mark.usefixtures("_no_url_check")
 class TestUploadCache:
     def test_reuses_url_without_reuploading(self, tmp_path, monkeypatch):
         image_hosts._url_cache.clear()
@@ -113,6 +122,62 @@ class TestUploadCache:
             image_hosts._url_cache[k] = (url, time.time() - 1)
         assert image_hosts.upload_file(f, prefs) == "https://host/2"
         assert len(calls) == 2
+
+
+class TestServedCheck:
+    """A host can take the upload and still not serve the file to a plain
+    client; the provider would then be charged for fetching a web page."""
+
+    def _resp(self, status=200, content_type="video/mp4"):
+        return types.SimpleNamespace(status_code=status, headers={"content-type": content_type}, close=lambda: None)
+
+    def test_html_answer_falls_through_to_the_backup(self, tmp_path, monkeypatch):
+        image_hosts._url_cache.clear()
+        f = tmp_path / "clip.mp4"
+        f.write_bytes(b"v")
+        monkeypatch.setattr(image_hosts, "_upload_to_tmpfiles", lambda p, e=60: "https://tmp/x.mp4")
+        monkeypatch.setattr(image_hosts, "_upload_to_litterbox", lambda p, e=60: "https://litter/x.mp4")
+        monkeypatch.setattr(
+            image_hosts.requests,
+            "get",
+            lambda url, **kw: self._resp(content_type="text/html" if "tmp/" in url else "video/mp4"),
+        )
+        prefs = {"primary": "tmpfiles", "backup": "litterbox", "expiry_minutes": 60}
+        assert image_hosts.upload_file(f, prefs) == "https://litter/x.mp4"
+
+    def test_unreachable_url_is_not_handed_on(self, tmp_path, monkeypatch):
+        image_hosts._url_cache.clear()
+        f = tmp_path / "clip.mp4"
+        f.write_bytes(b"v")
+        monkeypatch.setattr(image_hosts, "_upload_to_tmpfiles", lambda p, e=60: "https://tmp/x.mp4")
+
+        def boom(url, **kw):
+            raise image_hosts.requests.ConnectionError("no route")
+
+        monkeypatch.setattr(image_hosts.requests, "get", boom)
+        prefs = {"primary": "tmpfiles", "backup": None, "expiry_minutes": 60}
+        with pytest.raises(ValueError, match="All upload hosts failed"):
+            image_hosts.upload_file(f, prefs)
+
+    def test_a_served_file_passes(self, tmp_path, monkeypatch):
+        image_hosts._url_cache.clear()
+        f = tmp_path / "clip.mp4"
+        f.write_bytes(b"v")
+        monkeypatch.setattr(image_hosts, "_upload_to_tmpfiles", lambda p, e=60: "https://tmp/x.mp4")
+        monkeypatch.setattr(image_hosts.requests, "get", lambda url, **kw: self._resp(206, "application/octet-stream"))
+        prefs = {"primary": "tmpfiles", "backup": None, "expiry_minutes": 60}
+        assert image_hosts.upload_file(f, prefs) == "https://tmp/x.mp4"
+
+    def test_selfhost_is_not_checked(self, tmp_path, monkeypatch):
+        image_hosts._url_cache.clear()
+        f = tmp_path / "clip.mp4"
+        f.write_bytes(b"v")
+        calls = []
+        monkeypatch.setattr(image_hosts.requests, "get", lambda url, **kw: calls.append(url) or self._resp())
+        monkeypatch.setattr("web.public_media.selfhost_url", lambda p, base, ttl_seconds: "https://my.box/t")
+        prefs = {"primary": "selfhost", "backup": None, "expiry_minutes": 60, "selfhost_base": "https://my.box"}
+        assert image_hosts.upload_file(f, prefs) == "https://my.box/t"
+        assert calls == []
 
 
 class TestSelfHost:

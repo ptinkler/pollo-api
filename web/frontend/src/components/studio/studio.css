@@ -176,21 +176,108 @@
   display: flex;
   gap: 8px;
 }
-.studio .orow .msel {
+.studio .orow > * {
   flex: 1;
   min-width: 0;
 }
-.studio .msel {
-  width: 100%;
-  padding: 7px 10px;
+/* One control shape for the whole inspector: a bordered card with a tiny
+   caption over its value, matching ModelPicker's trigger, so presets, media
+   options and the pickers all read as the same kind of thing. */
+.studio .ifield {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 5px 10px;
   border: 1px solid var(--sborder);
   border-radius: var(--r);
   background: var(--spanel2);
+  transition: border-color 0.12s;
+}
+.studio .ifield:hover,
+.studio .ifield:focus-within {
+  border-color: var(--saccent);
+}
+.studio .fcap {
+  font-size: 0.65rem;
+  line-height: 1.5;
+  color: var(--smuted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.studio .ifield > select,
+.studio .ifield > input {
+  width: 100%;
+  min-width: 0;
+  appearance: none;
+  border: 0;
+  padding: 0 14px 0 0;
+  background: none;
   color: var(--sfg);
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1.4;
   outline: none;
+}
+.studio .ifield > select {
+  cursor: pointer;
+}
+.studio .ifield > input::placeholder {
+  color: var(--sfaint);
+}
+/* The same ▾ the model picker uses, drawn by the card rather than the browser */
+.studio .ifield:has(> select)::after {
+  content: '▾';
+  position: absolute;
+  right: 9px;
+  bottom: 4px;
+  color: var(--smuted);
+  font-size: 0.75rem;
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* Shared slider: the inspector has only this one (context + video length) */
+.studio .srange {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  height: 18px;
+  margin: 0;
+  background: none;
+  appearance: none;
+  cursor: pointer;
+}
+.studio .srange::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--saccent) var(--fill), var(--sborder) var(--fill));
+}
+.studio .srange::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--saccent) var(--fill), var(--sborder) var(--fill));
+}
+.studio .srange::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--sfg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.studio .srange::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--sfg);
 }
 .studio .audio {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 6px;
   color: var(--smuted);

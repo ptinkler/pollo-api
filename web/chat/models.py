@@ -70,6 +70,15 @@ class TurnOptions(BaseModel):
     generate_audio: bool | None = None
 
 
+class VideoTurnOptions(TurnOptions):
+    """Video options carry one extra: whether the length was left on Auto. The
+    duration still arrives resolved (the source clip's length, or the model's
+    default), so without this flag "reuse these settings" couldn't tell a
+    hand-picked 30s from an auto 30s."""
+
+    duration_auto: bool = False
+
+
 class AudioOptions(BaseModel):
     """Speech / music settings; each applies only to models that take it."""
 
@@ -103,7 +112,7 @@ class TurnSettings(BaseModel):
     # The composer's picks, applied in every mode (Auto included). Unset =
     # the chat model's choice (Auto), else the media model's default.
     image_options: TurnOptions = TurnOptions()
-    video_options: TurnOptions = TurnOptions()
+    video_options: VideoTurnOptions = VideoTurnOptions()
     audio_options: AudioOptions = AudioOptions()
     ref_choices: RefChoices = RefChoices()
 

@@ -4,7 +4,8 @@
     tenant       multi-tenant row scoping (ORM events) + set/reset/current
     _base        engine, schema catch-up, the locked session, _detach_id
     users / conversations / instructions / characters / messages / imports /
-    library      the MetadataDB method mixins, by domain
+    library / media
+                 the MetadataDB method mixins, by domain
     manager      MetadataDB (composed from the mixins) + get_db
 
 Public surface is unchanged: import Base, MetadataDB, get_db, iso, set_tenant,
@@ -23,6 +24,7 @@ from .models import (
     ChatMessage,
     ChatSettings,
     ChatSpace,
+    MediaDuration,
     User,
     iso,
 )
@@ -47,4 +49,5 @@ __all__ = [
     "ChatMessage",
     "ChatSettings",
     "ChatSpace",
+    "MediaDuration",
 ]

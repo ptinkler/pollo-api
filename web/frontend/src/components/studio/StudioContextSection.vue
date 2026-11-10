@@ -1,12 +1,16 @@
 <!-- Inspector section: how much history + how many recent images each turn
      sends (the composer's memory/image sliders). -->
 <script setup>
-import { inject } from 'vue'
+import { inject, computed } from 'vue'
 import { MEMORY_STEPS, IMAGE_STEPS } from '../../composables/useComposerSettings'
 
 const { mode, memoryIndex, imageIndex, historyLimit, imageLimit } = inject('composerSettings')
 
 const label = v => (v == null ? 'All' : v)
+// The filled part of the track, so these read like the video Length slider
+const pct = (i, steps) => `${steps.length > 1 ? (i / (steps.length - 1)) * 100 : 0}%`
+const memoryFill = computed(() => pct(memoryIndex.value, MEMORY_STEPS))
+const imageFill = computed(() => pct(imageIndex.value, IMAGE_STEPS))
 </script>
 
 <template>
@@ -18,7 +22,14 @@ const label = v => (v == null ? 'All' : v)
         <span>Memory</span>
         <span class="sval">{{ label(historyLimit) }} {{ historyLimit === 1 ? 'message' : 'messages' }}</span>
       </div>
-      <input v-model.number="memoryIndex" type="range" min="0" :max="MEMORY_STEPS.length - 1" />
+      <input
+        v-model.number="memoryIndex"
+        class="srange"
+        type="range"
+        min="0"
+        :max="MEMORY_STEPS.length - 1"
+        :style="{ '--fill': memoryFill }"
+      />
     </div>
 
     <div class="slider">
@@ -26,7 +37,14 @@ const label = v => (v == null ? 'All' : v)
         <span>Images sent</span>
         <span class="sval">{{ imageLimit === 0 ? 'None' : label(imageLimit) }}</span>
       </div>
-      <input v-model.number="imageIndex" type="range" min="0" :max="IMAGE_STEPS.length - 1" />
+      <input
+        v-model.number="imageIndex"
+        class="srange"
+        type="range"
+        min="0"
+        :max="IMAGE_STEPS.length - 1"
+        :style="{ '--fill': imageFill }"
+      />
     </div>
   </div>
 </template>
@@ -39,15 +57,13 @@ const label = v => (v == null ? 'All' : v)
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 7px;
+  margin-bottom: 4px;
   color: var(--smuted);
   font-size: 12.5px;
 }
 .sval {
-  color: var(--sfg);
-}
-input[type='range'] {
-  width: 100%;
-  accent-color: var(--saccent);
+  color: var(--saccent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 </style>

@@ -322,8 +322,11 @@ export function useComposerSettings(models) {
       video_options: {
         aspect_ratio: videoOpts.aspect_ratio || null,
         resolution: videoOpts.resolution || null,
-        // '' = Auto: the attached clip's length (reference-to-video), else the model's default
+        // '' = Auto: the attached clip's length (reference-to-video), else the
+        // model's default. The flag rides along so reusing this generation's
+        // settings later lands back on Auto, not on the number Auto resolved to.
         duration: videoOpts.duration ? Number(videoOpts.duration) : clipDuration.value,
+        duration_auto: !videoOpts.duration,
         generate_audio: videoInfo.value?.generate_audio ? videoOpts.generate_audio : null,
       },
       audio_options: audioSettings(),

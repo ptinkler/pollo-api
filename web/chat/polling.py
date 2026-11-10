@@ -76,8 +76,18 @@ def _poll_video(conv_id: str, message_id: int, media_id: str, job_id: str) -> No
             return
         if status in ("failed", "cancelled", "expired"):
             error = job.get("error") or f"{(item.get('kind') or 'video').title()} {status}"
+            # A provider that charges for a failed job says so here; record it so
+            # the charge shows up in the usage breakdown like any other. The
+            # verdict replaces the submit reply as the stored response, so the
+            # request view doesn't still read "accepted".
+            extra = {k: job[k] for k in ("credits", "response") if job.get(k) is not None}
             db.update_chat_media_item(
-                message_id, media_id, status="error", error=error, moderated=bool(_MODERATION.search(error))
+                message_id,
+                media_id,
+                status="error",
+                error=error,
+                moderated=bool(_MODERATION.search(error)),
+                **extra,
             )
             return
     db.update_chat_media_item(message_id, media_id, status="error", error="Timed out waiting for the file")

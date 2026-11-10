@@ -80,6 +80,11 @@ const providers = computed(() => [
 function keySet(id) {
   return !!keys.value[id]?.set
 }
+
+// A row's share of the biggest spender, drawn as a faint bar behind the model
+// name so the shape of the spend reads without squinting at the numbers.
+const topSpend = computed(() => Math.max(...(breakdown.value?.rows || []).map(r => r.usd), 0))
+const share = usd => `${topSpend.value > 0 ? Math.max(1.5, (usd / topSpend.value) * 100) : 0}%`
 </script>
 
 <template>
@@ -88,8 +93,8 @@ function keySet(id) {
       <div class="phead">
         <h1>Credit usage</h1>
         <div class="hactions">
-          <button class="btn" title="Refresh balances" @click="emit('refresh')">
-            <svg class="ic"><use href="#s-refresh" /></svg> Refresh
+          <button class="btn btn-icon" title="Refresh balances" aria-label="Refresh balances" @click="emit('refresh')">
+            <svg class="ic"><use href="#s-refresh" /></svg>
           </button>
           <button class="btn" @click="emit('close')">
             <svg class="ic"><use href="#s-chevL" /></svg> Back
@@ -98,7 +103,13 @@ function keySet(id) {
       </div>
 
       <div class="cards">
-        <div v-for="p in providers" :key="p.id" class="pcard" :class="{ nokey: !keySet(p.id) }">
+        <div
+          v-for="p in providers"
+          :key="p.id"
+          class="pcard"
+          :class="{ nokey: !keySet(p.id) }"
+          :style="{ '--tint': `var(--p-${p.id})` }"
+        >
           <div class="pcard-head">
             <span class="pname">{{ p.label }}</span>
             <span class="pkey" :class="{ on: keySet(p.id) }">{{
@@ -136,11 +147,17 @@ function keySet(id) {
           </thead>
           <tbody>
             <tr v-for="r in breakdown.rows" :key="r.model + r.kind">
-              <td>{{ shortModel(r.model) }}</td>
-              <td>{{ r.kind }}</td>
+              <td class="bd-model">
+                <span class="bar" :style="{ width: share(r.usd) }"></span>
+                <span class="bd-name">{{ shortModel(r.model) }}</span>
+              </td>
+              <td>
+                <span class="kpill" :class="r.kind">{{ r.kind }}</span>
+              </td>
               <td class="num">{{ r.count }}</td>
+              <!-- Credits lead so the dollar amounts stay flush with the column -->
               <td class="num">
-                {{ fmtCost(r.usd) }}<span v-if="r.credits" class="bd-cr"> · {{ r.credits }} cr</span>
+                <span v-if="r.credits" class="bd-cr">{{ r.credits }} cr · </span>{{ fmtCost(r.usd) }}
               </td>
             </tr>
           </tbody>
@@ -165,11 +182,23 @@ function keySet(id) {
   gap: 10px;
   margin-bottom: 18px;
 }
+/* Each card wears its provider's pastel (--tint, set inline from --p-<id>):
+   a soft wash, a tinted top edge and a tinted number, so the three read apart
+   at a glance and match the provider tags in the model picker. */
 .pcard {
-  border: 1px solid var(--sborder);
-  background: var(--sbg);
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--tint) 26%, var(--sborder));
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tint) 11%, transparent), transparent 62%), var(--sbg);
   border-radius: var(--r-lg);
   padding: 14px 16px;
+}
+.pcard::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: var(--tint);
 }
 .pcard.nokey {
   opacity: 0.75;
@@ -192,14 +221,14 @@ function keySet(id) {
   background: var(--sbg2);
 }
 .pkey.on {
-  color: var(--saccent);
-  background: var(--saccent-soft);
+  color: var(--tint);
+  background: color-mix(in srgb, var(--tint) 16%, transparent);
 }
 .pval {
   font-size: 26px;
   font-weight: 700;
   line-height: 1.1;
-  color: var(--sfg);
+  color: var(--tint);
   font-variant-numeric: tabular-nums;
 }
 .punit {
@@ -213,8 +242,8 @@ function keySet(id) {
 }
 .plink {
   margin-top: 10px;
-  color: var(--saccent);
-  border-color: var(--saccent);
+  color: var(--tint);
+  border-color: color-mix(in srgb, var(--tint) 55%, transparent);
 }
 .bd {
   margin-bottom: 18px;
@@ -259,5 +288,42 @@ function keySet(id) {
 }
 .bd-cr {
   color: var(--sfaint);
+}
+.bd-model {
+  position: relative;
+}
+.bd-model .bar {
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--p-pollo) 15%, transparent);
+}
+.bd-name {
+  position: relative;
+}
+/* One pastel per kind of thing bought, from the provider palette */
+.kpill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  text-transform: capitalize;
+  color: var(--k);
+  background: color-mix(in srgb, var(--k) 15%, transparent);
+  --k: var(--smuted);
+}
+.kpill.chat {
+  --k: var(--p-openrouter);
+}
+.kpill.image {
+  --k: var(--p-pollo);
+}
+.kpill.video {
+  --k: var(--p-venice);
+}
+.kpill.audio {
+  --k: var(--sstar);
 }
 </style>

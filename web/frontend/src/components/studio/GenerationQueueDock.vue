@@ -61,31 +61,35 @@ function label(e) {
       </button>
     </div>
 
-    <div v-show="!collapsed" class="qbody">
-      <button
-        v-for="e in entries"
-        :key="e.media_id"
-        type="button"
-        class="qrow"
-        :class="e.status"
-        @click="emit('open', e)"
-      >
-        <span class="qthumb" :class="e.kind">
-          <img v-if="e.status === 'done' && e.file && e.kind === 'image'" :src="thumb(e)" loading="lazy" alt="" />
-          <video v-else-if="e.status === 'done' && e.file" :src="thumb(e)" muted preload="metadata"></video>
-          <span v-else-if="e.status === 'pending'" class="qspin sm"></span>
-          <span v-else class="qfail">✕</span>
-        </span>
-        <span class="qinfo">
-          <span class="qlabel">{{ label(e) }}</span>
-          <span class="qsub">{{ e.conversation_title || 'Untitled thread' }}</span>
-        </span>
-        <span class="qx" title="Remove from queue" @click.stop="emit('clear-one', e.media_id)">×</span>
-      </button>
-    </div>
-
-    <div v-show="!collapsed && done" class="qfoot">
-      <button class="qclear" @click="emit('clear')">Clear {{ done }} finished</button>
+    <!-- One popover above the pill: the list, then the clear strip inside it.
+         (The dock is column-reverse, so this sits above the head in the DOM
+         order it reads on screen.) -->
+    <div v-show="!collapsed" class="qpop">
+      <div class="qbody">
+        <button
+          v-for="e in entries"
+          :key="e.media_id"
+          type="button"
+          class="qrow"
+          :class="e.status"
+          @click="emit('open', e)"
+        >
+          <span class="qthumb" :class="e.kind">
+            <img v-if="e.status === 'done' && e.file && e.kind === 'image'" :src="thumb(e)" loading="lazy" alt="" />
+            <video v-else-if="e.status === 'done' && e.file" :src="thumb(e)" muted preload="metadata"></video>
+            <span v-else-if="e.status === 'pending'" class="qspin sm"></span>
+            <span v-else class="qfail">✕</span>
+          </span>
+          <span class="qinfo">
+            <span class="qlabel">{{ label(e) }}</span>
+            <span class="qsub">{{ e.conversation_title || 'Untitled thread' }}</span>
+          </span>
+          <span class="qx" title="Remove from queue" @click.stop="emit('clear-one', e.media_id)">×</span>
+        </button>
+      </div>
+      <div v-if="done" class="qfoot">
+        <button class="qclear" @click="emit('clear')">Clear {{ done }} finished</button>
+      </div>
     </div>
   </div>
 </template>
@@ -139,15 +143,17 @@ function label(e) {
   line-height: 1;
   padding: 2px 4px;
 }
-.qbody,
-.qfoot {
-  background: var(--spanel2);
+.qpop {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 6px;
+  overflow: hidden;
   border: 1px solid var(--sborder);
+  border-radius: var(--r-lg);
+  background: var(--spanel2);
   box-shadow: var(--shadow-pop);
 }
 .qbody {
-  margin-top: 6px;
-  border-radius: 12px 12px 0 0;
   max-height: min(55vh, 420px);
   overflow-y: auto;
   padding: 6px;
@@ -240,15 +246,15 @@ function label(e) {
   color: var(--sfg);
 }
 .qfoot {
-  padding: 6px;
-  border-top: none;
-  border-radius: 0 0 12px 12px;
+  flex: 0 0 auto;
+  padding: 4px;
+  border-top: 1px solid var(--sborder2);
 }
 .qclear {
   width: 100%;
   padding: 6px;
-  border: 1px solid var(--sborder);
-  border-radius: 7px;
+  border: 0;
+  border-radius: var(--r);
   background: transparent;
   color: var(--smuted);
   cursor: pointer;

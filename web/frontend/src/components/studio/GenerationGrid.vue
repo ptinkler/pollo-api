@@ -78,6 +78,8 @@ const inProgress = computed(() => props.items.filter(it => it.status === 'pendin
         >
           <svg class="ic"><use href="#s-star" /></svg>
         </button>
+        <!-- Extra filters from the page using the grid, in the same toolbar -->
+        <slot name="filters"></slot>
       </div>
       <div class="seg" role="group" aria-label="Card size">
         <button v-for="s in ['s', 'm', 'l']" :key="s" :class="{ on: size === s }" @click="setSize(s)">
@@ -140,6 +142,7 @@ const inProgress = computed(() => props.items.filter(it => it.status === 'pendin
 <style scoped>
 .gens {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 12px 16px 16px;
 }

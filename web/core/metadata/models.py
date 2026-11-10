@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -446,3 +446,19 @@ class ChatLibraryItem(Base):
             return json.loads(self.item_json)
         except json.JSONDecodeError:
             return {}
+
+
+class MediaDuration(Base):
+    """How long a video file is, so the media library doesn't re-read it.
+
+    Reading a length means opening the file with OpenCV; on a NAS that costs a
+    fraction of a second each, which made listing a library of videos take the
+    best part of a minute. This is a cache of what's on disk, not anything a
+    user wrote, so it isn't tenant-owned and is safe to lose: a row whose
+    `mtime_ns` no longer matches the file is simply read again.
+    """
+
+    __tablename__ = "media_durations"
+    path: Mapped[str] = mapped_column(String(1024), primary_key=True)
+    mtime_ns: Mapped[int] = mapped_column(BigInteger)
+    seconds: Mapped[float | None] = mapped_column(Float, nullable=True)  # null = unreadable

@@ -43,29 +43,43 @@ function onDuration(e) {
   <div v-if="showImageOpts" class="isection">
     <div class="ilabel">Image options</div>
     <div class="orow">
-      <select v-if="imageShowsRatio" v-model="imageOpts.aspect_ratio" class="msel">
-        <option value="">Ratio: auto</option>
-        <option v-for="r in imageRatioOptions" :key="r" :value="r">{{ r }}</option>
-      </select>
-      <select v-model="imageOpts.resolution" class="msel">
-        <option value="">Res: default</option>
-        <option v-for="r in imageResOptions" :key="r" :value="r">{{ r }}</option>
-      </select>
+      <label v-if="imageShowsRatio" class="ifield">
+        <span class="fcap">Ratio</span>
+        <select v-model="imageOpts.aspect_ratio">
+          <option value="">Auto</option>
+          <option v-for="r in imageRatioOptions" :key="r" :value="r">{{ r }}</option>
+        </select>
+      </label>
+      <label class="ifield">
+        <span class="fcap">Resolution</span>
+        <select v-model="imageOpts.resolution">
+          <option value="">Model default</option>
+          <option v-for="r in imageResOptions" :key="r" :value="r">{{ r }}</option>
+        </select>
+      </label>
     </div>
   </div>
 
   <div v-if="showVideoOpts" class="isection">
     <div class="ilabel">Video options</div>
     <div class="orow">
-      <select v-if="videoShowsRatio" v-model="videoOpts.aspect_ratio" class="msel">
-        <option value="">Ratio: auto</option>
-        <option v-for="r in videoRatioOptions" :key="r" :value="r">{{ r }}</option>
-      </select>
-      <select v-model="videoOpts.resolution" class="msel">
-        <option value="">Res: default</option>
-        <option v-for="r in videoResOptions" :key="r" :value="r">{{ r }}</option>
-      </select>
+      <label v-if="videoShowsRatio" class="ifield">
+        <span class="fcap">Ratio</span>
+        <select v-model="videoOpts.aspect_ratio">
+          <option value="">Auto</option>
+          <option v-for="r in videoRatioOptions" :key="r" :value="r">{{ r }}</option>
+        </select>
+      </label>
+      <label class="ifield">
+        <span class="fcap">Resolution</span>
+        <select v-model="videoOpts.resolution">
+          <option value="">Model default</option>
+          <option v-for="r in videoResOptions" :key="r" :value="r">{{ r }}</option>
+        </select>
+      </label>
     </div>
+    <!-- A card each: a hairline between rows is invisible against the card's
+         own fill, and these are two unrelated settings. -->
     <div class="card">
       <div class="crow">
         <span class="clabel" :title="videoInfo?.generate_audio ? '' : 'This model decides its own audio'">Audio</span>
@@ -75,30 +89,30 @@ function onDuration(e) {
         </div>
         <span v-else class="dval hint end">model default</span>
       </div>
-      <template v-if="videoShowsDuration && durationOptions.length">
-        <div class="crow">
-          <span class="clabel">Length</span>
-          <span v-if="isAuto" class="dval hint">{{ durText }}</span>
-          <div class="seg" role="group" aria-label="Length mode">
-            <button :class="{ on: isAuto }" @click="setAuto(true)">Auto</button>
-            <button :class="{ on: !isAuto }" @click="setAuto(false)">Custom</button>
-          </div>
+    </div>
+    <div v-if="videoShowsDuration && durationOptions.length" class="card">
+      <div class="crow">
+        <span class="clabel">Length</span>
+        <span v-if="isAuto" class="dval hint">{{ durText }}</span>
+        <div class="seg" role="group" aria-label="Length mode">
+          <button :class="{ on: isAuto }" @click="setAuto(true)">Auto</button>
+          <button :class="{ on: !isAuto }" @click="setAuto(false)">Custom</button>
         </div>
-        <div v-if="!isAuto" class="crow slide">
-          <input
-            type="range"
-            class="drange"
-            min="0"
-            :max="lastIndex"
-            step="1"
-            :value="durIndex"
-            :style="{ '--fill': fillPct + '%' }"
-            aria-label="Length in seconds"
-            @input="onDuration"
-          />
-          <span class="dval">{{ durText }}</span>
-        </div>
-      </template>
+      </div>
+      <div v-if="!isAuto" class="crow slide">
+        <input
+          type="range"
+          class="srange"
+          min="0"
+          :max="lastIndex"
+          step="1"
+          :value="durIndex"
+          :style="{ '--fill': fillPct + '%' }"
+          aria-label="Length in seconds"
+          @input="onDuration"
+        />
+        <span class="dval">{{ durText }}</span>
+      </div>
     </div>
   </div>
 </template>
@@ -115,14 +129,11 @@ function onDuration(e) {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  min-height: 32px;
+  min-height: 38px;
   padding: 0 10px;
 }
 .crow + .crow {
   margin-top: 0;
-}
-.crow + .crow:not(.slide) {
-  border-top: 1px solid var(--sborder2);
 }
 .clabel {
   font-size: 12px;
@@ -134,45 +145,6 @@ function onDuration(e) {
   min-height: 24px;
   padding-bottom: 4px;
 }
-.drange {
-  flex: 1;
-  min-width: 0;
-  height: 18px;
-  margin: 0;
-  background: none;
-  appearance: none;
-  cursor: pointer;
-}
-.drange:disabled {
-  cursor: default;
-}
-.drange::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: 2px;
-  background: linear-gradient(to right, var(--saccent) var(--fill), var(--sborder) var(--fill));
-}
-.drange::-moz-range-track {
-  height: 4px;
-  border-radius: 2px;
-  background: linear-gradient(to right, var(--saccent) var(--fill), var(--sborder) var(--fill));
-}
-.drange::-webkit-slider-thumb {
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  margin-top: -5px;
-  border-radius: 50%;
-  border: 0;
-  background: var(--sfg);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-}
-.drange::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 0;
-  background: var(--sfg);
-}
 .dval {
   min-width: 0;
   text-align: right;
@@ -181,18 +153,15 @@ function onDuration(e) {
   color: var(--saccent);
   font-variant-numeric: tabular-nums;
 }
-.crow .crow .dval.hint.end {
-  margin: 0 0 0 auto;
-  text-align: right;
-}
 .dval.hint {
-  min-width: 0;
   margin-right: auto;
   text-align: left;
-}
-.dval.hint {
   white-space: nowrap;
   font-weight: 400;
   color: var(--smuted);
+}
+.dval.hint.end {
+  margin: 0 0 0 auto;
+  text-align: right;
 }
 </style>

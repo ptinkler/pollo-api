@@ -2589,6 +2589,39 @@ class TestPolloImageModels:
         assert (kwargs["prompt"], kwargs["length"], kwargs["generate_audio"]) == ("make it move", 15, False)
         assert kwargs["aspect_ratio"] == "9:16"  # picked in the composer, so it wins over the image's shape
 
+    def test_auto_length_is_remembered_on_the_media_item(self, client, conv, chat, monkeypatch, pollo):
+        """The composer resolves Auto to a number before sending, so the item
+        records that it *was* Auto — otherwise reusing its settings would pin
+        whatever Auto worked out to."""
+        monkeypatch.setattr(openrouter, "submit_video", lambda *a, **k: pytest.fail("should run on Pollo"))
+        chat.catalogue._models_cache.update(
+            at=0.0, data={"video": [{"id": "pollo/seedance20fastv1", "durations": list(range(4, 16))}]}
+        )
+        up = client.post(
+            f"/api/chat/conversations/{conv['id']}/attachments", files={"file": ("a.png", _png_bytes(), "image/png")}
+        ).json()["file"]
+
+        def send(video_options):
+            return _events(
+                client.post(
+                    f"/api/chat/conversations/{conv['id']}/messages",
+                    json={
+                        "content": "make it move",
+                        "attachments": [up],
+                        "mode": "video",
+                        **self.VIDEO,
+                        "video_options": video_options,
+                    },
+                )
+            )[-1]["message"]["media"][0]
+
+        auto = send({"duration": 10, "duration_auto": True})
+        assert auto["params"]["duration"] == 10 and auto["params"]["duration_auto"] is True
+        picked = send({"duration": 10})
+        assert picked["params"]["duration"] == 10 and picked["params"]["duration_auto"] is False
+        # Either way Pollo is sent the resolved length, not the flag
+        assert all("duration_auto" not in kwargs for _, kwargs in pollo["generators"])
+
     # ── audio ──
     AUDIO = {**SETTINGS, "audio_model": "pollo/elevenv3v1"}
 
@@ -2807,6 +2840,33 @@ class TestPolloImageModels:
         chat.polling._poll_video(conv["id"], msg.id, "pv2", "pollo:task-8")
         item = db.get_chat_message(msg.id).media[0]
         assert item["status"] == "error" and item["moderated"] is True and item["error"].startswith("Pollo:")
+
+    def test_a_charged_failure_keeps_its_credits_and_shows_the_verdict(self, chat, db, conv, pollo):
+        """Pollo bills a job that fails its own validation, so the credits have
+        to land on the item (they're real money) and the stored response has to
+        be the verdict, not the "accepted" reply from submitting."""
+        msg = db.add_chat_message(
+            conv["id"],
+            "assistant",
+            media=[
+                {
+                    "id": "pv3",
+                    "kind": "video",
+                    "source": "generated",
+                    "status": "pending",
+                    "job_id": "pollo:task-11",
+                    "response": {"code": "SUCCESS", "data": {"status": "waiting"}},
+                }
+            ],
+        )
+        pollo["statuses"] = iter([[("failed", "InvalidParameter Invalid video_url.", None, 61)]])
+        chat.polling._poll_video(conv["id"], msg.id, "pv3", "pollo:task-11")
+        item = db.get_chat_message(msg.id).media[0]
+        assert item["status"] == "error" and item["credits"] == 61
+        assert item["response"]["generations"][0]["failMsg"] == "InvalidParameter Invalid video_url."
+        # and it's counted as spend, since it was charged
+        rows = db.spend_rows([conv["id"]])
+        assert [r["credits"] for r in rows] == [61]
 
     def test_kling_and_qwen_models_offered_in_chat(self, chat, monkeypatch, pollo):
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
@@ -3150,7 +3210,8 @@ class TestDeleteExchange:
         db.set_chat_leaf(conv["id"], a3.id)  # looking at the original version
 
         info = client.get(f"/api/chat/messages/{u2.id}/delete-info").json()
-        assert info == {"other_versions": 1, "other_messages": 2}
+        # Both generated images go with the turn, so the confirmation can name them
+        assert info == {"other_versions": 1, "other_messages": 2, "media": {"image": 2}}
 
         msgs = client.delete(f"/api/chat/messages/{u2.id}").json()["messages"]
         assert [m["content"] for m in msgs] == ["draw a fox", "Here!", "thanks", "Welcome"]
@@ -3175,7 +3236,30 @@ class TestDeleteExchange:
         assert client.get(f"/api/chat/messages/{u2.id}/delete-info").json() == {
             "other_versions": 0,
             "other_messages": 0,
+            "media": {"image": 1},
         }
+
+    def test_info_counts_no_media_when_the_generation_failed(self, client, conv, db):
+        u = db.add_chat_message(conv["id"], "user", "make a video")
+        db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "",
+            parent_id=u.id,
+            media=[{"id": "f1", "kind": "video", "source": "generated", "status": "error", "error": "nope"}],
+        )
+        info = client.get(f"/api/chat/messages/{u.id}/delete-info").json()
+        assert info["media"] == {}  # nothing was made, so there's nothing to offer to delete
+
+    def test_info_ignores_uploads(self, client, conv, db):
+        u = db.add_chat_message(
+            conv["id"],
+            "user",
+            "here you go",
+            media=[{"id": "up1", "kind": "image", "source": "upload", "status": "done", "file": "up_a.png"}],
+        )
+        db.add_chat_message(conv["id"], "assistant", "Nice", parent_id=u.id)
+        assert client.get(f"/api/chat/messages/{u.id}/delete-info").json()["media"] == {}
 
     def test_deleting_the_last_exchange_shows_the_one_before(self, client, conv, db):
         u1, a1, u2, a2, u3, a3 = self._chat(db, conv)

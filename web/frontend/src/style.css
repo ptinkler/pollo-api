@@ -20,6 +20,12 @@
   --sbg2: #0d0f13;
   --spanel2: #1a1e26;
 
+  /* One pastel per provider, used wherever a provider is named (model picker
+     tags, the usage cards) so the same thing is always the same colour. */
+  --p-pollo: #8fa6ff;
+  --p-venice: #f0a868;
+  --p-openrouter: #74cfc0;
+
   /* Semantic colours (status, destructive actions, favourites) */
   --sdanger: #e5484d;
   --sdanger-soft: color-mix(in srgb, var(--sdanger) 12%, transparent);
@@ -65,6 +71,10 @@
   --saccent-soft: color-mix(in srgb, var(--saccent) 12%, transparent);
   --sbg2: #f7f8fa;
   --spanel2: #f1f3f7;
+
+  --p-pollo: #5f79e8;
+  --p-venice: #c7781f;
+  --p-openrouter: #2e9d8c;
 
   --sdanger: #d7373f;
   --ssuccess: #1f9d57;
@@ -253,6 +263,12 @@ a {
   /* the default look; the class is kept for the older call sites */
 }
 
+/* Icon-only button that still sits in a row of .btn (square, same height) */
+.btn-icon {
+  width: 30px;
+  padding: 0;
+}
+
 .btn-primary {
   background: var(--saccent);
   border-color: var(--saccent);
@@ -393,10 +409,17 @@ a {
   color: var(--sfg);
 }
 
+/* The pick is filled, not merely lighter: at this size a tinted background
+   alone doesn't say which of two words is on. */
 .seg > button.on {
-  background: var(--shover);
-  color: var(--sfg);
-  box-shadow: 0 0 0 1px var(--sborder);
+  background: var(--saccent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.seg > button.on:hover {
+  color: #fff;
+  filter: brightness(1.08);
 }
 
 .seg .ic {

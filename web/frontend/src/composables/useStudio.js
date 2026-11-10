@@ -567,11 +567,23 @@ export function useStudio({ models, settings, showToast }) {
   }
   const resendMessage = msg => editMessage(msg, msg.content || '')
 
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
   function deleteDetail({ other_versions: versions, other_messages: after }) {
-    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
     const removes = [versions && plural(versions, 'other version'), after && plural(after, 'message')].filter(Boolean)
     const where = versions ? ' that followed them' : ' on other branches'
     return removes.length ? `This also removes ${removes.join(' and ')}${after ? where : ''}.` : ''
+  }
+  // The files the "also delete" box decides on, named so it's clear what goes:
+  // only what this turn generated (uploads stay), and nothing at all when the
+  // generation failed — then there's no box to tick.
+  const MEDIA_WORDS = { image: 'image', video: 'video', audio: 'audio clip' }
+  function deleteMediaLabel(media) {
+    const parts = Object.entries(media || {})
+      .filter(([, n]) => n > 0)
+      .map(([kind, n]) => plural(n, MEDIA_WORDS[kind] || 'file'))
+    if (!parts.length) return ''
+    const list = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0]
+    return `Also delete the ${list} it made`
   }
   // Deleting works on the prompt; given a reply (the gallery hands us the
   // message holding the media) it deletes the prompt that produced it.
@@ -579,12 +591,16 @@ export function useStudio({ models, settings, showToast }) {
     if (sending.value) return
     const promptId = msg.role === 'assistant' && msg.parent_id ? msg.parent_id : msg.id
     try {
+      const info = await fetchDeleteInfo(promptId)
+      const mediaLabel = deleteMediaLabel(info.media)
       const r = await confirmDialog({
         title: 'Delete this prompt and its reply?',
-        message: deleteDetail(await fetchDeleteInfo(promptId)),
+        message: [deleteDetail(info), mediaLabel && 'Unticked, those files stay in your Media library.']
+          .filter(Boolean)
+          .join(' '),
         confirmLabel: 'Delete',
         danger: true,
-        checkbox: { label: 'Also delete its images and videos', checked: true },
+        checkbox: mediaLabel ? { label: mediaLabel, checked: true } : null,
       })
       if (!r) return
       showChat(await deleteChatExchange(promptId, { deleteMedia: r.checked }))
@@ -648,7 +664,10 @@ export function useStudio({ models, settings, showToast }) {
     const opts = kind === 'video' ? settings.videoOpts : settings.imageOpts
     for (const k of ['aspect_ratio', 'resolution']) if (p[k]) opts[k] = p[k]
     if (kind !== 'video') return
-    for (const k of ['duration', 'generate_audio']) if (p[k] != null) opts[k] = p[k]
+    if (p.generate_audio != null) opts.generate_audio = p.generate_audio
+    // A generation made on Auto goes back to Auto ('') — its stored duration is
+    // what Auto worked out to (the clip's length), not a length that was chosen.
+    opts.duration = p.duration_auto ? '' : (p.duration ?? opts.duration)
   }
   // Put a generation's reference images back as attachments (character refs
   // come back with the characters, not as files)

@@ -34,57 +34,6 @@
 .top .spacer {
   flex: 1;
 }
-/* Sliding switch for the thread's default view: chat ◄► gallery */
-.kindswitch {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  width: 56px;
-  height: 28px;
-  padding: 3px;
-  border: 1px solid var(--sborder);
-  border-radius: 999px;
-  background: var(--sbg2);
-  cursor: pointer;
-}
-.kindswitch:hover {
-  border-color: var(--saccent);
-}
-.kindswitch .knob {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 24px;
-  height: 20px;
-  border-radius: 999px;
-  /* A bright thumb so the active icon (accent, below) reads clearly in both
-     themes — white-on-accent washed out at this size. */
-  background: var(--sfg);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
-  transition: transform 0.16s ease;
-}
-.kindswitch[data-on='gallery'] .knob {
-  transform: translateX(24px);
-}
-.kindswitch .kopt {
-  position: relative;
-  z-index: 1;
-  flex: 1;
-  display: grid;
-  place-items: center;
-  color: var(--smuted);
-  transition: color 0.16s ease;
-}
-.kindswitch .kopt .ic {
-  width: 13px;
-  height: 13px;
-  stroke-width: 2;
-}
-/* The icon sitting on the thumb: it inverts against the bright knob. */
-.kindswitch[data-on='chat'] .kopt:first-of-type,
-.kindswitch[data-on='gallery'] .kopt:last-of-type {
-  color: var(--sbg);
-}
 .gcount {
   font-size: 12px;
   color: var(--smuted);

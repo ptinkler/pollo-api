@@ -364,10 +364,26 @@ class MessageMixin:
         }
 
     def chat_exchange_delete_info(self, conversation_id: str, user_message_id: int) -> dict | None:
-        """How much deleting this prompt's turn removes, for the confirmation."""
+        """How much deleting this prompt's turn removes, for the confirmation:
+        the other versions/messages that go with it, and the generated files it
+        holds, per kind — the ones the "also delete its media" box decides on
+        (a turn that generated nothing, or only failed, has none)."""
         with self._session() as session:
             plan = self._chat_exchange_plan(session, conversation_id, user_message_id)
-            return plan and {"other_versions": plan["other_versions"], "other_messages": plan["other_messages"]}
+            if not plan:
+                return None
+            media: dict[str, int] = {}
+            for mid in plan["doomed"]:
+                for item in plan["msgs"][mid].media or []:
+                    if item.get("source") == "upload" or not item.get("file"):
+                        continue
+                    kind = item.get("kind") or "file"
+                    media[kind] = media.get(kind, 0) + 1
+            return {
+                "other_versions": plan["other_versions"],
+                "other_messages": plan["other_messages"],
+                "media": media,
+            }
 
     def delete_chat_exchange(self, conversation_id: str, user_message_id: int) -> list[dict[str, Any]]:
         """Delete a prompt's whole turn — every version of the prompt and every

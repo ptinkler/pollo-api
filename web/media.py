@@ -115,12 +115,90 @@ def _video_seconds(path: str, mtime_ns: int) -> float | None:
         cap.release()
 
 
-def _duration(path: Path, kind: str | None) -> float | None:
+# Reading a length means opening the file with OpenCV, which on a NAS costs
+# ~a tenth of a second each — enough to make building the whole list take the
+# best part of a minute. So lengths are remembered in the database
+# (MediaDuration), the list build only ever uses what's already known, and a
+# request reads a handful of the rest for the page it returns (the length is a
+# caption on a tile, so arriving a request later costs nothing).
+_DURATION_FILL_BUDGET = 48
+_durations: dict[str, tuple[int, float | None]] | None = None
+_durations_lock = threading.Lock()
+
+
+def _durations_map() -> dict[str, tuple[int, float | None]]:
+    """Known lengths: path → (the mtime it was read at, seconds). Read from the
+    database once per process; filling adds to it."""
+    global _durations
+    with _durations_lock:
+        if _durations is None:
+            _durations = get_db().media_durations()
+        return _durations
+
+
+def _duration_known(path: Path) -> bool:
+    """Whether this exact version of the file has been read before — including
+    one whose length couldn't be worked out, so it isn't retried every request."""
+    try:
+        mtime_ns = path.stat().st_mtime_ns
+    except OSError:
+        return False
+    known = _durations_map().get(str(path))
+    return bool(known and known[0] == mtime_ns)
+
+
+def _known_duration(path: Path, kind: str | None) -> float | None:
+    """The length if it's already been read; never opens the file."""
     if kind != "video":
         return None
     try:
-        return _video_seconds(str(path), path.stat().st_mtime_ns)
+        mtime_ns = path.stat().st_mtime_ns
     except OSError:
+        return None
+    known = _durations_map().get(str(path))
+    return known[1] if known and known[0] == mtime_ns else None
+
+
+def _read_duration(path: Path) -> tuple[int, float | None] | None:
+    """Open the file and read its length (the slow part); None if it's gone."""
+    try:
+        mtime_ns = path.stat().st_mtime_ns
+        return mtime_ns, _video_seconds(str(path), mtime_ns)
+    except OSError:
+        return None
+
+
+def _fill_durations(items: list[dict[str, Any]]) -> None:
+    """Read the lengths still missing from *items*, up to a budget, so a page
+    full of videos never seen before can't make one request slow."""
+    budget = _DURATION_FILL_BUDGET
+    read: list[tuple[str, int, float | None]] = []
+    for item in items:
+        if budget <= 0:
+            break
+        if item.get("kind") != "video" or item.get("duration") is not None:
+            continue
+        path = _item_path(item)
+        if path is None or _duration_known(path):
+            continue
+        budget -= 1
+        got = _read_duration(path)
+        if got is None:
+            continue
+        item["duration"] = got[1]
+        read.append((str(path), *got))
+    if not read:
+        return
+    with _durations_lock:
+        if _durations is not None:
+            _durations.update({path: (mtime_ns, seconds) for path, mtime_ns, seconds in read})
+    get_db().set_media_durations(read)
+
+
+def _item_path(item: dict[str, Any]) -> Path | None:
+    try:
+        return resolve(item["id"])[1]
+    except (HTTPException, KeyError):
         return None
 
 
@@ -235,7 +313,7 @@ def _library_items() -> list[dict[str, Any]]:
             "url": f"/api/media/library/{p.name}",
             "thumb_url": _thumb_url(f"lib:{p.name}"),
             "created_at": _mtime_iso(p),
-            "duration": _duration(p, _kind(p)),
+            "duration": _known_duration(p, _kind(p)),
         }
         for p in d.iterdir()
         if p.is_file() and _kind(p)
@@ -258,7 +336,7 @@ def _chat_records(msgs, lib_items, titles: dict[str, str]) -> list[dict[str, Any
         items[file] = {
             "id": f"chat:{conv_id}:{file}",
             "kind": kind,
-            "duration": _duration(_chat_dir(conv_id) / file, kind),
+            "duration": _known_duration(_chat_dir(conv_id) / file, kind),
             "source": "upload" if item.get("source") == "upload" else "generated",
             "origin": "chat",
             "name": file,
@@ -321,7 +399,7 @@ def _chat_orphans(msgs, lib_items, titles: dict[str, str]) -> list[dict[str, Any
                     "url": f"/api/chat/media/{d.name}/{p.name}",
                     "thumb_url": _thumb_url(media_id),
                     "created_at": _mtime_iso(p),
-                    "duration": _duration(p, kind),
+                    "duration": _known_duration(p, kind),
                     "conversation_id": d.name if d.name in titles else None,
                     "conversation_title": titles.get(d.name),
                 }
@@ -406,6 +484,7 @@ def api_list_media(
         items = [i for i in items if _matches(i, kind, source, origin, ql)]
     total = len(items)
     items = items[offset : offset + limit] if limit else items[offset:]
+    _fill_durations(items)
     return {"items": items, "total": total, "offset": offset}
 
 

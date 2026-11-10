@@ -36,9 +36,10 @@ export function tagColor(slug) {
   return `hsl(${Math.round((i * GOLDEN_ANGLE) % 360)} 72% ${i % 2 ? 72 : 62}%)`
 }
 
-// Providers: Pollo / Venice keep their brand-ish hues, OpenRouter is neutral
+// One pastel per provider, defined once in style.css (--p-*) so the picker
+// tags, the filter chips and the usage cards all agree.
 export const PROVIDER_COLOR = {
-  pollo: 'var(--accent2)',
-  venice: '#e8a33d',
-  openrouter: 'var(--text2)',
+  pollo: 'var(--p-pollo)',
+  venice: 'var(--p-venice)',
+  openrouter: 'var(--p-openrouter)',
 }

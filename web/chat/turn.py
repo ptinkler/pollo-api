@@ -655,6 +655,9 @@ class Turn:
             first_frame = None
         params = {
             "duration": duration,
+            # Remembered so reusing a generation's settings puts Length back on
+            # Auto rather than pinning whatever Auto resolved to (never sent).
+            "duration_auto": bool(self.s.video_options.duration_auto),
             "aspect_ratio": aspect_ratio,
             "resolution": resolution,
             "first_frame": first_frame,

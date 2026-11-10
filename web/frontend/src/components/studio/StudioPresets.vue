@@ -25,11 +25,14 @@ async function onPick(e) {
 
 <template>
   <div class="presets">
-    <select :value="activePresetId" class="msel" aria-label="Presets" @change="onPick">
-      <option value="">Presets{{ presets.length ? '' : ' (none saved)' }}</option>
-      <option v-for="p in presets" :key="p.id" :value="p.id">{{ p.name }}</option>
-      <option value="__manage">Manage presets…</option>
-    </select>
+    <label class="ifield">
+      <span class="fcap">Preset</span>
+      <select :value="activePresetId" aria-label="Presets" @change="onPick">
+        <option value="">{{ presets.length ? 'None' : 'None saved yet' }}</option>
+        <option v-for="p in presets" :key="p.id" :value="p.id">{{ p.name }}</option>
+        <option value="__manage">Manage presets…</option>
+      </select>
+    </label>
     <button class="add" title="Save the current models and options as a preset" @click="creating = true">+</button>
     <PresetEditor :open="creating" @close="creating = false" />
   </div>
@@ -41,19 +44,17 @@ async function onPick(e) {
   gap: 6px;
   margin-bottom: 8px;
 }
-.presets .msel {
+.presets .ifield {
   flex: 1;
   min-width: 0;
-  padding: 4px 8px;
-  font-size: 12px;
-  color: var(--smuted);
 }
 .add {
-  width: 28px;
+  width: 30px;
+  flex: 0 0 auto;
   border: 1px solid var(--sborder);
   border-radius: var(--r);
   background: var(--spanel2);
-  color: var(--sfg);
+  color: var(--smuted);
   font-size: 15px;
   line-height: 1;
   cursor: pointer;

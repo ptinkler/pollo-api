@@ -432,3 +432,75 @@ class TestUploadDedupe:
         assert a == b  # identical bytes → one file
         assert client.delete(f"{url}/{a}").json() == {"deleted": True}
         assert client.delete(f"{url}/{a}").json() == {"deleted": False}  # already gone
+
+
+class TestVideoDurations:
+    """Reading a length opens the file with OpenCV, which is slow on a NAS, so
+    building the list never does it: a request fills in the page it returns,
+    and what's been read is kept in the database (MediaDuration)."""
+
+    @pytest.fixture()
+    def clips(self, db, conv):
+        import web.core.config as config
+        import web.media as media_mod
+
+        d = config.ROOT_DIR / "chat" / conv.id
+        for n in range(3):
+            (d / f"clip_{n}.mp4").write_bytes(b"not really a video")
+        db.add_chat_message(
+            conv.id,
+            "assistant",
+            "clips",
+            media=[
+                {
+                    "id": f"v{n}",
+                    "kind": "video",
+                    "source": "generated",
+                    "status": "done",
+                    "file": f"clip_{n}.mp4",
+                    "prompt": "x",
+                }
+                for n in range(3)
+            ],
+        )
+        media_mod._invalidate_list()
+        media_mod._durations = {}
+        return media_mod
+
+    def test_list_build_never_opens_a_video(self, client, clips, monkeypatch):
+        monkeypatch.setattr(clips, "_video_seconds", lambda *a: pytest.fail("the list build read a video header"))
+        # The clips are in the library and get built into the list, but this
+        # page holds no video, so nothing opens one
+        r = client.get("/api/media?kind=image")
+        assert r.status_code == 200 and r.json()["total"] and not any(i["kind"] == "video" for i in r.json()["items"])
+
+    def test_a_page_fills_in_its_own_lengths_and_remembers_them(self, client, clips, monkeypatch):
+        reads = []
+        monkeypatch.setattr(clips, "_video_seconds", lambda path, mtime: reads.append(path) or 12.5)
+        items = {i["id"]: i for i in client.get("/api/media").json()["items"]}
+        clip = next(i for i in items.values() if i["name"] == "clip_0.mp4")
+        assert clip["duration"] == 12.5 and len(reads) == 3
+        # Read once: the next request (and the next process) uses what's stored
+        reads.clear()
+        clips._invalidate_list()
+        clips._durations = None  # as a fresh process would start: nothing in memory
+        again = {i["name"]: i for i in client.get("/api/media").json()["items"]}
+        assert again["clip_0.mp4"]["duration"] == 12.5 and reads == []
+
+    def test_a_re_encoded_file_is_read_again(self, client, clips, db, monkeypatch):
+        import web.core.config as config
+
+        monkeypatch.setattr(clips, "_video_seconds", lambda path, mtime: 4.0)
+        client.get("/api/media")
+        (config.ROOT_DIR / "chat" / next(iter(db.list_conversations())).id / "clip_0.mp4").write_bytes(b"longer now")
+        monkeypatch.setattr(clips, "_video_seconds", lambda path, mtime: 9.0)
+        clips._invalidate_list()
+        items = {i["name"]: i for i in client.get("/api/media").json()["items"]}
+        assert items["clip_0.mp4"]["duration"] == 9.0 and items["clip_1.mp4"]["duration"] == 4.0
+
+    def test_fill_is_capped_so_one_request_cannot_stall(self, client, clips, monkeypatch):
+        monkeypatch.setattr(clips, "_DURATION_FILL_BUDGET", 2)
+        reads = []
+        monkeypatch.setattr(clips, "_video_seconds", lambda path, mtime: reads.append(path) or 3.0)
+        client.get("/api/media")
+        assert len(reads) == 2

@@ -596,11 +596,15 @@ function onKeydown(e) {
 }
 
 .provider-tag.pollo {
-  color: var(--accent2);
+  color: var(--p-pollo);
 }
 
 .provider-tag.venice {
-  color: #e8a33d;
+  color: var(--p-venice);
+}
+
+.provider-tag.openrouter {
+  color: var(--p-openrouter);
 }
 
 /* Provider colour on the closed-picker tag reused by the row provider label */
@@ -617,12 +621,16 @@ function onKeydown(e) {
   line-height: 1.5;
 }
 .row-provider.pollo {
-  color: var(--accent2);
-  border-color: color-mix(in srgb, var(--accent2) 45%, transparent);
+  color: var(--p-pollo);
+  border-color: color-mix(in srgb, var(--p-pollo) 45%, transparent);
 }
 .row-provider.venice {
-  color: #e8a33d;
-  border-color: color-mix(in srgb, #e8a33d 45%, transparent);
+  color: var(--p-venice);
+  border-color: color-mix(in srgb, var(--p-venice) 45%, transparent);
+}
+.row-provider.openrouter {
+  color: var(--p-openrouter);
+  border-color: color-mix(in srgb, var(--p-openrouter) 45%, transparent);
 }
 
 .tab-hint {

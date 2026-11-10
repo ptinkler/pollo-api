@@ -99,6 +99,7 @@ def upload_file(filepath: Path, prefs: dict | None = None) -> str:
             return cached
         try:
             url = _dispatch(host, filepath, prefs)
+            _verify_served(host, url, filepath)
             _store_url(key, url, expiry)
             print(f"[Upload] {host} succeeded: {url}")
             return url
@@ -106,6 +107,34 @@ def upload_file(filepath: Path, prefs: dict | None = None) -> str:
             print(f"[Upload] {host} failed ({exc}), trying next host…")
             errors.append(f"{host}: {exc}")
     raise ValueError("All upload hosts failed — " + "; ".join(errors))
+
+
+# A host can accept the upload and still not serve the file to a plain HTTP
+# client — a temp host hands an interstitial page to anything that doesn't look
+# like a browser, say. The provider then fetches HTML where a video should be
+# and rejects it ("Invalid video_url") *after* charging for the job, so the URL
+# is checked here instead, and a host that doesn't serve it falls through to
+# the backup. Self-hosting is skipped: this instance can reach itself whatever
+# the outside world sees.
+_VERIFY_HOSTS = ("litterbox", "tmpfiles")
+_VERIFY_TIMEOUT = (8, 15)
+
+
+def _verify_served(host: str, url: str, filepath: Path) -> None:
+    if host not in _VERIFY_HOSTS:
+        return
+    try:
+        resp = requests.get(url, stream=True, timeout=_VERIFY_TIMEOUT, headers={"Range": "bytes=0-0"})
+        content_type = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+        resp.close()
+    except requests.RequestException as exc:
+        raise ValueError(f"hosted file isn't reachable ({type(exc).__name__})") from exc
+    if resp.status_code not in (200, 206):
+        raise ValueError(f"hosted file answered HTTP {resp.status_code}")
+    # Only an HTML answer is treated as wrong: hosts serve files as all sorts of
+    # octet-stream/text types, and rejecting those would break working uploads.
+    if content_type in ("text/html", "application/xhtml+xml"):
+        raise ValueError(f"hosted file served a web page, not {filepath.suffix.lstrip('.') or 'the file'}")
 
 
 def _dispatch(host: str, filepath: Path, prefs: dict) -> str:

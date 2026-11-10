@@ -31,69 +31,62 @@ const voiceLabel = v => [v.voiceName, v.language, v.gender].filter(Boolean).join
     <div class="ilabel">Audio options</div>
 
     <div v-if="has('voice')" class="orow">
-      <select v-model="audioOpts.voice" class="msel" title="Voice">
-        <option value="">Voice: pick one…</option>
-        <option v-for="v in voices" :key="v.voiceId" :value="v.voiceId">{{ voiceLabel(v) }}</option>
-      </select>
+      <label class="ifield">
+        <span class="fcap">Voice</span>
+        <select v-model="audioOpts.voice">
+          <option value="">Pick one…</option>
+          <option v-for="v in voices" :key="v.voiceId" :value="v.voiceId">{{ voiceLabel(v) }}</option>
+        </select>
+      </label>
     </div>
     <div v-if="voicesError" class="aerr">{{ voicesError }}</div>
 
     <div v-if="has('tuning')" class="orow">
-      <input
-        v-model.number="audioOpts.speed"
-        class="msel"
-        type="number"
-        min="0.5"
-        max="2"
-        step="0.1"
-        placeholder="Speed ×"
-        title="Speed (0.5–2×)"
-      />
-      <input
-        v-model.number="audioOpts.volume"
-        class="msel"
-        type="number"
-        min="0.5"
-        max="2"
-        step="0.1"
-        placeholder="Volume ×"
-        title="Volume (0.5–2×)"
-      />
-      <input
-        v-model.number="audioOpts.pitch"
-        class="msel"
-        type="number"
-        min="-12"
-        max="12"
-        step="1"
-        placeholder="Pitch ±"
-        title="Pitch shift in semitones (−12…12)"
-      />
+      <label class="ifield" title="Speed (0.5–2×)">
+        <span class="fcap">Speed</span>
+        <input v-model.number="audioOpts.speed" type="number" min="0.5" max="2" step="0.1" placeholder="1×" />
+      </label>
+      <label class="ifield" title="Volume (0.5–2×)">
+        <span class="fcap">Volume</span>
+        <input v-model.number="audioOpts.volume" type="number" min="0.5" max="2" step="0.1" placeholder="1×" />
+      </label>
+      <label class="ifield" title="Pitch shift in semitones (−12…12)">
+        <span class="fcap">Pitch</span>
+        <input v-model.number="audioOpts.pitch" type="number" min="-12" max="12" step="1" placeholder="0" />
+      </label>
     </div>
 
     <template v-if="has('instrumental')">
       <div class="orow">
         <label class="audio"><input v-model="audioOpts.instrumental" type="checkbox" /> Instrumental</label>
-        <select v-if="!audioOpts.instrumental" v-model="audioOpts.vocal_gender" class="msel" title="Preferred vocals">
-          <option value="">Vocals: any</option>
-          <option value="f">Female</option>
-          <option value="m">Male</option>
-        </select>
+        <label v-if="!audioOpts.instrumental" class="ifield">
+          <span class="fcap">Vocals</span>
+          <select v-model="audioOpts.vocal_gender">
+            <option value="">Any</option>
+            <option value="f">Female</option>
+            <option value="m">Male</option>
+          </select>
+        </label>
       </div>
       <div v-if="has('lyrics')" class="orow">
-        <input v-model="audioOpts.style" class="msel" placeholder="Style (with title = lyrics mode)" />
-        <input v-model="audioOpts.title" class="msel" placeholder="Title" maxlength="80" />
+        <label class="ifield" title="A style and a title together switch the model into lyrics mode">
+          <span class="fcap">Style</span>
+          <input v-model="audioOpts.style" placeholder="e.g. synthwave" />
+        </label>
+        <label class="ifield">
+          <span class="fcap">Title</span>
+          <input v-model="audioOpts.title" placeholder="Untitled" maxlength="80" />
+        </label>
       </div>
       <div class="orow">
-        <input v-model="audioOpts.negative_prompt" class="msel" placeholder="Avoid (styles to exclude)" />
-        <input
-          v-if="has('duration')"
-          v-model.number="audioOpts.duration"
-          class="msel"
-          type="number"
-          min="1"
-          placeholder="Seconds"
-        />
+        <label class="ifield">
+          <span class="fcap">Avoid</span>
+          <input v-model="audioOpts.negative_prompt" placeholder="Styles to exclude" />
+        </label>
+        <label v-if="has('duration')" class="ifield">
+          <span class="fcap">Length</span>
+          <input v-model.number="audioOpts.duration" type="number" min="1" placeholder="Seconds" />
+        </label>
       </div>
     </template>
   </div>
