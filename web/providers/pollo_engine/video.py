@@ -1,10 +1,10 @@
-"""V1 video API bodies: the generic family plus Kling, extend, edit, upscale, lipsync and motion."""
+"""Video API bodies: the generic family plus Kling, extend, edit, upscale, lipsync and motion."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from web.core.config import POLLO_API_V1_BASE
+from web.core.config import POLLO_GENERATION_BASE
 
 from ._shared import _aspect_ratio, _valid_length
 
@@ -42,7 +42,7 @@ _V1_VIDEO_DEFAULTS: dict[str, Any] = {
 
 # Kling models share these base values (layered under each Kling row).
 _KLING_BASE: dict[str, Any] = {
-    "V1_PROVIDER": "kling-ai",
+    "PROVIDER": "kling-ai",
     "VALID_LENGTHS": (5, 10),
     "VALID_RATIOS": ("16:9", "9:16", "1:1"),
     "DEFAULT_RESOLUTION": "",
@@ -51,11 +51,11 @@ _KLING_BASE: dict[str, Any] = {
 _UPSCALE_SCALES = ("original", "2x", "4x", "hd", "4K")
 _UPSCALE_MODES = ("standard", "face", "denoise", "sharpen", "anime")
 
-# model_id -> overrides of the defaults above (plus V1_PROVIDER/V1_MODEL)
-V1_VIDEO: dict[str, dict[str, Any]] = {
-    "pollo20v1": {
-        "V1_PROVIDER": "pollo-ai",
-        "V1_MODEL": "pollo-v2",
+# model_id -> overrides of the defaults above (plus PROVIDER/MODEL)
+VIDEO_MODELS: dict[str, dict[str, Any]] = {
+    "pollo20": {
+        "PROVIDER": "pollo-ai",
+        "MODEL": "pollo-v2",
         "VALID_LENGTHS": (5, 10),
         "VALID_RESOLUTIONS": ("480p", "720p", "1080p"),
         "VALID_RATIOS": ("16:9", "9:16", "4:3", "3:4", "1:1"),
@@ -68,9 +68,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "REF_VALID_LENGTHS": (1, 2, 3, 4, 5, 6, 7, 8),
         "REF_VALID_RESOLUTIONS": ("540p", "720p", "1080p"),
     },
-    "pollo25v1": {
-        "V1_PROVIDER": "pollo-ai",
-        "V1_MODEL": "pollo-v2-5",
+    "pollo25": {
+        "PROVIDER": "pollo-ai",
+        "MODEL": "pollo-v2-5",
         "VALID_LENGTHS": (4, 5, 6, 7, 8, 9, 10, 11, 12, 15),
         "VALID_RESOLUTIONS": ("720p", "1080p"),
         "VALID_RATIOS": ("16:9", "9:16"),
@@ -79,9 +79,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "HAS_MODE": True,
         "MODE_DEFAULT": "basic",
     },
-    "pollo30v1": {
-        "V1_PROVIDER": "pollo-ai",
-        "V1_MODEL": "pollo-v3-0",
+    "pollo30": {
+        "PROVIDER": "pollo-ai",
+        "MODEL": "pollo-v3-0",
         "VALID_LENGTHS": (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
         "VALID_RESOLUTIONS": ("480p", "720p", "1080p", "4K"),
         "VALID_RATIOS": ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"),
@@ -96,9 +96,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "MAX_REFS": 13,
         "MODE_PRO_RESOLUTIONS": ("1080p", "4K"),
     },
-    "pollo30fastv1": {
-        "V1_PROVIDER": "pollo-ai",
-        "V1_MODEL": "pollo-v3-0-fast",
+    "pollo30fast": {
+        "PROVIDER": "pollo-ai",
+        "MODEL": "pollo-v3-0-fast",
         "VALID_LENGTHS": (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
         "VALID_RESOLUTIONS": ("480p", "720p"),
         "VALID_RATIOS": ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9"),
@@ -112,9 +112,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "MAX_REFS": 13,
         "REF_HAS_SEED": False,
     },
-    "seedance20v1": {
-        "V1_PROVIDER": "bytedance",
-        "V1_MODEL": "seedance-2-0",
+    "seedance20": {
+        "PROVIDER": "bytedance",
+        "MODEL": "seedance-2-0",
         "VALID_LENGTHS": (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
         "VALID_RESOLUTIONS": ("480p", "720p", "1080p", "4K"),
         "VALID_RATIOS": ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9"),
@@ -127,9 +127,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "HAS_ASPECT_RATIO_ON_IMAGE": True,
         "MAX_REFS": 15,
     },
-    "seedance20fastv1": {
-        "V1_PROVIDER": "bytedance",
-        "V1_MODEL": "seedance-2-0-fast",
+    "seedance20fast": {
+        "PROVIDER": "bytedance",
+        "MODEL": "seedance-2-0-fast",
         "VALID_LENGTHS": (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
         "VALID_RESOLUTIONS": ("480p", "720p"),
         "VALID_RATIOS": ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9"),
@@ -142,9 +142,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "HAS_ASPECT_RATIO_ON_IMAGE": True,
         "MAX_REFS": 15,
     },
-    "seedance20miniv1": {
-        "V1_PROVIDER": "bytedance",
-        "V1_MODEL": "seedance-2-0-mini",
+    "seedance20mini": {
+        "PROVIDER": "bytedance",
+        "MODEL": "seedance-2-0-mini",
         "VALID_LENGTHS": (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
         "VALID_RESOLUTIONS": ("480p", "720p"),
         "VALID_RATIOS": ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9"),
@@ -157,9 +157,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "HAS_ASPECT_RATIO_ON_IMAGE": True,
         "MAX_REFS": 15,
     },
-    "seedance25v1": {
-        "V1_PROVIDER": "bytedance",
-        "V1_MODEL": "seedance-2-5",
+    "seedance25": {
+        "PROVIDER": "bytedance",
+        "MODEL": "seedance-2-5",
         "VALID_LENGTHS": tuple(range(4, 31)),
         "VALID_RESOLUTIONS": ("480p", "720p", "1080p"),
         "VALID_RATIOS": ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"),
@@ -172,9 +172,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "MAX_REFS": 50,
         "DEFAULT_RATIO": "adaptive",
     },
-    "seedance25draftv1": {
-        "V1_PROVIDER": "bytedance",
-        "V1_MODEL": "seedance-2-5-draft",
+    "seedance25draft": {
+        "PROVIDER": "bytedance",
+        "MODEL": "seedance-2-5-draft",
         "VALID_LENGTHS": tuple(range(4, 31)),
         "VALID_RESOLUTIONS": ("480p",),
         "VALID_RATIOS": ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"),
@@ -187,9 +187,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "DEFAULT_RATIO": "adaptive",
         "FORCE_RESOLUTION": "480p",
     },
-    "minimaxh3v1": {
-        "V1_PROVIDER": "minimax",
-        "V1_MODEL": "minimax-h3",
+    "minimaxh3": {
+        "PROVIDER": "minimax",
+        "MODEL": "minimax-h3",
         "VALID_LENGTHS": (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
         "VALID_RESOLUTIONS": ("480p", "768p", "2K"),
         "VALID_RATIOS": ("auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"),
@@ -199,8 +199,8 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "MAX_REFS": 15,
     },
     "minimaxh3max": {
-        "V1_PROVIDER": "minimax",
-        "V1_MODEL": "minimax-h3-max",
+        "PROVIDER": "minimax",
+        "MODEL": "minimax-h3-max",
         "VALID_LENGTHS": (5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
         "VALID_RESOLUTIONS": ("480p", "768p", "1080p"),
         "VALID_RATIOS": ("auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"),
@@ -209,9 +209,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "HAS_REFS": True,
         "MAX_REFS": 12,
     },
-    "wan27v1": {
-        "V1_PROVIDER": "alibaba",
-        "V1_MODEL": "wan-v2-7",
+    "wan27": {
+        "PROVIDER": "alibaba",
+        "MODEL": "wan-v2-7",
         "VALID_LENGTHS": tuple(range(2, 16)),
         "VALID_RESOLUTIONS": ("720p", "1080p"),
         "VALID_RATIOS": ("16:9", "1:1", "4:3", "3:4", "9:16"),
@@ -222,9 +222,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "HAS_NEGATIVE_PROMPT_AUDIO": True,
         "MAX_REFS": 10,
     },
-    "wan30v1": {
-        "V1_PROVIDER": "alibaba",
-        "V1_MODEL": "wan-v3-0",
+    "wan30": {
+        "PROVIDER": "alibaba",
+        "MODEL": "wan-v3-0",
         "VALID_LENGTHS": tuple(range(2, 31)),
         "VALID_RESOLUTIONS": ("480p", "720p", "1080p"),
         "VALID_RATIOS": ("adaptive", "16:9", "9:16", "4:3", "3:4", "1:1"),
@@ -237,9 +237,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "MAX_REFS": 22,
         "DEFAULT_RATIO": "adaptive",
     },
-    "wan30primev1": {
-        "V1_PROVIDER": "alibaba",
-        "V1_MODEL": "wan-v3-0-prime",
+    "wan30prime": {
+        "PROVIDER": "alibaba",
+        "MODEL": "wan-v3-0-prime",
         "VALID_LENGTHS": tuple(range(2, 31)),
         "VALID_RESOLUTIONS": ("480p", "720p", "1080p"),
         "VALID_RATIOS": ("adaptive", "16:9", "9:16", "4:3", "3:4", "1:1"),
@@ -253,26 +253,26 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "DEFAULT_RATIO": "adaptive",
     },
     # --- Newer frontier models (added 2026-11) ---
-    "sora2v1": {
-        "V1_PROVIDER": "openai",
-        "V1_MODEL": "sora-2",
+    "sora2": {
+        "PROVIDER": "openai",
+        "MODEL": "sora-2",
         "VALID_LENGTHS": (4, 8, 12, 16, 20),
         "VALID_RESOLUTIONS": (),
         "VALID_RATIOS": ("16:9", "9:16"),
         "DEFAULT_LENGTH": 8,
     },
-    "sora2prov1": {
-        "V1_PROVIDER": "openai",
-        "V1_MODEL": "sora-2-pro",
+    "sora2pro": {
+        "PROVIDER": "openai",
+        "MODEL": "sora-2-pro",
         "VALID_LENGTHS": (4, 8, 12, 16, 20),
         "VALID_RESOLUTIONS": ("720p", "1024p", "1080p"),
         "VALID_RATIOS": ("16:9", "9:16"),
         "DEFAULT_RESOLUTION": "720p",
         "DEFAULT_LENGTH": 8,
     },
-    "veo31v1": {
-        "V1_PROVIDER": "google",
-        "V1_MODEL": "veo-3-1",
+    "veo31": {
+        "PROVIDER": "google",
+        "MODEL": "veo-3-1",
         "VALID_LENGTHS": (8,),
         "VALID_RESOLUTIONS": ("720p", "1080p"),
         "VALID_RATIOS": ("16:9", "9:16"),
@@ -281,9 +281,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "HAS_GENERATE_AUDIO": True,
         "HAS_IMAGE_TAIL": True,
     },
-    "veo31fastv1": {
-        "V1_PROVIDER": "google",
-        "V1_MODEL": "veo-3-1-fast",
+    "veo31fast": {
+        "PROVIDER": "google",
+        "MODEL": "veo-3-1-fast",
         "VALID_LENGTHS": (4, 6, 8),
         "VALID_RESOLUTIONS": ("720p", "1080p", "4K"),
         "VALID_RATIOS": ("16:9", "9:16"),
@@ -292,9 +292,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "HAS_GENERATE_AUDIO": True,
         "HAS_IMAGE_TAIL": True,
     },
-    "veo31litev1": {
-        "V1_PROVIDER": "google",
-        "V1_MODEL": "veo3-1-lite",
+    "veo31lite": {
+        "PROVIDER": "google",
+        "MODEL": "veo3-1-lite",
         "VALID_LENGTHS": (4, 6, 8),
         "VALID_RESOLUTIONS": ("720p", "1080p"),
         "VALID_RATIOS": ("16:9", "9:16"),
@@ -302,27 +302,27 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "DEFAULT_LENGTH": 8,
         "HAS_IMAGE_TAIL": True,
     },
-    "hailuo23v1": {
-        "V1_PROVIDER": "minimax",
-        "V1_MODEL": "hailuo-2-3",
+    "hailuo23": {
+        "PROVIDER": "minimax",
+        "MODEL": "hailuo-2-3",
         "VALID_LENGTHS": (6, 10),
         "VALID_RESOLUTIONS": ("768p", "1080p"),
         "VALID_RATIOS": (),
         "DEFAULT_RESOLUTION": "768p",
         "DEFAULT_LENGTH": 6,
     },
-    "hailuo03v1": {
-        "V1_PROVIDER": "minimax",
-        "V1_MODEL": "hailuo-03",
+    "hailuo03": {
+        "PROVIDER": "minimax",
+        "MODEL": "hailuo-03",
         "VALID_LENGTHS": tuple(range(4, 16)),
         "VALID_RESOLUTIONS": ("480p", "768p", "2K"),
         "VALID_RATIOS": ("auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"),
         "DEFAULT_RESOLUTION": "768p",
         "HAS_IMAGE_TAIL": True,
     },
-    "pollo26v1": {
-        "V1_PROVIDER": "pollo-ai",
-        "V1_MODEL": "pollo-v2-6",
+    "pollo26": {
+        "PROVIDER": "pollo-ai",
+        "MODEL": "pollo-v2-6",
         "VALID_LENGTHS": tuple(range(4, 16)),
         "VALID_RESOLUTIONS": ("480p", "720p", "1080p", "4K"),
         "VALID_RATIOS": ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9"),
@@ -332,9 +332,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "HAS_SEED": True,
         "HAS_IMAGE_TAIL": True,
     },
-    "pollo26fastv1": {
-        "V1_PROVIDER": "pollo-ai",
-        "V1_MODEL": "pollo-v2-6-fast",
+    "pollo26fast": {
+        "PROVIDER": "pollo-ai",
+        "MODEL": "pollo-v2-6-fast",
         "VALID_LENGTHS": tuple(range(4, 16)),
         "VALID_RESOLUTIONS": ("480p", "720p"),
         "VALID_RATIOS": ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9"),
@@ -344,9 +344,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "HAS_SEED": True,
         "HAS_IMAGE_TAIL": True,
     },
-    "wan25v1": {
-        "V1_PROVIDER": "alibaba",
-        "V1_MODEL": "wan-v2-5",
+    "wan25": {
+        "PROVIDER": "alibaba",
+        "MODEL": "wan-v2-5",
         "VALID_LENGTHS": (5, 10),
         "VALID_RESOLUTIONS": ("480p", "720p", "1080p"),
         "VALID_RATIOS": ("16:9", "1:1", "4:3", "3:4", "9:16"),
@@ -354,9 +354,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "HAS_GENERATE_AUDIO": True,
         "HAS_SEED": True,
     },
-    "wan26v1": {
-        "V1_PROVIDER": "alibaba",
-        "V1_MODEL": "wan-v2-6",
+    "wan26": {
+        "PROVIDER": "alibaba",
+        "MODEL": "wan-v2-6",
         "VALID_LENGTHS": (5, 10),
         "VALID_RESOLUTIONS": ("720p", "1080p"),
         "VALID_RATIOS": ("1:1", "4:3", "3:4", "16:9", "9:16"),
@@ -364,9 +364,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "HAS_GENERATE_AUDIO": True,
         "HAS_SEED": True,
     },
-    "grokvideo15v1": {
-        "V1_PROVIDER": "xai",
-        "V1_MODEL": "grok-imagine-video-1-5",
+    "grokvideo15": {
+        "PROVIDER": "xai",
+        "MODEL": "grok-imagine-video-1-5",
         "VALID_LENGTHS": tuple(range(1, 16)),
         "VALID_RESOLUTIONS": ("480p", "720p", "1080p"),
         "VALID_RATIOS": (),
@@ -374,16 +374,16 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
     },
     # Kling video: reuses the generic payload, then remaps the resolution
     # tier to a mode and applies end-frame rules
-    "klingv21v1": {
-        "V1_MODEL": "kling-v2-1",
+    "klingv21": {
+        "MODEL": "kling-v2-1",
         "VALID_RESOLUTIONS": ("std", "pro"),
         "RESOLUTION_IS_MODE": True,
         "TEXT_TO_VIDEO": False,
         "builder": "kling",
     },
-    "klingv21masterv1": {"V1_MODEL": "kling-v2-1-master", "builder": "kling"},
-    "klingv25turbov1": {
-        "V1_MODEL": "kling-v2-5-turbo",
+    "klingv21master": {"MODEL": "kling-v2-1-master", "builder": "kling"},
+    "klingv25turbo": {
+        "MODEL": "kling-v2-5-turbo",
         "VALID_RESOLUTIONS": ("std", "pro"),
         "HAS_IMAGE_TAIL": True,
         "RESOLUTION_IS_MODE": True,
@@ -391,16 +391,16 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "IMAGE_TAIL_NEEDS_PRO": True,
         "builder": "kling",
     },
-    "klingvideoo1v1": {"V1_MODEL": "kling-video-o1", "HAS_IMAGE_TAIL": True, "builder": "kling"},
-    "klingv26v1": {
-        "V1_MODEL": "kling-v2-6",
+    "klingvideoo1": {"MODEL": "kling-video-o1", "HAS_IMAGE_TAIL": True, "builder": "kling"},
+    "klingv26": {
+        "MODEL": "kling-v2-6",
         "HAS_IMAGE_TAIL": True,
         "HAS_GENERATE_AUDIO": True,
         "NO_AUDIO_WITH_IMAGE_TAIL": True,
         "builder": "kling",
     },
-    "klingv3v1": {
-        "V1_MODEL": "kling-v3",
+    "klingv3": {
+        "MODEL": "kling-v3",
         "VALID_LENGTHS": tuple(range(3, 16)),
         "VALID_RESOLUTIONS": ("std", "pro", "4K"),
         "HAS_IMAGE_TAIL": True,
@@ -408,14 +408,14 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "RESOLUTION_IS_MODE": True,
         "builder": "kling",
     },
-    "klingv3turbov1": {
-        "V1_MODEL": "kling-v3-turbo",
+    "klingv3turbo": {
+        "MODEL": "kling-v3-turbo",
         "VALID_LENGTHS": tuple(range(3, 16)),
         "VALID_RESOLUTIONS": ("720p", "1080p"),
         "builder": "kling",
     },
-    "klingv3omniv1": {
-        "V1_MODEL": "kling-v3-omni",
+    "klingv3omni": {
+        "MODEL": "kling-v3-omni",
         "VALID_LENGTHS": tuple(range(3, 16)),
         "VALID_RESOLUTIONS": ("std", "pro", "4K"),
         "HAS_IMAGE_TAIL": True,
@@ -426,8 +426,8 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "MAX_REFS": 7,
         "builder": "kling",
     },
-    "klingv4v1": {
-        "V1_MODEL": "kling-v4",
+    "klingv4": {
+        "MODEL": "kling-v4",
         "VALID_LENGTHS": tuple(range(3, 31)),
         "VALID_RESOLUTIONS": ("720p", "1080p"),  # real resolutions, not std/pro tiers
         "VALID_RATIOS": ("21:9", "16:9", "9:16", "1:1", "adaptive"),
@@ -437,8 +437,8 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "MAX_REFS": 15,
         "builder": "kling",
     },
-    "klingv4flashv1": {
-        "V1_MODEL": "kling-v4-flash",
+    "klingv4flash": {
+        "MODEL": "kling-v4-flash",
         "VALID_LENGTHS": tuple(range(3, 21)),
         "VALID_RESOLUTIONS": ("720p",),
         "VALID_RATIOS": ("21:9", "16:9", "9:16", "1:1", "adaptive"),
@@ -449,9 +449,9 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "MAX_REFS": 15,
         "builder": "kling",
     },
-    "seedance25extendv1": {
-        "V1_PROVIDER": "bytedance",
-        "V1_MODEL": "seedance-2-5",
+    "seedance25extend": {
+        "PROVIDER": "bytedance",
+        "MODEL": "seedance-2-5",
         "endpoint": "video-extend",
         "VALID_LENGTHS": tuple(range(4, 31)),
         "VALID_RESOLUTIONS": ("480p", "720p", "1080p"),
@@ -464,27 +464,27 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
     # animating an image. All take the `_extend_payload` shape (video + prompt +
     # duration + resolution, plus generateAudio/seed where offered). Sora 2's and
     # Runway's extend endpoints use a different request shape and are left out.
-    "pollov2extenderv1": {
-        "V1_PROVIDER": "pollo-ai",
-        "V1_MODEL": "pollo-v2-extender",
+    "pollov2extender": {
+        "PROVIDER": "pollo-ai",
+        "MODEL": "pollo-v2-extender",
         "endpoint": "video-extend",
         "VALID_LENGTHS": (4, 5, 6, 7, 8, 9, 10),
         "VALID_RESOLUTIONS": ("540p", "720p", "1080p"),
         "DEFAULT_RESOLUTION": "720p",
         "builder": "extend",
     },
-    "geminiomniextendv1": {
-        "V1_PROVIDER": "google",
-        "V1_MODEL": "gemini-omni-1-1-flash",
+    "geminiomniextend": {
+        "PROVIDER": "google",
+        "MODEL": "gemini-omni-1-1-flash",
         "endpoint": "video-extend",
         "VALID_LENGTHS": (4, 5, 6, 7, 8, 9, 10),
         "VALID_RESOLUTIONS": ("360p", "720p", "1080p", "4K"),
         "DEFAULT_RESOLUTION": "720p",
         "builder": "extend",
     },
-    "flux3extendv1": {
-        "V1_PROVIDER": "flux",
-        "V1_MODEL": "flux-3",
+    "flux3extend": {
+        "PROVIDER": "flux",
+        "MODEL": "flux-3",
         "endpoint": "video-extend",
         "VALID_LENGTHS": (4, 5, 6, 7, 8, 9, 10),
         "VALID_RESOLUTIONS": ("720p", "1080p"),
@@ -492,18 +492,18 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
         "HAS_GENERATE_AUDIO": True,
         "builder": "extend",
     },
-    "viduq2proextendv1": {
-        "V1_PROVIDER": "vidu",
-        "V1_MODEL": "viduq2-pro",
+    "viduq2proextend": {
+        "PROVIDER": "vidu",
+        "MODEL": "viduq2-pro",
         "endpoint": "video-extend",
         "VALID_LENGTHS": (4, 5, 6, 7, 8, 9, 10),
         "VALID_RESOLUTIONS": ("540p", "720p", "1080p"),
         "DEFAULT_RESOLUTION": "720p",
         "builder": "extend",
     },
-    "viduq2turboextendv1": {
-        "V1_PROVIDER": "vidu",
-        "V1_MODEL": "viduq2-turbo",
+    "viduq2turboextend": {
+        "PROVIDER": "vidu",
+        "MODEL": "viduq2-turbo",
         "endpoint": "video-extend",
         "VALID_LENGTHS": (4, 5, 6, 7, 8, 9, 10),
         "VALID_RESOLUTIONS": ("540p", "720p", "1080p"),
@@ -514,63 +514,63 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
     # instruction (`video` and `prompt` are both required). Minimal shape —
     # {video, prompt} plus a resolution where the model offers one; images/seed/
     # audio refinements are left for a later pass.
-    "wanedit27v1": {
-        "V1_PROVIDER": "alibaba",
-        "V1_MODEL": "wan-v2-7",
+    "wanedit27": {
+        "PROVIDER": "alibaba",
+        "MODEL": "wan-v2-7",
         "endpoint": "video-edit",
         "VALID_RESOLUTIONS": ("720p", "1080p"),
         "DEFAULT_RESOLUTION": "720p",
         "builder": "edit",
     },
-    "wanedit30v1": {
-        "V1_PROVIDER": "alibaba",
-        "V1_MODEL": "wan-v3-0",
+    "wanedit30": {
+        "PROVIDER": "alibaba",
+        "MODEL": "wan-v3-0",
         "endpoint": "video-edit",
         "VALID_RESOLUTIONS": ("480p", "720p", "1080p"),
         "DEFAULT_RESOLUTION": "720p",
         "builder": "edit",
     },
-    "wanedit30primev1": {
-        "V1_PROVIDER": "alibaba",
-        "V1_MODEL": "wan-v3-0-prime",
+    "wanedit30prime": {
+        "PROVIDER": "alibaba",
+        "MODEL": "wan-v3-0-prime",
         "endpoint": "video-edit",
         "VALID_RESOLUTIONS": ("480p", "720p", "1080p"),
         "DEFAULT_RESOLUTION": "720p",
         "builder": "edit",
     },
-    "geminiomnieditv1": {
-        "V1_PROVIDER": "google",
-        "V1_MODEL": "gemini-omni-1-1-flash",
+    "geminiomniedit": {
+        "PROVIDER": "google",
+        "MODEL": "gemini-omni-1-1-flash",
         "endpoint": "video-edit",
         "VALID_RESOLUTIONS": ("360p", "720p", "1080p", "4K"),
         "DEFAULT_RESOLUTION": "720p",
         "builder": "edit",
     },
-    "happyhorse10v1": {
-        "V1_PROVIDER": "alibaba",
-        "V1_MODEL": "happyhorse-1-0",
+    "happyhorse10": {
+        "PROVIDER": "alibaba",
+        "MODEL": "happyhorse-1-0",
         "endpoint": "video-edit",
         "VALID_RESOLUTIONS": ("720p", "1080p"),
         "DEFAULT_RESOLUTION": "720p",
         "builder": "edit",
     },
-    "viduq2proeditv1": {
-        "V1_PROVIDER": "vidu",
-        "V1_MODEL": "viduq2-pro",
+    "viduq2proedit": {
+        "PROVIDER": "vidu",
+        "MODEL": "viduq2-pro",
         "endpoint": "video-edit",
         "VALID_RESOLUTIONS": ("540p", "720p", "1080p"),
         "DEFAULT_RESOLUTION": "720p",
         "builder": "edit",
     },
-    "runwayalepheditv1": {
-        "V1_PROVIDER": "runway",
-        "V1_MODEL": "runway-gen-4-aleph",
+    "runwayalephedit": {
+        "PROVIDER": "runway",
+        "MODEL": "runway-gen-4-aleph",
         "endpoint": "video-edit",
         "builder": "edit",
     },
-    "wananimatemixv1": {
-        "V1_PROVIDER": "alibaba",
-        "V1_MODEL": "wan-2-2-animate-mix",
+    "wananimatemix": {
+        "PROVIDER": "alibaba",
+        "MODEL": "wan-2-2-animate-mix",
         "endpoint": "motion",
         "HAS_MODE": True,
         "DEFAULT_MODE": "std",
@@ -579,61 +579,61 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
     # Motion / act (added 2026-11): a reference image animated by the motion of a
     # source video. Wan 2.2 Animate Mix is one of them;
     # the MODEL_INFO "type": "motion" sets the tag and submit routing.
-    "wananimatemovev1": {
-        "V1_PROVIDER": "alibaba",
-        "V1_MODEL": "wan-2-2-animate-move",
+    "wananimatemove": {
+        "PROVIDER": "alibaba",
+        "MODEL": "wan-2-2-animate-move",
         "endpoint": "motion",
         "HAS_MODE": True,
         "DEFAULT_MODE": "std",
         "builder": "motion",
     },
-    "klingmotion26v1": {
-        "V1_PROVIDER": "kling-ai",
-        "V1_MODEL": "kling-v2-6",
+    "klingmotion26": {
+        "PROVIDER": "kling-ai",
+        "MODEL": "kling-v2-6",
         "endpoint": "motion",
         "HAS_MODE": True,
         "DEFAULT_MODE": "std",
         "builder": "motion",
     },
-    "klingmotion3v1": {
-        "V1_PROVIDER": "kling-ai",
-        "V1_MODEL": "kling-v3",
+    "klingmotion3": {
+        "PROVIDER": "kling-ai",
+        "MODEL": "kling-v3",
         "endpoint": "motion",
         "HAS_MODE": True,
         "DEFAULT_MODE": "std",
         "builder": "motion",
     },
-    "actionimitationv1": {
-        "V1_PROVIDER": "pollo-ai",
-        "V1_MODEL": "action-imitation",
+    "actionimitation": {
+        "PROVIDER": "pollo-ai",
+        "MODEL": "action-imitation",
         "endpoint": "motion",
         "builder": "motion",
     },
-    "actionimitationv2v1": {
-        "V1_PROVIDER": "pollo-ai",
-        "V1_MODEL": "action-imitation-v2",
+    "actionimitationv2": {
+        "PROVIDER": "pollo-ai",
+        "MODEL": "action-imitation-v2",
         "endpoint": "motion",
         "builder": "motion",
     },
-    "runwayacttwov1": {
-        "V1_PROVIDER": "runway",
-        "V1_MODEL": "runway-act-two",
+    "runwayacttwo": {
+        "PROVIDER": "runway",
+        "MODEL": "runway-act-two",
         "endpoint": "motion",
         "builder": "motion",
     },
     # Video upscale (added 2026-11): {video, scale (+mode)}. The resolution
     # picker carries Pollo's `scale`; Pollo's own endpoint has no provider/model
     # segment, so it sets V1_URL.
-    "pollovideoupscalev1": {
-        "V1_URL": f"{POLLO_API_V1_BASE}/upscale",
+    "pollovideoupscale": {
+        "V1_URL": f"{POLLO_GENERATION_BASE}/upscale",
         "VALID_RESOLUTIONS": _UPSCALE_SCALES,
         "DEFAULT_RESOLUTION": "2x",
         "MODES": _UPSCALE_MODES,
         "builder": "upscale",
     },
-    "topazvideoupscalev1": {
-        "V1_PROVIDER": "topaz",
-        "V1_MODEL": "topaz-video-upscale",
+    "topazvideoupscale": {
+        "PROVIDER": "topaz",
+        "MODEL": "topaz-video-upscale",
         "endpoint": "upscale",
         "VALID_RESOLUTIONS": _UPSCALE_SCALES,
         "DEFAULT_RESOLUTION": "2x",
@@ -642,49 +642,49 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
     },
     # Video tools (added 2026-11): source video in, video out. Like upscale, the
     # resolution picker carries the one choice (output format / subtitle language).
-    "videobgremovev1": {
-        "V1_URL": f"{POLLO_API_V1_BASE}/video-background-remove",
+    "videobgremove": {
+        "V1_URL": f"{POLLO_GENERATION_BASE}/video-background-remove",
         "VALID_RESOLUTIONS": ("webm", "mov"),
         "DEFAULT_RESOLUTION": "webm",
         "builder": "bgremove",
     },
-    "videosubtitleremovev1": {
-        "V1_URL": f"{POLLO_API_V1_BASE}/video-subtitle-remove",
+    "videosubtitleremove": {
+        "V1_URL": f"{POLLO_GENERATION_BASE}/video-subtitle-remove",
         "VALID_RESOLUTIONS": ("en", "zh", "all", "ja", "ko", "ar"),
         "DEFAULT_RESOLUTION": "en",
         "MODES": ("standard", "advanced"),
         "builder": "subtitle",
     },
     # Face swap: the source video plus one face image (first_frame).
-    "faceswapv1": {
-        "V1_URL": f"{POLLO_API_V1_BASE}/face-swap",
+    "faceswap": {
+        "V1_URL": f"{POLLO_GENERATION_BASE}/face-swap",
         "builder": "faceswap",
     },
     # Lip-sync (added 2026-11): drive a reference image (a portrait) with an
     # audio track. Shape {image, audio} (+prompt, +resolution where offered).
-    "omnihumanv1": {
-        "V1_PROVIDER": "bytedance",
-        "V1_MODEL": "omnihuman",
+    "omnihuman": {
+        "PROVIDER": "bytedance",
+        "MODEL": "omnihuman",
         "endpoint": "lipsync",
         "builder": "lipsync",
     },
-    "omnihuman15v1": {
-        "V1_PROVIDER": "bytedance",
-        "V1_MODEL": "omnihuman-v1-5",
+    "omnihuman15": {
+        "PROVIDER": "bytedance",
+        "MODEL": "omnihuman-v1-5",
         "endpoint": "lipsync",
         "builder": "lipsync",
     },
-    "hedracharv3v1": {
-        "V1_PROVIDER": "hedra",
-        "V1_MODEL": "hedra-character-v3",
+    "hedracharv3": {
+        "PROVIDER": "hedra",
+        "MODEL": "hedra-character-v3",
         "endpoint": "lipsync",
         "VALID_RESOLUTIONS": ("540p", "720p"),
         "DEFAULT_RESOLUTION": "540p",
         "builder": "lipsync",
     },
-    "h3lipsyncv1": {
-        "V1_PROVIDER": "pollo-ai",
-        "V1_MODEL": "h3-lipsync",
+    "h3lipsync": {
+        "PROVIDER": "pollo-ai",
+        "MODEL": "h3-lipsync",
         "endpoint": "lipsync",
         "VALID_RESOLUTIONS": ("480p", "720p", "1080p"),
         "DEFAULT_RESOLUTION": "720p",
@@ -695,18 +695,18 @@ V1_VIDEO: dict[str, dict[str, Any]] = {
 
 
 def _cfg(model_id: str) -> dict[str, Any]:
-    row = V1_VIDEO[model_id]
+    row = VIDEO_MODELS[model_id]
     base = {**_V1_VIDEO_DEFAULTS}
     if row.get("builder") == "kling":
         base.update(_KLING_BASE)
     return {**base, **row}
 
 
-def v1_video_model_url(model_id: str) -> str:
+def video_model_url(model_id: str) -> str:
     c = _cfg(model_id)
     if c.get("V1_URL"):
         return c["V1_URL"]
-    return f"{POLLO_API_V1_BASE}/{c['V1_PROVIDER']}/{c['V1_MODEL']}/{c['endpoint']}"
+    return f"{POLLO_GENERATION_BASE}/{c['PROVIDER']}/{c['MODEL']}/{c['endpoint']}"
 
 
 def _normalize_refs(refs: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
@@ -811,7 +811,7 @@ def _generic_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: d
 
 def _kling_payload(c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **_) -> dict[str, Any]:
     if s["is_text_only"] and not c["TEXT_TO_VIDEO"]:
-        raise ValueError(f"{c['V1_MODEL']} needs a source image (it has no text-to-video mode)")
+        raise ValueError(f"{c['MODEL']} needs a source image (it has no text-to-video mode)")
     payload = _generic_payload(c, prompt, image_url, s)
     attrs = payload["input"]
     tier = attrs.pop("resolution", None)
@@ -941,8 +941,8 @@ _BUILDERS = {
 }
 
 
-def v1_video_payload(model_id: str, *, prompt: str, image_url: str | None, **kw) -> dict[str, Any]:
-    """Build the v1 video API body for any model, dispatching on its family."""
+def video_payload(model_id: str, *, prompt: str, image_url: str | None, **kw) -> dict[str, Any]:
+    """Build the video API body for any model, dispatching on its family."""
     c = _cfg(model_id)
     build = _BUILDERS.get(c["builder"])
     if build is None:

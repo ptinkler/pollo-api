@@ -1,10 +1,10 @@
-"""V1 image API bodies (BaseV1ImageGenerator)."""
+"""Image API bodies."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from web.core.config import POLLO_API_V1_BASE
+from web.core.config import POLLO_GENERATION_BASE
 
 from ._shared import _aspect_ratio
 
@@ -18,24 +18,24 @@ _V1_IMAGE_DEFAULTS: dict[str, Any] = {
     "ASPECT_RATIO_WITH_IMAGES": True,
 }
 
-V1_IMAGE: dict[str, dict[str, Any]] = {
-    "pollojourneyv1": {
-        "V1_PROVIDER": "pollo-ai",
-        "V1_MODEL": "pollojourney-v8-2-image",
+IMAGE_MODELS: dict[str, dict[str, Any]] = {
+    "pollojourney": {
+        "PROVIDER": "pollo-ai",
+        "MODEL": "pollojourney-v8-2-image",
         "VALID_RATIOS": ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16"),
         "VALID_RESOLUTIONS": ("1K", "2K"),
         "HAS_SEED": True,
     },
-    "seedreamv1": {
-        "V1_PROVIDER": "bytedance",
-        "V1_MODEL": "seedream-5-0-lite",
+    "seedream": {
+        "PROVIDER": "bytedance",
+        "MODEL": "seedream-5-0-lite",
         "VALID_RATIOS": ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16", "21:9"),
         "VALID_RESOLUTIONS": ("2K", "3K", "4K"),
         "MAX_IMAGES": 14,
     },
-    "nanobanana2v1": {
-        "V1_PROVIDER": "google",
-        "V1_MODEL": "nano-banana-2",
+    "nanobanana2": {
+        "PROVIDER": "google",
+        "MODEL": "nano-banana-2",
         "VALID_RATIOS": (
             "1:1",
             "9:16",
@@ -54,65 +54,65 @@ V1_IMAGE: dict[str, dict[str, Any]] = {
         ),
         "VALID_RESOLUTIONS": ("0.5K", "1K", "2K", "4K"),
     },
-    "klingv3imagev1": {
-        "V1_PROVIDER": "kling-ai",
-        "V1_MODEL": "kling-v3-image",
+    "klingv3image": {
+        "PROVIDER": "kling-ai",
+        "MODEL": "kling-v3-image",
         "VALID_RATIOS": ("1:1", "3:2", "2:3", "3:4", "4:3", "16:9", "9:16", "21:9"),
         "VALID_RESOLUTIONS": ("1K", "2K"),
         "MAX_IMAGES": 1,
     },
-    "klingv3omniimagev1": {
-        "V1_PROVIDER": "kling-ai",
-        "V1_MODEL": "kling-v3-omni",
+    "klingv3omniimage": {
+        "PROVIDER": "kling-ai",
+        "MODEL": "kling-v3-omni",
         "VALID_RATIOS": ("16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "21:9", "auto"),
         "VALID_RESOLUTIONS": ("1K", "2K", "4K"),
         "MAX_IMAGES": 10,
     },
-    "seedreamprov1": {
-        "V1_PROVIDER": "bytedance",
-        "V1_MODEL": "seedream-5-0-pro",
+    "seedreampro": {
+        "PROVIDER": "bytedance",
+        "MODEL": "seedream-5-0-pro",
         "VALID_RATIOS": ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"),
         "VALID_RESOLUTIONS": ("1K", "2K"),
         "MAX_IMAGES": 10,
     },
-    "seedreamflashv1": {
-        "V1_PROVIDER": "bytedance",
-        "V1_MODEL": "seedream-5-0-flash",
+    "seedreamflash": {
+        "PROVIDER": "bytedance",
+        "MODEL": "seedream-5-0-flash",
         "VALID_RATIOS": ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"),
         "VALID_RESOLUTIONS": ("1K", "1.5K", "2K"),
         "MAX_IMAGES": 10,
     },
-    "qwenimage3v1": {
-        "V1_PROVIDER": "alibaba",
-        "V1_MODEL": "qwen-image-3",
+    "qwenimage3": {
+        "PROVIDER": "alibaba",
+        "MODEL": "qwen-image-3",
         "VALID_RATIOS": ("1:1", "3:4", "4:3", "16:9", "9:16"),
         "VALID_RESOLUTIONS": ("1K", "2K"),
         "MAX_IMAGES": 3,
     },
-    "qwenimage3prov1": {
-        "V1_PROVIDER": "alibaba",
-        "V1_MODEL": "qwen-image-3-pro",
+    "qwenimage3pro": {
+        "PROVIDER": "alibaba",
+        "MODEL": "qwen-image-3-pro",
         "VALID_RATIOS": ("1:1", "3:4", "4:3", "16:9", "9:16"),
         "VALID_RESOLUTIONS": ("1K", "2K"),
         "MAX_IMAGES": 3,
     },
-    "qwenimageflashv1": {
-        "V1_PROVIDER": "alibaba",
-        "V1_MODEL": "pre-qwen-image-flash",
+    "qwenimageflash": {
+        "PROVIDER": "alibaba",
+        "MODEL": "pre-qwen-image-flash",
         "VALID_RATIOS": ("1:1", "3:4", "4:3", "16:9", "9:16"),
         "ACCEPTS_IMAGES": False,
     },
     # --- Newer frontier models (added 2026-11) ---
-    "nanobananaprov1": {
-        "V1_PROVIDER": "google",
-        "V1_MODEL": "nano-banana-pro",
+    "nanobananapro": {
+        "PROVIDER": "google",
+        "MODEL": "nano-banana-pro",
         "VALID_RATIOS": ("1:1", "9:16", "16:9", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9"),
         "VALID_RESOLUTIONS": ("1K", "2K", "4K"),
         "MAX_IMAGES": 14,
     },
-    "nanobanana21v1": {
-        "V1_PROVIDER": "google",
-        "V1_MODEL": "nano-banana-2-1",
+    "nanobanana21": {
+        "PROVIDER": "google",
+        "MODEL": "nano-banana-2-1",
         "VALID_RATIOS": (
             "1:1",
             "9:16",
@@ -131,74 +131,74 @@ V1_IMAGE: dict[str, dict[str, Any]] = {
         ),
         "VALID_RESOLUTIONS": ("1K", "2K", "4K"),
     },
-    "fluxkontextprov1": {
-        "V1_PROVIDER": "flux",
-        "V1_MODEL": "flux-kontext-pro",
+    "fluxkontextpro": {
+        "PROVIDER": "flux",
+        "MODEL": "flux-kontext-pro",
         "VALID_RATIOS": ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16"),
         "MAX_IMAGES": 1,
     },
-    "fluxkontextmaxv1": {
-        "V1_PROVIDER": "flux",
-        "V1_MODEL": "flux-kontext-max",
+    "fluxkontextmax": {
+        "PROVIDER": "flux",
+        "MODEL": "flux-kontext-max",
         "VALID_RATIOS": ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16"),
         "MAX_IMAGES": 1,
     },
-    "flux2maxv1": {
-        "V1_PROVIDER": "flux",
-        "V1_MODEL": "flux-2-max",
+    "flux2max": {
+        "PROVIDER": "flux",
+        "MODEL": "flux-2-max",
         "VALID_RATIOS": ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16"),
         "MAX_IMAGES": 10,
     },
-    "gptimage25v1": {
-        "V1_PROVIDER": "openai",
-        "V1_MODEL": "gpt-image-2-5",
+    "gptimage25": {
+        "PROVIDER": "openai",
+        "MODEL": "gpt-image-2-5",
         "VALID_RATIOS": ("auto", "1:1", "9:16", "16:9", "21:9", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4"),
         "VALID_RESOLUTIONS": ("1K", "2K", "4K"),
         "MAX_IMAGES": 16,
     },
-    "seedream45v1": {
-        "V1_PROVIDER": "bytedance",
-        "V1_MODEL": "seedream-4-5",
+    "seedream45": {
+        "PROVIDER": "bytedance",
+        "MODEL": "seedream-4-5",
         "VALID_RATIOS": ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"),
         "VALID_RESOLUTIONS": ("2K", "4K"),
         "MAX_IMAGES": 10,
     },
-    "midjourneyv82v1": {
-        "V1_PROVIDER": "midjourney",
-        "V1_MODEL": "midjourney-v8-2",
+    "midjourneyv82": {
+        "PROVIDER": "midjourney",
+        "MODEL": "midjourney-v8-2",
         "VALID_RATIOS": ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16"),
         "VALID_RESOLUTIONS": ("1K", "2K"),
         "MAX_IMAGES": 1,
     },
-    "grokimage20v1": {
-        "V1_PROVIDER": "xai",
-        "V1_MODEL": "grok-imagine-image-2-0",
+    "grokimage20": {
+        "PROVIDER": "xai",
+        "MODEL": "grok-imagine-image-2-0",
         "VALID_RATIOS": ("auto", "1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16", "2:1", "1:2", "21:9"),
         "VALID_RESOLUTIONS": ("1K", "2K"),
         "MAX_IMAGES": 1,
     },
-    "recraftv3v1": {
-        "V1_PROVIDER": "recraft",
-        "V1_MODEL": "recraft-v3",
+    "recraftv3": {
+        "PROVIDER": "recraft",
+        "MODEL": "recraft-v3",
         "VALID_RATIOS": ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16"),
         "ACCEPTS_IMAGES": False,
     },
-    "ideogramv2turbov1": {
-        "V1_PROVIDER": "ideogram",
-        "V1_MODEL": "ideogram-v2-turbo",
+    "ideogramv2turbo": {
+        "PROVIDER": "ideogram",
+        "MODEL": "ideogram-v2-turbo",
         "VALID_RATIOS": ("1:1", "16:9", "3:2", "2:3", "3:4", "4:3", "9:16"),
         "ACCEPTS_IMAGES": False,
     },
     # Image tools (added 2026-11): a source image in, an image out, no prompt.
     # "TOOL" picks the body; image upscale's `scale` rides the resolution picker.
-    "imageupscalev1": {
-        "V1_URL": f"{POLLO_API_V1_BASE}/image-upscale",
+    "imageupscale": {
+        "V1_URL": f"{POLLO_GENERATION_BASE}/image-upscale",
         "TOOL": "upscale",
         "VALID_RESOLUTIONS": ("1x", "2x", "4x", "8x", "16x"),
         "MAX_IMAGES": 1,
     },
-    "imagebgremovev1": {
-        "V1_URL": f"{POLLO_API_V1_BASE}/image-background-remove",
+    "imagebgremove": {
+        "V1_URL": f"{POLLO_GENERATION_BASE}/image-background-remove",
         "TOOL": "bgremove",
         "MAX_IMAGES": 1,
     },
@@ -206,12 +206,12 @@ V1_IMAGE: dict[str, dict[str, Any]] = {
 
 
 def _img_cfg(model_id: str) -> dict[str, Any]:
-    return {**_V1_IMAGE_DEFAULTS, **V1_IMAGE[model_id]}
+    return {**_V1_IMAGE_DEFAULTS, **IMAGE_MODELS[model_id]}
 
 
-def v1_image_model_url(model_id: str) -> str:
+def image_model_url(model_id: str) -> str:
     c = _img_cfg(model_id)
-    return c.get("V1_URL") or f"{POLLO_API_V1_BASE}/{c['V1_PROVIDER']}/{c['V1_MODEL']}/image"
+    return c.get("V1_URL") or f"{POLLO_GENERATION_BASE}/{c['PROVIDER']}/{c['MODEL']}/image"
 
 
 def _tool_payload(c: dict[str, Any], image_url: str | None, **kw) -> dict[str, Any]:
@@ -226,8 +226,8 @@ def _tool_payload(c: dict[str, Any], image_url: str | None, **kw) -> dict[str, A
     return {"input": attrs}
 
 
-def v1_image_payload(model_id: str, *, prompt: str, image_url: str | None, **kw) -> dict[str, Any]:
-    """Build the v1 image API body, matching BaseV1ImageGenerator exactly."""
+def image_payload(model_id: str, *, prompt: str, image_url: str | None, **kw) -> dict[str, Any]:
+    """Build the image API body."""
     c = _img_cfg(model_id)
     if c.get("TOOL"):
         return _tool_payload(c, image_url, **kw)

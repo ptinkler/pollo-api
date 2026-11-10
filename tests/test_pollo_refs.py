@@ -67,7 +67,7 @@ class TestSubmitRefBranch:
 
         monkeypatch.setattr(pollo, "_submit", fake_submit)
         job = pollo.submit_video(
-            "pollo/klingv4v1",
+            "pollo/klingv4",
             "replace [@video1] with [@image1]",
             duration=5,
             ref_items=[
@@ -85,14 +85,14 @@ class TestSubmitRefBranch:
         # No refs -> falls through to the plain image/text path (first_frame).
         provider_keys["pollo"] = "K"
         monkeypatch.setattr(pollo, "_submit", lambda gen: gen.get_payload() and "task2")
-        job = pollo.submit_video("pollo/klingv4v1", "a fox runs", duration=5, ref_items=[])
+        job = pollo.submit_video("pollo/klingv4", "a fox runs", duration=5, ref_items=[])
         assert job["id"] == "pollo:task2"
 
 
 def test_list_video_models_surfaces_ref_mode(provider_keys):
     provider_keys["pollo"] = "K"
     by_id = {m["id"]: m for m in pollo.list_video_models()}
-    assert by_id["pollo/klingv4v1"]["ref_mode"]["limits"] == {"image": 10, "video": 5, "audio": 3}
-    assert by_id["pollo/klingv4flashv1"]["ref_mode"]["types"] == ["image", "video"]
+    assert by_id["pollo/klingv4"]["ref_mode"]["limits"] == {"image": 10, "video": 5, "audio": 3}
+    assert by_id["pollo/klingv4flash"]["ref_mode"]["types"] == ["image", "video"]
     # A non-refs model carries ref_mode: None.
-    assert by_id["pollo/klingv3turbov1"]["ref_mode"] is None
+    assert by_id["pollo/klingv3turbo"]["ref_mode"] is None

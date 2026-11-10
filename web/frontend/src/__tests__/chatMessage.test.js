@@ -105,9 +105,7 @@ describe('ChatMessage media settings', () => {
           role: 'assistant',
           content: '',
           status: 'done',
-          media: [
-            { ...image, model: 'pollo/seedreamv1', params: { aspect_ratio: '16:9', resolution: '2K', refs: [] } },
-          ],
+          media: [{ ...image, model: 'pollo/seedream', params: { aspect_ratio: '16:9', resolution: '2K', refs: [] } }],
         },
       },
     })

@@ -202,22 +202,38 @@ export function useComposerSettings(models) {
     return (preferred || list[0]).id
   }
 
-  // Once the catalogues are in: models for anything not picked yet. An empty
+  // A model this browser remembered (or a thread recorded) can have been
+  // renamed or retired since. `known` only answers once that catalogue has
+  // loaded, so a provider outage never discards the user's pick.
+  const known = (kind, id) => !models[kind]?.length || models[kind].some(m => m.id === id)
+
+  // Once the catalogues are in: models for anything not picked yet, and a
+  // fresh default for anything whose remembered model is gone. An empty
   // image/video pick is a deliberate "None" once the user has made one.
   function applyDefaults() {
-    if (!selected.text) selected.text = pickDefault('text')
-    if (!('image' in prefs)) selected.image = pickDefault('image')
-    if (!('video' in prefs)) selected.video = pickDefault('video')
-    if (!('audio' in prefs)) selected.audio = pickDefault('audio')
+    if (!selected.text || !known('text', selected.text)) selected.text = pickDefault('text')
+    for (const kind of ['image', 'video', 'audio']) {
+      // an empty pick is the user's "None" — only a named-but-missing model is replaced
+      const stale = selected[kind] && !known(kind, selected[kind])
+      if (!(kind in prefs) || stale) selected[kind] = pickDefault(kind)
+    }
+  }
+
+  // The models a chat recorded, skipping any the catalogue no longer has
+  // (renamed or retired) so the composer never points at a dead model.
+  function applyChatModels(conv) {
+    for (const kind of ['text', 'image', 'video']) {
+      const id = conv[`${kind}_model`]
+      if (id && known(kind, id)) selected[kind] = id
+    }
+    const audio = conv.settings?.audio_model
+    if (audio && known('audio', audio)) selected.audio = audio
   }
 
   // A chat's own models and settings, restored when it's opened
   function applyChat(conv) {
-    for (const kind of ['text', 'image', 'video']) {
-      if (conv[`${kind}_model`]) selected[kind] = conv[`${kind}_model`]
-    }
+    applyChatModels(conv)
     const st = conv.settings
-    if (st?.audio_model) selected.audio = st.audio_model
     setRefChoices(st?.ref_choices)
     if (!st) return
     if (MODES.some(m => m.id === st.mode)) mode.value = st.mode

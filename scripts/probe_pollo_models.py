@@ -16,7 +16,7 @@ body with placeholder media URLs and returns a price without starting a job.
 Usage:
     POLLO_API_KEY=sk-... python scripts/probe_pollo_models.py            # motion/recast family
     python scripts/probe_pollo_models.py --key sk-... --family motion
-    python scripts/probe_pollo_models.py --key sk-... --all-video        # every v1 video model
+    python scripts/probe_pollo_models.py --key sk-... --all-video        # every video model
     python scripts/probe_pollo_models.py --key sk-... --live             # GROUND TRUTH: really submits, SPENDS CREDITS
 
 The estimate probe is free but only proves the estimate endpoint is enabled.
@@ -35,7 +35,7 @@ import requests
 # Run from the repo root so `web` imports resolve.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from web.providers.pollo_engine import GENERATORS_V1  # noqa: E402
+from web.providers.pollo_engine import VIDEO_GENERATORS  # noqa: E402
 from web.providers.pollo_engine import video_generator as get_video_generator  # noqa: E402
 from web.providers.pollo_estimate import PLACEHOLDERS  # noqa: E402
 from web.providers.pollo_models import MODEL_INFO  # noqa: E402
@@ -44,9 +44,9 @@ TIMEOUT = 20
 
 
 def _models(family: str | None, all_video: bool) -> list[str]:
-    """The v1 video model keys to probe, in catalogue order."""
+    """The video model keys to probe, in catalogue order."""
     keys = []
-    for key in GENERATORS_V1:
+    for key in VIDEO_GENERATORS:
         info = MODEL_INFO.get(key, {})
         if all_video or (family and info.get("type") == family):
             keys.append(key)
@@ -57,7 +57,7 @@ def _build(key: str, api_key: str):
     """A video generator for `key` with placeholder media, like the composer's
     estimate path does (web/providers/pollo.py estimate_cost)."""
     info = MODEL_INFO.get(key, {})
-    cls = GENERATORS_V1[key]
+    cls = VIDEO_GENERATORS[key]
     kw = {"api_key": api_key, "project": "probe", "prompt": "probe"}
     # A reference/first image when the model takes one; a source video when it
     # reads one. Motion/recast models take both.
@@ -136,7 +136,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--key", default=os.getenv("POLLO_API_KEY"), help="Pollo API key (or set POLLO_API_KEY)")
     ap.add_argument("--family", default="motion", help="model type to probe (default: motion/recast)")
-    ap.add_argument("--all-video", action="store_true", help="probe every v1 video model, not just one family")
+    ap.add_argument("--all-video", action="store_true", help="probe every video model, not just one family")
     ap.add_argument("--live", action="store_true", help="really submit — GROUND TRUTH, SPENDS REAL MONEY when enabled")
     ap.add_argument(
         "--yes-bill-me",
@@ -169,7 +169,7 @@ def main() -> int:
     if args.live:
         mode = "LIVE submit"
         print(f"⚠  LIVE: creating real non-refundable jobs for up to {len(keys)} models — every enabled one is BILLED.")
-    scope = "all v1 video models" if args.all_video else f"family={args.family!r}"
+    scope = "all video models" if args.all_video else f"family={args.family!r}"
     print(f"Probing {len(keys)} models ({scope}) via {mode}\n")
     probe = _probe_live if args.live else _probe_estimate
 

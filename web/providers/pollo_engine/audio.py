@@ -1,10 +1,10 @@
-"""V1 audio API bodies: text-to-speech and text-to-music (Suno)."""
+"""Audio API bodies: text-to-speech and text-to-music (Suno)."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from web.core.config import POLLO_API_V1_BASE
+from web.core.config import POLLO_GENERATION_BASE
 
 _AUDIO_DEFAULTS: dict[str, Any] = {
     "MAX_PROMPT": 3000,
@@ -14,56 +14,56 @@ _AUDIO_DEFAULTS: dict[str, Any] = {
     "NEEDS_REF": False,  # a reference voice clip (voice cloning)
 }
 
-# model_id -> overrides (plus V1_PROVIDER / V1_MODEL / endpoint / builder)
-V1_AUDIO: dict[str, dict[str, Any]] = {
-    "seedaudio10v1": {
-        "V1_PROVIDER": "bytedance",
-        "V1_MODEL": "seed-audio-1-0",
+# model_id -> overrides (plus PROVIDER / MODEL / endpoint / builder)
+AUDIO_MODELS: dict[str, dict[str, Any]] = {
+    "seedaudio10": {
+        "PROVIDER": "bytedance",
+        "MODEL": "seed-audio-1-0",
         "endpoint": "text2speech",
         "builder": "speech",
         "HAS_TUNING": True,
     },
-    "seedaudioref10v1": {
-        "V1_PROVIDER": "bytedance",
-        "V1_MODEL": "seed-audio-1-0",
+    "seedaudioref10": {
+        "PROVIDER": "bytedance",
+        "MODEL": "seed-audio-1-0",
         "endpoint": "ref2audio",
         "builder": "speech",
         "HAS_TUNING": True,
         "NEEDS_REF": True,
     },
-    "minimaxspeech28hdv1": {
-        "V1_PROVIDER": "minimax",
-        "V1_MODEL": "speech-2-8-hd",
+    "minimaxspeech28hd": {
+        "PROVIDER": "minimax",
+        "MODEL": "speech-2-8-hd",
         "endpoint": "text2speech",
         "builder": "speech",
         "MAX_PROMPT": 5000,
         "NEEDS_VOICE": True,
     },
-    "elevenv3v1": {
-        "V1_PROVIDER": "elevenlabs",
-        "V1_MODEL": "eleven-v3",
+    "elevenv3": {
+        "PROVIDER": "elevenlabs",
+        "MODEL": "eleven-v3",
         "endpoint": "text2speech",
         "builder": "speech",
         "MAX_PROMPT": 5000,
         "NEEDS_VOICE": True,
     },
-    "sunov45plusv1": {
-        "V1_PROVIDER": "suno",
-        "V1_MODEL": "suno-v4-5plus",
+    "sunov45plus": {
+        "PROVIDER": "suno",
+        "MODEL": "suno-v4-5plus",
         "endpoint": "text2music",
         "builder": "music",
         "MAX_PROMPT": 5000,
     },
-    "sunov5v1": {
-        "V1_PROVIDER": "suno",
-        "V1_MODEL": "suno-v5",
+    "sunov5": {
+        "PROVIDER": "suno",
+        "MODEL": "suno-v5",
         "endpoint": "text2music",
         "builder": "music",
         "MAX_PROMPT": 5000,
     },
-    "sunov55v1": {
-        "V1_PROVIDER": "suno",
-        "V1_MODEL": "suno-v5-5",
+    "sunov55": {
+        "PROVIDER": "suno",
+        "MODEL": "suno-v5-5",
         "endpoint": "text2music",
         "builder": "music",
         "MAX_PROMPT": 5000,
@@ -73,12 +73,12 @@ V1_AUDIO: dict[str, dict[str, Any]] = {
 
 
 def _cfg(model_id: str) -> dict[str, Any]:
-    return {**_AUDIO_DEFAULTS, **V1_AUDIO[model_id]}
+    return {**_AUDIO_DEFAULTS, **AUDIO_MODELS[model_id]}
 
 
-def v1_audio_model_url(model_id: str) -> str:
+def audio_model_url(model_id: str) -> str:
     c = _cfg(model_id)
-    return f"{POLLO_API_V1_BASE}/{c['V1_PROVIDER']}/{c['V1_MODEL']}/{c['endpoint']}"
+    return f"{POLLO_GENERATION_BASE}/{c['PROVIDER']}/{c['MODEL']}/{c['endpoint']}"
 
 
 def _clamp(value: Any, lo: float, hi: float) -> float:
@@ -125,7 +125,7 @@ def _music_payload(c: dict[str, Any], prompt: str, **kw) -> dict[str, Any]:
     return {"input": attrs}
 
 
-def v1_audio_payload(model_id: str, *, prompt: str, **kw) -> dict[str, Any]:
+def audio_payload(model_id: str, *, prompt: str, **kw) -> dict[str, Any]:
     c = _cfg(model_id)
     prompt = (prompt or "").strip()
     if not prompt:

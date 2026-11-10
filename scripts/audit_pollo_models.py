@@ -9,7 +9,7 @@ the public spec):
      source of truth for a model's FEATURES — whether it has a reference-to-
      video branch, the refs cap, allowed ref types, durations, resolutions,
      ratios. This script extracts those and diffs them against our registry
-     (web/providers/pollo_engine/v1_video.py V1_VIDEO + pollo_models.MODEL_INFO)
+     (web/providers/pollo_engine/v1_video.py VIDEO_MODELS + pollo_models.MODEL_INFO)
      so you never hand-find a model's feature set again.
 
   2. ENABLED ON YOUR KEY?  (--key / POLLO_API_KEY) The free estimate probe
@@ -44,7 +44,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))  # repo root, for `web.*`
 sys.path.insert(0, _HERE)  # this scripts/ dir, for the probe import
 
-from web.providers.pollo_engine.v1_video import V1_VIDEO  # noqa: E402
+from web.providers.pollo_engine.video import VIDEO_MODELS  # noqa: E402
 from web.providers.pollo_models import MODEL_INFO  # noqa: E402
 
 SPEC_URL = "https://docs.pollo.ai/openapi.json"
@@ -127,10 +127,10 @@ def parse_docs(spec: dict) -> dict[str, dict]:
 
 
 def _our_models() -> dict[str, dict]:
-    """Our v1 video registry keyed by Pollo model slug (V1_MODEL)."""
+    """Our video registry keyed by Pollo model slug (MODEL)."""
     out = {}
-    for key, cfg in V1_VIDEO.items():
-        slug = cfg.get("V1_MODEL")
+    for key, cfg in VIDEO_MODELS.items():
+        slug = cfg.get("MODEL")
         if slug:
             out[slug] = {"key": key, "info": MODEL_INFO.get(key, {}), "cfg": cfg}
     return out

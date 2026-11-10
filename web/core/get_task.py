@@ -7,7 +7,7 @@ API Docs: https://docs.pollo.ai/task/get-task-status?playground=open
 import requests
 
 from .cloudflare import is_cloudflare_block
-from .config import POLLO_API_BASE, POLLO_API_TIMEOUT
+from .config import POLLO_API_TIMEOUT, POLLO_PLATFORM_BASE, POLLO_TASK_BASE
 
 # Each result tuple: (status, failMsg, url, credits)
 TaskResult = tuple[str, str | None, str | None, int | None]
@@ -19,7 +19,7 @@ CLOUDFLARE_MESSAGE = "Cloudflare blocked the request — check your VPN or switc
 def get_task_status(task_id: str, api_key: str) -> list[TaskResult]:
     """One result per generation of the task; a single ("error", …) or
     ("cloudflare_blocked", …) result when the status can't be read."""
-    url = f"{POLLO_API_BASE}/{task_id}/status"
+    url = f"{POLLO_TASK_BASE}/{task_id}/status"
     response = requests.request("GET", url, headers={"x-api-key": api_key}, timeout=POLLO_API_TIMEOUT)
     if is_cloudflare_block(response):
         return [("cloudflare_blocked", CLOUDFLARE_MESSAGE, None, None)]
@@ -72,9 +72,7 @@ def get_credit_balance(api_key: str) -> dict[str, int] | None:
     Returns {"availableCredits": N, "totalCredits": N} or None on failure.
     """
     headers = {"x-api-key": api_key}
-    # The credit balance endpoint is at the platform root, not under /generation
-    base = POLLO_API_BASE.rsplit("/generation", 1)[0]
-    url = f"{base}/credit/balance"
+    url = f"{POLLO_PLATFORM_BASE}/credit/balance"
     try:
         response = requests.get(url, headers=headers, timeout=POLLO_API_TIMEOUT)
         if response.status_code == 200:

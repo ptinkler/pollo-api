@@ -1,10 +1,9 @@
 """Unified model registry + runtime generator.
 
-One ModelSpec per model replaces the old class-per-model hierarchy: it is the
-data (VALID_* for the catalogue/validation, the endpoint, the family) and a
-factory for the runtime object. One PolloGenerator replaces all 44 generator
-classes: it resolves inputs + builds the payload via the family functions, and
-carries the submit/estimate/metadata behaviour the callers use.
+One ModelSpec per model: the data (VALID_* for the catalogue/validation, the
+endpoint, the family) and a factory for the runtime object. One PolloGenerator
+resolves inputs, builds the payload via the family functions, and submits or
+prices the request.
 """
 
 from __future__ import annotations
@@ -15,41 +14,15 @@ from typing import Any
 import requests
 
 from web.core.cloudflare import is_cloudflare_block
-from web.core.config import POLLO_API_TIMEOUT, POLLO_API_V1_BASE
+from web.core.config import POLLO_API_TIMEOUT
 
-from .legacy_image import LEGACY_IMAGE, legacy_image_model_url, legacy_image_payload
-from .legacy_ref import _REF_VALID_LENGTHS, LEGACY_REF, legacy_ref_model_url, legacy_ref_payload
-from .legacy_video import LEGACY_VIDEO, _legacy_cfg, legacy_video_model_url, legacy_video_payload
-from .v1_audio import V1_AUDIO, v1_audio_model_url, v1_audio_payload
-from .v1_image import V1_IMAGE, _img_cfg, v1_image_model_url, v1_image_payload
-from .v1_video import V1_VIDEO, _cfg, v1_video_model_url, v1_video_payload
+from .audio import AUDIO_MODELS, audio_model_url, audio_payload
+from .image import IMAGE_MODELS, _img_cfg, image_model_url, image_payload
+from .video import VIDEO_MODELS, _cfg, video_model_url, video_payload
 
-# Resolution tiers the catalogue/validation advertise for legacy video (the
-# legacy builders don't themselves validate resolution).
-_LEGACY_VIDEO_RESOLUTIONS: dict[str, tuple] = {
-    "pollo25": ("720p", "1080p"),
-    "seedance25": ("480p", "720p"),
-    "seedance25draft": ("480p",),
-    "minimaxh3": ("480P", "768P", "2K"),
-    "wan27": ("720P", "1080P"),
-    "wan30": ("480P", "720P", "1080P"),
-    "wan30prime": ("480P", "720P", "1080P"),
-}
-_REF_RATIOS = ("4:3", "3:4", "1:1", "16:9", "9:16", "21:9")
-_V1_FAMILY = {
-    "generic": "v1video",
-    "kling": "kling",
-    "extend": "extend",
-    "edit": "edit",
-    "upscale": "upscale",
-    "bgremove": "bgremove",
-    "subtitle": "subtitle",
-    "faceswap": "faceswap",
-    "lipsync": "lipsync",
-    "motion": "motion",
-}
-
-_V1_VIDEO_FAMILIES = tuple(_V1_FAMILY.values())
+# A video row's builder name -> the family a ModelSpec carries. They differ only
+# for the catch-all builder, whose family is the plain "video".
+_FAMILY = {"generic": "video"}
 # families that work on a source video and take no source image
 _VIDEO_ONLY_FAMILIES = ("extend", "edit", "upscale", "bgremove", "subtitle")
 
@@ -62,7 +35,7 @@ class ModelSpec:
 
     model_id: str
     kind: str  # "video" | "image" | "audio"
-    family: str  # a _V1_FAMILY value, legacyvideo, ref, v1image, legacyimage
+    family: str  # "image", "audio", or a video builder's family ("video", "kling", "extend"…)
     model_url: str
     VALID_RATIOS: tuple = ()
     VALID_LENGTHS: tuple = ()
@@ -76,15 +49,9 @@ class ModelSpec:
 
 def _build_payload(spec: ModelSpec, prompt: str, image_url: str | None, **kw) -> dict[str, Any]:
     if spec.kind == "audio":
-        return v1_audio_payload(spec.model_id, prompt=prompt, **kw)
-    if spec.kind == "image":
-        fn = v1_image_payload if spec.family == "v1image" else legacy_image_payload
-        return fn(spec.model_id, prompt=prompt, image_url=image_url, **kw)
-    if spec.family in _V1_VIDEO_FAMILIES:
-        return v1_video_payload(spec.model_id, prompt=prompt, image_url=image_url, **kw)
-    if spec.family == "legacyvideo":
-        return legacy_video_payload(spec.model_id, prompt=prompt, image_url=image_url, **kw)
-    return legacy_ref_payload(spec.model_id, prompt=prompt, image_url=image_url, **kw)
+        return audio_payload(spec.model_id, prompt=prompt, **kw)
+    build = image_payload if spec.kind == "image" else video_payload
+    return build(spec.model_id, prompt=prompt, image_url=image_url, **kw)
 
 
 class PolloGenerator:
@@ -114,11 +81,8 @@ class PolloGenerator:
 
     @property
     def estimate_url(self) -> str | None:
-        if not self.model_url:
-            return None
-        if self.model_url.startswith(POLLO_API_V1_BASE):
-            return f"{self.model_url}/estimate"
-        return None if self.model_url.endswith("/ref2video") else f"{self.model_url}/validate"
+        """The endpoint's free price-check twin (see web/providers/pollo_estimate.py)."""
+        return f"{self.model_url}/estimate" if self.model_url else None
 
     def send_request(self) -> requests.Response:
         if not self.model_url:
@@ -139,72 +103,38 @@ class PolloGenerator:
         return resp
 
 
-def _video_specs() -> dict[str, ModelSpec]:
-    specs: dict[str, ModelSpec] = {}
-    for mid in LEGACY_VIDEO:
-        c = _legacy_cfg(mid)
-        specs[mid] = ModelSpec(
-            mid,
-            "video",
-            "legacyvideo",
-            legacy_video_model_url(mid),
-            VALID_RATIOS=tuple(c["VALID_RATIOS"]),
-            VALID_LENGTHS=tuple(c["VALID_LENGTHS"]),
-            VALID_RESOLUTIONS=_LEGACY_VIDEO_RESOLUTIONS.get(mid, ()),
-        )
-    for mid in LEGACY_REF:
-        specs[mid] = ModelSpec(
-            mid, "video", "ref", legacy_ref_model_url(mid), VALID_RATIOS=_REF_RATIOS, VALID_LENGTHS=_REF_VALID_LENGTHS
-        )
-    return specs
-
-
-# Registries (model_id -> ModelSpec).
-GENERATORS_LEGACY: dict[str, ModelSpec] = _video_specs()
-GENERATORS_V1: dict[str, ModelSpec] = {}
-for _mid in V1_VIDEO:
-    _c = _cfg(_mid)
-    _fam = _V1_FAMILY[_c["builder"]]
-    GENERATORS_V1[_mid] = ModelSpec(
-        _mid,
+# Registries (model_id -> ModelSpec), one per kind.
+def _video_spec(model_id: str) -> ModelSpec:
+    c = _cfg(model_id)
+    return ModelSpec(
+        model_id,
         "video",
-        _fam,
-        v1_video_model_url(_mid),
-        VALID_RATIOS=tuple(_c["VALID_RATIOS"]),
-        VALID_LENGTHS=tuple(_c["VALID_LENGTHS"]),
-        VALID_RESOLUTIONS=tuple(_c["VALID_RESOLUTIONS"]),
+        _FAMILY.get(c["builder"], c["builder"]),
+        video_model_url(model_id),
+        VALID_RATIOS=tuple(c["VALID_RATIOS"]),
+        VALID_LENGTHS=tuple(c["VALID_LENGTHS"]),
+        VALID_RESOLUTIONS=tuple(c["VALID_RESOLUTIONS"]),
     )
-GENERATORS: dict[str, ModelSpec] = {**GENERATORS_LEGACY, **GENERATORS_V1}
 
-IMAGE_GENERATORS_V1: dict[str, ModelSpec] = {}
-for _mid in V1_IMAGE:
-    _c = _img_cfg(_mid)
-    IMAGE_GENERATORS_V1[_mid] = ModelSpec(
-        _mid,
+
+def _image_spec(model_id: str) -> ModelSpec:
+    c = _img_cfg(model_id)
+    return ModelSpec(
+        model_id,
         "image",
-        "v1image",
-        v1_image_model_url(_mid),
-        VALID_RATIOS=tuple(_c["VALID_RATIOS"]),
-        VALID_RESOLUTIONS=tuple(_c["VALID_RESOLUTIONS"]),
-        ACCEPTS_IMAGES=_c["ACCEPTS_IMAGES"],
-        MAX_IMAGES=_c["MAX_IMAGES"],
-    )
-IMAGE_GENERATORS_LEGACY: dict[str, ModelSpec] = {
-    _mid: ModelSpec(
-        _mid,
         "image",
-        "legacyimage",
-        legacy_image_model_url(_mid),
-        VALID_RATIOS=tuple(_row.get("VALID_RATIOS", ())),
-        VALID_RESOLUTIONS=tuple(_row.get("VALID_RESOLUTIONS", ())),
+        image_model_url(model_id),
+        VALID_RATIOS=tuple(c["VALID_RATIOS"]),
+        VALID_RESOLUTIONS=tuple(c["VALID_RESOLUTIONS"]),
+        ACCEPTS_IMAGES=c["ACCEPTS_IMAGES"],
+        MAX_IMAGES=c["MAX_IMAGES"],
     )
-    for _mid, _row in LEGACY_IMAGE.items()
-}
-IMAGE_GENERATORS: dict[str, ModelSpec] = {**IMAGE_GENERATORS_LEGACY, **IMAGE_GENERATORS_V1}
 
 
+VIDEO_GENERATORS: dict[str, ModelSpec] = {_mid: _video_spec(_mid) for _mid in VIDEO_MODELS}
+IMAGE_GENERATORS: dict[str, ModelSpec] = {_mid: _image_spec(_mid) for _mid in IMAGE_MODELS}
 AUDIO_GENERATORS: dict[str, ModelSpec] = {
-    _mid: ModelSpec(_mid, "audio", _row["builder"], v1_audio_model_url(_mid)) for _mid, _row in V1_AUDIO.items()
+    _mid: ModelSpec(_mid, "audio", _row["builder"], audio_model_url(_mid)) for _mid, _row in AUDIO_MODELS.items()
 }
 
 
@@ -217,9 +147,9 @@ def audio_generator(model_id: str, **kwargs) -> PolloGenerator:
 
 def video_generator(model_id: str, **kwargs) -> PolloGenerator:
     try:
-        return GENERATORS[model_id](**kwargs)
+        return VIDEO_GENERATORS[model_id](**kwargs)
     except KeyError:
-        raise ValueError(f"Unsupported model: {model_id}. Available: {', '.join(GENERATORS)}") from None
+        raise ValueError(f"Unsupported model: {model_id}. Available: {', '.join(VIDEO_GENERATORS)}") from None
 
 
 def image_generator(model_id: str, **kwargs) -> PolloGenerator:

@@ -473,7 +473,6 @@ def _submit_video(conv_id: str, model: str, prompt: str, params: dict[str, Any])
             source_video=_conv_dir(conv_id) / params["source_video"] if params.get("source_video") else None,
             source_audio=_conv_dir(conv_id) / params["source_audio"] if params.get("source_audio") else None,
             mode=params.get("mode"),
-            refs=[_ref_file(conv_id, r) for r in params.get("refs") or []],
             # Reference-to-video: named image/video/audio refs the prompt mentions
             # as [@name] (resolve each file to a path; keep its name and type).
             ref_items=[

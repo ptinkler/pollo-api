@@ -512,9 +512,9 @@ describe('ModelPicker pop-up placement', () => {
 
 describe('ModelPicker hidden models', () => {
   const WITH_HIDDEN = [
-    { id: 'pollo/seedreamv1', name: 'Pollo: Seedream 5.0 Lite' },
+    { id: 'pollo/seedream', name: 'Pollo: Seedream 5.0 Lite' },
     {
-      id: 'pollo/seedreamprov1',
+      id: 'pollo/seedreampro',
       name: 'Pollo: Seedream 5.0 Pro',
       hidden: 'Not enabled for API access on this key (403)',
     },
@@ -527,7 +527,7 @@ describe('ModelPicker hidden models', () => {
   })
 
   it('hides them until "Show hidden" is ticked, then badges them', async () => {
-    const w = await openFilters(await openPicker({ models: WITH_HIDDEN, modelValue: 'pollo/seedreamv1' }))
+    const w = await openFilters(await openPicker({ models: WITH_HIDDEN, modelValue: 'pollo/seedream' }))
     expect(modelNames(w)).toEqual(['Pollo: Seedream 5.0 Lite'])
     expect(w.find('.show-hidden .fn').text()).toBe('1')
     await w.find('.show-hidden input').setValue(true)
@@ -538,7 +538,7 @@ describe('ModelPicker hidden models', () => {
   })
 
   it('keeps a hidden model that is already selected', async () => {
-    const w = await openPicker({ models: WITH_HIDDEN, modelValue: 'pollo/seedreamprov1' })
+    const w = await openPicker({ models: WITH_HIDDEN, modelValue: 'pollo/seedreampro' })
     expect(modelNames(w)).toEqual(['Pollo: Seedream 5.0 Lite', 'Pollo: Seedream 5.0 Pro'])
     w.unmount()
   })

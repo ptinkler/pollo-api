@@ -101,7 +101,7 @@ class TestModelCatalogue:
         catalogue.clear_models()
 
         def fake_list(kind, refresh=False):
-            return [{"id": "pollo/seedreamv1", "name": "Seedream"}] if kind == "image" else []
+            return [{"id": "pollo/seedream", "name": "Seedream"}] if kind == "image" else []
 
         monkeypatch.setattr(pollo_provider, "list_models", fake_list)
 
@@ -110,7 +110,7 @@ class TestModelCatalogue:
         data = r.json()
         assert data["errors"] == {}
         assert data["text"] == []  # no chat provider, but the endpoint still serves
-        assert [m["id"] for m in data["image"]] == ["pollo/seedreamv1"]
+        assert [m["id"] for m in data["image"]] == ["pollo/seedream"]
 
 
 class TestConversations:
@@ -2352,7 +2352,7 @@ class TestPolloImageModels:
     """Pollo image models in chat. Pollo is fully mocked — nothing here can
     reach the real API (which would bill credits)."""
 
-    POLLO = {**SETTINGS, "image_model": "pollo/seedreamv1"}
+    POLLO = {**SETTINGS, "image_model": "pollo/seedream"}
 
     @pytest.fixture()
     def pollo(self, chat, monkeypatch, provider_keys):
@@ -2436,12 +2436,9 @@ class TestPolloImageModels:
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
             monkeypatch.setattr(openrouter, fn, lambda: [])
         models = {m["id"]: m for m in chat.catalogue.get_models(refresh=True)["image"]}
-        assert models["pollo/seedreamv1"]["name"] == "Pollo: Seedream 5.0 Lite"
-        assert models["pollo/seedreamprov1"]["name"] == "Pollo: Seedream 5.0 Pro"
-        assert "21:9" in models["pollo/seedreamv1"]["aspect_ratios"]
-        # legacy-only: no working v1 endpoint, so chat offers the legacy one
-        assert models["pollo/polloimage2"]["name"] == "Pollo: Pollo Image 2.0"
-        assert "pollo/polloimage2v1" not in models and "pollo/seedream" not in models
+        assert models["pollo/seedream"]["name"] == "Pollo: Seedream 5.0 Lite"
+        assert models["pollo/seedreampro"]["name"] == "Pollo: Seedream 5.0 Pro"
+        assert "21:9" in models["pollo/seedream"]["aspect_ratios"]
         provider_keys["pollo"] = None
         assert not any(m["id"].startswith("pollo/") for m in chat.catalogue.get_models(refresh=True)["image"])
 
@@ -2460,7 +2457,7 @@ class TestPolloImageModels:
         assert item["credits"] == 6 and not item.get("cost")
         assert msg["cost"] == pytest.approx(0.003)  # OpenRouter text only — credits aren't dollars
         key, kwargs = pollo["generators"][0]
-        assert key == "seedreamv1"
+        assert key == "seedream"
         # The model's 16:9 is ignored; composer on auto → no ratio sent (model default)
         assert (kwargs["prompt"], kwargs["aspect_ratio"], kwargs["images"]) == ("a red fox", None, None)
 
@@ -2518,17 +2515,6 @@ class TestPolloImageModels:
         fixed = db.get_chat_message(msg["id"]).media[0]
         assert fixed["status"] == "done" and fixed["credits"] == 3
 
-    def test_legacy_only_model_generates_on_its_legacy_key(self, client, conv, chat, monkeypatch, pollo):
-        pollo["statuses"] = iter([[("succeed", None, "https://cdn/x.png", 4)]])
-        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))
-        _events(
-            client.post(
-                f"/api/chat/conversations/{conv['id']}/messages",
-                json={"content": "a fox", "mode": "image", **{**SETTINGS, "image_model": "pollo/polloimage2"}},
-            )
-        )
-        assert pollo["generators"][0][0] == "polloimage2"
-
     def test_polling_survives_transient_errors(self, chat, monkeypatch, pollo):
         pollo["statuses"] = iter(
             [
@@ -2537,26 +2523,26 @@ class TestPolloImageModels:
                 [("succeed", None, "https://cdn/x.png", 2)],
             ]
         )
-        images, credits, _sent = pollo_provider.generate_image("pollo/nanobanana2v1", "x")
+        images, credits, _sent = pollo_provider.generate_image("pollo/nanobanana2", "x")
         assert len(images) == 1 and credits == 2
 
     # ── video ──
-    VIDEO = {**SETTINGS, "video_model": "pollo/seedance20fastv1"}
+    VIDEO = {**SETTINGS, "video_model": "pollo/seedance20fast"}
 
     def test_video_models_listed_without_deprecated_ones(self, chat, monkeypatch, pollo):
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
             monkeypatch.setattr(openrouter, fn, lambda: [])
         models = {m["id"]: m for m in chat.catalogue.get_models(refresh=True)["video"]}
-        fast = models["pollo/seedance20fastv1"]
+        fast = models["pollo/seedance20fast"]
         assert fast["name"] == "Pollo: Seedance 2.0 Fast"
         assert fast["durations"] == list(range(4, 16)) and fast["resolutions"] == ["480p", "720p"]
         assert fast["frame_images"] == ["first_frame"] and fast["generate_audio"] is True
-        assert "pollo/wan27v1" not in models  # marked deprecated on the Generate page
+        assert "pollo/wan27" not in models  # marked deprecated on the Generate page
 
     def test_video_mode_submits_to_pollo_with_first_frame(self, client, conv, chat, monkeypatch, pollo):
         monkeypatch.setattr(openrouter, "submit_video", lambda *a, **k: pytest.fail("should run on Pollo"))
         chat.catalogue.seed_models(
-            {"video": [{"id": "pollo/seedance20fastv1", "durations": list(range(4, 16))}]}, stale=True
+            {"video": [{"id": "pollo/seedance20fast", "durations": list(range(4, 16))}]}, stale=True
         )
         up = client.post(
             f"/api/chat/conversations/{conv['id']}/attachments", files={"file": ("a.png", _png_bytes(), "image/png")}
@@ -2576,7 +2562,7 @@ class TestPolloImageModels:
         item = msg["media"][0]
         assert item["status"] == "pending" and item["job_id"] == "pollo:task-1"
         key, kwargs = pollo["generators"][0]
-        assert key == "seedance20fastv1"
+        assert key == "seedance20fast"
         assert pollo["uploads"] == [up] and kwargs["image_url"] == f"https://tmp.example/{up}"
         assert (kwargs["prompt"], kwargs["length"], kwargs["generate_audio"]) == ("make it move", 15, False)
         assert kwargs["aspect_ratio"] == "9:16"  # picked in the composer, so it wins over the image's shape
@@ -2587,7 +2573,7 @@ class TestPolloImageModels:
         whatever Auto worked out to."""
         monkeypatch.setattr(openrouter, "submit_video", lambda *a, **k: pytest.fail("should run on Pollo"))
         chat.catalogue.seed_models(
-            {"video": [{"id": "pollo/seedance20fastv1", "durations": list(range(4, 16))}]}, stale=True
+            {"video": [{"id": "pollo/seedance20fast", "durations": list(range(4, 16))}]}, stale=True
         )
         up = client.post(
             f"/api/chat/conversations/{conv['id']}/attachments", files={"file": ("a.png", _png_bytes(), "image/png")}
@@ -2615,14 +2601,14 @@ class TestPolloImageModels:
         assert all("duration_auto" not in kwargs for _, kwargs in pollo["generators"])
 
     # ── audio ──
-    AUDIO = {**SETTINGS, "audio_model": "pollo/elevenv3v1"}
+    AUDIO = {**SETTINGS, "audio_model": "pollo/elevenv3"}
 
     def test_audio_models_listed_with_their_type(self, chat, monkeypatch, pollo):
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
             monkeypatch.setattr(openrouter, fn, lambda: [])
         models = {m["id"]: m for m in chat.catalogue.get_models(refresh=True)["audio"]}
-        assert models["pollo/elevenv3v1"]["tags"] == ["tts"] and models["pollo/elevenv3v1"]["options"] == ["voice"]
-        assert models["pollo/sunov55v1"]["tags"] == ["music"]
+        assert models["pollo/elevenv3"]["tags"] == ["tts"] and models["pollo/elevenv3"]["options"] == ["voice"]
+        assert models["pollo/sunov55"]["tags"] == ["music"]
 
     def test_audio_mode_submits_speech_with_the_picked_voice(self, client, conv, chat, monkeypatch, pollo):
         class Gen:
@@ -2650,10 +2636,10 @@ class TestPolloImageModels:
         item = msg["media"][0]
         assert item["kind"] == "audio" and item["status"] == "pending" and item["job_id"] == "pollo:task-1"
         key, kwargs = pollo["generators"][0]
-        assert key == "elevenv3v1" and kwargs["prompt"] == "hello" and kwargs["voice"] == "v1"
+        assert key == "elevenv3" and kwargs["prompt"] == "hello" and kwargs["voice"] == "v1"
         # the picks are remembered with the conversation's composer settings
         settings = client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["settings"]
-        assert settings["audio_model"] == "pollo/elevenv3v1" and settings["audio_options"]["voice"] == "v1"
+        assert settings["audio_model"] == "pollo/elevenv3" and settings["audio_options"]["voice"] == "v1"
 
     def _fake_audio_generator(self, monkeypatch, chat, pollo):
         class Gen:
@@ -2696,7 +2682,7 @@ class TestPolloImageModels:
         monkeypatch.setattr(pollo_provider, "estimate_cost", fake)
         r = client.post(
             "/api/chat/estimate",
-            json={"model": "pollo/elevenv3v1", "kind": "audio", "prompt": "hi", "audio_options": {"voice": "v1"}},
+            json={"model": "pollo/elevenv3", "kind": "audio", "prompt": "hi", "audio_options": {"voice": "v1"}},
         )
         assert r.json() == {"estimate": {"credits": 3}}
         assert seen["kind"] == "audio" and seen["args"][-2:] == ("hi", {"voice": "v1"})
@@ -2705,12 +2691,12 @@ class TestPolloImageModels:
         chat.catalogue.seed_models(
             {
                 "image": [
-                    {"id": "pollo/imageupscalev1", "name": "Pollo: Image Upscale", "tool": "upscale", "no_prompt": True}
+                    {"id": "pollo/imageupscale", "name": "Pollo: Image Upscale", "tool": "upscale", "no_prompt": True}
                 ]
             },
             stale=True,
         )
-        body = {"content": "", "mode": "image", **SETTINGS, "image_model": "pollo/imageupscalev1"}
+        body = {"content": "", "mode": "image", **SETTINGS, "image_model": "pollo/imageupscale"}
         r = client.post(f"/api/chat/conversations/{conv['id']}/messages", json=body)
         assert r.status_code == 200  # an empty message is fine for a tool…
         assert "needs an image" in _events(r)[-1]["message"]["error"]  # …but it must have an image
@@ -2753,11 +2739,11 @@ class TestPolloImageModels:
         )
 
     def test_first_frame_sets_the_ratio_when_none_is_picked(self, client, conv, chat, monkeypatch, pollo):
-        self._video_from_image(client, conv, chat, (60, 80), "pollo/seedance20fastv1")  # 3:4 photo
+        self._video_from_image(client, conv, chat, (60, 80), "pollo/seedance20fast")  # 3:4 photo
         assert pollo["generators"][0][1]["aspect_ratio"] == "3:4"
 
     def test_follow_image_ratio_preferred_when_the_model_has_one(self, client, conv, chat, monkeypatch, pollo):
-        self._video_from_image(client, conv, chat, (60, 80), "pollo/seedance25v1")
+        self._video_from_image(client, conv, chat, (60, 80), "pollo/seedance25")
         assert pollo["generators"][0][1]["aspect_ratio"] == "adaptive"
 
     def test_animating_ignores_the_chat_models_ratio_guess(self, client, conv, chat, db, monkeypatch, pollo):
@@ -2866,13 +2852,10 @@ class TestPolloImageModels:
         data = chat.catalogue.get_models(refresh=True)
         images = {m["id"]: m for m in data["image"]}
         videos = {m["id"]: m for m in data["video"]}
-        # Qwen Image runs on its legacy endpoint (its v1 one 404s)
-        assert images["pollo/qwenimage"]["input_modalities"] == ["text", "image"]
-        assert images["pollo/qwenimage3prov1"]["input_modalities"] == ["text", "image"]
-        assert "pollo/qwenimagev1" not in images
-        assert images["pollo/qwenimageflashv1"]["input_modalities"] == ["text"]  # no reference images
-        assert videos["pollo/klingv3v1"]["resolutions"] == ["std", "pro", "4K"]
-        assert videos["pollo/klingv3v1"]["durations"] == list(range(3, 16))
+        assert images["pollo/qwenimage3pro"]["input_modalities"] == ["text", "image"]
+        assert images["pollo/qwenimageflash"]["input_modalities"] == ["text"]  # no reference images
+        assert videos["pollo/klingv3"]["resolutions"] == ["std", "pro", "4K"]
+        assert videos["pollo/klingv3"]["durations"] == list(range(3, 16))
 
     def test_image_only_kling_without_an_image_fails_on_the_card(self, client, conv, chat, db, monkeypatch, pollo):
         import web.providers.pollo_engine as registry
@@ -2881,7 +2864,7 @@ class TestPolloImageModels:
         msg = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages",
-                json={"content": "a fox running", "mode": "video", **{**SETTINGS, "video_model": "pollo/klingv21v1"}},
+                json={"content": "a fox running", "mode": "video", **{**SETTINGS, "video_model": "pollo/klingv21"}},
             )
         )[-1]["message"]
         item = msg["media"][0]
@@ -2893,7 +2876,7 @@ class TestPolloImageModels:
         chat.catalogue.seed_models(
             {
                 "video": [
-                    {"id": "pollo/seedance20fastv1", "durations": list(range(4, 16)), "resolutions": ["480p", "720p"]}
+                    {"id": "pollo/seedance20fast", "durations": list(range(4, 16)), "resolutions": ["480p", "720p"]}
                 ]
             },
             stale=True,
@@ -2937,7 +2920,7 @@ class TestPolloImageModels:
         msg = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages",
-                json={"content": "a fox", "mode": "image", **{**SETTINGS, "image_model": "pollo/qwenimage3prov1"}},
+                json={"content": "a fox", "mode": "image", **{**SETTINGS, "image_model": "pollo/qwenimage3pro"}},
             )
         )[-1]["message"]
         assert "isn't available to your API key" in msg["media"][0]["error"]
@@ -2962,7 +2945,7 @@ class TestPolloImageModels:
         msg = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages",
-                json={"content": "a gym", "mode": "image", **{**SETTINGS, "image_model": "pollo/seedreamprov1"}},
+                json={"content": "a gym", "mode": "image", **{**SETTINGS, "image_model": "pollo/seedreampro"}},
             )
         )[-1]["message"]
         item = msg["media"][0]
@@ -2978,13 +2961,11 @@ class TestPolloImageModels:
             monkeypatch.setattr(openrouter, fn, lambda: [])
         images = {m["id"]: m for m in chat.catalogue.get_models(refresh=True)["image"]}
         hidden = {k for k, m in images.items() if m["hidden"]}
-        assert hidden == {
-            "pollo/qwenimage",
-            "pollo/qwenimageflashv1",
-        }
-        assert images["pollo/qwenimage3v1"]["hidden"] is None  # works since its address was fixed
-        assert "403" in images["pollo/qwenimage"]["hidden"]
-        assert images["pollo/klingv3imagev1"]["hidden"] is None  # confirmed working
+        assert hidden == {"pollo/qwenimageflash"}
+        # `hidden` carries the reason, shown in the picker behind "Show hidden"
+        assert "unavailable" in images["pollo/qwenimageflash"]["hidden"]
+        assert images["pollo/qwenimage3"]["hidden"] is None  # works since its address was fixed
+        assert images["pollo/klingv3image"]["hidden"] is None  # confirmed working
 
 
 class TestOpenRouterConnection:
@@ -3834,7 +3815,7 @@ class TestEstimate:
 
         monkeypatch.setattr(pollo_estimate, "_ask", fake_ask)
         pollo_estimate.clear_cache()
-        body = {"model": "pollo/seedance20fastv1", "kind": "video", "duration": 5, "resolution": "480p"}
+        body = {"model": "pollo/seedance20fast", "kind": "video", "duration": 5, "resolution": "480p"}
         got = client.post("/api/chat/estimate", json=body).json()
         assert got == {"estimate": {"credits": 8, "full_credits": 10}}
         assert seen["url"].endswith("/estimate") and seen["key"] == "pk-test"
@@ -3851,12 +3832,12 @@ class TestSpendBreakdown:
             "assistant",
             "",
             media=[
-                {"id": "a", "kind": "video", "status": "done", "model": "pollo/seedance25v1", "credits": 10},
-                {"id": "b", "kind": "video", "status": "done", "model": "pollo/seedance25v1", "credits": 5},
+                {"id": "a", "kind": "video", "status": "done", "model": "pollo/seedance25", "credits": 10},
+                {"id": "b", "kind": "video", "status": "done", "model": "pollo/seedance25", "credits": 5},
             ],
         )
         body = client.get("/api/chat/spend/breakdown").json()
-        row = next(r for r in body["rows"] if r["model"] == "pollo/seedance25v1")
+        row = next(r for r in body["rows"] if r["model"] == "pollo/seedance25")
         assert row["credits"] == 15 and row["count"] == 2 and row["usd"] == 0.9  # 15 cr x $0.06
         assert body["total_usd"] >= 0.9
         assert client.get("/api/chat/spend/breakdown?days=7").status_code == 200

@@ -1,8 +1,8 @@
 """
-Credit estimates from Pollo itself: every v1 endpoint has an ".../estimate"
-twin and most legacy ones a ".../validate" twin (docs.pollo.ai/openapi.json,
-2026-10-18) that take the same body as the generation request and return
-its price without starting a task. The Generate page asks while the form
+Credit estimates from Pollo itself: every generation endpoint has an
+".../estimate" twin (docs.pollo.ai/openapi.json, 2026-10-18) that takes the
+same body as the generation request and returns its price without starting
+a task. The Generate page asks while the form
 changes, so answers are cached; the media URLs are placeholders (prices
 depend on the settings, not on which image goes in), so nothing is
 uploaded for an estimate. Checked 2026-10-18: they don't cost credits.
@@ -79,8 +79,9 @@ def _ask(url: str, payload: dict, api_key: str | None) -> tuple[dict | None, boo
 
 
 def _credits(data: Any) -> dict | None:
-    """The price from an estimate (v1: cost/discountCost) or validate
-    (legacy: cost/totalCost) answer."""
+    """The price out of an estimate answer: `cost`, or `discountCost` when
+    the account gets a discount. `totalCost` is accepted as an older spelling
+    of the undiscounted price."""
     if not isinstance(data, dict):
         return None
     full = _number(data.get("totalCost")) if data.get("totalCost") is not None else _number(data.get("cost"))

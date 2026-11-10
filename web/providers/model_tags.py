@@ -117,7 +117,7 @@ def _video_tags(m: dict[str, Any], add: Callable[..., None]) -> None:
         add("text2vid")
     if m.get("reference_images"):
         add("ref2vid")
-    refs = m.get("ref_mode") or {}  # v1 models' reference-to-video branch
+    refs = m.get("ref_mode") or {}  # the model's reference-to-video branch
     if refs:
         add("ref2vid")
     if "video" in (refs.get("types") or []):
