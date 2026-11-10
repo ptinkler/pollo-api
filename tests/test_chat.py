@@ -4016,3 +4016,76 @@ class TestEditAndRewordInPlace:
         user = db.get_chat_messages(conv["id"])[-1]
         r = client.post(f"/api/chat/conversations/{conv['id']}/reword", json={"message_id": user.id, **SETTINGS})
         assert r.status_code == 400
+
+
+class TestRetryAFailedPicture:
+    """A failed generation can be run again with a changed prompt, and leaves
+    no empty version behind."""
+
+    def _failed(self, db, conv):
+        db.add_chat_message(conv["id"], "user", "draw a fox")
+        return db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "Sorry.",
+            model="t/model",
+            media=[
+                {
+                    "id": "m1",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "error",
+                    "error": "flagged",
+                    "prompt": "a fox",
+                    "model": "i/model",
+                    "params": {"aspect_ratio": "16:9", "resolution": None, "refs": []},
+                }
+            ],
+        )
+
+    def _inline(self, monkeypatch):
+        class Inline:
+            def __init__(self, target, args, **kw):
+                self.target, self.args = target, args
+
+            def start(self):
+                self.target(*self.args)
+
+        monkeypatch.setattr(threading, "Thread", Inline)
+
+    def test_a_changed_prompt_is_used(self, client, conv, chat, db, monkeypatch):
+        msg = self._failed(db, conv)
+        self._inline(monkeypatch)
+        got = {}
+        monkeypatch.setattr(
+            openrouter,
+            "generate_image",
+            lambda model, prompt, **kw: (got.update(prompt=prompt), ([(_png_bytes(), "image/png")], 0.01))[1],
+        )
+        r = client.post(
+            f"/api/chat/messages/{msg.id}/media/m1/regenerate",
+            json={"prompt": "a fox, softer lighting", "replace": True},
+        )
+        assert r.status_code == 200
+        assert got["prompt"] == "a fox, softer lighting"
+        item = db.get_chat_message(msg.id).media[0]
+        assert item["status"] == "done" and item["prompt"] == "a fox, softer lighting"
+
+    def test_it_leaves_no_empty_version(self, client, conv, chat, db, monkeypatch):
+        """There was no picture, so there is nothing to flip back to."""
+        msg = self._failed(db, conv)
+        self._inline(monkeypatch)
+        monkeypatch.setattr(
+            openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], 0.01)
+        )
+        client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={"prompt": "try again", "replace": True})
+        assert db.get_chat_message(msg.id).media[0].get("versions") in (None, [])
+
+    def test_editing_a_failed_picture_is_still_refused(self, client, conv, chat, db):
+        """`edit` needs a picture to send back; a failure has none."""
+        msg = self._failed(db, conv)
+        r = client.post(
+            f"/api/chat/messages/{msg.id}/media/m1/regenerate",
+            json={"prompt": "x", "edit": True, "replace": True},
+        )
+        assert r.status_code == 400

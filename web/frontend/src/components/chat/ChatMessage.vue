@@ -392,6 +392,8 @@ const requestItem = ref(null)
                 decoding="async"
                 @click="emit('open-media', bigView(item))"
               />
+              <audio v-else-if="item.kind === 'audio'" :src="url(item)" class="media-audio" controls></audio>
+              <video v-else :src="url(item)" controls loop playsinline preload="metadata"></video>
               <div v-if="versionsOf(item).length" class="ver-nav" @click.stop>
                 <button :disabled="versionAt(item) === 0" title="Earlier version" @click="stepVersion(item, -1)">
                   ‹
@@ -407,8 +409,6 @@ const requestItem = ref(null)
                   ›
                 </button>
               </div>
-              <audio v-else-if="item.kind === 'audio'" :src="url(item)" class="media-audio" controls></audio>
-              <video v-else :src="url(item)" controls loop playsinline preload="metadata"></video>
               <button
                 v-if="canPin(item)"
                 :class="['pin-btn', { on: item.pinned }]"
@@ -469,7 +469,10 @@ const requestItem = ref(null)
                   title="Run the same prompt again on the currently selected model"
                   @click="emit('regenerate', { mediaId: item.id, model: null })"
                 >
-                  ↻ Retry
+                  <svg class="ic sm"><use href="#s-refresh" /></svg> Retry
+                </button>
+                <button class="retry-btn" title="Change the prompt and try again" @click="openPrompt(item, false)">
+                  <svg class="ic sm"><use href="#s-pencil" /></svg> Change prompt
                 </button>
                 <ModelPicker
                   :model-value="''"
@@ -595,18 +598,18 @@ const requestItem = ref(null)
             <button
               v-if="canRetry && message.media?.length"
               class="meta-btn"
-              title="Write these words again, keeping the pictures this reply made"
+              title="Rewrite: write these words again and replace them here. The pictures are kept as they are."
               @click="emit('reword')"
             >
-              ↻ Words
+              <svg class="ic sm"><use href="#s-pencil" /></svg> Rewrite
             </button>
             <button
               v-if="canRetry"
               class="meta-btn"
-              title="Retry: another version of this reply"
+              title="Retry: a fresh version of this whole reply, pictures included, kept beside this one — use ‹ › to compare."
               @click="emit('retry')"
             >
-              ↻
+              <svg class="ic sm"><use href="#s-refresh" /></svg> Retry
             </button>
             <button
               v-if="canBranch"

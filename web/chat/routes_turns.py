@@ -378,8 +378,10 @@ def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia):
         params["refs"] = [item["file"], *(r for r in params.get("refs") or [] if str(r).startswith("char:"))]
     if data.replace:
         # Keep what it looked like before, then clear the result fields so the
-        # worker fills them in on the same item.
-        versions = [*(item.get("versions") or []), _as_version(item)]
+        # worker fills them in on the same item. A failed attempt has no
+        # picture to keep, so retrying one adds no version to flip back to.
+        old_versions = list(item.get("versions") or [])
+        versions = [*old_versions, _as_version(item)] if item.get("file") else old_versions
         blank = dict.fromkeys(("file", "cost", "credits", "error", "job_id", "request", "response"))
         item = {**item, **blank, "status": "pending", "model": model, "prompt": prompt, "params": params}
         item["versions"] = versions

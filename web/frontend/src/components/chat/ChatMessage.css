@@ -598,6 +598,9 @@
 }
 
 .retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   background: var(--saccent);
   border: none;
   border-radius: var(--r);
@@ -629,6 +632,9 @@
 }
 
 .meta-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   background: none;
   border: none;
   color: var(--text2);

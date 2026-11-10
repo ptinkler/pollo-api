@@ -544,16 +544,100 @@ describe('ChatMessage reword a reply', () => {
 
   it('is offered on a reply that made media, and emits reword', async () => {
     const w = mount(ChatMessage, latest([image]))
-    await w.find('button[title^="Write these words again"]').trigger('click')
+    await w.find('button[title^="Rewrite"]').trigger('click')
     expect(w.emitted('reword')).toHaveLength(1)
   })
 
   it('is not offered on a reply with no media to keep', () => {
-    expect(mount(ChatMessage, latest([])).find('button[title^="Write these words again"]').exists()).toBe(false)
+    expect(mount(ChatMessage, latest([])).find('button[title^="Rewrite"]').exists()).toBe(false)
   })
 
   it('is not offered on an older reply, where Retry is not either', () => {
     const w = mount(ChatMessage, reply([image]))
-    expect(w.find('button[title^="Write these words again"]').exists()).toBe(false)
+    expect(w.find('button[title^="Rewrite"]').exists()).toBe(false)
+  })
+})
+
+describe('ChatMessage renders one element per media kind', () => {
+  // Regression: the version arrows were inserted between the <img v-if> and
+  // its <video v-else>, which breaks Vue's conditional chain — the <video>
+  // then rendered for images too, putting a play control on a picture.
+  const media = extra => ({
+    props: {
+      convId: 'c1',
+      message: {
+        id: 50,
+        role: 'assistant',
+        content: '',
+        status: 'done',
+        media: [{ id: 'm1', source: 'generated', status: 'done', prompt: 'a fox', ...extra }],
+      },
+    },
+  })
+
+  it('an image is an <img> and nothing else', () => {
+    const w = mount(ChatMessage, media({ kind: 'image', file: 'a.png' }))
+    expect(w.findAll('img')).toHaveLength(1)
+    expect(w.find('video').exists()).toBe(false)
+    expect(w.find('audio').exists()).toBe(false)
+  })
+
+  it('an image with earlier versions is still only an <img>', () => {
+    const w = mount(ChatMessage, media({ kind: 'image', file: 'b.png', versions: [{ file: 'a.png' }] }))
+    expect(w.find('.ver-nav').exists()).toBe(true)
+    expect(w.find('video').exists()).toBe(false)
+  })
+
+  it('a video is a <video> and not an <img>', () => {
+    const w = mount(ChatMessage, media({ kind: 'video', file: 'a.mp4' }))
+    expect(w.findAll('video')).toHaveLength(1)
+    expect(w.find('img').exists()).toBe(false)
+  })
+
+  it('audio is an <audio> and not a <video>', () => {
+    const w = mount(ChatMessage, media({ kind: 'audio', file: 'a.mp3' }))
+    expect(w.findAll('audio')).toHaveLength(1)
+    expect(w.find('video').exists()).toBe(false)
+  })
+})
+
+describe('ChatMessage a failed picture can be changed and retried', () => {
+  const failed = {
+    props: {
+      convId: 'c1',
+      message: {
+        id: 60,
+        role: 'assistant',
+        content: '',
+        status: 'done',
+        media: [
+          {
+            id: 'm1',
+            kind: 'image',
+            source: 'generated',
+            status: 'error',
+            error: 'flagged',
+            prompt: 'a fox',
+            model: 'i/model',
+          },
+        ],
+      },
+    },
+  }
+
+  it('offers Change prompt beside Retry', async () => {
+    const w = mount(ChatMessage, failed)
+    expect(w.find('button[title^="Run the same prompt again"]').exists()).toBe(true)
+    await w.find('button[title="Change the prompt and try again"]').trigger('click')
+    const box = w.find('.prompt-box textarea')
+    expect(box.element.value).toBe('a fox') // pre-filled with what failed
+    await box.setValue('a fox, softer lighting')
+    await w.find('.prompt-box .edit-send').trigger('click')
+    expect(w.emitted('regenerate')[0][0]).toMatchObject({
+      mediaId: 'm1',
+      prompt: 'a fox, softer lighting',
+      edit: false,
+      replace: true,
+    })
   })
 })
