@@ -1,8 +1,8 @@
 <script setup>
-import { ref, computed, watch, inject } from 'vue'
+import { ref, reactive, computed, watch, inject, onBeforeUnmount } from 'vue'
 import MediaGrid from './MediaGrid.vue'
 import MediaFilters from './MediaFilters.vue'
-import { fetchMedia, uploadMedia, useMediaFilters } from '../../composables/useMedia'
+import { fetchMediaPage, uploadMedia } from '../../composables/useMedia'
 import { takeFiles } from '../../utils/files'
 
 // Pick media from the library, or upload new from this computer (they go into
@@ -22,14 +22,21 @@ const props = defineProps({
 const emit = defineEmits(['pick', 'close'])
 const showToast = inject('showToast', () => {})
 
+// A page at a time, filtered server-side: the whole library in one request is
+// a long wait before anything shows (and most of it is never scrolled to).
+const PAGE = 30
 const items = ref([])
+const total = ref(0)
 const loading = ref(false)
 const uploading = ref(0)
-const selected = ref(new Set())
-const shown = computed(() => items.value.filter(i => props.kinds.includes(i.kind)))
-const { filters, filtered } = useMediaFilters(shown, { kind: 'all', origin: props.origin })
-const byId = computed(() => Object.fromEntries(items.value.map(i => [i.id, i])))
-const kindCount = kind => [...selected.value].filter(id => byId.value[id]?.kind === kind).length
+const filters = reactive({ kind: 'all', source: props.source, origin: props.origin, q: '' })
+const hasMore = computed(() => items.value.length < total.value)
+
+// What's ticked, by id — kept as the items themselves so a pick survives
+// scrolling on, searching, or changing a filter.
+const picked = ref(new Map())
+const selected = computed(() => new Set(picked.value.keys()))
+const kindCount = kind => [...picked.value.values()].filter(i => i.kind === kind).length
 // Per-kind tallies for the footer, e.g. "Images 2/10 · Videos 1/5"
 const tallies = computed(() => props.kinds.map(k => ({ kind: k, n: kindCount(k), cap: props.limits?.[k] ?? null })))
 
@@ -42,65 +49,106 @@ const accept = computed(() =>
 )
 const kindOf = file => (file.type.startsWith('video/') ? 'video' : file.type.startsWith('image/') ? 'image' : null)
 
+// The dialog only ever offers `kinds`; one of them narrows the query, and both
+// is every kind the library holds, so it asks for all of them.
+const kindParam = () => (filters.kind !== 'all' ? filters.kind : props.kinds.length === 1 ? props.kinds[0] : undefined)
+const params = offset => ({
+  offset,
+  limit: PAGE,
+  kind: kindParam(),
+  source: filters.source === 'all' ? undefined : filters.source,
+  origin: filters.origin === 'all' ? undefined : filters.origin,
+  q: filters.q.trim() || undefined,
+})
+
+let seq = 0
+async function load() {
+  const mine = ++seq
+  loading.value = true
+  try {
+    const { items: page, total: t } = await fetchMediaPage(params(0))
+    if (mine !== seq) return // a newer search already answered
+    items.value = page
+    total.value = t
+  } catch (e) {
+    if (mine === seq) showToast(`Couldn't load the library: ${e.message}`, 'error')
+  } finally {
+    if (mine === seq) loading.value = false
+  }
+}
+async function loadMore() {
+  if (!hasMore.value || loading.value) return
+  const mine = seq
+  const { items: page } = await fetchMediaPage(params(items.value.length))
+  if (mine === seq) items.value = [...items.value, ...page]
+}
+
+// Typing re-queries, but only once you pause
+let searchTimer = null
+watch(
+  () => filters.q,
+  () => {
+    clearTimeout(searchTimer)
+    searchTimer = setTimeout(load, 250)
+  },
+)
+watch([() => filters.kind, () => filters.source, () => filters.origin], load)
+onBeforeUnmount(() => clearTimeout(searchTimer))
+
 watch(
   () => props.open,
-  async open => {
+  open => {
     if (!open) return
-    selected.value = new Set()
+    picked.value = new Map()
     filters.origin = props.origin
     filters.source = props.source
-    loading.value = true
-    try {
-      items.value = await fetchMedia()
-    } catch (e) {
-      showToast(`Couldn't load the library: ${e.message}`, 'error')
-    } finally {
-      loading.value = false
-    }
+    filters.kind = 'all'
+    filters.q = ''
+    load()
   },
 )
 
 function toggle(item) {
-  if (selected.value.has(item.id)) {
-    const next = new Set(selected.value)
-    next.delete(item.id)
-    selected.value = next
-    return
-  }
-  if (!props.multiple) return (selected.value = new Set([item.id]))
+  const next = new Map(picked.value)
+  if (next.delete(item.id)) return (picked.value = next)
+  if (!props.multiple) return (picked.value = new Map([[item.id, item]]))
   if (props.limits) {
     const cap = props.limits[item.kind]
     if (cap != null && kindCount(item.kind) >= cap)
       return showToast(`Up to ${cap} ${item.kind}${cap === 1 ? '' : 's'}`, 'error')
-  } else if (props.max != null && selected.value.size >= props.max) {
+  } else if (props.max != null && picked.value.size >= props.max) {
     return showToast(`Pick up to ${props.max}`, 'error')
   }
-  selected.value = new Set(selected.value).add(item.id)
+  picked.value = next.set(item.id, item)
 }
 
+// An upload lands in the library and the server drops its cached list, so a
+// reload brings it back at the top; the pick is held in `picked`, not in the
+// page, so it survives that reload.
 async function upload(files) {
+  let widened = false
   for (const file of [...files]) {
     const kind = kindOf(file)
     if (!kind || !props.kinds.includes(kind)) continue
     uploading.value++
     try {
       const item = await uploadMedia(file)
-      items.value = [item, ...items.value]
-      if (![item.origin, 'all'].includes(filters.origin)) filters.origin = 'all' // so the upload shows
       toggle(item) // pre-select what was just uploaded
+      if (![item.origin, 'all'].includes(filters.origin)) {
+        filters.origin = 'all' // so the upload shows (its watcher reloads)
+        widened = true
+      }
     } catch (e) {
       showToast(`Upload failed: ${e.message}`, 'error')
     } finally {
       uploading.value--
     }
   }
+  if (!widened) await load()
 }
 
 function confirm() {
-  emit(
-    'pick',
-    items.value.filter(i => selected.value.has(i.id)),
-  )
+  emit('pick', [...picked.value.values()])
   emit('close')
 }
 </script>
@@ -131,9 +179,19 @@ function confirm() {
         <MediaFilters v-model:filters="filters" :show-kind="false" />
 
         <div class="body">
-          <p v-if="loading" class="muted">Loading…</p>
-          <p v-else-if="!filtered.length" class="muted">Nothing here yet — upload above.</p>
-          <MediaGrid v-else :items="filtered" :selected="selected" selectable @toggle="toggle" />
+          <p v-if="loading && !items.length" class="muted">Loading…</p>
+          <p v-else-if="!items.length" class="muted">
+            {{ filters.q.trim() ? 'Nothing matches that search.' : 'Nothing here yet — upload above.' }}
+          </p>
+          <MediaGrid
+            v-else
+            :items="items"
+            :selected="selected"
+            :has-more="hasMore"
+            selectable
+            @toggle="toggle"
+            @more="loadMore"
+          />
         </div>
 
         <div class="actions">

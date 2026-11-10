@@ -504,3 +504,68 @@ class TestVideoDurations:
         monkeypatch.setattr(clips, "_video_seconds", lambda path, mtime: reads.append(path) or 3.0)
         client.get("/api/media")
         assert len(reads) == 2
+
+
+class TestMediaCache:
+    """The cache lives under <data>/cache with the thumbnails, so deleting that
+    folder wipes it — and it can't grow past one row per file that exists."""
+
+    @pytest.fixture()
+    def cached(self, client, clips, db, conv):
+        import web.media_cache as media_cache
+
+        client.get("/api/media")  # fills in the clips' lengths
+        return media_cache
+
+    @pytest.fixture()
+    def clips(self, db, conv):
+        return TestVideoDurations.clips.__wrapped__(TestVideoDurations(), db, conv)
+
+    def test_it_sits_in_the_cache_folder_and_a_wipe_is_harmless(self, client, cached, monkeypatch):
+        import shutil
+
+        import web.core.config as config
+
+        assert cached.db_path().parent == config.ROOT_DIR / "cache"
+        assert cached.durations()
+        shutil.rmtree(config.ROOT_DIR / "cache")  # what a user wiping the cache does
+        assert cached.durations() == {}
+        monkeypatch.setattr(cached, "_swept", False)
+        assert client.get("/api/media").status_code == 200  # reads them again, no complaint
+
+    def test_a_re_encoded_file_replaces_its_row(self, client, cached, clips, db, monkeypatch):
+        import web.core.config as config
+
+        before = len(cached.durations())
+        path = config.ROOT_DIR / "chat" / next(iter(db.list_conversations())).id / "clip_0.mp4"
+        path.write_bytes(b"re-encoded")
+        monkeypatch.setattr(clips, "_video_seconds", lambda p, m: 7.0)
+        clips._invalidate_list()
+        client.get("/api/media")
+        assert len(cached.durations()) == before  # replaced, not added
+        assert cached.durations()[str(path)][1] == 7.0
+
+    def test_deleting_media_drops_its_row(self, client, cached, db):
+        import web.core.config as config
+
+        conv_id = next(iter(db.list_conversations())).id
+        path = str(config.ROOT_DIR / "chat" / conv_id / "clip_0.mp4")
+        assert path in cached.durations()
+        assert client.delete(f"/api/media/chat:{conv_id}:clip_0.mp4").status_code == 200
+        assert path not in cached.durations()
+
+    def test_a_sweep_drops_rows_whose_file_has_gone(self, cached, db):
+        import web.core.config as config
+
+        (config.ROOT_DIR / "chat" / next(iter(db.list_conversations())).id / "clip_1.mp4").unlink()
+        assert cached.sweep() == 1
+        assert all("clip_1.mp4" not in p for p in cached.durations())
+
+    def test_an_unusable_cache_file_just_means_no_cache(self, cached, monkeypatch, tmp_path):
+        blocker = tmp_path / "blocker"  # a file where the cache folder should be
+        blocker.write_text("x")
+        monkeypatch.setattr(cached, "db_path", lambda: blocker / "media-cache.sqlite")
+        assert cached.durations() == {}  # degraded, not raised
+        cached.remember([("/a.mp4", 1, 2.0)])
+        cached.forget("/a.mp4")
+        assert cached.sweep() == 0

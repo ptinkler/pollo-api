@@ -47,15 +47,35 @@ describe('useMediaFilters', () => {
   })
 })
 
-describe('MediaPicker', () => {
-  beforeEach(() => {
-    globalThis.fetch = vi.fn(async url => {
-      const body = String(url).endsWith('/api/media/upload')
-        ? { id: 'lib:new.png', kind: 'image', source: 'upload', origin: 'library', name: 'new.png', url: '/n' }
-        : { items: ITEMS }
-      return { ok: true, status: 200, json: async () => body }
-    })
+// The picker pages and filters server-side now, so the stub has to answer the
+// way /api/media does: apply the query, then slice.
+function stubLibrary(all = ITEMS) {
+  const library = [...all]
+  globalThis.fetch = vi.fn(async url => {
+    const href = String(url)
+    if (href.endsWith('/api/media/upload')) {
+      // As the server does: it joins the library, so the next list request has it
+      const item = { id: 'lib:new.png', kind: 'image', source: 'upload', origin: 'library', name: 'new.png', url: '/n' }
+      library.unshift(item)
+      return { ok: true, status: 200, json: async () => item }
+    }
+    const p = new URL(href, 'http://t').searchParams
+    const q = (p.get('q') || '').toLowerCase()
+    const matches = i =>
+      (!p.get('kind') || i.kind === p.get('kind')) &&
+      (!p.get('source') || i.source === p.get('source')) &&
+      (!p.get('origin') || i.origin === p.get('origin')) &&
+      (!q || [i.prompt, i.name, i.conversation_title].some(v => v?.toLowerCase().includes(q)))
+    const hits = library.filter(matches)
+    const offset = Number(p.get('offset') || 0)
+    const limit = Number(p.get('limit') || 0)
+    const items = limit ? hits.slice(offset, offset + limit) : hits.slice(offset)
+    return { ok: true, status: 200, json: async () => ({ items, total: hits.length, offset }) }
   })
+}
+
+describe('MediaPicker', () => {
+  beforeEach(() => stubLibrary())
 
   async function open(props = {}) {
     const w = mount(MediaPicker, { props: { open: false, ...props }, attachTo: document.body })
@@ -65,9 +85,14 @@ describe('MediaPicker', () => {
   }
 
   it('offers only images and emits the picked ones', async () => {
+    const withVideo = [
+      ...ITEMS,
+      { id: 'lib:v.mp4', kind: 'video', source: 'upload', origin: 'library', name: 'v.mp4', url: '/v' },
+    ]
+    stubLibrary(withVideo)
     const w = await open()
     const tiles = document.body.querySelectorAll('.tile')
-    expect(tiles).toHaveLength(2) // the video isn't offered
+    expect(tiles).toHaveLength(2) // asked the server for images only, so the video isn't offered
     tiles[0].click()
     tiles[1].click()
     await flushPromises()
@@ -82,7 +107,7 @@ describe('MediaPicker', () => {
       ...ITEMS,
       { id: 'lib:v.mp4', kind: 'video', source: 'upload', origin: 'library', name: 'v.mp4', url: '/v' },
     ]
-    globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ items: withVideo }) }))
+    stubLibrary(withVideo)
     const w = await open({ kinds: ['image', 'video'], limits: { image: 1, video: 1 } })
     expect(document.body.querySelectorAll('.tile')).toHaveLength(3) // both images + the video are offered
     const tiles = document.body.querySelectorAll('.tile')

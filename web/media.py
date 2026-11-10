@@ -43,7 +43,7 @@ from pydantic import BaseModel
 from web.core import config
 from web.core.metadata import get_db, iso
 
-from . import characters
+from . import characters, media_cache
 from .uploads import (
     image_media_type,
     is_blank_image,
@@ -117,10 +117,10 @@ def _video_seconds(path: str, mtime_ns: int) -> float | None:
 
 # Reading a length means opening the file with OpenCV, which on a NAS costs
 # ~a tenth of a second each — enough to make building the whole list take the
-# best part of a minute. So lengths are remembered in the database
-# (MediaDuration), the list build only ever uses what's already known, and a
-# request reads a handful of the rest for the page it returns (the length is a
-# caption on a tile, so arriving a request later costs nothing).
+# best part of a minute. So lengths are remembered in the media cache (see
+# web/media_cache.py), the list build only ever uses what's already known, and
+# a request reads a handful of the rest for the page it returns (the length is
+# a caption on a tile, so arriving a request later costs nothing).
 _DURATION_FILL_BUDGET = 48
 _durations: dict[str, tuple[int, float | None]] | None = None
 _durations_lock = threading.Lock()
@@ -128,11 +128,12 @@ _durations_lock = threading.Lock()
 
 def _durations_map() -> dict[str, tuple[int, float | None]]:
     """Known lengths: path → (the mtime it was read at, seconds). Read from the
-    database once per process; filling adds to it."""
+    cache once per process; filling adds to it."""
     global _durations
     with _durations_lock:
         if _durations is None:
-            _durations = get_db().media_durations()
+            _durations = media_cache.durations()
+            media_cache.sweep_in_background()
         return _durations
 
 
@@ -192,7 +193,7 @@ def _fill_durations(items: list[dict[str, Any]]) -> None:
     with _durations_lock:
         if _durations is not None:
             _durations.update({path: (mtime_ns, seconds) for path, mtime_ns, seconds in read})
-    get_db().set_media_durations(read)
+    media_cache.remember(read)
 
 
 def _item_path(item: dict[str, Any]) -> Path | None:
@@ -228,6 +229,13 @@ def resolve(media_id: str) -> tuple[str, Path, dict[str, str]]:
     if not path.is_file():
         raise HTTPException(404, "Media not found")
     return origin, path, parts
+
+
+def _forget_file(path: Path) -> None:
+    """Drop what was cached about a file that's being deleted, so nothing is
+    left behind for it."""
+    _thumb_path(path).unlink(missing_ok=True)
+    media_cache.forget(path)
 
 
 def _thumb_url(media_id: str) -> str:
@@ -562,7 +570,7 @@ def _delete_item(media_id: str) -> dict:
     the chat message's media item. Copies already made from it (character
     images, attachments, Generate sources) are separate files and stay."""
     origin, path, parts = resolve(media_id)
-    _thumb_path(path).unlink(missing_ok=True)
+    _forget_file(path)
     db = get_db()
     if origin == "lib":
         path.unlink()
@@ -676,7 +684,7 @@ def api_clear_blocked():
             by_message.setdefault(owner.id, []).append(item.get("id"))
         if item.get("file") and item.get("status", "done") == "done":
             path = _chat_dir(owner.conversation_id) / safe_filename(item["file"])
-            _thumb_path(path).unlink(missing_ok=True)
+            _forget_file(path)
             path.unlink(missing_ok=True)
     for msg_id, ids in by_message.items():
         msg = db.get_chat_message(msg_id)

@@ -9,7 +9,6 @@ from .conversations import ConversationMixin
 from .imports import ImportMixin
 from .instructions import InstructionMixin
 from .library import LibraryMixin
-from .media import MediaMixin
 from .messages import MessageMixin
 from .users import UserMixin
 
@@ -23,7 +22,6 @@ class MetadataDB(
     MessageMixin,
     ImportMixin,
     LibraryMixin,
-    MediaMixin,
 ):
     """SQLAlchemy-based database manager. The engine, schema catch-up and the
     locked session live on _DBBase; each domain's methods come from a mixin."""
