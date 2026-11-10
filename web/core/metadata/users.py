@@ -22,13 +22,6 @@ class UserMixin:
                 session.expunge(user)
             return user
 
-    def get_user_by_provider(self, provider: str, provider_sub: str) -> User | None:
-        with self._session() as session:
-            user = session.query(User).filter(User.provider == provider, User.provider_sub == provider_sub).first()
-            if user:
-                session.expunge(user)
-            return user
-
     def upsert_oauth_user(self, profile: dict, is_admin: bool = False) -> User:
         """Create or refresh a user from an OAuth profile {provider, sub, email,
         name, avatar}. Matches on (provider, sub) first, then email."""

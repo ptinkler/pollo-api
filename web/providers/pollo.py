@@ -220,9 +220,7 @@ def submit_audio(model_id: str, prompt: str, source_audio: Path | None = None, *
             raise PolloError("Voice cloning needs a reference clip — upload an audio file")
         opts["voice_ref_url"] = _upload_audio(source_audio)
     try:
-        generator = get_audio_generator(
-            key, api_key=keyctx.provider_key("pollo"), project="chat", prompt=prompt, **opts
-        )
+        generator = get_audio_generator(key, api_key=keyctx.provider_key("pollo"), prompt=prompt, **opts)
         generator.get_payload()
     except ValueError as e:
         raise PolloError(str(e)) from e
@@ -309,7 +307,6 @@ def _submit_ref_video_job(
     generator = get_video_generator(
         key,
         api_key=keyctx.provider_key("pollo"),
-        project="chat",
         prompt=prompt,
         image_url=None,
         refs=refs,
@@ -342,7 +339,6 @@ def generate_image(
     generator = get_image_generator(
         key,
         api_key=keyctx.provider_key("pollo"),
-        project="chat",
         prompt=prompt,
         image_url=None,
         aspect_ratio=aspect_ratio,
@@ -405,7 +401,6 @@ def _submit_source_video_job(
     # The source video goes to the host that takes larger files; both are URLs.
     kw: dict[str, Any] = {
         "api_key": keyctx.provider_key("pollo"),
-        "project": "chat",
         "prompt": prompt,
         "video_url": _upload_video(source_video),
     }
@@ -463,7 +458,6 @@ def submit_video(
         generator = get_video_generator(
             key,
             api_key=keyctx.provider_key("pollo"),
-            project="chat",
             prompt=prompt,
             image_url=_upload(first_frame),
             audio_url=_upload_audio(source_audio),
@@ -491,7 +485,6 @@ def submit_video(
         generator = get_video_generator(
             key,
             api_key=keyctx.provider_key("pollo"),
-            project="chat",
             prompt=prompt,
             image_url=None,
             refs=[
@@ -515,7 +508,6 @@ def submit_video(
     generator = get_video_generator(
         key,
         api_key=keyctx.provider_key("pollo"),
-        project="chat",
         prompt=prompt,
         image_url=_upload(first_frame) if first_frame else None,
         aspect_ratio=aspect_ratio,
@@ -547,7 +539,6 @@ def estimate_cost(
             generator = get_audio_generator(
                 key,
                 api_key=keyctx.provider_key("pollo"),
-                project="chat",
                 prompt=prompt or "estimate",
                 voice_ref_url=pollo_estimate.PLACEHOLDERS["audio"],
                 **(audio or {}),
@@ -558,7 +549,6 @@ def estimate_cost(
             generator = get_image_generator(
                 key,
                 api_key=keyctx.provider_key("pollo"),
-                project="chat",
                 prompt="estimate",
                 image_url=None,
                 aspect_ratio=aspect_ratio if aspect_ratio in generators[key].VALID_RATIOS else None,
@@ -571,7 +561,6 @@ def estimate_cost(
             generator = get_video_generator(
                 key,
                 api_key=keyctx.provider_key("pollo"),
-                project="chat",
                 prompt="estimate",
                 image_url=pollo_estimate.PLACEHOLDERS["image"] if n_images else None,
                 # source-file models (upscale, tools…) price from stand-in files

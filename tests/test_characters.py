@@ -265,8 +265,8 @@ class TestInChat:
         assert sent["prompt"] == "Linh dancing"
 
     def test_image_model_without_references_does_not_use_characters(self, client, conv, chat, db, monkeypatch):
-        chat.catalogue._models_cache.update(
-            at=9e18, data={"text": [], "video": [], "image": [{"id": "i/model", "input_modalities": ["text"]}]}
+        chat.catalogue.seed_models(
+            {"text": [], "video": [], "image": [{"id": "i/model", "input_modalities": ["text"]}]}
         )
         linh = _make(client)
         self._attach(client, conv, linh)
@@ -282,9 +282,8 @@ class TestInChat:
         assert db.get_conversation(conv["id"]).character_ids == [linh["id"]]
 
     def test_chat_model_without_tools_is_not_told_in_auto(self, client, conv, chat, monkeypatch):
-        chat.catalogue._models_cache.update(
-            at=9e18,
-            data={
+        chat.catalogue.seed_models(
+            {
                 "image": [],
                 "video": [],
                 "text": [{"id": "t/model", "supports_tools": False, "input_modalities": ["text"]}],

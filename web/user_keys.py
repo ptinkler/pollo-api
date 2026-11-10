@@ -94,4 +94,10 @@ async def set_keys(data: KeysUpdate, user=Depends(require_user)):
         else:
             current[provider] = value.strip()
     get_db().set_user_api_keys(user.id, _encrypt(current))
+    # The catalogues are cached per user and built from their keys
+    from .chat.catalogue import clear_models
+    from .providers import venice
+
+    clear_models()
+    venice.clear_caches()
     return {"keys": _masked(get_db().get_user(user.id))}

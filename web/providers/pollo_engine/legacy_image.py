@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from web.core.config import POLLO_API_BASE
@@ -50,17 +49,14 @@ def legacy_image_model_url(model_id: str) -> str:
 
 
 def _legacy_img_inputs(c: dict[str, Any], **kw) -> dict[str, Any]:
-    resolution = kw.get("resolution") or os.getenv("RESOLUTION")
-    thinking = kw.get("thinking_level") or os.getenv("THINKING_LEVEL")
-    mode = kw.get("mode") or os.getenv("IMAGE_MODE")
+    resolution = kw.get("resolution")
+    thinking = kw.get("thinking_level")
+    mode = kw.get("mode")
     max_images = kw.get("max_images")
-    if max_images is None:
-        max_images = int(os.getenv("MAX_IMAGES")) if os.getenv("MAX_IMAGES") else None
     return {
-        "aspect_ratio": kw.get("aspect_ratio")
-        or _aspect_ratio(os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "square")),
+        "aspect_ratio": kw.get("aspect_ratio") or _aspect_ratio("square"),
         "resolution": resolution if resolution in c["VALID_RESOLUTIONS"] else None,
-        "seed": kw.get("seed") or (int(os.getenv("SEED")) if os.getenv("SEED") else None),
+        "seed": kw.get("seed"),
         "images": kw.get("images") or None,
         "thinking_level": thinking if thinking in c.get("VALID_THINKING_LEVELS", ()) else None,
         "mode": mode if mode in c.get("VALID_MODES", ()) else None,

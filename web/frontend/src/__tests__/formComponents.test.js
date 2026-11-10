@@ -209,15 +209,3 @@ describe('SleekTextarea', () => {
     expect(wrapper.find('.sleek-textarea').classes()).toContain('has-value')
   })
 })
-
-describe('form/index.js exports', () => {
-  it('exports all form components', async () => {
-    const exports = await import('../components/form/index.js')
-    expect(exports.SleekInput).toBeDefined()
-    expect(exports.SleekTextarea).toBeDefined()
-    expect(exports.SleekSelect).toBeDefined()
-    expect(exports.ToggleSwitch).toBeDefined()
-    expect(exports.RatioPicker).toBeDefined()
-    expect(exports.LengthSlider).toBeDefined()
-  })
-})

@@ -5,18 +5,57 @@ import threading
 import time
 from typing import Any
 
+from web.core.metadata import current_tenant
+
 from ..providers import PROVIDERS, venice
 from ..providers.model_tags import tags_for
 from .constants import MODELS_CACHE_TTL
 
-_models_cache: dict[str, Any] = {"at": 0.0, "data": None}
+# Each provider lists the models the REQUESTING user's key can see (an
+# unconfigured provider returns [], and "enabled for this key" differs per
+# account), so a catalogue belongs to one user: the cache holds an entry per
+# tenant, never one for the process. "" is the unauthenticated bucket.
+_models_cache: dict[str, dict[str, Any]] = {}
 _models_lock = threading.Lock()
+_MAX_CACHED_TENANTS = 32
+_NEVER = 9e18  # an "at" that can't expire (seed_models)
+
+
+def _prune(now: float) -> None:
+    """Caller holds the lock. Drop lapsed entries, then the oldest, so one
+    process can't accumulate an entry per user who ever signed in."""
+    for key in [k for k, e in _models_cache.items() if now - e["at"] > MODELS_CACHE_TTL]:
+        del _models_cache[key]
+    while len(_models_cache) > _MAX_CACHED_TENANTS:
+        del _models_cache[min(_models_cache, key=lambda k: _models_cache[k]["at"])]
+
+
+def cached_models() -> dict[str, Any] | None:
+    """The current tenant's cached catalogue, or None when nothing is cached."""
+    entry = _models_cache.get(current_tenant())
+    return entry["data"] if entry else None
+
+
+def seed_models(data: dict[str, Any], stale: bool = False) -> None:
+    """Put a ready-made catalogue in the current tenant's cache (tests).
+    `stale` lets get_models() refetch while the per-model lookups still see it."""
+    with _models_lock:
+        _models_cache[current_tenant()] = {"at": 0.0 if stale else _NEVER, "data": data}
+
+
+def clear_models() -> None:
+    """Forget every cached catalogue — called when a user's provider keys
+    change, since their keys decide what the catalogue contains."""
+    with _models_lock:
+        _models_cache.clear()
 
 
 def get_models(refresh: bool = False) -> dict[str, Any]:
+    tenant = current_tenant()
     with _models_lock:
-        if not refresh and _models_cache["data"] and time.time() - _models_cache["at"] < MODELS_CACHE_TTL:
-            return _models_cache["data"]
+        entry = _models_cache.get(tenant)
+        if not refresh and entry and time.time() - entry["at"] < MODELS_CACHE_TTL:
+            return entry["data"]
         data: dict[str, Any] = {"errors": {}}
         # Uniform dispatch: each provider lists its own models per kind (in
         # PROVIDERS order), so no provider is special-cased here.
@@ -35,7 +74,9 @@ def get_models(refresh: bool = False) -> dict[str, Any]:
             data[kind] = models
         # Only cache a complete result, so a transient failure isn't sticky
         if not data["errors"]:
-            _models_cache.update(at=time.time(), data=data)
+            now = time.time()
+            _models_cache[tenant] = {"at": now, "data": data}
+            _prune(now)
         return data
 
 
@@ -46,7 +87,7 @@ def _model_info(kind: str, model_id: str | None) -> dict | None:
     vision isn't sent images (Venice rejects those requests)."""
     if not model_id:
         return None
-    data = _models_cache["data"]
+    data = cached_models()
     info = next((m for m in data.get(kind, []) if m["id"] == model_id), None) if data else None
     if info is None and venice.is_venice(model_id) and venice.is_configured():
         try:

@@ -9,7 +9,6 @@ carries the submit/estimate/metadata behaviour the callers use.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,21 +16,13 @@ import requests
 
 from web.core.cloudflare import is_cloudflare_block
 from web.core.config import POLLO_API_TIMEOUT, POLLO_API_V1_BASE
-from web.core.get_inputs import get_image_url, get_prompt
 
-from ._shared import _UNSET, _aspect_ratio, _bool_env, _valid_length
 from .legacy_image import LEGACY_IMAGE, legacy_image_model_url, legacy_image_payload
-from .legacy_ref import (
-    _REF_VALID_LENGTHS,
-    LEGACY_REF,
-    _build_ref_list,
-    legacy_ref_model_url,
-    legacy_ref_payload,
-)
-from .legacy_video import LEGACY_VIDEO, _legacy_cfg, _legacy_inputs, legacy_video_model_url, legacy_video_payload
+from .legacy_ref import _REF_VALID_LENGTHS, LEGACY_REF, legacy_ref_model_url, legacy_ref_payload
+from .legacy_video import LEGACY_VIDEO, _legacy_cfg, legacy_video_model_url, legacy_video_payload
 from .v1_audio import V1_AUDIO, v1_audio_model_url, v1_audio_payload
 from .v1_image import V1_IMAGE, _img_cfg, v1_image_model_url, v1_image_payload
-from .v1_video import V1_VIDEO, _cfg, _process_inputs, v1_video_model_url, v1_video_payload
+from .v1_video import V1_VIDEO, _cfg, v1_video_model_url, v1_video_payload
 
 # Resolution tiers the catalogue/validation advertise for legacy video (the
 # legacy builders don't themselves validate resolution).
@@ -59,16 +50,15 @@ _V1_FAMILY = {
 }
 
 _V1_VIDEO_FAMILIES = tuple(_V1_FAMILY.values())
-# families that work on a source video (and take no source image) / any source video
+# families that work on a source video and take no source image
 _VIDEO_ONLY_FAMILIES = ("extend", "edit", "upscale", "bgremove", "subtitle")
-_SOURCE_VIDEO_FAMILIES = (*_VIDEO_ONLY_FAMILIES, "motion", "faceswap")
 
 
 @dataclass
 class ModelSpec:
-    """A model's static data + a factory for its runtime generator. Exposes the
-    VALID_*/ACCEPTS_IMAGES/MAX_IMAGES attributes the catalogue and validation
-    read off the (former) class, and is callable like the old class was."""
+    """A model's static data + a factory for its runtime generator: the VALID_*
+    /ACCEPTS_IMAGES/MAX_IMAGES the catalogue and validation read, and the
+    endpoint + family the payload builders dispatch on."""
 
     model_id: str
     kind: str  # "video" | "image" | "audio"
@@ -79,7 +69,6 @@ class ModelSpec:
     VALID_RESOLUTIONS: tuple = ()
     ACCEPTS_IMAGES: bool = True
     MAX_IMAGES: int = 0
-    video_edit: bool = False
 
     def __call__(self, **kwargs) -> PolloGenerator:
         return PolloGenerator(self, **kwargs)
@@ -98,43 +87,6 @@ def _build_payload(spec: ModelSpec, prompt: str, image_url: str | None, **kw) ->
     return legacy_ref_payload(spec.model_id, prompt=prompt, image_url=image_url, **kw)
 
 
-def _video_state(spec: ModelSpec, image_url: str | None, **kw) -> dict[str, Any]:
-    """The resolved aspect/resolution/length/audio for job records — the values
-    the old __init__ stored as attributes (whether or not the payload sends them)."""
-    if spec.family in _V1_VIDEO_FAMILIES:
-        s = _process_inputs(_cfg(spec.model_id), image_url, **kw)
-        return {
-            "aspect_ratio": s["aspect_ratio"],
-            "resolution": s["resolution"],
-            "length": s["length"],
-            "duration": None,
-            "generate_audio": s["generate_audio"],
-        }
-    if spec.family == "legacyvideo":
-        s = _legacy_inputs(_legacy_cfg(spec.model_id), kw.get("image_path"), **kw)
-        return {
-            "aspect_ratio": s["aspect_ratio"],
-            "resolution": s["resolution"],
-            "length": s["length"],
-            "duration": None,
-            "generate_audio": s["generate_audio"],
-        }
-    # ref2video
-    duration = _valid_length(
-        str(kw.get("length") or kw.get("duration") or os.getenv("LENGTH", "10")), _REF_VALID_LENGTHS, 10
-    )
-    return {
-        "aspect_ratio": kw.get("aspect_ratio")
-        or _aspect_ratio(os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "portrait")),
-        "resolution": kw.get("resolution") or os.getenv("RESOLUTION", "720p"),
-        "length": None,
-        "duration": duration,
-        "generate_audio": kw.get("generate_audio")
-        if kw.get("generate_audio") is not None
-        else _bool_env("GENERATE_AUDIO", True),
-    }
-
-
 class PolloGenerator:
     """Runtime generator for one request: resolves inputs, builds the payload via
     the engine's family functions, and submits/prices it."""
@@ -142,58 +94,23 @@ class PolloGenerator:
     def __init__(self, spec: ModelSpec, **kwargs) -> None:
         self.spec = spec
         self.model_url = spec.model_url
-        self.model_name = spec.model_id
         self.api_key = kwargs.get("api_key")
-        self.project = kwargs.get("project") or os.getenv("PROJECT", "default")
-        self.prompt = kwargs.get("prompt") or get_prompt(self.project)
-        image_url = kwargs.get("image_url", _UNSET)
-        self.image_url = get_image_url(self.project) if image_url is _UNSET else image_url
-        if spec.kind == "audio":
-            self.image_url = None
-        if spec.family in _VIDEO_ONLY_FAMILIES:
-            self.image_url = None  # works on a source video; never a source image
+        self.prompt = kwargs.get("prompt") or ""
+        self.image_url = kwargs.get("image_url")
+        if spec.kind == "audio" or spec.family in _VIDEO_ONLY_FAMILIES:
+            self.image_url = None  # audio, or works on a source video: never a source image
         if spec.family in ("motion", "upscale", "bgremove", "subtitle", "faceswap"):
-            self.prompt = kwargs.get("prompt") or " "  # ignored by these; the API wants it non-empty
-        self.video_url = kwargs.get("video_url")
+            self.prompt = self.prompt or " "  # ignored by these; the API wants it non-empty
         # what the family builders take (resolved prompt/image_url pass explicitly)
         self._kwargs = {k: v for k, v in kwargs.items() if k not in ("api_key", "project", "prompt", "image_url")}
         self._payload: dict[str, Any] | None = None
         self.payload_attrs: dict[str, Any] = {}
-
-        if spec.kind == "video":
-            st = _video_state(spec, self.image_url, **self._kwargs)
-            self.aspect_ratio, self.resolution = st["aspect_ratio"], st["resolution"]
-            self.length, self.duration, self.generate_audio = st["length"], st["duration"], st["generate_audio"]
-            self.refs = (
-                _build_ref_list(self.image_url, kwargs.get("subject_url"), kwargs.get("refs"))
-                if spec.family == "ref"
-                else kwargs.get("refs")
-            )
-        else:
-            self.aspect_ratio = self.resolution = self.length = self.duration = self.generate_audio = None
-            self.refs = kwargs.get("refs")
 
     def get_payload(self) -> dict[str, Any]:
         if self._payload is None:
             self._payload = _build_payload(self.spec, self.prompt, self.image_url, **self._kwargs)
         self.payload_attrs = self._payload["input"]
         return self._payload
-
-    @property
-    def is_text_only(self) -> bool:
-        if self.spec.kind == "audio":
-            return True
-        if self.spec.video_edit:
-            return False
-        if self.spec.family == "ref":
-            return not self.refs
-        if self.spec.kind == "image":
-            return self.image_url is None and not self._kwargs.get("images")
-        return self.image_url is None
-
-    @property
-    def is_video_edit(self) -> bool:
-        return self.spec.video_edit
 
     @property
     def estimate_url(self) -> str | None:
@@ -205,7 +122,7 @@ class PolloGenerator:
 
     def send_request(self) -> requests.Response:
         if not self.model_url:
-            raise ValueError("model_url must be set in the subclass.")
+            raise ValueError(f"No endpoint configured for {self.spec.model_id}")
         payload = self.get_payload()
         headers = {"x-api-key": self.api_key, "Content-Type": "application/json"}
         try:
@@ -220,15 +137,6 @@ class PolloGenerator:
                 "Check your VPN — you may need to enable it, switch regions, or your IP is flagged."
             )
         return resp
-
-    def build_download_metadata(self) -> dict[str, Any]:
-        meta: dict[str, Any] = {"payload": self.payload_attrs}
-        if self.spec.family == "ref":
-            refs = self.refs or []
-            meta["refs_count"] = len(refs)
-            meta["ref_names"] = [r.get("name", "") for r in refs]
-            meta["ref_types"] = [r.get("type", "image") for r in refs]
-        return meta
 
 
 def _video_specs() -> dict[str, ModelSpec]:
@@ -265,7 +173,6 @@ for _mid in V1_VIDEO:
         VALID_RATIOS=tuple(_c["VALID_RATIOS"]),
         VALID_LENGTHS=tuple(_c["VALID_LENGTHS"]),
         VALID_RESOLUTIONS=tuple(_c["VALID_RESOLUTIONS"]),
-        video_edit=_fam in _SOURCE_VIDEO_FAMILIES,
     )
 GENERATORS: dict[str, ModelSpec] = {**GENERATORS_LEGACY, **GENERATORS_V1}
 

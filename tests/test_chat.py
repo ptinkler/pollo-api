@@ -68,7 +68,7 @@ def chat(monkeypatch, db, provider_keys):
     monkeypatch.setattr(chat_mod.polling, "VIDEO_POLL_INTERVAL", 0)
     monkeypatch.setattr(chat_mod.polling, "start_video_poller", lambda *a: None)
     monkeypatch.setattr(chat_mod.generation, "_generate_title", lambda model, prompt: (None, 0.0))  # tests opt in
-    chat_mod.catalogue._models_cache.update(at=0.0, data=None)
+    chat_mod.catalogue.clear_models()
     return chat_mod
 
 
@@ -98,7 +98,7 @@ class TestModelCatalogue:
         provider_keys["pollo"] = "pollo-test"
         from web.chat import catalogue
 
-        catalogue._models_cache.update(at=0.0, data=None)
+        catalogue.clear_models()
 
         def fake_list(kind, refresh=False):
             return [{"id": "pollo/seedreamv1", "name": "Seedream"}] if kind == "image" else []
@@ -325,9 +325,8 @@ class TestTurns:
     def test_image_models_own_auto_beats_the_chat_models_ratio_pick(self, client, conv, chat, monkeypatch):
         # With the composer ratio left unset and the image model offering its
         # own "auto", that wins over whatever ratio the chat model guessed.
-        chat.catalogue._models_cache.update(
-            at=9e18,
-            data={"text": [], "video": [], "image": [{"id": "i/model", "aspect_ratios": ["auto", "16:9", "1:1"]}]},
+        chat.catalogue.seed_models(
+            {"text": [], "video": [], "image": [{"id": "i/model", "aspect_ratios": ["auto", "16:9", "1:1"]}]},
         )
         rounds = iter([_tool_chunks("generate_image", {"prompt": "a cat", "aspect_ratio": "16:9"}, text="A cat.")])
         monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(rounds))
@@ -525,9 +524,8 @@ class TestTurns:
         monkeypatch.setattr(
             openrouter, "submit_video", lambda model, prompt, **kw: {"id": "gen-vid-1", "status": "pending"}
         )
-        chat.catalogue._models_cache.update(
-            at=9e18,
-            data={
+        chat.catalogue.seed_models(
+            {
                 "text": [],
                 "image": [],
                 "video": [{"id": "v/model", "durations": [5, 10], "aspect_ratios": ["16:9"], "resolutions": ["720p"]}],
@@ -580,9 +578,8 @@ class TestTurns:
         assert ev[-1]["message"]["status"] == "error"
 
     def test_tools_withheld_for_models_without_tool_support(self, client, conv, chat, monkeypatch):
-        chat.catalogue._models_cache.update(
-            at=9e18,
-            data={
+        chat.catalogue.seed_models(
+            {
                 "image": [],
                 "video": [],
                 "text": [{"id": "t/model", "supports_tools": False, "input_modalities": ["text"]}],
@@ -1321,9 +1318,8 @@ class TestModerationAndRegenerate:
                 }
             ],
         )
-        chat.catalogue._models_cache.update(
-            at=9e18,
-            data={
+        chat.catalogue.seed_models(
+            {
                 "text": [],
                 "image": [],
                 "video": [{"id": "v/new", "durations": [5, 10], "aspect_ratios": ["16:9"], "resolutions": []}],
@@ -1412,9 +1408,8 @@ class TestContext:
         assert self._pixels_sent(client, conv, chat, db, monkeypatch, image_limit=limit) == expected
 
     def test_no_pixels_for_text_only_models(self, client, conv, chat, db, monkeypatch):
-        chat.catalogue._models_cache.update(
-            at=9e18,
-            data={
+        chat.catalogue.seed_models(
+            {
                 "image": [],
                 "video": [],
                 "text": [{"id": "t/model", "supports_tools": True, "input_modalities": ["text"]}],
@@ -1574,8 +1569,8 @@ class TestConsistencyReferences:
         assert got.get("input_images") is None
 
     def test_skipped_for_image_models_without_reference_support(self, client, conv, chat, db, monkeypatch):
-        chat.catalogue._models_cache.update(
-            at=9e18, data={"text": [], "video": [], "image": [{"id": "i/model", "input_modalities": ["text"]}]}
+        chat.catalogue.seed_models(
+            {"text": [], "video": [], "image": [{"id": "i/model", "input_modalities": ["text"]}]}
         )
         self._prior_images(chat, db, conv, 1)
         got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "next", "keep_consistent": True})
@@ -1656,8 +1651,8 @@ class TestConsistencyReferences:
         assert ev[-1]["message"]["media"][0]["params"]["refs"] == ["u.png"]
 
     def test_pins_ignored_for_image_models_without_reference_support(self, client, conv, chat, db, monkeypatch):
-        chat.catalogue._models_cache.update(
-            at=9e18, data={"text": [], "video": [], "image": [{"id": "i/model", "input_modalities": ["text"]}]}
+        chat.catalogue.seed_models(
+            {"text": [], "video": [], "image": [{"id": "i/model", "input_modalities": ["text"]}]}
         )
         self._prior_images(chat, db, conv, 1)
         self._pin(client, db, conv, "g0")
@@ -1735,9 +1730,8 @@ class TestModelDecides:
         for i in range(4):
             db.add_chat_message(conv["id"], "user", f"q{i}")
             db.add_chat_message(conv["id"], "assistant", f"a{i}")
-        chat.catalogue._models_cache.update(
-            at=9e18,
-            data={
+        chat.catalogue.seed_models(
+            {
                 "image": [],
                 "video": [],
                 "text": [{"id": "t/model", "supports_tools": False, "input_modalities": ["text"]}],
@@ -1770,7 +1764,7 @@ class TestConversationalImageModels:
     }
 
     def _setup(self, chat, db, conv, with_prior_image=True):
-        chat.catalogue._models_cache.update(at=9e18, data=self.CATALOGUE)
+        chat.catalogue.seed_models(self.CATALOGUE)
         db.add_chat_message(conv["id"], "user", "write a story about Linh, with a photo")
         media = []
         if with_prior_image:
@@ -1859,9 +1853,8 @@ class TestConversationalImageModels:
         assert [m["role"] for m in got["messages"]] == ["user", "assistant", "user"]
 
     def test_non_conversational_models_still_use_images_api(self, client, conv, chat, db, monkeypatch):
-        chat.catalogue._models_cache.update(
-            at=9e18,
-            data={
+        chat.catalogue.seed_models(
+            {
                 "text": [],
                 "video": [],
                 "image": [{"id": "i/model", "input_modalities": ["text", "image"], "conversational": False}],
@@ -1879,7 +1872,7 @@ class TestConversationalImageModels:
         assert "context" not in ev[-1]["message"]["media"][0]["params"]
 
     def test_retry_of_failed_image_rebuilds_context(self, client, conv, chat, db, monkeypatch):
-        chat.catalogue._models_cache.update(at=9e18, data=self.CATALOGUE)
+        chat.catalogue.seed_models(self.CATALOGUE)
         db.add_chat_message(conv["id"], "user", "story please, with a photo")
         msg = db.add_chat_message(
             conv["id"],
@@ -2197,9 +2190,8 @@ class TestCustomInstructions:
         assert [m["role"] for m in seen["msgs"]] == ["system", "user"]
 
     def test_conversational_image_models_get_them_too(self, client, conv, chat, monkeypatch):
-        chat.catalogue._models_cache.update(
-            at=9e18,
-            data={
+        chat.catalogue.seed_models(
+            {
                 "text": [],
                 "video": [],
                 "image": [{"id": "i/model", "input_modalities": ["text", "image"], "conversational": True}],
@@ -2563,8 +2555,8 @@ class TestPolloImageModels:
 
     def test_video_mode_submits_to_pollo_with_first_frame(self, client, conv, chat, monkeypatch, pollo):
         monkeypatch.setattr(openrouter, "submit_video", lambda *a, **k: pytest.fail("should run on Pollo"))
-        chat.catalogue._models_cache.update(
-            at=0.0, data={"video": [{"id": "pollo/seedance20fastv1", "durations": list(range(4, 16))}]}
+        chat.catalogue.seed_models(
+            {"video": [{"id": "pollo/seedance20fastv1", "durations": list(range(4, 16))}]}, stale=True
         )
         up = client.post(
             f"/api/chat/conversations/{conv['id']}/attachments", files={"file": ("a.png", _png_bytes(), "image/png")}
@@ -2594,8 +2586,8 @@ class TestPolloImageModels:
         records that it *was* Auto — otherwise reusing its settings would pin
         whatever Auto worked out to."""
         monkeypatch.setattr(openrouter, "submit_video", lambda *a, **k: pytest.fail("should run on Pollo"))
-        chat.catalogue._models_cache.update(
-            at=0.0, data={"video": [{"id": "pollo/seedance20fastv1", "durations": list(range(4, 16))}]}
+        chat.catalogue.seed_models(
+            {"video": [{"id": "pollo/seedance20fastv1", "durations": list(range(4, 16))}]}, stale=True
         )
         up = client.post(
             f"/api/chat/conversations/{conv['id']}/attachments", files={"file": ("a.png", _png_bytes(), "image/png")}
@@ -2710,13 +2702,13 @@ class TestPolloImageModels:
         assert seen["kind"] == "audio" and seen["args"][-2:] == ("hi", {"voice": "v1"})
 
     def test_a_tool_needs_no_prompt_but_an_image(self, client, conv, chat, monkeypatch, pollo):
-        chat.catalogue._models_cache.update(
-            at=0.0,
-            data={
+        chat.catalogue.seed_models(
+            {
                 "image": [
                     {"id": "pollo/imageupscalev1", "name": "Pollo: Image Upscale", "tool": "upscale", "no_prompt": True}
                 ]
             },
+            stale=True,
         )
         body = {"content": "", "mode": "image", **SETTINGS, "image_model": "pollo/imageupscalev1"}
         r = client.post(f"/api/chat/conversations/{conv['id']}/messages", json=body)
@@ -2898,13 +2890,13 @@ class TestPolloImageModels:
     def test_auto_mode_uses_composer_video_settings_and_records_what_was_sent(
         self, client, conv, chat, monkeypatch, pollo
     ):
-        chat.catalogue._models_cache.update(
-            at=0.0,
-            data={
+        chat.catalogue.seed_models(
+            {
                 "video": [
                     {"id": "pollo/seedance20fastv1", "durations": list(range(4, 16)), "resolutions": ["480p", "720p"]}
                 ]
             },
+            stale=True,
         )
         rounds = iter(
             [_tool_chunks("generate_video", {"prompt": "waves", "duration": 6}, text="Rolling."), _text_chunks("x")]

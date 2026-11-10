@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from web.core.config import POLLO_API_BASE
 
-from ._shared import _aspect_from_image, _aspect_ratio, _bool_env, _valid_length
+from ._shared import _aspect_from_image, _aspect_ratio, _valid_length
 
 _LEGACY_VIDEO_DEFAULTS: dict[str, Any] = {
     "VALID_LENGTHS": (),
@@ -90,35 +89,23 @@ def legacy_video_model_url(model_id: str) -> str:
 
 
 def _legacy_inputs(c: dict[str, Any], image_path, **kw) -> dict[str, Any]:
-    resolution = kw.get("resolution") or os.getenv("RESOLUTION", c["DEFAULT_RESOLUTION"])
-    if c.get("FORCE_RESOLUTION"):
-        resolution = c["FORCE_RESOLUTION"]
-    length = _valid_length(
-        str(kw.get("length") or os.getenv("LENGTH", str(c["DEFAULT_LENGTH"]))), c["VALID_LENGTHS"], c["DEFAULT_LENGTH"]
-    )
-    aspect_ratio = kw.get("aspect_ratio") or _aspect_ratio(
-        os.getenv("ASPECT_RATIO") or os.getenv("RATIO", c["DEFAULT_RATIO"])
-    )
+    resolution = c.get("FORCE_RESOLUTION") or kw.get("resolution") or c["DEFAULT_RESOLUTION"]
+    length = _valid_length(str(kw.get("length") or c["DEFAULT_LENGTH"]), c["VALID_LENGTHS"], c["DEFAULT_LENGTH"])
+    aspect_ratio = kw.get("aspect_ratio") or _aspect_ratio(c["DEFAULT_RATIO"])
     if c["ASPECT_FROM_IMAGE"]:
         aspect_ratio = _aspect_from_image(image_path, c["VALID_RATIOS"], c["ASPECT_SKIP_NONNUMERIC"]) or aspect_ratio
-    num_outputs = kw.get("num_outputs")
-    if num_outputs is None:
-        num_outputs = int(os.getenv("NUM_OUTPUTS")) if os.getenv("NUM_OUTPUTS") else 1
+    num_outputs = 1 if kw.get("num_outputs") is None else kw["num_outputs"]
     return {
         "resolution": resolution,
         "length": length,
         "aspect_ratio": aspect_ratio,
-        "generate_audio": kw.get("generate_audio")
-        if kw.get("generate_audio") is not None
-        else _bool_env("GENERATE_AUDIO", True),
-        "web_search": kw.get("web_search") if kw.get("web_search") is not None else _bool_env("WEBSEARCH", False),
-        "seed": kw.get("seed") or (int(os.getenv("SEED")) if os.getenv("SEED") else None),
-        "image_tail": kw.get("image_tail") or os.getenv("IMAGE_TAIL"),
-        "negative_prompt": kw.get("negative_prompt") or os.getenv("NEGATIVE_PROMPT"),
+        "generate_audio": True if kw.get("generate_audio") is None else kw["generate_audio"],
+        "web_search": False if kw.get("web_search") is None else kw["web_search"],
+        "seed": kw.get("seed"),
+        "image_tail": kw.get("image_tail"),
+        "negative_prompt": kw.get("negative_prompt"),
         "audio_url": kw.get("audio_url"),
-        "prompt_optimizer": kw.get("prompt_optimizer")
-        if kw.get("prompt_optimizer") is not None
-        else _bool_env("PROMPT_OPTIMIZER", True),
+        "prompt_optimizer": True if kw.get("prompt_optimizer") is None else kw["prompt_optimizer"],
         "num_outputs": max(1, min(4, int(num_outputs))),
     }
 

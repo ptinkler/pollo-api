@@ -1,7 +1,7 @@
 """
 Pollo Studio — API Backend (FastAPI)
 
-Run:  python web/app.py   (from the pollo root directory)
+Run:  make dev-api   (uvicorn web.api:app, from the repo root)
 """
 
 import os
@@ -13,7 +13,6 @@ from pathlib import Path
 
 import cv2
 import uvicorn
-from dotenv import load_dotenv
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
@@ -24,8 +23,9 @@ ROOT_DIR = Path(__file__).parent.parent.resolve()
 WEB_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(ROOT_DIR))
 os.chdir(ROOT_DIR)
-load_dotenv(override=True)
 
+from web.core import config  # noqa: E402, F401 — imported first: loads .env before anything reads it
+from web.core.env import bool_env, bool_env_or_none  # noqa: E402
 from web.core.get_task import get_credit_balance
 from web.core.metadata import get_db
 
@@ -63,19 +63,10 @@ async def lifespan(app: FastAPI):
     # Shutdown: nothing to do
 
 
-def _bool_env(name: str, default: bool = False) -> bool:
-    val = os.getenv(name, "").strip().lower()
-    if val in {"1", "true", "yes", "on"}:
-        return True
-    if val in {"0", "false", "no", "off"}:
-        return False
-    return default
-
-
 # The interactive API docs (/docs, /redoc, /openapi.json) expose the whole API
 # surface unauthenticated, so they're off by default — enable with ENABLE_API_DOCS
 # (or in dev, where DEV_LOGIN is set).
-_docs_on = _bool_env("ENABLE_API_DOCS") or _bool_env("DEV_LOGIN")
+_docs_on = bool_env("ENABLE_API_DOCS") or bool_env("DEV_LOGIN")
 app = FastAPI(
     title="Pollo Studio API",
     lifespan=lifespan,
@@ -110,7 +101,7 @@ app.add_middleware(
     SessionMiddleware,
     secret_key=_user_secret().hex(),
     same_site="lax",
-    https_only=_bool_env("COOKIE_SECURE", default=True),
+    https_only=bool_env("COOKIE_SECURE", default=True),
 )
 
 
@@ -176,11 +167,9 @@ def _cookie_secure(request: Request) -> bool:
     local dev would otherwise break — browsers treat localhost as secure, so
     the cookie still works there. COOKIE_SECURE=true/false overrides either
     way: set it false only to serve auth over plain HTTP on a LAN."""
-    override = os.getenv("COOKIE_SECURE", "").strip().lower()
-    if override in {"1", "true", "yes", "on"}:
-        return True
-    if override in {"0", "false", "no", "off"}:
-        return False
+    override = bool_env_or_none("COOKIE_SECURE")
+    if override is not None:
+        return override
     forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
     if request.url.scheme == "https" or forwarded == "https":
         return True

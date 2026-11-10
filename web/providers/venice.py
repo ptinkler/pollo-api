@@ -70,9 +70,11 @@ DEFAULT_CAMERA_TRAJECTORY = [
 ]
 
 _client = httpx.Client(transport=httpx.HTTPTransport(socket_options=_keepalive_socket_options()))
-_catalogue: dict[str, Any] = {"at": 0.0, "data": None}
+# Per tenant: the catalogue is built with the requesting user's key, and the
+# balance is that account's (see _tenant()).
+_catalogue: dict[str, dict[str, Any]] = {}
 _catalogue_lock = threading.Lock()
-_balance: dict[str, Any] = {"usd": None}  # from the x-venice-balance-usd header on each call
+_balance: dict[str, float | None] = {}  # tenant -> the x-venice-balance-usd header's last value
 _video_quotes: dict[str, float] = {}  # job id → quoted USD, recorded as its cost when done
 _download_urls: dict[str, str] = {}  # job id → download link (private models)
 _VIDEO_DIR = Path(tempfile.gettempdir()) / "venice-videos"
@@ -91,6 +93,14 @@ def get_api_key() -> str:
     from .. import keyctx
 
     return keyctx.provider_key("venice") or ""
+
+
+def _tenant() -> str:
+    """Who the per-account caches below belong to. The signed-in user, or ""
+    outside a request (a background poller works on one job's owner's key)."""
+    from web.core.metadata import current_tenant
+
+    return current_tenant()
 
 
 def is_configured() -> bool:
@@ -119,7 +129,7 @@ def _note_balance(resp: httpx.Response) -> None:
     value = resp.headers.get("x-venice-balance-usd")
     if value:
         with contextlib.suppress(ValueError):
-            _balance["usd"] = float(value)
+            _balance[_tenant()] = float(value)
 
 
 def _raise_for_response(resp: httpx.Response) -> None:
@@ -474,10 +484,24 @@ def _video_entry(family: str, main: dict | None, i2v: dict | None) -> dict:
 
 
 def _get_catalogue(refresh: bool = False) -> dict[str, Any]:
+    key = _tenant()
     with _catalogue_lock:
-        if refresh or not _catalogue["data"] or time.time() - _catalogue["at"] > CATALOGUE_TTL:
-            _catalogue.update(at=time.time(), data=_build_catalogue())
-        return _catalogue["data"]
+        entry = _catalogue.get(key)
+        if refresh or not entry or time.time() - entry["at"] > CATALOGUE_TTL:
+            entry = {"at": time.time(), "data": _build_catalogue()}
+            _catalogue[key] = entry
+        return entry["data"]
+
+
+def clear_caches() -> None:
+    """Drop every in-process cache (catalogue, quotes, balances, job state).
+    Called when a user's keys change, and by tests between cases."""
+    with _catalogue_lock:
+        _catalogue.clear()
+    _quotes.clear()
+    _video_quotes.clear()
+    _download_urls.clear()
+    _balance.clear()
 
 
 def _public(models: list[dict]) -> list[dict]:
@@ -509,17 +533,18 @@ def get_balances() -> dict[str, float | None]:
     endpoint in one call. /billing/balance needs an admin key, and the USD figure
     lives in the body — not a response header, despite older API versions. If the
     endpoint can't be read, fall back to the balance a prior response's header
-    reported (via _note_balance)."""
+    reported for THIS user (via _note_balance) — never another account's."""
+    key = _tenant()
     try:
         data = _request("GET", "/api_keys/rate_limits").json()
     except VeniceError:
-        return {"usd": _balance["usd"], "credits": None}
+        return {"usd": _balance.get(key), "credits": None}
     balances = (data.get("data") or data).get("balances") or {}
     usd = balances.get("USD")
     if usd is not None:
-        _balance["usd"] = float(usd)
+        _balance[key] = float(usd)
     credits = balances.get("BUNDLED_CREDITS")
-    return {"usd": _balance["usd"], "credits": float(credits) if credits is not None else None}
+    return {"usd": _balance.get(key), "credits": float(credits) if credits is not None else None}
 
 
 def stream_chat(

@@ -99,7 +99,41 @@ def test_catalogue_attaches_tags_to_every_model(monkeypatch):
         assert data["text"][0]["tags"] == ["functions"]
     finally:
         # get_models() caches module-side; drop the fake data so it can't leak
-        catalogue._models_cache.update(at=0.0, data=None)
+        catalogue.clear_models()
+
+
+def test_each_user_gets_their_own_catalogue(monkeypatch):
+    """The catalogue is built from the requesting user's provider keys, so it
+    must be cached per user: one user's list must never be served to another."""
+    from web.core.metadata import reset_tenant, set_tenant
+
+    seen: list[str | None] = []
+
+    class PerKeyProvider:
+        """Stands in for a provider that lists nothing without a key."""
+
+        NAME = "fake"
+
+        def list_models(self, kind, refresh=False):
+            from web.core.metadata import current_tenant
+
+            seen.append(current_tenant())
+            if kind != "image" or current_tenant() != "has-key":
+                return []
+            return [{"id": "fake/i", "name": "I", "input_modalities": ["text"]}]
+
+    monkeypatch.setattr(catalogue, "PROVIDERS", (PerKeyProvider(),))
+    try:
+        for tenant, expected in (("no-key", []), ("has-key", ["fake/i"]), ("no-key", [])):
+            token = set_tenant(tenant)
+            try:
+                assert [m["id"] for m in catalogue.get_models()["image"]] == expected
+            finally:
+                reset_tenant(token)
+        # The keyless user's empty list was cached, then served again from cache
+        assert seen.count("no-key") == 4  # four kinds, listed once; the repeat was a cache hit
+    finally:
+        catalogue.clear_models()
 
 
 def test_ref_mode_models_are_tagged_for_references_and_video_refs():

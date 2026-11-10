@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from web.core.config import POLLO_API_V1_BASE
@@ -232,12 +231,10 @@ def v1_image_payload(model_id: str, *, prompt: str, image_url: str | None, **kw)
     c = _img_cfg(model_id)
     if c.get("TOOL"):
         return _tool_payload(c, image_url, **kw)
-    aspect_ratio = kw.get("aspect_ratio") or _aspect_ratio(
-        os.getenv("ASPECT_RATIO") or os.getenv("RATIO", c["DEFAULT_RATIO_KEYWORD"])
-    )
-    resolution = kw.get("resolution") or os.getenv("RESOLUTION")
+    aspect_ratio = kw.get("aspect_ratio") or _aspect_ratio(c["DEFAULT_RATIO_KEYWORD"])
+    resolution = kw.get("resolution")
     resolution = resolution if resolution in c["VALID_RESOLUTIONS"] else None
-    seed = (kw.get("seed") or (int(os.getenv("SEED")) if os.getenv("SEED") else None)) if c["HAS_SEED"] else None
+    seed = kw.get("seed") if c["HAS_SEED"] else None
 
     images = ([image_url] if image_url else []) + (kw.get("images") or [])
     if not c["ACCEPTS_IMAGES"]:

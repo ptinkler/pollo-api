@@ -14,6 +14,7 @@ import os
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
+from web.core.env import bool_env
 from web.core.metadata import get_db
 
 router = APIRouter(prefix="/api/auth")
@@ -24,7 +25,7 @@ DEV_USER = {"provider": "local", "sub": "dev", "name": "Dev", "avatar": None}
 
 
 def dev_login_enabled() -> bool:
-    return os.getenv("DEV_LOGIN", "").strip().lower() in {"1", "true", "yes", "on"}
+    return bool_env("DEV_LOGIN")
 
 
 def dev_email() -> str:

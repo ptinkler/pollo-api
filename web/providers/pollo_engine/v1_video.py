@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from web.core.config import POLLO_API_V1_BASE
 
-from ._shared import _aspect_ratio, _bool_env, _valid_length
+from ._shared import _aspect_ratio, _valid_length
 
 # Config rows (introspected from the generator classes). Fields omitted here
 # take the base defaults below.
@@ -732,11 +731,11 @@ def _normalize_refs(refs: list[dict[str, Any]] | None) -> list[dict[str, Any]] |
 def _resolve_resolution(c: dict[str, Any], **kw) -> str:
     if c.get("FORCE_RESOLUTION"):
         return c["FORCE_RESOLUTION"]
-    return kw.get("resolution") or os.getenv("RESOLUTION", c["DEFAULT_RESOLUTION"])
+    return kw.get("resolution") or c["DEFAULT_RESOLUTION"]
 
 
 def _resolve_length(c: dict[str, Any], **kw) -> int:
-    length_str = str(kw.get("length") or os.getenv("LENGTH", str(c["DEFAULT_LENGTH"])))
+    length_str = str(kw.get("length") or c["DEFAULT_LENGTH"])
     if kw.get("refs") and c["REF_VALID_LENGTHS"]:
         length = int(length_str) if length_str.isdigit() else c["DEFAULT_LENGTH"]
         return min(c["REF_VALID_LENGTHS"], key=lambda v: abs(v - length))
@@ -744,13 +743,9 @@ def _resolve_length(c: dict[str, Any], **kw) -> int:
 
 
 def _resolve_aspect_ratio(c: dict[str, Any], **kw) -> str:
-    # explicit kwarg, then env, then a model default ("adaptive" on a few),
-    # else the base "portrait" → 9:16.
-    if kw.get("aspect_ratio"):
-        return kw["aspect_ratio"]
-    if os.getenv("ASPECT_RATIO") or os.getenv("RATIO"):
-        return _aspect_ratio(os.getenv("ASPECT_RATIO") or os.getenv("RATIO"))
-    return c.get("DEFAULT_RATIO") or _aspect_ratio("portrait")
+    # the explicit kwarg, then a model default ("adaptive" on a few), else the
+    # base "portrait" → 9:16.
+    return kw.get("aspect_ratio") or c.get("DEFAULT_RATIO") or _aspect_ratio("portrait")
 
 
 def _resolve_mode(c: dict[str, Any], resolution: str, mode: str | None) -> str | None:
@@ -758,12 +753,12 @@ def _resolve_mode(c: dict[str, Any], resolution: str, mode: str | None) -> str |
         return None
     if c.get("MODE_PRO_RESOLUTIONS"):
         return "pro" if resolution.upper() in {r.upper() for r in c["MODE_PRO_RESOLUTIONS"]} else "basic"
-    return mode or os.getenv("MODE", c.get("MODE_DEFAULT"))
+    return mode or c.get("MODE_DEFAULT")
 
 
 def _process_inputs(c: dict[str, Any], image_url: str | None, **kw) -> dict[str, Any]:
-    """Resolve the request inputs against a model's config, mirroring
-    BaseV1VideoGenerator.__init__ (kwarg, then env, then default)."""
+    """Resolve the request inputs against a model's config: the caller's value,
+    else the model's default. A field the model doesn't offer stays None."""
     refs = _normalize_refs(kw.get("refs")) if c["HAS_REFS"] else None
     resolution = _resolve_resolution(c, **kw)
     return {
@@ -772,22 +767,14 @@ def _process_inputs(c: dict[str, Any], image_url: str | None, **kw) -> dict[str,
         "resolution": resolution,
         "length": _resolve_length(c, **kw),
         "aspect_ratio": _resolve_aspect_ratio(c, **kw),
-        "image_tail": (kw.get("image_tail") or os.getenv("IMAGE_TAIL")) if c["HAS_IMAGE_TAIL"] else None,
-        "seed": (kw.get("seed") or (int(os.getenv("SEED")) if os.getenv("SEED") else None)) if c["HAS_SEED"] else None,
+        "image_tail": kw.get("image_tail") if c["HAS_IMAGE_TAIL"] else None,
+        "seed": kw.get("seed") if c["HAS_SEED"] else None,
         "generate_audio": (
-            (kw.get("generate_audio") if kw.get("generate_audio") is not None else _bool_env("GENERATE_AUDIO", True))
-            if c["HAS_GENERATE_AUDIO"]
-            else None
+            (True if kw.get("generate_audio") is None else kw["generate_audio"]) if c["HAS_GENERATE_AUDIO"] else None
         ),
-        "web_search": (
-            (kw.get("web_search") if kw.get("web_search") is not None else _bool_env("WEBSEARCH", False))
-            if c["HAS_WEB_SEARCH"]
-            else None
-        ),
+        "web_search": ((False if kw.get("web_search") is None else kw["web_search"]) if c["HAS_WEB_SEARCH"] else None),
         "mode": _resolve_mode(c, resolution, kw.get("mode")),
-        "negative_prompt": kw.get("negative_prompt") or os.getenv("NEGATIVE_PROMPT")
-        if c["HAS_NEGATIVE_PROMPT_AUDIO"]
-        else None,
+        "negative_prompt": kw.get("negative_prompt") if c["HAS_NEGATIVE_PROMPT_AUDIO"] else None,
         "audio_url": kw.get("audio_url") if c["HAS_NEGATIVE_PROMPT_AUDIO"] else None,
     }
 

@@ -177,12 +177,8 @@ def venice(chat, monkeypatch, tmp_path, provider_keys):
     # Catalogue builds price each video model; tests that queue videos set their own quote
     fake.routes["/video/quote"] = lambda kw: httpx.Response(200, json={"quote": QUOTES.get(kw["json"]["model"])})
     monkeypatch.setattr(v, "_client", fake)
-    v._quotes.clear()
     monkeypatch.setattr(v, "_VIDEO_DIR", tmp_path / "venice-videos")
-    v._catalogue.update(at=0.0, data=None)
-    v._video_quotes.clear()
-    v._download_urls.clear()
-    v._balance["usd"] = None
+    v.clear_caches()
     return v, fake
 
 
@@ -635,7 +631,7 @@ class TestText:
         Venice's own catalogue that the model can't see images."""
         v, fake = venice
         fake.routes["/chat/completions"] = self._sse({"choices": [{"delta": {"content": "ok"}}]})
-        assert chat.catalogue._models_cache["data"] is None
+        assert chat.catalogue.cached_models() is None
         up = client.post(
             f"/api/chat/conversations/{conv['id']}/attachments", files={"file": ("a.png", _png_bytes(), "image/png")}
         ).json()["file"]

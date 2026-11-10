@@ -3,12 +3,11 @@ payload shape; only the model slug differs."""
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from web.core.config import POLLO_API_BASE
 
-from ._shared import _aspect_ratio, _bool_env, _valid_length
+from ._shared import _aspect_ratio, _valid_length
 
 LEGACY_REF: dict[str, str] = {}
 _REF_VALID_LENGTHS = tuple(range(4, 16))
@@ -59,15 +58,11 @@ def legacy_ref_payload(
     model_id: str, *, prompt: str, image_url: str | None, subject_url: str | None = None, **kw
 ) -> dict[str, Any]:
     """Build a legacy ref2video API body, matching PolloDanceRefVideoGenerator."""
-    aspect_ratio = kw.get("aspect_ratio") or _aspect_ratio(os.getenv("ASPECT_RATIO") or os.getenv("RATIO", "portrait"))
-    resolution = kw.get("resolution") or os.getenv("RESOLUTION", "720p")
-    duration = _valid_length(
-        str(kw.get("length") or kw.get("duration") or os.getenv("LENGTH", "10")), _REF_VALID_LENGTHS, 10
-    )
-    generate_audio = (
-        kw.get("generate_audio") if kw.get("generate_audio") is not None else _bool_env("GENERATE_AUDIO", True)
-    )
-    video_num = kw.get("video_num") or int(os.getenv("VIDEO_NUM", "1"))
+    aspect_ratio = kw.get("aspect_ratio") or _aspect_ratio("portrait")
+    resolution = kw.get("resolution") or "720p"
+    duration = _valid_length(str(kw.get("length") or kw.get("duration") or 10), _REF_VALID_LENGTHS, 10)
+    generate_audio = True if kw.get("generate_audio") is None else kw["generate_audio"]
+    video_num = kw.get("video_num") or 1
     if video_num < 1 or video_num > 4:
         video_num = 1
 

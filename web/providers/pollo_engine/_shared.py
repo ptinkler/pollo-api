@@ -3,13 +3,11 @@ input-parsing helpers, and aspect-ratio maths."""
 
 from __future__ import annotations
 
-import os
+from PIL import Image
 
 # Terminal task statuses from the Pollo API (used by the poller in pollo.py).
 SUCCESS_STATUSES = ("succeed", "success", "succeeded", "complete", "completed")
 ERROR_STATUSES = ("error", "failed")
-
-_UNSET = object()
 
 _RATIO_WORDS = {"portrait": "9:16", "landscape": "16:9", "square": "1:1"}
 
@@ -32,13 +30,7 @@ def _valid_length(length_str: str, valid: tuple, default: int) -> int:
     return length
 
 
-def _bool_env(name: str, default: bool) -> bool:
-    return os.getenv(name, str(default)).lower() in ("1", "true", "yes")
-
-
 def _image_dimensions(image_path) -> tuple[int, int]:
-    from PIL import Image  # local import: only the CLI-era local-file path needs it
-
     return Image.open(image_path).size
 
 
