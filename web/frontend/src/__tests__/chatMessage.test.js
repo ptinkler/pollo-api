@@ -628,7 +628,7 @@ describe('ChatMessage a failed picture can be changed and retried', () => {
   it('offers Change prompt beside Retry', async () => {
     const w = mount(ChatMessage, failed)
     expect(w.find('button[title^="Run the same prompt again"]').exists()).toBe(true)
-    await w.find('button[title="Change the prompt and try again"]').trigger('click')
+    await w.find('button[title="Edit the prompt, then run it again"]').trigger('click')
     const box = w.find('.prompt-box textarea')
     expect(box.element.value).toBe('a fox') // pre-filled with what failed
     await box.setValue('a fox, softer lighting')

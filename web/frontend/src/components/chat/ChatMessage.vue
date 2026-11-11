@@ -466,13 +466,13 @@ const requestItem = ref(null)
               >
                 <button
                   class="retry-btn primary"
-                  title="Run the same prompt again on the currently selected model"
+                  title="Run the same prompt again, on the model selected now"
                   @click="emit('regenerate', { mediaId: item.id, model: null })"
                 >
-                  <svg class="ic sm"><use href="#s-refresh" /></svg> Retry
+                  Try again
                 </button>
-                <button class="retry-btn" title="Change the prompt and try again" @click="openPrompt(item, false)">
-                  <svg class="ic sm"><use href="#s-pencil" /></svg> Change prompt
+                <button class="retry-btn" title="Edit the prompt, then run it again" @click="openPrompt(item, false)">
+                  Try a new prompt…
                 </button>
                 <ModelPicker
                   :model-value="''"

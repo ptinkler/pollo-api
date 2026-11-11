@@ -127,11 +127,19 @@ describe('a failed card suggests one action, not three', () => {
     },
   }
 
-  it('only Retry is primary; the alternatives are plain', () => {
+  it('reads as one set of three ways out', () => {
+    const w = mount(ChatMessage, failed)
+    const labels = w.findAll('.error-actions button').map(b => b.text())
+    expect(labels).toEqual(['Try again', 'Try a new prompt…', 'Try another model…'])
+    // none carries an icon: the picker trigger can't take one, so none does
+    expect(w.findAll('.error-actions svg')).toHaveLength(0)
+  })
+
+  it('only the first is primary; the alternatives are plain', () => {
     const w = mount(ChatMessage, failed)
     const primary = w.findAll('.retry-btn.primary')
     expect(primary).toHaveLength(1)
-    expect(primary[0].text()).toContain('Retry')
-    expect(w.find('button[title="Change the prompt and try again"]').classes()).not.toContain('primary')
+    expect(primary[0].text()).toBe('Try again')
+    expect(w.find('button[title="Edit the prompt, then run it again"]').classes()).not.toContain('primary')
   })
 })
