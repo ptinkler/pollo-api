@@ -29,7 +29,7 @@ watch(
 
 <template>
   <div class="page">
-    <div class="pwrap">
+    <div class="pwrap full">
       <div class="phead">
         <h1>
           <svg class="ic lg"><use href="#s-folder" /></svg> {{ space.name }}

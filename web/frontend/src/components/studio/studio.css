@@ -21,6 +21,10 @@
 .studio .pwrap.wide {
   max-width: 1000px;
 }
+.studio .pwrap.full {
+  width: 100%;
+  max-width: none;
+}
 .studio .phead {
   display: flex;
   align-items: flex-start;

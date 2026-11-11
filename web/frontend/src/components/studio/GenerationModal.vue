@@ -155,17 +155,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               >
                 <svg class="ic"><use href="#s-cog" /></svg>Settings
               </button>
-              <button
-                v-if="canManage"
-                class="gm-btn wide"
-                :class="{ primary: isError }"
-                @click="emit('regenerate', item)"
-              >
+              <button v-if="canManage" class="gm-btn" :class="{ primary: isError }" @click="emit('regenerate', item)">
                 <svg class="ic"><use href="#s-refresh" /></svg>{{ isError ? 'Retry' : 'Regenerate' }}
               </button>
               <a
                 v-if="!canManage && item.conversation_id"
-                class="gm-btn wide"
+                class="gm-btn"
                 :href="`/${item.conversation_id}`"
                 @click.prevent="emit('open-thread', item.conversation_id)"
               >
@@ -384,7 +379,7 @@ a.gm-btn {
 .gm-grid .gm-btn {
   justify-content: center;
 }
-.gm-grid .gm-btn.wide {
+.gm-grid .gm-btn:last-child:nth-child(odd) {
   grid-column: 1 / -1;
 }
 .gm-btn.icon {
