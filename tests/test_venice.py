@@ -6,7 +6,9 @@ import json
 import httpx
 import pytest
 
+import web.providers.venice as v
 from tests.test_chat import SETTINGS, _events, _png_bytes, chat, client, conv, db  # noqa: F401
+from web import request_log
 from web.providers import openrouter
 
 MODELS = {
@@ -124,7 +126,6 @@ MODELS = {
     ],
 }
 
-
 QUOTES = {
     "wan-3-0-text-to-video": 0.65,
     "ovi-image-to-video": 0.4,
@@ -170,7 +171,6 @@ class FakeVenice:
 
 @pytest.fixture()
 def venice(chat, monkeypatch, tmp_path, provider_keys):
-    import web.providers.venice as v
 
     provider_keys["venice"] = "v-test"
     fake = FakeVenice()
@@ -439,7 +439,6 @@ class TestImages:
         assert ev[-1]["message"]["media"][0]["status"] == "done"
 
     def test_requests_are_logged_with_images_cut_short(self, venice, tmp_path):
-        from web import request_log
 
         v, fake = venice
         ref = tmp_path / "r.png"
@@ -591,7 +590,6 @@ class TestText:
         assert chunks[1]["usage"]["cost"] == pytest.approx(1000 * 1e-6 + 500 * 4e-6)
 
     def test_chat_reply_is_logged_with_its_text_and_tool_calls(self, venice):
-        from web import request_log
 
         v, fake = venice
         call = {"index": 0, "function": {"name": "generate_image", "arguments": '{"prompt": "a fox"}'}}
@@ -693,7 +691,7 @@ class TestVideoFamiliesInChat:
         fake.routes["/video/queue"] = httpx.Response(200, json={"queue_id": queue_id})
 
     def _image(self, chat, conv, name):
-        (chat._conv_dir(conv["id"]) / name).write_bytes(_png_bytes())
+        (chat.conversation_dir(conv["id"]) / name).write_bytes(_png_bytes())
 
     def test_reference_model_gets_attached_pinned_and_character_images(
         self, client, conv, chat, db, venice, monkeypatch
@@ -768,7 +766,7 @@ class TestVideoFamiliesInChat:
         v, fake = venice
         self._load_catalogue(client, chat, monkeypatch)
         self._queue(fake)
-        (chat._conv_dir(conv["id"]) / "vid_old.mp4").write_bytes(b"MP4")
+        (chat.conversation_dir(conv["id"]) / "vid_old.mp4").write_bytes(b"MP4")
         db.add_chat_message(conv["id"], "user", "x")
         db.add_chat_message(
             conv["id"],

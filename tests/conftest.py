@@ -1,7 +1,13 @@
 """Global test fixtures — prevent tests from touching the real database, the
 real assets, the developer's .env, or the network."""
 
+import types
+
 import pytest
+import requests
+
+import web.core.config as config_mod
+from web.core import metadata
 
 # Every setting the app reads from the environment. A developer's .env is
 # loaded at import (web/core/config.py), so without this a test would behave
@@ -44,7 +50,6 @@ def _clean_env(monkeypatch):
 def _guard_real_db(monkeypatch, tmp_path):
     """Redirect config paths to a temp directory so no test can accidentally
     create files in the real data/assets directories."""
-    import web.core.config as config_mod
 
     monkeypatch.setattr(config_mod, "ROOT_DIR", tmp_path)
     monkeypatch.setattr(config_mod, "ASSETS_DIR", tmp_path / "assets")
@@ -62,7 +67,6 @@ _TEST_PROVIDER_KEYS: dict[str, str | None] = {}
 def provider_keys(monkeypatch):
     """Inject per-user provider keys for a test via an in-memory dict, patching
     only the resolver seam. No API key is read from the environment."""
-    import web.api  # noqa: F401 — ensure app import side effects have run
 
     _TEST_PROVIDER_KEYS.clear()
     monkeypatch.setattr(
@@ -85,9 +89,6 @@ def _tenant(request, monkeypatch):
 
     Tests marked `no_tenant` opt out — they build pre-user_id schemas where the
     scope filter can't reference the column yet."""
-    import types
-
-    from web.core import metadata
 
     if "no_tenant" in request.keywords:
         yield None
@@ -112,7 +113,6 @@ def _no_outbound_http(monkeypatch):
     outlived the test that started it and is now running with the mocks undone.
     Left alone that shows up as an unrelated test timing out 30 seconds later,
     which is very hard to trace back; this names it on the spot."""
-    import requests
 
     def blocked(*args, **kwargs):
         target = args[1] if len(args) > 1 else (args[0] if args else kwargs.get("url", "?"))

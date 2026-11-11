@@ -26,7 +26,7 @@ export const characterAvatar = c => (c?.images?.length ? characterImageUrl(c.id,
 
 // Characters need a model that takes reference images (their whole point is
 // keeping a look consistent). Mirrors the server's checks: _characters_usable
-// in web/chat.py, and the "images" option / Ref mode on the Generate page.
+// in web/chat/turn.py, and the "images" option / Ref mode on the Generate page.
 
 /** A chat image model (catalogue entry) that can use characters. */
 export const chatImageModelTakesCharacters = info =>

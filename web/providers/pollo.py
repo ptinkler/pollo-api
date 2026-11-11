@@ -199,14 +199,13 @@ def submit_audio(model_id: str, prompt: str, source_audio: Path | None = None, *
     if MODEL_INFO.get(key, {}).get("audio_input"):
         if not source_audio:
             raise PolloError("Voice cloning needs a reference clip — upload an audio file")
-        opts["voice_ref_url"] = _upload_audio(source_audio)
+        opts["voice_ref_url"] = _upload(source_audio, "audio")
     try:
         generator = get_audio_generator(key, api_key=keyctx.provider_key("pollo"), prompt=prompt, **opts)
         generator.get_payload()
     except ValueError as e:
         raise PolloError(str(e)) from e
-    task_id = _submit(generator)
-    return {"id": JOB_PREFIX + task_id, "params": dict(generator.payload_attrs)}
+    return _job(generator, dict(generator.payload_attrs))
 
 
 def _generator_key(model_id: str, generators: dict) -> str:
@@ -218,29 +217,13 @@ def _generator_key(model_id: str, generators: dict) -> str:
     return key
 
 
-def _upload(path: Path) -> str:
-    try:
-        return image_hosts.upload_image(path)
-    except ValueError as e:
-        raise PolloError(f"Couldn't upload the image for Pollo: {e}") from e
-
-
-def _upload_video(path: Path) -> str:
-    """Upload a source video to the user's configured host (Pollo only takes
-    URLs). The host/retention come from the user's upload preferences."""
+def _upload(path: Path, what: str = "image") -> str:
+    """Put a local file on the user's configured public host — Pollo only takes
+    URLs. The host and retention come from their upload preferences."""
     try:
         return image_hosts.upload_file(path)
     except ValueError as e:
-        raise PolloError(f"Couldn't upload the video for Pollo: {e}") from e
-
-
-def _upload_audio(path: Path) -> str:
-    """Upload a lip-sync audio track to the user's configured host (Pollo only
-    takes URLs)."""
-    try:
-        return image_hosts.upload_file(path)
-    except ValueError as e:
-        raise PolloError(f"Couldn't upload the audio for Pollo: {e}") from e
+        raise PolloError(f"Couldn't upload the {what} for Pollo: {e}") from e
 
 
 def _upload_ref_item(item: dict) -> dict:
@@ -249,7 +232,7 @@ def _upload_ref_item(item: dict) -> dict:
     retries (web/image_hosts.py), so re-rendering doesn't re-upload."""
     typ = item.get("type") or "image"
     path = item["path"]
-    url = _upload_video(path) if typ == "video" else _upload_audio(path) if typ == "audio" else _upload(path)
+    url = _upload(path, "video") if typ == "video" else _upload(path, "audio") if typ == "audio" else _upload(path)
     ref: dict[str, Any] = {"url": url, "type": typ}
     if item.get("name"):
         ref["name"] = item["name"]
@@ -286,8 +269,7 @@ def _submit_ref_video_job(
         length=duration,
         generate_audio=generate_audio,
     )
-    task_id = _submit(generator)
-    return {"id": JOB_PREFIX + task_id, "params": _sent_params(generator)}
+    return _job(generator)
 
 
 def generate_image(
@@ -373,7 +355,7 @@ def _submit_source_video_job(
     kw: dict[str, Any] = {
         "api_key": keyctx.provider_key("pollo"),
         "prompt": prompt,
-        "video_url": _upload_video(source_video),
+        "video_url": _upload(source_video, "video"),
     }
     if typ in _IMAGE_AND_VIDEO:  # the reference / face image rides along
         kw.update(image_url=_upload(first_frame), mode=mode)
@@ -384,8 +366,7 @@ def _submit_source_video_job(
         if typ == "extend":  # extend lets the user pick added duration + audio
             kw.update(length=duration, generate_audio=generate_audio)
     generator = get_video_generator(key, **kw)
-    task_id = _submit(generator)
-    return {"id": JOB_PREFIX + task_id, "params": _sent_params(generator)}
+    return _job(generator)
 
 
 def submit_video(
@@ -430,11 +411,10 @@ def submit_video(
             api_key=keyctx.provider_key("pollo"),
             prompt=prompt,
             image_url=_upload(first_frame),
-            audio_url=_upload_audio(source_audio),
+            audio_url=_upload(source_audio, "audio"),
             resolution=resolution,
         )
-        task_id = _submit(generator)
-        return {"id": JOB_PREFIX + task_id, "params": _sent_params(generator)}
+        return _job(generator)
     job = _submit_source_video_job(
         key,
         typ,
@@ -466,8 +446,7 @@ def submit_video(
         length=duration,
         generate_audio=generate_audio,
     )
-    task_id = _submit(generator)
-    return {"id": JOB_PREFIX + task_id, "params": _sent_params(generator)}
+    return _job(generator)
 
 
 def estimate_cost(
@@ -524,6 +503,12 @@ def estimate_cost(
         return pollo_estimate.estimate(generator)
     except Exception:  # noqa: BLE001 — an estimate is a nicety; never fail the composer over it
         return None
+
+
+def _job(generator, params: dict | None = None) -> dict:
+    """Submit and describe the job: its id, and the settings actually sent.
+    `params` overrides the video/image view of them (audio reports its own)."""
+    return {"id": JOB_PREFIX + _submit(generator), "params": params or _sent_params(generator)}
 
 
 def _sent_params(generator) -> dict[str, Any]:

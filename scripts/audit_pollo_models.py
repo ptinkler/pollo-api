@@ -35,6 +35,7 @@ import contextlib
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.request
 from datetime import date
@@ -43,6 +44,8 @@ from pathlib import Path
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))  # repo root, for `web.*`
 sys.path.insert(0, _HERE)  # this scripts/ dir, for the probe import
+
+from probe_pollo_models import _probe_estimate  # noqa: E402 — sibling script, after the sys.path bootstrap above
 
 from web.providers.pollo_engine.video import VIDEO_MODELS  # noqa: E402
 from web.providers.pollo_models import MODEL_INFO  # noqa: E402
@@ -158,8 +161,6 @@ def _mismatches(ours: dict, docs: dict | None) -> list[str]:
 
 def _enablement(keys: list[str], api_key: str) -> dict[str, str]:
     """Live estimate probe (reuses probe_pollo_models) -> {our_key: verdict}."""
-    from probe_pollo_models import _probe_estimate  # local script
-
     return {k: _probe_estimate(k, api_key)[0] for k in keys}
 
 
@@ -306,8 +307,6 @@ def plan_writes(ours: dict, docs: dict[str, dict], enabled: dict[str, str]) -> t
 
 def _write(ours: dict, docs: dict, enabled: dict) -> None:
     """Apply the mechanical fixes to our source, then report; you review the diff."""
-    import subprocess
-
     models_edits, engine_edits, notes = plan_writes(ours, docs, enabled)
     warnings: list[str] = []
     n = apply_edits(MODELS_FILE, models_edits, warnings) + apply_edits(ENGINE_FILE, engine_edits, warnings)

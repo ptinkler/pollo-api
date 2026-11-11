@@ -7,6 +7,7 @@ import types
 import pytest
 from fastapi.testclient import TestClient
 
+import web.api as api_mod
 from web import image_hosts, public_media, upload_settings
 from web.core import config
 
@@ -248,6 +249,5 @@ class TestApi:
 
 
 def _app():
-    import web.api as api_mod
 
     return api_mod.app

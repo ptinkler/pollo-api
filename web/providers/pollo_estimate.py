@@ -9,12 +9,15 @@ uploaded for an estimate. Checked 2026-10-18: they don't cost credits.
 """
 
 import json
+import logging
 from typing import Any
 
 import requests
 
 from web.core.cache import MISS, TTLCache
 from web.core.cloudflare import is_cloudflare_block
+
+log = logging.getLogger(__name__)
 
 # Stand-ins for the request's media: what's priced is that there is an
 # image, end frame or reference, not what it shows (Pollo accepts these,
@@ -66,7 +69,7 @@ def _ask(url: str, payload: dict, api_key: str | None) -> tuple[dict | None, boo
     if is_cloudflare_block(resp) or resp.status_code >= 500:
         return None, False
     if resp.status_code != 200:
-        print(f"[Estimate] {url} answered HTTP {resp.status_code}: {resp.text[:200]}")
+        log.warning("estimate %s answered HTTP %s: %s", url, resp.status_code, resp.text[:200])
         return None, True
     try:
         body = resp.json()

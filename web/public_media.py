@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse
 
 from web.core import config
 
-from .auth import _user_secret
+from .auth import user_secret
 
 router = APIRouter(prefix="/api/public-media")
 
@@ -51,7 +51,7 @@ def sign_media_token(filepath: Path, ttl_seconds: int) -> str:
     b64path = _b64(str(Path(filepath).resolve()).encode())
     exp = int(time.time()) + int(ttl_seconds)
     payload = f"{b64path}.{exp}"
-    sig = hmac.new(_user_secret(), payload.encode(), hashlib.sha256).digest()
+    sig = hmac.new(user_secret(), payload.encode(), hashlib.sha256).digest()
     return f"{payload}.{_b64(sig)}"
 
 
@@ -62,7 +62,7 @@ def _resolve_token(token: str) -> Path | None:
         return None
     b64path, exp_s, sig_b64 = parts
     payload = f"{b64path}.{exp_s}"
-    expected = hmac.new(_user_secret(), payload.encode(), hashlib.sha256).digest()
+    expected = hmac.new(user_secret(), payload.encode(), hashlib.sha256).digest()
     try:
         if not hmac.compare_digest(expected, _unb64(sig_b64)):
             return None

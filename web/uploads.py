@@ -63,49 +63,56 @@ def is_blank_image(data: bytes) -> bool:
         return False  # not an image Pillow reads; leave it to the caller
 
 
-async def read_image_upload(file: UploadFile) -> tuple[bytes, str]:
-    """Validate an uploaded image (type, size, real image content); returns
-    (bytes, file extension to save it with)."""
-    ext = IMAGE_UPLOAD_TYPES.get(file.content_type or "")
-    if not ext:
-        raise HTTPException(400, f"Unsupported file type: {file.content_type}. Use PNG, JPEG, WebP or GIF.")
-    content = await file.read()
-    if len(content) > MAX_IMAGE_UPLOAD_BYTES:
-        raise HTTPException(400, f"File too large (max {MAX_IMAGE_UPLOAD_BYTES // 1024 // 1024} MB)")
-    # Check the actual content regardless of the client-supplied content type
+def _is_real_image(content: bytes) -> bool:
+    """The bytes really are an image, whatever content type the client claimed."""
     try:
         Image.open(io.BytesIO(content)).verify()
-    except Exception:
-        raise HTTPException(400, "File is not a valid image") from None
+    except Exception:  # noqa: BLE001 — anything Pillow rejects is not an image
+        return False
+    return True
+
+
+def _is_real_video(content: bytes) -> bool:
+    """MP4/QuickTime files carry an "ftyp" box near the start — a cheap check
+    that the bytes are really a video, not a renamed file."""
+    return b"ftyp" in content[:64]
+
+
+async def _read_upload(
+    file: UploadFile,
+    types: dict[str, str],
+    max_bytes: int,
+    accepted: str,
+    check=None,
+    kind: str = "",
+) -> tuple[bytes, str]:
+    """Validate one upload against its type map, size cap and (optionally) its
+    real content; returns (bytes, the extension to save it with). `accepted`
+    names the formats for the wrong-type message, `kind` the thing it should
+    have been for the bad-content one."""
+    ext = types.get(file.content_type or "")
+    if not ext:
+        raise HTTPException(400, f"Unsupported file type: {file.content_type}. Use {accepted}.")
+    content = await file.read()
+    if len(content) > max_bytes:
+        raise HTTPException(400, f"File too large (max {max_bytes // 1024 // 1024} MB)")
+    if check and not check(content):
+        raise HTTPException(400, f"File is not a valid {kind}")
     return content, ext
+
+
+async def read_image_upload(file: UploadFile) -> tuple[bytes, str]:
+    return await _read_upload(
+        file, IMAGE_UPLOAD_TYPES, MAX_IMAGE_UPLOAD_BYTES, "PNG, JPEG, WebP or GIF", _is_real_image, "image"
+    )
 
 
 async def read_video_upload(file: UploadFile) -> tuple[bytes, str]:
-    """Validate an uploaded video (type, size, mp4 signature); returns
-    (bytes, file extension to save it with)."""
-    ext = VIDEO_UPLOAD_TYPES.get(file.content_type or "")
-    if not ext:
-        raise HTTPException(400, f"Unsupported file type: {file.content_type}. Use MP4.")
-    content = await file.read()
-    if len(content) > MAX_VIDEO_UPLOAD_BYTES:
-        raise HTTPException(400, f"File too large (max {MAX_VIDEO_UPLOAD_BYTES // 1024 // 1024} MB)")
-    # MP4/QuickTime files carry an "ftyp" box near the start — a cheap check
-    # that the bytes are really a video, not a renamed file.
-    if b"ftyp" not in content[:64]:
-        raise HTTPException(400, "File is not a valid MP4 video")
-    return content, ext
+    return await _read_upload(file, VIDEO_UPLOAD_TYPES, MAX_VIDEO_UPLOAD_BYTES, "MP4", _is_real_video, "MP4 video")
 
 
 async def read_audio_upload(file: UploadFile) -> tuple[bytes, str]:
-    """Validate an uploaded audio track (type, size); returns (bytes, file
-    extension to save it with)."""
-    ext = AUDIO_UPLOAD_TYPES.get(file.content_type or "")
-    if not ext:
-        raise HTTPException(400, f"Unsupported file type: {file.content_type}. Use MP3, WAV, M4A or AAC.")
-    content = await file.read()
-    if len(content) > MAX_AUDIO_UPLOAD_BYTES:
-        raise HTTPException(400, f"File too large (max {MAX_AUDIO_UPLOAD_BYTES // 1024 // 1024} MB)")
-    return content, ext
+    return await _read_upload(file, AUDIO_UPLOAD_TYPES, MAX_AUDIO_UPLOAD_BYTES, "MP3, WAV, M4A or AAC")
 
 
 def file_to_data_url(path: Path) -> str:

@@ -13,9 +13,9 @@ from web.core.metadata import get_db
 from .. import characters, providers, request_log
 from ..providers import openrouter, pollo, provider_for
 from ..uploads import file_to_data_url, is_blank_image
-from .catalogue import _auto_ratio, _model_info
+from .catalogue import auto_ratio, model_info
 from .constants import DEFAULT_IMAGE_LIMIT, IMAGE_EXTS, TITLE_SECONDS
-from .helpers import _conv_dir, _effective_ids
+from .helpers import conversation_dir, effective_ids
 from .models import RefChoices
 from .tools import AUDIO_TOOL_RESULT, IMAGE_TOOL_RESULT, TITLE_PROMPT, VIDEO_TOOL_RESULT
 
@@ -60,7 +60,7 @@ ENHANCE_PROMPT = (
 )
 
 
-def _enhance_prompt(model: str, prompt: str, kind: str) -> tuple[str, float]:
+def enhance_prompt(model: str, prompt: str, kind: str) -> tuple[str, float]:
     """(the prompt rewritten by the chat model, its cost in USD). Raises
     ValueError when the model returns nothing usable."""
     text, cost = _ask(model, ENHANCE_PROMPT.format(kind=kind, prompt=prompt[:4000]), ENHANCE_SECONDS)
@@ -82,7 +82,7 @@ def _clean_title(text: str) -> str | None:
     return line
 
 
-def _characters_note(attached: list) -> str:
+def characters_note(attached: list) -> str:
     """What the chat model is told about the attached characters ('' when there are none)."""
     if not attached:
         return ""
@@ -95,7 +95,7 @@ def _characters_note(attached: list) -> str:
     return "\n\n".join(parts)
 
 
-def _plan_refs(
+def plan_refs(
     chat_refs: list[str],
     chars: list,
     image_limit: int | None,
@@ -113,27 +113,27 @@ def _plan_refs(
     character's main image, the other chat images (pins, recent), then the
     characters' other images. Images the user switched off never go."""
     on, off = (choices.on, set(choices.off)) if choices else ([], set())
-    kept = [r for r in _dedupe(chat_refs) if r not in off]
-    lead = kept if after is None else [r for r in _dedupe(chat_refs[:after]) if r not in off]
+    kept = [r for r in dedupe(chat_refs) if r not in off]
+    lead = kept if after is None else [r for r in dedupe(chat_refs[:after]) if r not in off]
     chat_refs = kept[:image_limit]
     split = min(len(lead), len(chat_refs))
     every = characters.reference_refs(chars, skip=off)
     mains = characters.reference_refs(chars, per_character=1, skip=off)
     candidates = set(kept) | set(every)  # a switched-on chat image goes even over the slider
-    ordered = _dedupe(chat_refs[:split] + [r for r in on if r in candidates] + mains + chat_refs[split:] + every)
+    ordered = dedupe(chat_refs[:split] + [r for r in on if r in candidates] + mains + chat_refs[split:] + every)
     if max_refs is None:
         return ordered, []
     return ordered[:max_refs], ordered[max_refs:]
 
 
-def _param_characters(params: dict) -> list:
+def param_characters(params: dict) -> list:
     """The characters a media item was made with (deleted ones drop out)."""
     return characters.load(params.get("characters"), get_db())
 
 
 def _ref_file(conv_id: str, ref: str) -> Path:
     """A reference image's file: a character image ("char:…") or a file in the chat."""
-    return characters.ref_path(ref) or _conv_dir(conv_id) / ref
+    return characters.ref_path(ref) or conversation_dir(conv_id) / ref
 
 
 def _history_window(history: list, limit: int | None) -> list:
@@ -147,7 +147,7 @@ def _history_window(history: list, limit: int | None) -> list:
     return window or history[-1:]
 
 
-def _conversation(
+def conversation(
     conv_id: str,
     history: list,
     history_limit: int | None,
@@ -164,7 +164,7 @@ def _conversation(
     calls otherwise) records generated media as the tool calls and results
     that produced it; without it, media is summarised in bracketed notes."""
     history = _history_window(history, history_limit)
-    pixels = _pixels_for(_conv_dir(conv_id), _pixel_files(history, image_limit if vision else 0))
+    pixels = _pixels_for(conversation_dir(conv_id), _pixel_files(history, image_limit if vision else 0))
     messages: list[dict] = []
     carried: list[dict] = []
     for msg in history:
@@ -232,7 +232,7 @@ def _assistant_messages(msg, as_tool_calls: bool) -> list[dict]:
     return [{"role": "assistant", "content": text}] if text else []
 
 
-def _image_context(
+def image_context(
     conv_id: str,
     history: list,
     history_limit: int | None,
@@ -247,7 +247,7 @@ def _image_context(
     when the chat model called the tool — its reply so far and its prompt,
     verbatim, with any reference images it asked for. In Image mode
     (prompt=None) the user's own message is already the last one."""
-    messages = _conversation(conv_id, history, history_limit, vision=True, image_limit=image_limit)
+    messages = conversation(conv_id, history, history_limit, vision=True, image_limit=image_limit)
     system = [s for s in (instructions, characters.describe(chars or [])) if s]
     messages[:0] = [{"role": "system", "content": s} for s in system]
     if prompt is not None:
@@ -269,7 +269,7 @@ def _image_context(
     return messages
 
 
-def _conversation_instructions(conv_id: str) -> str | None:
+def conversation_instructions(conv_id: str) -> str | None:
     """The instructions a chat uses — its defaults' and its own — flattened for
     the model (user's text, verbatim): every snippet from the groups (in group
     order), then the single snippets — each sent once — joined by blank lines.
@@ -282,24 +282,24 @@ def _conversation_instructions(conv_id: str) -> str | None:
     paused = conv.paused_instructions
     paused_groups, paused_snippets = set(paused["instruction_group"]), set(paused["instruction"])
     snippet_ids: list[int] = []
-    for gid in _effective_ids(conv, "instruction_group"):
+    for gid in effective_ids(conv, "instruction_group"):
         if gid in paused_groups:
             continue
         group = db.get_instruction_group(gid)
         if group:
             snippet_ids += group.snippet_ids
-    snippet_ids += [sid for sid in _effective_ids(conv, "instruction") if sid not in paused_snippets]
+    snippet_ids += [sid for sid in effective_ids(conv, "instruction") if sid not in paused_snippets]
     snippet_ids = list(dict.fromkeys(snippet_ids))  # a snippet in several groups is sent once
     parts = [s.content.strip() for s in db.get_instructions(snippet_ids) if s.content.strip()]
     return "\n\n".join(parts) or None
 
 
-def _is_conversational(image_model: str | None) -> bool:
-    info = _model_info("image", image_model)
+def is_conversational(image_model: str | None) -> bool:
+    info = model_info("image", image_model)
     return bool(info and info.get("conversational"))
 
 
-def _dedupe(files: list[str]) -> list[str]:
+def dedupe(files: list[str]) -> list[str]:
     return list(dict.fromkeys(files))
 
 
@@ -343,42 +343,42 @@ def _media_note(item: dict) -> str:
     return f"[{state}: {item.get('prompt') or ''}]"
 
 
-_MODERATION = re.compile(
+MODERATION = re.compile(
     r"moderat|flagged|content[ _-]?polic|safety|nsfw|sexual|prohibited|violat|inappropriate|"
     r"sensitive content|not allowed|blocked",
     re.IGNORECASE,
 )
 
 
-def _is_moderation_error(e: openrouter.OpenRouterError) -> bool:
+def is_moderation_error(e: openrouter.OpenRouterError) -> bool:
     """OpenRouter's own moderation returns 403; providers phrase their
     content-policy refusals in many ways, so also match on the message.
     Pollo's 403 means "model not enabled for API access", so for Pollo only
     the message counts."""
     if isinstance(e, pollo.PolloError):
-        return bool(_MODERATION.search(str(e)))
-    return e.status == 403 or bool(_MODERATION.search(str(e)))
+        return bool(MODERATION.search(str(e)))
+    return e.status == 403 or bool(MODERATION.search(str(e)))
 
 
-def _failure_fields(e: openrouter.OpenRouterError) -> dict[str, Any]:
+def failure_fields(e: openrouter.OpenRouterError) -> dict[str, Any]:
     """A failed media item's fields. Called right after the generation call,
     on its thread: what it sent and got back comes from the error, or — when
     the call itself worked but the result didn't (a Pollo task that failed, a
     black image) — from the request log."""
-    fields = {"status": "error", "error": str(e), "moderated": _is_moderation_error(e)}
-    return {**fields, **_exchange(getattr(e, "log_entry", None) or request_log.take_last())}
+    fields = {"status": "error", "error": str(e), "moderated": is_moderation_error(e)}
+    return {**fields, **exchange_fields(getattr(e, "log_entry", None) or request_log.take_last())}
 
 
-def _exchange(entry: dict | None) -> dict[str, Any]:
+def exchange_fields(entry: dict | None) -> dict[str, Any]:
     """A request-log entry as media item fields: the body sent to the provider
     and what it answered, for the UI's "Request" view."""
     return {"request": entry.get("request"), "response": entry.get("response")} if entry else {}
 
 
-def _take_log(result: dict) -> tuple[dict, dict[str, Any]]:
+def take_log(result: dict) -> tuple[dict, dict[str, Any]]:
     """(a generation's settings/job, minus its request-log entry; that entry as media item fields)."""
     result = dict(result)
-    return result, _exchange(result.pop("log", None))
+    return result, exchange_fields(result.pop("log", None))
 
 
 BLACK_IMAGE_ERROR = (
@@ -388,21 +388,21 @@ BLACK_IMAGE_ERROR = (
 )
 
 
-def _run_image_generation(
+def run_image_generation(
     conv_id: str, model: str, prompt: str, params: dict[str, Any], context: list[dict] | None = None
 ) -> tuple[list[str], float | None, int | None, dict[str, Any]]:
     """Generate and save images; returns (filenames, dollar cost, Pollo credits,
     the params actually sent — Pollo and Venice, defaults included — for display).
     With `context` (conversational models) the model gets the conversation;
     otherwise the Images API — or Pollo, or Venice — gets the prompt plus any reference images."""
-    conv_dir = _conv_dir(conv_id)
+    conv_dir = conversation_dir(conv_id)
     refs = [p for p in (_ref_file(conv_id, f) for f in params.get("refs") or []) if p.is_file()]
     if context is None:
-        prompt = characters.with_characters(prompt, _param_characters(params))
+        prompt = characters.with_characters(prompt, param_characters(params))
     request_log.forget_last()
     # An unset ratio ("Ratio: auto") becomes the model's own auto value when it
     # has one, so it stays automatic instead of falling back to 16:9.
-    aspect_ratio = params.get("aspect_ratio") or _auto_ratio("image", model)
+    aspect_ratio = params.get("aspect_ratio") or auto_ratio("image", model)
     images, cost, credits, sent = providers.generate_image(
         model,
         prompt,
@@ -423,7 +423,7 @@ def _run_image_generation(
     return names, cost, credits, {**sent, "log": request_log.take_last()}
 
 
-def _submit_video_generation(conv_id: str, model: str, prompt: str, params: dict[str, Any]) -> dict:
+def submit_video_generation(conv_id: str, model: str, prompt: str, params: dict[str, Any]) -> dict:
     """Start a video job on the model's provider. Returns the job plus
     "log": what was sent and answered (from the request log)."""
     request_log.forget_last()
@@ -432,11 +432,11 @@ def _submit_video_generation(conv_id: str, model: str, prompt: str, params: dict
 
 def _submit_video(conv_id: str, model: str, prompt: str, params: dict[str, Any]) -> dict:
     frame = _ref_file(conv_id, params["first_frame"]) if params.get("first_frame") else None
-    prompt = characters.with_characters(prompt, _param_characters(params))
+    prompt = characters.with_characters(prompt, param_characters(params))
     # An unset ratio uses the model's own auto value when it has one (matching
     # the image path); animating an image still derives the ratio from the frame.
-    aspect_ratio = params.get("aspect_ratio") or (None if frame else _auto_ratio("video", model))
-    conv_dir = _conv_dir(conv_id)
+    aspect_ratio = params.get("aspect_ratio") or (None if frame else auto_ratio("video", model))
+    conv_dir = conversation_dir(conv_id)
     return providers.submit_video(
         model,
         prompt,

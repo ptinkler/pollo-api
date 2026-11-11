@@ -12,14 +12,14 @@ ERROR_STATUSES = ("error", "failed")
 _RATIO_WORDS = {"portrait": "9:16", "landscape": "16:9", "square": "1:1"}
 
 
-def _aspect_ratio(mode: str = "portrait") -> str:
+def parse_aspect_ratio(mode: str = "portrait") -> str:
     """A ratio string from a mode word or a direct 'W:H' value (default 9:16)."""
     if ":" in mode:
         return mode
     return _RATIO_WORDS.get(mode, "9:16")
 
 
-def _valid_length(length_str: str, valid: tuple, default: int) -> int:
+def valid_length(length_str: str, valid: tuple, default: int) -> int:
     """Parse + validate a length against `valid` (empty = accept any)."""
     try:
         length = int(length_str)

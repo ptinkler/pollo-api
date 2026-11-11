@@ -6,7 +6,7 @@ from typing import Any
 
 from web.core.config import POLLO_GENERATION_BASE
 
-from ._shared import _aspect_ratio
+from ._shared import parse_aspect_ratio
 
 _V1_IMAGE_DEFAULTS: dict[str, Any] = {
     "VALID_RATIOS": (),
@@ -205,12 +205,12 @@ IMAGE_MODELS: dict[str, dict[str, Any]] = {
 }
 
 
-def _img_cfg(model_id: str) -> dict[str, Any]:
+def img_cfg(model_id: str) -> dict[str, Any]:
     return {**_V1_IMAGE_DEFAULTS, **IMAGE_MODELS[model_id]}
 
 
 def image_model_url(model_id: str) -> str:
-    c = _img_cfg(model_id)
+    c = img_cfg(model_id)
     return c.get("V1_URL") or f"{POLLO_GENERATION_BASE}/{c['PROVIDER']}/{c['MODEL']}/image"
 
 
@@ -228,10 +228,10 @@ def _tool_payload(c: dict[str, Any], image_url: str | None, **kw) -> dict[str, A
 
 def image_payload(model_id: str, *, prompt: str, image_url: str | None, **kw) -> dict[str, Any]:
     """Build the image API body."""
-    c = _img_cfg(model_id)
+    c = img_cfg(model_id)
     if c.get("TOOL"):
         return _tool_payload(c, image_url, **kw)
-    aspect_ratio = kw.get("aspect_ratio") or _aspect_ratio(c["DEFAULT_RATIO_KEYWORD"])
+    aspect_ratio = kw.get("aspect_ratio") or parse_aspect_ratio(c["DEFAULT_RATIO_KEYWORD"])
     resolution = kw.get("resolution")
     resolution = resolution if resolution in c["VALID_RESOLUTIONS"] else None
     seed = kw.get("seed") if c["HAS_SEED"] else None

@@ -107,7 +107,7 @@ class ChatConversation(Base):
     instruction_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Instruction groups attached (ChatInstructionGroup.id list, JSON); each
     # contributes all its snippets. Groups + individual snippets are flattened
-    # and de-duped into the instructions sent to the model (see web/chat.py).
+    # and de-duped into the instructions sent to the model (see web/chat/generation.py).
     instruction_group_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # The space this chat belongs to (ChatSpace.id); null = unfiled. A space is
     # a chat-only grouping that seeds new chats with its default characters and
@@ -349,7 +349,7 @@ class ChatSettings(DefaultsBucket, Base):
 
 class ChatMessage(Base):
     """One chat turn. `media_json` is a list of media items (images/videos,
-    uploaded or generated) — see web/chat.py for the item shape.
+    uploaded or generated) — see web/chat/__init__.py for the item shape.
 
     Messages form a tree through `parent_id` (None = first message of a
     branch); siblings are alternative versions of the same turn."""

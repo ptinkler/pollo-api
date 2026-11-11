@@ -17,8 +17,8 @@ from web.core.cloudflare import is_cloudflare_block
 from web.core.config import POLLO_API_TIMEOUT
 
 from .audio import AUDIO_MODELS, audio_model_url, audio_payload
-from .image import IMAGE_MODELS, _img_cfg, image_model_url, image_payload
-from .video import VIDEO_MODELS, _cfg, video_model_url, video_payload
+from .image import IMAGE_MODELS, image_model_url, image_payload, img_cfg
+from .video import VIDEO_MODELS, cfg, video_model_url, video_payload
 
 # A video row's builder name -> the family a ModelSpec carries. They differ only
 # for the catch-all builder, whose family is the plain "video".
@@ -105,7 +105,7 @@ class PolloGenerator:
 
 # Registries (model_id -> ModelSpec), one per kind.
 def _video_spec(model_id: str) -> ModelSpec:
-    c = _cfg(model_id)
+    c = cfg(model_id)
     return ModelSpec(
         model_id,
         "video",
@@ -118,7 +118,7 @@ def _video_spec(model_id: str) -> ModelSpec:
 
 
 def _image_spec(model_id: str) -> ModelSpec:
-    c = _img_cfg(model_id)
+    c = img_cfg(model_id)
     return ModelSpec(
         model_id,
         "image",

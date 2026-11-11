@@ -2,6 +2,7 @@
 
 import json
 
+import web.characters as characters_mod
 from tests.test_chat import (  # noqa: F401
     SETTINGS,
     _events,
@@ -46,7 +47,6 @@ class TestManagement:
         assert client.patch(f"/api/characters/{c['id']}", json={"images": ["nope.png"]}).status_code == 400
 
     def test_image_limit(self, client, monkeypatch):
-        import web.characters as characters_mod
 
         monkeypatch.setattr(characters_mod, "MAX_IMAGES", 1)
         c = _make(client)
@@ -54,7 +54,7 @@ class TestManagement:
         assert r.status_code == 400
 
     def test_copy_image_from_chat(self, client, conv, chat):
-        (chat._conv_dir(conv["id"]) / "g.png").write_bytes(_png_bytes())
+        (chat.conversation_dir(conv["id"]) / "g.png").write_bytes(_png_bytes())
         c = _make(client, images=0)
         r = client.post(
             f"/api/characters/{c['id']}/images/from-chat", json={"conversation_id": conv["id"], "file": "g.png"}
@@ -221,7 +221,7 @@ class TestInChat:
         """The priority when a model takes fewer images than that (see TestReferenceCaps)."""
         linh = _make(client)
         self._attach(client, conv, linh)
-        (chat._conv_dir(conv["id"]) / "g.png").write_bytes(_png_bytes())
+        (chat.conversation_dir(conv["id"]) / "g.png").write_bytes(_png_bytes())
         db.add_chat_message(conv["id"], "user", "x")
         msg = db.add_chat_message(
             conv["id"],
@@ -240,7 +240,6 @@ class TestInChat:
 
     def test_character_refs_are_shared_round_robin(self, chat, client):
         a, b = _make(client, name="A", images=3), _make(client, name="B", images=3)
-        import web.characters as characters_mod
 
         refs = characters_mod.reference_refs(characters_mod.load([a["id"], b["id"]]), 3)
         assert refs == [
@@ -380,7 +379,7 @@ class TestUseByName:
         assert ev[-1]["message"]["media"][0]["params"]["characters"] == [linh["id"]]
 
     def test_create_character_from_the_latest_image_then_draw_them(self, client, conv, chat, db, monkeypatch):
-        (chat._conv_dir(conv["id"]) / "g.png").write_bytes(_png_bytes())
+        (chat.conversation_dir(conv["id"]) / "g.png").write_bytes(_png_bytes())
         db.add_chat_message(conv["id"], "user", "draw a girl")
         db.add_chat_message(
             conv["id"],
@@ -456,7 +455,7 @@ class TestReferenceCaps:
         # 8 pinned chat images: only the slider's number of them go
         db.add_chat_message(conv["id"], "user", "pics")
         for i in range(8):
-            (chat._conv_dir(conv["id"]) / f"p{i}.png").write_bytes(_png_bytes())
+            (chat.conversation_dir(conv["id"]) / f"p{i}.png").write_bytes(_png_bytes())
         db.add_chat_message(
             conv["id"],
             "assistant",
@@ -495,7 +494,7 @@ class TestReferenceCaps:
     def test_slider_raises_the_chat_image_cap(self, client, conv, chat, db, monkeypatch):
         db.add_chat_message(conv["id"], "user", "pics")
         for i in range(8):
-            (chat._conv_dir(conv["id"]) / f"p{i}.png").write_bytes(_png_bytes())
+            (chat.conversation_dir(conv["id"]) / f"p{i}.png").write_bytes(_png_bytes())
         db.add_chat_message(
             conv["id"],
             "assistant",
@@ -527,7 +526,7 @@ class TestReferenceCaps:
     def _pins(self, chat, db, conv, n):
         db.add_chat_message(conv["id"], "user", "pics")
         for i in range(n):
-            (chat._conv_dir(conv["id"]) / f"p{i}.png").write_bytes(_png_bytes())
+            (chat.conversation_dir(conv["id"]) / f"p{i}.png").write_bytes(_png_bytes())
         db.add_chat_message(
             conv["id"],
             "assistant",
@@ -547,16 +546,16 @@ class TestReferenceCaps:
         )
 
     def _send_image(self, client, conv, chat, monkeypatch, max_refs, **settings):
-        real = chat.catalogue._model_info
+        real = chat.catalogue.model_info
 
         def fake_info(kind, mid):
             if kind == "image":
                 return {"input_modalities": ["text", "image"], "max_refs": max_refs}
             return real(kind, mid)
 
-        # _model_info is read in both the turn (ref caps) and generation (modality) modules
-        monkeypatch.setattr(chat.turn, "_model_info", fake_info)
-        monkeypatch.setattr(chat.generation, "_model_info", fake_info)
+        # model_info is read in both the turn (ref caps) and generation (modality) modules
+        monkeypatch.setattr(chat.turn, "model_info", fake_info)
+        monkeypatch.setattr(chat.generation, "model_info", fake_info)
         monkeypatch.setattr(
             openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
         )

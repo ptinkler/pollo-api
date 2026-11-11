@@ -7,18 +7,10 @@ from .models import ChatConversation, ChatInstruction, ChatInstructionGroup, Cha
 
 class InstructionMixin:
     def list_instructions(self) -> list[ChatInstruction]:
-        with self._session() as session:
-            items = session.query(ChatInstruction).order_by(ChatInstruction.name).all()
-            for i in items:
-                session.expunge(i)
-            return items
+        return self._list(ChatInstruction, ChatInstruction.name)
 
     def get_instruction(self, instruction_id: int) -> ChatInstruction | None:
-        with self._session() as session:
-            item = session.get(ChatInstruction, instruction_id)
-            if item:
-                session.expunge(item)
-            return item
+        return self._get(ChatInstruction, instruction_id)
 
     def get_instructions(self, ids: list[int]) -> list[ChatInstruction]:
         """Snippets for the given ids, in that order; unknown ids drop out."""
@@ -33,21 +25,7 @@ class InstructionMixin:
 
     def save_instruction(self, instruction_id: int | None = None, **fields) -> ChatInstruction | None:
         """Create (id None) or update a snippet."""
-        with self._session() as session:
-            if instruction_id is None:
-                item = ChatInstruction(**fields)
-                session.add(item)
-            else:
-                item = session.get(ChatInstruction, instruction_id)
-                if not item:
-                    return None
-                for key, value in fields.items():
-                    setattr(item, key, value)
-                item.updated_at = datetime.now()
-            session.commit()
-            session.refresh(item)
-            session.expunge(item)
-            return item
+        return self._save(ChatInstruction, instruction_id, **fields)
 
     def delete_instruction(self, instruction_id: int) -> bool:
         """Delete a snippet and remove it from any chats and groups using it."""
@@ -76,36 +54,14 @@ class InstructionMixin:
             return True
 
     def list_instruction_groups(self) -> list[ChatInstructionGroup]:
-        with self._session() as session:
-            items = session.query(ChatInstructionGroup).order_by(ChatInstructionGroup.name).all()
-            for i in items:
-                session.expunge(i)
-            return items
+        return self._list(ChatInstructionGroup, ChatInstructionGroup.name)
 
     def get_instruction_group(self, group_id: int) -> ChatInstructionGroup | None:
-        with self._session() as session:
-            item = session.get(ChatInstructionGroup, group_id)
-            if item:
-                session.expunge(item)
-            return item
+        return self._get(ChatInstructionGroup, group_id)
 
     def save_instruction_group(self, group_id: int | None = None, **fields) -> ChatInstructionGroup | None:
         """Create (id None) or update a group."""
-        with self._session() as session:
-            if group_id is None:
-                item = ChatInstructionGroup(**fields)
-                session.add(item)
-            else:
-                item = session.get(ChatInstructionGroup, group_id)
-                if not item:
-                    return None
-                for key, value in fields.items():
-                    setattr(item, key, value)
-                item.updated_at = datetime.now()
-            session.commit()
-            session.refresh(item)
-            session.expunge(item)
-            return item
+        return self._save(ChatInstructionGroup, group_id, **fields)
 
     def delete_instruction_group(self, group_id: int) -> bool:
         """Delete a group and detach it from any chats using it (its snippets stay)."""
@@ -167,35 +123,14 @@ class InstructionMixin:
             return item
 
     def list_spaces(self) -> list[ChatSpace]:
-        with self._session() as session:
-            items = session.query(ChatSpace).order_by(ChatSpace.name).all()
-            for i in items:
-                session.expunge(i)
-            return items
+        return self._list(ChatSpace, ChatSpace.name)
 
     def get_space(self, space_id: int) -> ChatSpace | None:
-        with self._session() as session:
-            item = session.get(ChatSpace, space_id)
-            if item:
-                session.expunge(item)
-            return item
+        return self._get(ChatSpace, space_id)
 
     def save_space(self, space_id: int | None = None, **fields) -> ChatSpace | None:
-        with self._session() as session:
-            if space_id is None:
-                item = ChatSpace(**fields)
-                session.add(item)
-            else:
-                item = session.get(ChatSpace, space_id)
-                if not item:
-                    return None
-                for key, value in fields.items():
-                    setattr(item, key, value)
-                item.updated_at = datetime.now()
-            session.commit()
-            session.refresh(item)
-            session.expunge(item)
-            return item
+        """Create (id None) or update a space."""
+        return self._save(ChatSpace, space_id, **fields)
 
     def delete_space(self, space_id: int) -> bool:
         """Delete a space; its chats become unfiled (space_id null), not deleted."""

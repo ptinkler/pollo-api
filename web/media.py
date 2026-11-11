@@ -41,9 +41,10 @@ from PIL import Image, ImageOps
 from pydantic import BaseModel
 
 from web.core import config
-from web.core.metadata import get_db, iso
+from web.core.metadata import current_tenant, get_db, iso
 
 from . import characters, media_cache
+from .media_types import VIDEO_SUFFIXES
 from .uploads import (
     image_media_type,
     is_blank_image,
@@ -56,21 +57,18 @@ from .users import require_user
 
 router = APIRouter(prefix="/api/media", dependencies=[Depends(require_user)])
 
-VIDEO_EXTS = {".mp4", ".webm", ".mov"}
 THUMB_SIZE = 320  # px, the thumbnail's shorter side (grid tiles are square, cropped to fill)
 THUMB_WORKERS = 2  # thumbnails made at once — a grid asks for many together, and a NAS CPU is slow
 # A new chat file isn't orphaned until it's this old (s): attachments wait in
 # the composer, and generations are written before their message records them
 ORPHAN_GRACE = 3600
-_PARAM_FILES = ("first_frame", "last_frame", "source_video")  # chat media params naming one file
+PARAM_FILES = ("first_frame", "last_frame", "source_video")  # chat media params naming one file
 
 
 def library_dir() -> Path:
     # Read config at call time so tests can redirect ROOT_DIR. Per-user
     # (<data>/library/<user_id>/) so one user's uploads never show to another;
     # the shared legacy folder is the admin's, migrated by provision_admin.
-    from web.core.metadata import current_tenant
-
     base = config.ROOT_DIR / "library"
     uid = current_tenant()
     return base / uid if uid else base
@@ -85,7 +83,8 @@ def _chat_dir(conv_id: str) -> Path:
 
 
 def _kind(path: Path | str) -> str | None:
-    if Path(path).suffix.lower() in VIDEO_EXTS:
+    """What the library indexes: pictures and videos (not audio)."""
+    if Path(path).suffix.lower() in VIDEO_SUFFIXES:
         return "video"
     return "image" if image_media_type(path) else None
 
@@ -340,7 +339,7 @@ def _library_items() -> list[dict[str, Any]]:
 
 def _chat_records(msgs, lib_items, titles: dict[str, str]) -> list[dict[str, Any]]:
     # Keyed by file name alone: a branched chat links its media in under the
-    # same names (web/chat.py api_fork_conversation), so each shows once —
+    # same names (web/chat/routes.py api_fork_conversation), so each shows once —
     # in the oldest chat that still has it
     items: dict[str, dict[str, Any]] = {}
 
@@ -383,7 +382,7 @@ def _referenced_files(item: dict) -> list[str]:
     files = [item.get("file")]
     for source in (item, *(item.get("versions") or [])):
         params = source.get("params") or {}
-        files += [source.get("file"), *(params.get("refs") or []), *(params.get(k) for k in _PARAM_FILES)]
+        files += [source.get("file"), *(params.get("refs") or []), *(params.get(k) for k in PARAM_FILES)]
     return [f for f in files if isinstance(f, str) and f]
 
 
@@ -434,7 +433,7 @@ def _build_items(db) -> list[dict[str, Any]]:
     records and orphans passes — they were the list's main cost."""
     msgs = db.get_chat_messages_with_media()  # newest first (id desc)
     lib_items = db.list_chat_library()
-    titles = {c.id: c.title for c in db.list_conversations(limit=100000)}
+    titles = db.conversation_titles()
     items = _library_items() + _chat_records(msgs, lib_items, titles) + _chat_orphans(msgs, lib_items, titles)
     items.sort(key=lambda i: i["created_at"] or "", reverse=True)
     return items
@@ -450,8 +449,6 @@ _list_cache: dict[tuple, dict] = {}
 
 
 def _all_items() -> list[dict[str, Any]]:
-    from web.core.metadata import current_tenant
-
     key = (config.ROOT_DIR, current_tenant())
     now = time.monotonic()
     entry = _list_cache.get(key)

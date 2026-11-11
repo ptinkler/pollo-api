@@ -19,7 +19,8 @@ from pydantic import BaseModel
 
 from web.core.metadata import get_db
 
-from .auth import _user_secret
+from . import caches
+from .auth import user_secret
 from .dev_login import store_keys_plaintext
 from .users import require_user
 
@@ -29,7 +30,7 @@ router = APIRouter(prefix="/api/keys")
 
 
 def _fernet() -> Fernet:
-    secret = os.getenv("KEYS_SECRET", "").strip().encode() or _user_secret()
+    secret = os.getenv("KEYS_SECRET", "").strip().encode() or user_secret()
     material = hashlib.sha256(b"pollo-keys-v1\x00" + secret).digest()
     return Fernet(base64.urlsafe_b64encode(material))
 
@@ -94,10 +95,5 @@ async def set_keys(data: KeysUpdate, user=Depends(require_user)):
         else:
             current[provider] = value.strip()
     get_db().set_user_api_keys(user.id, _encrypt(current))
-    # The catalogues are cached per user and built from their keys
-    from .chat.catalogue import clear_models
-    from .providers import venice
-
-    clear_models()
-    venice.clear_caches()
+    caches.keys_changed()  # catalogues and balances are per user, built from their keys
     return {"keys": _masked(get_db().get_user(user.id))}

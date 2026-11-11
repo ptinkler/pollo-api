@@ -1,12 +1,23 @@
 """Tests for web.media — the library of every upload and creation."""
 
 import io
+import os
+import shutil
+import threading
+import time
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 from PIL import Image
 
+import web.core.config as config
+import web.media as media_mod
+import web.media_cache as media_cache
 from tests.test_api import _setup_env, client, db  # noqa: F401 — fixtures
+from web.core import metadata
 
 
 def _png(color="red") -> bytes:
@@ -17,7 +28,6 @@ def _png(color="red") -> bytes:
 
 @pytest.fixture()
 def conv(db, tmp_path):
-    import web.core.config as config
 
     c = db.create_conversation(title="Fox chat")
     d = config.ROOT_DIR / "chat" / c.id
@@ -75,7 +85,6 @@ class TestListing:
         assert item["id"] not in _items(client)
 
     def test_bulk_download_and_delete(self, client):
-        import zipfile
 
         ids = [
             client.post("/api/media/upload", files={"file": (f"{n}.png", _png(n), "image/png")}).json()["id"]
@@ -100,8 +109,6 @@ class TestListing:
         conversation id. Knowing another user's id must not let you view,
         delete, or copy their files — only the owning user, or anyone for a
         truly orphaned folder with no conversation row (see test_delete)."""
-        import web.core.config as config
-        from web.core import metadata
 
         token = metadata.set_tenant("other-user")  # a conversation someone else owns
         try:
@@ -146,9 +153,6 @@ class TestOrphans:
     def orphans(self, db, conv):
         """conv plus an attachment nothing sent, a reference a reply was made
         from, and the folder of a deleted chat — all old enough."""
-        import os
-
-        import web.core.config as config
 
         root = config.ROOT_DIR / "chat"
         (root / conv.id / "up_lost.png").write_bytes(_png())
@@ -192,7 +196,6 @@ class TestOrphans:
 
 class TestImport:
     def test_into_a_chat(self, client, conv):
-        import web.core.config as config
 
         lib = client.post("/api/media/upload", files={"file": ("a.png", _png(), "image/png")}).json()
         r = client.post(
@@ -210,7 +213,6 @@ class TestImport:
         assert len(r["images"]) == 1
 
     def test_videos_attach_to_chat_but_not_characters(self, client, conv):
-        import web.core.config as config
 
         (config.ROOT_DIR / "chat" / conv.id / "vid.mp4").write_bytes(b"fake mp4")
         mid = f"chat:{conv.id}:vid.mp4"
@@ -224,7 +226,6 @@ class TestImport:
 
 class TestDelete:
     def test_chat_item_leaves_its_message(self, client, db, conv):
-        import web.core.config as config
 
         assert client.delete(f"/api/media/chat:{conv.id}:img_1.png").status_code == 200
         reply = db.get_chat_messages(conv.id)[-1]
@@ -247,7 +248,6 @@ class TestBlocked:
     def blocked(self, db, conv):
         """conv plus: a moderated failure and a black image in a reply, an
         ordinary failure (kept), and a moderated failure detached to the library."""
-        import web.core.config as config
 
         d = config.ROOT_DIR / "chat" / conv.id
         (d / "img_black.png").write_bytes(_png("black"))
@@ -299,7 +299,6 @@ class TestBlocked:
 
     @pytest.fixture(autouse=True)
     def _fresh_blank_checks(self, monkeypatch):
-        import web.media as media_mod
 
         monkeypatch.setattr(media_mod, "_blank_cache", None)
 
@@ -307,7 +306,6 @@ class TestBlocked:
         assert client.get("/api/media/blocked").json() == {"moderated": 2, "black": 1}
 
     def test_black_images_are_checked_once_even_across_restarts(self, client, blocked, monkeypatch):
-        import web.media as media_mod
 
         assert client.get("/api/media/blocked").json()["black"] == 1
         monkeypatch.setattr(media_mod, "_blank_cache", None)  # as after a restart
@@ -359,14 +357,11 @@ class TestThumbnails:
         thumb = Image.open(io.BytesIO(r.content))
         assert min(thumb.size) == 320 and thumb.size[0] > thumb.size[1]  # shorter side, shape kept
         # Second request comes from the cache — no re-encoding
-        import web.media as media_mod
 
         monkeypatch.setattr(media_mod.Image, "open", lambda *a, **k: pytest.fail("re-encoded"))
         assert client.get(item["thumb_url"]).content == r.content
 
     def test_video_thumb_uses_the_first_frame(self, client, conv, monkeypatch):
-        import web.core.config as config
-        import web.media as media_mod
 
         (config.ROOT_DIR / "chat" / conv.id / "vid.mp4").write_bytes(b"fake mp4")
         buf = io.BytesIO()
@@ -376,8 +371,6 @@ class TestThumbnails:
         assert r.status_code == 200 and Image.open(io.BytesIO(r.content)).size == (569, 320)
 
     def test_unreadable_file_has_no_thumb(self, client, conv, monkeypatch):
-        import web.core.config as config
-        import web.media as media_mod
 
         (config.ROOT_DIR / "chat" / conv.id / "vid.mp4").write_bytes(b"fake mp4")
         monkeypatch.setattr(media_mod, "first_frame_jpeg", lambda p: None)
@@ -388,14 +381,12 @@ class TestFirstFrameJpeg:
     """first_frame_jpeg: the video frame the library's thumbnails are made from."""
 
     def test_unopenable_file(self, tmp_path):
-        import web.media as media_mod
 
         fp = tmp_path / "notavideo.mp4"
         fp.write_bytes(b"definitely not a video")
         assert media_mod.first_frame_jpeg(fp) is None
 
     def test_read_fails(self, tmp_path):
-        import web.media as media_mod
 
         fp = tmp_path / "readfail.mp4"
         fp.write_bytes(b"\x00" * 100)
@@ -407,9 +398,6 @@ class TestFirstFrameJpeg:
         cap.release.assert_called_once()
 
     def test_success(self, tmp_path):
-        import numpy as np
-
-        import web.media as media_mod
 
         fp = tmp_path / "success.mp4"
         fp.write_bytes(b"\x00" * 100)
@@ -420,7 +408,6 @@ class TestFirstFrameJpeg:
             assert media_mod.first_frame_jpeg(fp) is not None
 
     def test_exception(self, tmp_path):
-        import web.media as media_mod
 
         fp = tmp_path / "exc.mp4"
         fp.write_bytes(b"\x00" * 100)
@@ -428,7 +415,6 @@ class TestFirstFrameJpeg:
             assert media_mod.first_frame_jpeg(fp) is None
 
     def test_delete_drops_the_cached_thumb(self, client):
-        import web.media as media_mod
 
         item = client.post("/api/media/upload", files={"file": ("a.png", _png(), "image/png")}).json()
         client.get(item["thumb_url"])
@@ -437,11 +423,6 @@ class TestFirstFrameJpeg:
         assert not list(media_mod.thumb_dir().iterdir())
 
     def test_at_most_two_made_at_once(self, client, monkeypatch):
-        import threading
-        import time
-        from concurrent.futures import ThreadPoolExecutor
-
-        import web.media as media_mod
 
         ids = [
             client.post("/api/media/upload", files={"file": (f"{n}.png", _png((n, 0, 0)), "image/png")}).json()[
@@ -486,8 +467,6 @@ class TestVideoDurations:
 
     @pytest.fixture()
     def clips(self, db, conv):
-        import web.core.config as config
-        import web.media as media_mod
 
         d = config.ROOT_DIR / "chat" / conv.id
         for n in range(3):
@@ -533,7 +512,6 @@ class TestVideoDurations:
         assert again["clip_0.mp4"]["duration"] == 12.5 and reads == []
 
     def test_a_re_encoded_file_is_read_again(self, client, clips, db, monkeypatch):
-        import web.core.config as config
 
         monkeypatch.setattr(clips, "_video_seconds", lambda path, mtime: 4.0)
         client.get("/api/media")
@@ -557,7 +535,6 @@ class TestMediaCache:
 
     @pytest.fixture()
     def cached(self, client, clips, db, conv):
-        import web.media_cache as media_cache
 
         client.get("/api/media")  # fills in the clips' lengths
         return media_cache
@@ -567,9 +544,6 @@ class TestMediaCache:
         return TestVideoDurations.clips.__wrapped__(TestVideoDurations(), db, conv)
 
     def test_it_sits_in_the_cache_folder_and_a_wipe_is_harmless(self, client, cached, monkeypatch):
-        import shutil
-
-        import web.core.config as config
 
         assert cached.db_path().parent == config.ROOT_DIR / "cache"
         assert cached.durations()
@@ -579,7 +553,6 @@ class TestMediaCache:
         assert client.get("/api/media").status_code == 200  # reads them again, no complaint
 
     def test_a_re_encoded_file_replaces_its_row(self, client, cached, clips, db, monkeypatch):
-        import web.core.config as config
 
         before = len(cached.durations())
         path = config.ROOT_DIR / "chat" / next(iter(db.list_conversations())).id / "clip_0.mp4"
@@ -591,7 +564,6 @@ class TestMediaCache:
         assert cached.durations()[str(path)][1] == 7.0
 
     def test_deleting_media_drops_its_row(self, client, cached, db):
-        import web.core.config as config
 
         conv_id = next(iter(db.list_conversations())).id
         path = str(config.ROOT_DIR / "chat" / conv_id / "clip_0.mp4")
@@ -600,7 +572,6 @@ class TestMediaCache:
         assert path not in cached.durations()
 
     def test_a_sweep_drops_rows_whose_file_has_gone(self, cached, db):
-        import web.core.config as config
 
         (config.ROOT_DIR / "chat" / next(iter(db.list_conversations())).id / "clip_1.mp4").unlink()
         assert cached.sweep() == 1

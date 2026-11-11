@@ -19,6 +19,11 @@ class ConversationMixin:
             session.expunge(conv)
             return conv
 
+    def conversation_titles(self) -> dict[str, str]:
+        """Every conversation's title, by id — for labelling media and
+        characters with the chat they came from."""
+        return {c.id: c.title for c in self.list_conversations(limit=None)}
+
     def get_conversation(self, conv_id: str) -> ChatConversation | None:
         with self._session() as session:
             conv = session.get(ChatConversation, conv_id)
@@ -38,15 +43,14 @@ class ConversationMixin:
         finally:
             reset_tenant(token)
 
-    def list_conversations(self, limit: int = 200) -> list[ChatConversation]:
-        """Pinned chats first, then the most recently active."""
+    def list_conversations(self, limit: int | None = 200) -> list[ChatConversation]:
+        """Pinned chats first, then the most recently active. `limit=None` is
+        every one of them."""
         with self._session() as session:
-            convs = (
-                session.query(ChatConversation)
-                .order_by(ChatConversation.pinned.desc(), ChatConversation.updated_at.desc())
-                .limit(limit)
-                .all()
+            query = session.query(ChatConversation).order_by(
+                ChatConversation.pinned.desc(), ChatConversation.updated_at.desc()
             )
+            convs = (query.limit(limit) if limit is not None else query).all()
             for c in convs:
                 session.expunge(c)
             return convs

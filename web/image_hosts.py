@@ -6,12 +6,18 @@ first, then the backup. Self-host serves the file from this instance itself
 (web/public_media.py) instead of a third-party temp host.
 """
 
+import logging
 import threading
 import time
 from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
+
+from .public_media import selfhost_url
+from .upload_settings import current_upload_prefs
+
+log = logging.getLogger(__name__)
 
 LITTERBOX_URL = "https://litterbox.catbox.moe/resources/internals/api.php"
 TMPFILES_URL = "https://tmpfiles.org/api/v1/upload"
@@ -71,11 +77,6 @@ def _store_url(key: tuple | None, url: str, expiry_minutes: int) -> None:
         _url_cache[key] = (url, good_until)
 
 
-def upload_image(filepath: Path) -> str:
-    """Upload a source image to the user's configured host(s)."""
-    return upload_file(filepath)
-
-
 def upload_file(filepath: Path, prefs: dict | None = None) -> str:
     """Upload any source file to the configured public host and return its URL,
     trying the primary host then the backup. `prefs` defaults to the current
@@ -83,8 +84,6 @@ def upload_file(filepath: Path, prefs: dict | None = None) -> str:
     URL from an earlier upload of the same file+host is reused instead of
     re-uploading (see the cache above)."""
     if prefs is None:
-        from .upload_settings import current_upload_prefs
-
         prefs = current_upload_prefs()
     expiry = prefs.get("expiry_minutes", 60)
     order = [prefs["primary"]]
@@ -95,16 +94,16 @@ def upload_file(filepath: Path, prefs: dict | None = None) -> str:
         key = _cache_key(filepath, host, expiry)
         cached = _cached_url(key)
         if cached:
-            print(f"[Upload] {host} reused still-live URL (no re-upload): {cached}")
+            log.info("%s: reused still-live URL, no re-upload: %s", host, cached)
             return cached
         try:
             url = _dispatch(host, filepath, prefs)
             _verify_served(host, url, filepath)
             _store_url(key, url, expiry)
-            print(f"[Upload] {host} succeeded: {url}")
+            log.info("%s: uploaded %s", host, url)
             return url
         except ValueError as exc:
-            print(f"[Upload] {host} failed ({exc}), trying next host…")
+            log.warning("%s failed (%s), trying the next host", host, exc)
             errors.append(f"{host}: {exc}")
     raise ValueError("All upload hosts failed — " + "; ".join(errors))
 
@@ -144,8 +143,6 @@ def _dispatch(host: str, filepath: Path, prefs: dict) -> str:
     if host == "tmpfiles":
         return _upload_to_tmpfiles(filepath, expiry)
     if host == "selfhost":
-        from .public_media import selfhost_url
-
         return selfhost_url(filepath, prefs.get("selfhost_base", ""), ttl_seconds=expiry * 60)
     raise ValueError(f"Unknown upload host {host!r}")
 
@@ -172,14 +169,14 @@ def _upload_to_litterbox(filepath: Path, expiry_minutes: int = 60) -> str:
                 timeout=(8, 15),  # (connect, read) — read is server response time only, not upload duration
             )
     except requests.exceptions.Timeout as exc:
-        print(f"[Litterbox] Upload failed — timed out ({exc})")
+        log.warning("litterbox upload timed out (%s)", exc)
         raise ValueError("Litterbox upload timed out — cycle VPN if blocked") from exc
     except (requests.exceptions.SSLError, requests.exceptions.ConnectionError) as exc:
-        print(f"[Litterbox] Upload failed — {type(exc).__name__}: {exc}")
+        log.warning("litterbox upload failed — %s: %s", type(exc).__name__, exc)
         raise ValueError(f"Litterbox upload failed — {type(exc).__name__}: {exc}") from exc
     if resp.status_code != 200 or not resp.text.startswith("https://"):
         err = _http_failure("Litterbox", resp)
-        print(f"[Litterbox] {err}")
+        log.warning("%s", err)
         raise err
     return resp.text.strip()
 

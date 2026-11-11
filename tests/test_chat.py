@@ -1,17 +1,36 @@
 """Tests for web.chat — OpenRouter chat mode. OpenRouter is always mocked."""
 
+import base64
+import importlib.util
 import io
 import json
+import socket
+import sys
 import threading
 import time
+import time as _t
+from datetime import datetime
 from pathlib import Path
 
+import httpx
 import pytest
+import sqlalchemy as sa
+from alembic import command
+from alembic.config import Config
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from web.core.metadata import MetadataDB
-from web.providers import openrouter
+import web.api as api_mod
+import web.characters as characters_mod
+import web.chat as chat_mod
+import web.core.config as config
+import web.media as media_mod
+import web.providers.pollo_engine as registry
+from web import request_log
+from web.chat import catalogue
+from web.core.metadata import MetadataDB, reset_tenant, set_tenant
+from web.providers import openrouter, pollo_estimate
 from web.providers import pollo as pollo_provider
 
 ROOT_DIR = Path(__file__).parent.parent.resolve()
@@ -53,10 +72,6 @@ def db(tmp_path):
 
 @pytest.fixture()
 def chat(monkeypatch, db, provider_keys):
-    import sys
-
-    import web.api  # noqa: F401 — load the whole app graph so every web.* module is importable
-    import web.chat as chat_mod
 
     # Patch get_db wherever it was imported (chat is a package now: routes,
     # helpers and catalogue each resolve their own get_db).
@@ -74,7 +89,6 @@ def chat(monkeypatch, db, provider_keys):
 
 @pytest.fixture()
 def client(chat):
-    import web.api as api_mod
 
     return TestClient(api_mod.app, raise_server_exceptions=False)
 
@@ -96,7 +110,6 @@ class TestModelCatalogue:
         provider_keys["openrouter"] = None
         provider_keys["venice"] = None
         provider_keys["pollo"] = "pollo-test"
-        from web.chat import catalogue
 
         catalogue.clear_models()
 
@@ -219,7 +232,6 @@ class TestMedia:
 
     @pytest.mark.parametrize("conv_id,name", [("abc", "../x.png"), ("..", "metadata.db"), ("abc", ".hidden")])
     def test_path_traversal_blocked(self, chat, conv_id, name):
-        from fastapi import HTTPException
 
         with pytest.raises(HTTPException) as e:
             chat.routes.api_chat_media(conv_id, name)
@@ -227,7 +239,7 @@ class TestMedia:
 
     def test_an_image_already_in_the_chat_can_be_attached(self, client, conv, chat, db, monkeypatch):
         """ "Make a video from this image" attaches a generated image by name — it becomes the first frame."""
-        (chat._conv_dir(conv["id"]) / "img_old.png").write_bytes(_png_bytes())
+        (chat.conversation_dir(conv["id"]) / "img_old.png").write_bytes(_png_bytes())
         submitted = {}
         monkeypatch.setattr(
             openrouter, "submit_video", lambda model, prompt, **kw: (submitted.update(kw), {"id": "vid-1"})[1]
@@ -319,7 +331,7 @@ class TestTurns:
         assert done["content"] == "Once upon a time, a cat."
         assert done["media"][0]["file"].startswith("img_")
         assert done["cost"] == pytest.approx(0.043)  # LLM round + image
-        path = chat.helpers._chat_root() / conv["id"] / done["media"][0]["file"]
+        path = chat.helpers.chat_root() / conv["id"] / done["media"][0]["file"]
         assert path.read_bytes() == _png_bytes()
 
     def test_image_models_own_auto_beats_the_chat_models_ratio_pick(self, client, conv, chat, monkeypatch):
@@ -758,9 +770,6 @@ class TestStartupResume:
 
 @pytest.mark.no_tenant
 def test_gallery_lane_backfill_converts_only_pure_gallery_threads():
-    import importlib.util
-
-    import sqlalchemy as sa
 
     spec = importlib.util.spec_from_file_location("m0024", "alembic/versions/0024_backfill_gallery_lane.py")
     mod = importlib.util.module_from_spec(spec)
@@ -796,9 +805,6 @@ def test_gallery_lane_backfill_converts_only_pure_gallery_threads():
 def test_alembic_migration_creates_chat_tables(tmp_path):
     """0003 adds the chat tables to a pre-chat DB, and is a no-op when
     create_all() already made them (the app creates tables on startup)."""
-    import sqlalchemy as sa
-    from alembic import command
-    from alembic.config import Config
 
     def cfg_for(path):
         cfg = Config(str(ROOT_DIR / "alembic.ini"))
@@ -825,48 +831,12 @@ def test_alembic_migration_creates_chat_tables(tmp_path):
     command.upgrade(cfg_for(fresh), "head")
 
 
-@pytest.mark.no_tenant
-def test_old_is_default_flags_seed_the_global_settings_bucket(tmp_path):
-    """Opening a database that still carries the old per-item is_default flag
-    moves those ids into the global settings bucket, once."""
-    import sqlalchemy as sa
-
-    path = tmp_path / "old.db"
-    eng = sa.create_engine(f"sqlite:///{path}")
-    with eng.begin() as c:  # pre-settings schema: instructions/groups carry is_default
-        c.execute(
-            sa.text(
-                "CREATE TABLE chat_instructions (id INTEGER PRIMARY KEY, name VARCHAR(255), content TEXT, "
-                "is_default BOOLEAN, created_at DATETIME, updated_at DATETIME)"
-            )
-        )
-        c.execute(
-            sa.text(
-                "CREATE TABLE chat_instruction_groups (id INTEGER PRIMARY KEY, name VARCHAR(255), "
-                "snippet_ids_json TEXT, is_default BOOLEAN, created_at DATETIME, updated_at DATETIME)"
-            )
-        )
-        c.execute(
-            sa.text("INSERT INTO chat_instructions (id, name, content, is_default) VALUES (1,'A','x',1),(2,'B','y',0)")
-        )
-        c.execute(sa.text("INSERT INTO chat_instruction_groups (id, name, is_default) VALUES (5,'G',1)"))
-    eng.dispose()
-
-    db = MetadataDB(db_path=path)
-    settings = db.get_settings()
-    assert settings.default_instruction_ids == [1]  # only the flagged snippet
-    assert settings.default_instruction_group_ids == [5]
-    assert settings.default_character_ids == []
-
-
 class TestOpenRouterErrors:
     def _resp(self, status, body):
-        import httpx
 
         return httpx.Response(status, json=body)
 
     def test_names_upstream_provider(self):
-        from web.providers import openrouter
 
         body = {
             "error": {
@@ -881,7 +851,6 @@ class TestOpenRouterErrors:
         assert e.value.status == 400
 
     def test_appends_raw_upstream_message(self):
-        from web.providers import openrouter
 
         body = {
             "error": {
@@ -894,9 +863,6 @@ class TestOpenRouterErrors:
         assert str(e.value) == "[Fal] Provider returned error: content policy"
 
     def test_non_json_body(self):
-        import httpx
-
-        from web.providers import openrouter
 
         with pytest.raises(openrouter.OpenRouterError) as e:
             openrouter._raise_for_response(httpx.Response(503, text="upstream down"))
@@ -1119,7 +1085,7 @@ class TestEditAndLibrary:
         assert started == [(conv["id"], 0, "v2", "gen-vid-2")]
 
     def test_delete_library_item(self, client, conv, chat, db):
-        f = chat._conv_dir(conv["id"]) / "img_x.png"
+        f = chat.conversation_dir(conv["id"]) / "img_x.png"
         f.write_bytes(b"png")
         msg = db.add_chat_message(
             conv["id"],
@@ -1143,15 +1109,14 @@ class TestEditAndLibrary:
         assert db.get_chat_library_item("i2") is None
 
     def test_deleting_conversation_can_keep_its_files(self, client, conv, chat):
-        folder = chat._conv_dir(conv["id"])
+        folder = chat.conversation_dir(conv["id"])
         (folder / "keep.png").write_bytes(b"x")
         client.delete(f"/api/chat/conversations/{conv['id']}?delete_media=false")
         assert (folder / "keep.png").exists()
 
     def test_deleting_conversation_deletes_files_by_default(self, client, conv, chat):
-        import time
 
-        folder = chat._conv_dir(conv["id"])
+        folder = chat.conversation_dir(conv["id"])
         (folder / "gone.png").write_bytes(b"x")
         client.delete(f"/api/chat/conversations/{conv['id']}")
         for _ in range(50):  # the folder is removed on a background thread
@@ -1162,14 +1127,14 @@ class TestEditAndLibrary:
 
     def test_deleting_an_exchange_can_delete_its_media(self, client, conv, chat, db):
         user = db.add_chat_message(conv["id"], "user", "draw")
-        (chat._conv_dir(conv["id"]) / "img_x.png").write_bytes(b"x")
+        (chat.conversation_dir(conv["id"]) / "img_x.png").write_bytes(b"x")
         db.add_chat_message(
             conv["id"],
             "assistant",
             media=[{"id": "m1", "kind": "image", "source": "generated", "status": "done", "file": "img_x.png"}],
         )
         client.delete(f"/api/chat/messages/{user.id}?delete_media=true")
-        assert not (chat._conv_dir(conv["id"]) / "img_x.png").exists()
+        assert not (chat.conversation_dir(conv["id"]) / "img_x.png").exists()
         assert db.get_chat_library_item("m1") is None
 
 
@@ -1225,7 +1190,7 @@ class TestModerationAndRegenerate:
         ],
     )
     def test_moderation_detection(self, chat, status, msg, expected):
-        assert chat.generation._is_moderation_error(openrouter.OpenRouterError(msg, status)) is expected
+        assert chat.generation.is_moderation_error(openrouter.OpenRouterError(msg, status)) is expected
 
     def _failed_image(self, db, conv, **extra):
         db.add_chat_message(conv["id"], "user", "draw")
@@ -1363,7 +1328,7 @@ class TestContext:
         return seen
 
     def _img(self, chat, conv, name):
-        (chat._conv_dir(conv["id"]) / name).write_bytes(_png_bytes())
+        (chat.conversation_dir(conv["id"]) / name).write_bytes(_png_bytes())
         return {"id": name, "kind": "image", "source": "generated", "status": "done", "file": name, "prompt": name}
 
     def test_generated_image_is_sent_as_pixels_with_next_user_message(self, client, conv, chat, db, monkeypatch):
@@ -1471,7 +1436,6 @@ class TestStallProtection:
             yield from self.lines
 
     def _keepalives(self):
-        import time as _t
 
         while True:
             _t.sleep(0.02)
@@ -1484,8 +1448,6 @@ class TestStallProtection:
         assert e.value.status == 504
 
     def test_stop_is_noticed_during_keepalives(self, chat, monkeypatch):
-        import threading
-        import time as _t
 
         monkeypatch.setattr(openrouter._client, "stream", lambda *a, **k: self._FakeStream(self._keepalives()))
         stop = threading.Event()
@@ -1500,7 +1462,7 @@ class TestConsistencyReferences:
         db.add_chat_message(conv["id"], "user", "story with a photo")
         for i in range(n):
             f = f"g{i}.png"
-            (chat._conv_dir(conv["id"]) / f).write_bytes(_png_bytes(color=(i * 40, 0, 0)))
+            (chat.conversation_dir(conv["id"]) / f).write_bytes(_png_bytes(color=(i * 40, 0, 0)))
             db.add_chat_message(
                 conv["id"],
                 "assistant",
@@ -1627,7 +1589,7 @@ class TestConsistencyReferences:
         assert item["params"]["refs"] == []
 
     def test_pinned_upload_is_a_reference_in_image_mode(self, client, conv, chat, db, monkeypatch):
-        (chat._conv_dir(conv["id"]) / "u.png").write_bytes(_png_bytes())
+        (chat.conversation_dir(conv["id"]) / "u.png").write_bytes(_png_bytes())
         db.add_chat_message(
             conv["id"],
             "user",
@@ -1748,7 +1710,6 @@ class TestModelDecides:
                 f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", "history_limit": 3, **SETTINGS}
             )
         )
-        from datetime import datetime
 
         today = datetime.now().strftime("%A %d %B %Y")
         assert seen["msgs"][0]["content"] == chat.tools.SYSTEM_PROMPT.format(today=today)
@@ -1768,7 +1729,7 @@ class TestConversationalImageModels:
         db.add_chat_message(conv["id"], "user", "write a story about Linh, with a photo")
         media = []
         if with_prior_image:
-            (chat._conv_dir(conv["id"]) / "g0.png").write_bytes(_png_bytes())
+            (chat.conversation_dir(conv["id"]) / "g0.png").write_bytes(_png_bytes())
             media = [
                 {
                     "id": "g0",
@@ -1910,12 +1871,10 @@ class TestConversationalImageModels:
 
 class TestOpenRouterChatImages:
     def _resp(self, body):
-        import httpx
 
         return httpx.Response(200, json=body)
 
     def test_parses_data_url_images_and_sends_modalities(self, chat, monkeypatch):
-        import base64
 
         sent = {}
         b64 = base64.b64encode(_png_bytes()).decode()
@@ -2118,10 +2077,10 @@ class TestCustomInstructions:
         made = client.post("/api/chat/conversations", json={}).json()
         # Nothing is copied in: the defaults apply on top of the chat's own (none here)
         assert made["instruction_ids"] == [] and made["instruction_group_ids"] == []
-        assert chat.generation._conversation_instructions(made["id"]) == "x\n\ny"  # D once, though in G too
+        assert chat.generation.conversation_instructions(made["id"]) == "x\n\ny"  # D once, though in G too
         # Changing the defaults changes the chat
         client.put("/api/chat/settings", json={"default_instruction_ids": [e["id"]]})
-        assert chat.generation._conversation_instructions(made["id"]) == "y"
+        assert chat.generation.conversation_instructions(made["id"]) == "y"
         assert client.post("/api/chat/conversations", json={"instruction_ids": [999]}).status_code == 400
 
     def test_global_settings_crud_and_validation(self, client):
@@ -2212,60 +2171,6 @@ class TestCustomInstructions:
         )
         assert got["messages"][0] == {"role": "system", "content": "Watercolour style only."}
 
-    @pytest.mark.no_tenant
-    def test_branch_columns_are_backfilled_on_older_databases(self, tmp_path):
-        import sqlalchemy as sa
-
-        path = tmp_path / "old.db"
-        eng = sa.create_engine(f"sqlite:///{path}")
-        with eng.begin() as c:  # chats from before branching: linear, no parent_id / current_leaf_id
-            c.execute(
-                sa.text(
-                    "CREATE TABLE chat_conversations (id VARCHAR(50) PRIMARY KEY, title VARCHAR(255), "
-                    "text_model VARCHAR(255), image_model VARCHAR(255), video_model VARCHAR(255), "
-                    "instruction_id INTEGER, created_at DATETIME, updated_at DATETIME)"
-                )
-            )
-            c.execute(
-                sa.text(
-                    "CREATE TABLE chat_messages (id INTEGER PRIMARY KEY, conversation_id VARCHAR(50), "
-                    "role VARCHAR(20), content TEXT, media_json TEXT, model VARCHAR(255), "
-                    "status VARCHAR(20), error TEXT, cost FLOAT, created_at DATETIME)"
-                )
-            )
-            c.execute(sa.text("INSERT INTO chat_conversations (id, title) VALUES ('a', 'A'), ('b', 'B')"))
-            c.execute(
-                sa.text(
-                    "INSERT INTO chat_messages (id, conversation_id, role, content, status) VALUES "
-                    "(1, 'a', 'user', 'q', 'done'), (2, 'b', 'user', 'x', 'done'), "
-                    "(3, 'a', 'assistant', 'r', 'done')"
-                )
-            )
-        eng.dispose()
-        db = MetadataDB(db_path=path)
-        assert [(m.id, m.parent_id) for m in db.get_chat_messages("a")] == [(1, None), (3, 1)]
-        assert db.get_conversation("a").current_leaf_id == 3
-        assert db.get_conversation("b").current_leaf_id == 2
-
-    @pytest.mark.no_tenant
-    def test_missing_column_is_added_to_older_databases(self, tmp_path):
-        import sqlalchemy as sa
-
-        path = tmp_path / "old.db"
-        eng = sa.create_engine(f"sqlite:///{path}")
-        with eng.begin() as c:  # a chat_conversations table from before instructions existed
-            c.execute(
-                sa.text(
-                    "CREATE TABLE chat_conversations (id VARCHAR(50) PRIMARY KEY, title VARCHAR(255), "
-                    "text_model VARCHAR(255), image_model VARCHAR(255), video_model VARCHAR(255), "
-                    "created_at DATETIME, updated_at DATETIME)"
-                )
-            )
-        eng.dispose()
-        db = MetadataDB(db_path=path)
-        conv = db.create_conversation(instruction_id=None)
-        assert db.get_conversation(conv.id).instruction_id is None
-
 
 class TestChatSpaces:
     def test_crud(self, client):
@@ -2298,10 +2203,10 @@ class TestChatSpaces:
         conv = client.post("/api/chat/conversations", json={"space_id": sp["id"]}).json()
         assert conv["space_id"] == sp["id"] and conv["instruction_ids"] == []
         # Global first, then the space's own, each snippet once (shared de-duped)
-        assert chat.generation._conversation_instructions(conv["id"]) == "x\n\nboth.\n\nBe warm."
+        assert chat.generation.conversation_instructions(conv["id"]) == "x\n\nboth.\n\nBe warm."
         # Out of the space, only the global defaults apply
         client.patch(f"/api/chat/conversations/{conv['id']}", json={"space_id": None})
-        assert chat.generation._conversation_instructions(conv["id"]) == "x\n\nboth."
+        assert chat.generation.conversation_instructions(conv["id"]) == "x\n\nboth."
 
     def test_chat_without_space_uses_only_global_defaults(self, client, chat, db):
         glob = client.post("/api/chat/instructions", json={"name": "Glob", "content": "x"}).json()
@@ -2316,7 +2221,7 @@ class TestChatSpaces:
         sp = client.post("/api/chat/spaces", json={"name": "Novel", "default_character_ids": [c1.id]}).json()
         conv = client.post("/api/chat/conversations", json={"space_id": sp["id"], "character_ids": [c2.id]}).json()
         assert conv["character_ids"] == [c2.id]  # its own
-        assert chat.helpers._effective_ids(db.get_conversation(conv["id"]), "character") == [c1.id, c2.id]
+        assert chat.helpers.effective_ids(db.get_conversation(conv["id"]), "character") == [c1.id, c2.id]
 
     def test_deleting_a_character_clears_it_from_global_and_space_defaults(self, client, db):
         c1 = db.create_character("Alice")
@@ -2416,8 +2321,8 @@ class TestPolloImageModels:
         )
         monkeypatch.setattr(
             pollo_provider.image_hosts,
-            "upload_image",
-            lambda path: (calls["uploads"].append(path.name), f"https://tmp.example/{path.name}")[1],
+            "upload_file",
+            lambda path, prefs=None: (calls["uploads"].append(path.name), f"https://tmp.example/{path.name}")[1],
         )
         return calls
 
@@ -2474,7 +2379,7 @@ class TestPolloImageModels:
         assert pollo["generators"][0][1]["aspect_ratio"] is None
 
     def test_reference_images_are_uploaded_for_pollo(self, client, conv, chat, db, monkeypatch, pollo):
-        (chat._conv_dir(conv["id"]) / "img_prev.png").write_bytes(_png_bytes())
+        (chat.conversation_dir(conv["id"]) / "img_prev.png").write_bytes(_png_bytes())
         db.add_chat_message(conv["id"], "user", "a cat")
         db.add_chat_message(
             conv["id"],
@@ -2747,7 +2652,7 @@ class TestPolloImageModels:
         assert pollo["generators"][0][1]["aspect_ratio"] == "adaptive"
 
     def test_animating_ignores_the_chat_models_ratio_guess(self, client, conv, chat, db, monkeypatch, pollo):
-        (chat._conv_dir(conv["id"]) / "img_prev.png").write_bytes(_png_bytes((60, 80)))
+        (chat.conversation_dir(conv["id"]) / "img_prev.png").write_bytes(_png_bytes((60, 80)))
         db.add_chat_message(conv["id"], "user", "a cat")
         db.add_chat_message(
             conv["id"],
@@ -2793,7 +2698,7 @@ class TestPolloImageModels:
         chat.polling._poll_video(conv["id"], msg.id, "pv1", "pollo:task-9")
         item = db.get_chat_message(msg.id).media[0]
         assert item["status"] == "done" and item["credits"] == 40 and not item.get("cost")
-        assert (chat.helpers._chat_root() / conv["id"] / item["file"]).read_bytes() == b"mp4-bytes"
+        assert (chat.helpers.chat_root() / conv["id"] / item["file"]).read_bytes() == b"mp4-bytes"
 
     def test_poller_saves_a_pollo_audio_job_as_mp3(self, chat, db, conv, monkeypatch, pollo):
         msg = db.add_chat_message(
@@ -2858,7 +2763,6 @@ class TestPolloImageModels:
         assert videos["pollo/klingv3"]["durations"] == list(range(3, 16))
 
     def test_image_only_kling_without_an_image_fails_on_the_card(self, client, conv, chat, db, monkeypatch, pollo):
-        import web.providers.pollo_engine as registry
 
         monkeypatch.setattr(pollo_provider, "get_video_generator", registry.video_generator)  # the real one
         msg = _events(
@@ -2952,7 +2856,7 @@ class TestPolloImageModels:
         assert item["error"] == "Pollo: This model is not enabled for API access." and item["moderated"] is False
 
     def test_pollo_content_rejection_is_still_moderation(self, chat):
-        is_mod = chat.generation._is_moderation_error
+        is_mod = chat.generation.is_moderation_error
         assert is_mod(pollo_provider.PolloError("Pollo: prompt flagged as sensitive content", 400))
         assert is_mod(openrouter.OpenRouterError("Forbidden", 403))  # OpenRouter's 403 still counts
 
@@ -2970,16 +2874,14 @@ class TestPolloImageModels:
 
 class TestOpenRouterConnection:
     def test_connections_use_tcp_keepalive(self, chat):
-        import socket
 
-        opts = openrouter._keepalive_socket_options()
+        opts = openrouter.keepalive_socket_options()
         assert (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1) in opts
         if hasattr(socket, "TCP_KEEPIDLE"):
             assert (socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 5) in opts
 
     def test_dropped_connection_fails_the_card_with_an_explanation(self, client, conv, chat, monkeypatch):
         """httpx.RemoteProtocolError used to escape as a raw error and leave the image pending."""
-        import httpx
 
         def drop(*a, **k):
             raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
@@ -3020,7 +2922,6 @@ class TestOpenRouterImageStream:
             return self._body
 
     def _b64(self, color="red"):
-        import base64
 
         return base64.b64encode(_png_bytes(color=color)).decode()
 
@@ -3050,7 +2951,6 @@ class TestOpenRouterImageStream:
         assert images == [(_png_bytes(), "image/png")] and cost == 0.03
 
     def test_logs_the_request_and_the_card_keeps_it(self, client, conv, chat, monkeypatch):
-        from web import request_log
 
         lines = ["event: error", "data: " + json.dumps({"error": {"message": "flagged by moderation"}}), ""]
         monkeypatch.setattr(openrouter._client, "stream", lambda *a, **k: self._Stream(lines))
@@ -3067,7 +2967,6 @@ class TestOpenRouterImageStream:
         assert item["request"] == entry["request"] and item["request"]["prompt"] == "a fox"
 
     def test_reference_images_are_cut_short_in_the_log(self, chat, monkeypatch):
-        from web import request_log
 
         lines = ["event: image_generation.completed", "data: " + json.dumps({"b64_json": self._b64()}), ""]
         monkeypatch.setattr(openrouter._client, "stream", lambda *a, **k: self._Stream(lines))
@@ -3249,7 +3148,7 @@ class TestDeleteExchange:
 
 class TestFork:
     def _chat(self, chat, db, conv):
-        d = chat._conv_dir(conv["id"])
+        d = chat.conversation_dir(conv["id"])
         (d / "fox.png").write_bytes(_png_bytes())
         (d / "cat.png").write_bytes(_png_bytes(color="blue"))
         u1 = db.add_chat_message(conv["id"], "user", "draw a fox", mode="auto")
@@ -3350,7 +3249,6 @@ class TestFork:
         assert self._fork(client, conv, u1.id).status_code == 409
 
     def test_chat_made_characters_are_copied_and_saved_ones_shared(self, client, conv, chat, db):
-        import web.characters as characters_mod
 
         saved = db.create_character("Rex", "a dog")
         own = db.create_character("Bob", "a fox", conversation_id=conv["id"])
@@ -3360,8 +3258,8 @@ class TestFork:
         own = db.update_character(own.id, images=["img_bob.png"])
         unused = db.create_character("Ann", "", conversation_id=conv["id"])
         client.patch(f"/api/chat/conversations/{conv['id']}", json={"character_ids": [saved.id, own.id]})
-        (chat._conv_dir(conv["id"]) / "bob.png").write_bytes(_png_bytes())
-        (chat._conv_dir(conv["id"]) / "up_src.png").write_bytes(_png_bytes())
+        (chat.conversation_dir(conv["id"]) / "bob.png").write_bytes(_png_bytes())
+        (chat.conversation_dir(conv["id"]) / "up_src.png").write_bytes(_png_bytes())
         u = db.add_chat_message(conv["id"], "user", "draw Bob")
         db.add_chat_message(
             conv["id"],
@@ -3389,7 +3287,7 @@ class TestFork:
 
         params = client.get(f"/api/chat/conversations/{new['id']}").json()["messages"][1]["media"][0]["params"]
         assert params == {"characters": [copy_id], "refs": ["up_src.png", f"char:{copy_id}/img_bob.png"]}
-        assert (chat._conv_dir(new["id"]) / "up_src.png").is_file()
+        assert (chat.conversation_dir(new["id"]) / "up_src.png").is_file()
 
         # Deleting the original takes its own characters, not the branch's
         client.delete(f"/api/chat/conversations/{conv['id']}")
@@ -3545,7 +3443,6 @@ class TestTitles:
         assert seen["model"] == "cheap/model"
 
     def test_generate_title_cleans_the_reply(self, monkeypatch):
-        import web.chat as chat_mod  # not the `chat` fixture: that stubs _generate_title out
 
         monkeypatch.setattr(
             openrouter,
@@ -3561,7 +3458,6 @@ class TestTitles:
 
 class TestPolloRequestLog:
     def test_submit_is_logged_with_its_payload(self, chat):
-        from web import request_log
 
         class Resp:
             status_code = 200
@@ -3598,17 +3494,17 @@ class TestHiddenDefaults:
             f"/api/chat/conversations/{one['id']}", json={"hidden_defaults": {"instruction": [a["id"]]}}
         ).json()
         assert hidden["hidden_defaults"]["instruction"] == [a["id"]]
-        assert chat.generation._conversation_instructions(one["id"]) == "bb"
-        assert chat.generation._conversation_instructions(two["id"]) == "aa\n\nbb"
+        assert chat.generation.conversation_instructions(one["id"]) == "bb"
+        assert chat.generation.conversation_instructions(two["id"]) == "aa\n\nbb"
         # Shown again
         client.patch(f"/api/chat/conversations/{one['id']}", json={"hidden_defaults": {}})
-        assert chat.generation._conversation_instructions(one["id"]) == "aa\n\nbb"
+        assert chat.generation.conversation_instructions(one["id"]) == "aa\n\nbb"
 
     def test_a_new_chat_can_start_with_some_hidden(self, client, chat, db):
         c1 = db.create_character("Alice")
         client.put("/api/chat/settings", json={"default_character_ids": [c1.id]})
         conv = client.post("/api/chat/conversations", json={"hidden_defaults": {"character": [c1.id]}}).json()
-        assert chat.helpers._effective_ids(db.get_conversation(conv["id"]), "character") == []
+        assert chat.helpers.effective_ids(db.get_conversation(conv["id"]), "character") == []
 
     def test_a_branch_keeps_what_was_hidden(self, client, chat, db, monkeypatch):
         a = client.post("/api/chat/instructions", json={"name": "A", "content": "aa"}).json()
@@ -3638,23 +3534,23 @@ class TestPausedInstructions:
             f"/api/chat/conversations/{conv['id']}",
             json={"instruction_group_ids": [g["id"]], "instruction_ids": [tone["id"], lang["id"]]},
         )
-        assert chat.generation._conversation_instructions(conv["id"]) == "Be warm.\n\nUse markdown.\n\nIn French."
+        assert chat.generation.conversation_instructions(conv["id"]) == "Be warm.\n\nUse markdown.\n\nIn French."
         # Pause the group: its Fmt drops, but Tone stays (attached individually too)
         r = client.patch(
             f"/api/chat/conversations/{conv['id']}", json={"paused_instructions": {"instruction_group": [g["id"]]}}
         ).json()
         assert r["paused_instructions"]["instruction_group"] == [g["id"]]
         assert r["instruction_group_ids"] == [g["id"]]  # still attached, just paused
-        assert chat.generation._conversation_instructions(conv["id"]) == "Be warm.\n\nIn French."
+        assert chat.generation.conversation_instructions(conv["id"]) == "Be warm.\n\nIn French."
         # Also pause the Tone snippet → only Lang is left
         client.patch(
             f"/api/chat/conversations/{conv['id']}",
             json={"paused_instructions": {"instruction_group": [g["id"]], "instruction": [tone["id"]]}},
         )
-        assert chat.generation._conversation_instructions(conv["id"]) == "In French."
+        assert chat.generation.conversation_instructions(conv["id"]) == "In French."
         # Resume everything
         client.patch(f"/api/chat/conversations/{conv['id']}", json={"paused_instructions": {}})
-        assert chat.generation._conversation_instructions(conv["id"]) == "Be warm.\n\nUse markdown.\n\nIn French."
+        assert chat.generation.conversation_instructions(conv["id"]) == "Be warm.\n\nUse markdown.\n\nIn French."
 
     def test_an_inherited_default_can_be_paused(self, client, chat):
         a = client.post("/api/chat/instructions", json={"name": "A", "content": "aa"}).json()
@@ -3663,15 +3559,15 @@ class TestPausedInstructions:
         one = client.post("/api/chat/conversations", json={}).json()
         two = client.post("/api/chat/conversations", json={}).json()
         client.patch(f"/api/chat/conversations/{one['id']}", json={"paused_instructions": {"instruction": [a["id"]]}})
-        assert chat.generation._conversation_instructions(one["id"]) == "bb"  # paused here
-        assert chat.generation._conversation_instructions(two["id"]) == "aa\n\nbb"  # unaffected elsewhere
+        assert chat.generation.conversation_instructions(one["id"]) == "bb"  # paused here
+        assert chat.generation.conversation_instructions(two["id"]) == "aa\n\nbb"  # unaffected elsewhere
 
     def test_a_new_chat_can_start_with_some_paused(self, client, chat):
         a = client.post("/api/chat/instructions", json={"name": "A", "content": "aa"}).json()
         client.put("/api/chat/settings", json={"default_instruction_ids": [a["id"]]})
         conv = client.post("/api/chat/conversations", json={"paused_instructions": {"instruction": [a["id"]]}}).json()
         assert conv["paused_instructions"]["instruction"] == [a["id"]]
-        assert chat.generation._conversation_instructions(conv["id"]) is None
+        assert chat.generation.conversation_instructions(conv["id"]) is None
 
     def test_a_branch_keeps_what_was_paused(self, client, db):
         a = client.post("/api/chat/instructions", json={"name": "A", "content": "aa"}).json()
@@ -3690,7 +3586,6 @@ class TestLargeChats:
     """Big chats (imports run to hundreds of messages and images) stay quick."""
 
     def test_images_have_a_small_preview(self, client, conv, tmp_path):
-        from PIL import Image
 
         folder = tmp_path / "chat" / conv["id"]
         folder.mkdir(parents=True)
@@ -3716,9 +3611,6 @@ class TestLargeChats:
         assert not list((tmp_path / "chat").glob(".deleting-*"))
 
     def test_missing_thumbnails_are_made_in_the_background(self, chat, tmp_path):
-        from PIL import Image
-
-        import web.media as media_mod
 
         folder = tmp_path / "chat" / "c1"
         folder.mkdir(parents=True)
@@ -3771,7 +3663,6 @@ class TestActiveGenerations:
         assert by["e1"]["status"] == "error" and by["e1"]["error"] == "boom" and by["e1"]["moderated"] is True
 
     def test_scoped_to_the_signed_in_user(self, client, db):
-        from web.core.metadata import reset_tenant, set_tenant
 
         c = client.post("/api/chat/conversations", json={}).json()
         tok = set_tenant("someone-else")
@@ -3804,7 +3695,6 @@ class TestEnhancePrompt:
 
 class TestEstimate:
     def test_pollo_estimate_asks_pollo_and_others_get_none(self, client, provider_keys, monkeypatch):
-        from web.providers import pollo_estimate
 
         provider_keys["pollo"] = "pk-test"
         seen = {}
@@ -3884,7 +3774,6 @@ class TestEditAndRewordInPlace:
         msg = self._reply_with_image(db, conv, **extra)
         db.update_chat_message(msg.id, cost=0.01)  # the words it already cost
         # the files must really be there: generation drops references it can't find
-        import web.core.config as config
 
         d = config.ROOT_DIR / "chat" / conv["id"]
         d.mkdir(parents=True, exist_ok=True)
@@ -3945,7 +3834,6 @@ class TestEditAndRewordInPlace:
 
     def test_an_earlier_version_is_not_treated_as_an_orphan(self, client, conv, chat, db, monkeypatch):
         """Its file must stay referenced, or the media sweep would offer to delete it."""
-        import web.media as media_mod
 
         msg = self._reply(db, conv)
         self._inline(chat, monkeypatch)
@@ -4089,3 +3977,26 @@ class TestRetryAFailedPicture:
             json={"prompt": "x", "edit": True, "replace": True},
         )
         assert r.status_code == 400
+
+
+def test_a_webm_attachment_is_recorded_as_a_video(client, conv, chat, db):
+    """Attachment kind comes from web.media_types now. Only ".mp4" counted
+    before, so a .webm or .mov clip was recorded as an image."""
+
+    d = config.ROOT_DIR / "chat" / conv["id"]
+    d.mkdir(parents=True, exist_ok=True)
+    for name in ("upv_clip.webm", "upa_voice.ogg", "up_pic.png"):
+        (d / name).write_bytes(b"fake")
+    _events(
+        client.post(
+            f"/api/chat/conversations/{conv['id']}/messages",
+            json={
+                "content": "look",
+                "attachments": ["upv_clip.webm", "upa_voice.ogg", "up_pic.png"],
+                "mode": "text",
+                **SETTINGS,
+            },
+        )
+    )
+    user = next(m for m in db.get_chat_messages(conv["id"]) if m.role == "user")
+    assert [i["kind"] for i in user.media] == ["video", "audio", "image"]

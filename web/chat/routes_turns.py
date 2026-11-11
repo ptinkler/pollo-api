@@ -15,40 +15,41 @@ from pydantic import BaseModel
 
 from web.core.metadata import get_db, iso
 
+from ..media_types import kind_of
 from ..providers import openrouter, pollo
 from ..uploads import safe_filename
 from . import polling
 from .audio import audio_params, submit_audio_generation
-from .catalogue import _fit_video_params, _model_info
+from .catalogue import fit_video_params, model_info
 from .constants import DEFAULT_IMAGE_LIMIT
 from .deps import router
 from .generation import (
-    _conversation_instructions,
-    _enhance_prompt,
-    _exchange,
-    _failure_fields,
-    _image_context,
-    _is_conversational,
-    _param_characters,
-    _run_image_generation,
-    _submit_video_generation,
-    _take_log,
+    conversation_instructions,
+    enhance_prompt,
+    exchange_fields,
+    failure_fields,
+    image_context,
+    is_conversational,
+    param_characters,
+    run_image_generation,
+    submit_video_generation,
+    take_log,
 )
 from .helpers import (
-    _add_message_cost,
-    _branch_to,
-    _conv_dir,
-    _find_media,
-    _message_out,
-    _remember_settings,
-    _require_conv,
-    _require_idle,
-    _require_openrouter,
-    _saved_media,
+    add_message_cost,
+    branch_to,
+    conversation_dir,
+    find_media,
+    message_out,
+    remember_settings,
+    require_conv,
+    require_idle,
+    require_text_provider,
+    saved_media,
 )
 from .models import EditMessage, EnhancePrompt, EstimateRequest, RetryMessage, SendMessage, TurnSettings
 from .turn import Turn
-from .workers import _ctx_thread, _with_owner_keys
+from .workers import ctx_thread, with_owner_keys
 
 # Live turns' cancel flags, keyed by the assistant message id (set by the
 # cancel route, checked by the running Turn).
@@ -60,7 +61,7 @@ def api_enhance_prompt(data: EnhancePrompt):
     """Rewrite a prompt with the chat model. Only ever called by the user's
     Enhance button — generations themselves always use the prompt as written."""
     try:
-        prompt, cost = _enhance_prompt(data.model, data.prompt, "video" if data.kind == "video" else "image")
+        prompt, cost = enhance_prompt(data.model, data.prompt, "video" if data.kind == "video" else "image")
     except (openrouter.OpenRouterError, ValueError) as e:
         raise HTTPException(502, str(e)) from e
     return {"prompt": prompt, "cost": cost}
@@ -74,7 +75,7 @@ def api_estimate(data: EstimateRequest):
         return {"estimate": None}
     duration, ratio, resolution = data.duration, data.aspect_ratio, data.resolution
     if data.kind == "video":
-        duration, ratio, resolution = _fit_video_params(data.model, duration, ratio, resolution)
+        duration, ratio, resolution = fit_video_params(data.model, duration, ratio, resolution)
     return {
         "estimate": pollo.estimate_cost(
             data.model,
@@ -113,35 +114,29 @@ def _prompt_optional(settings: TurnSettings) -> bool:
     """Tools take a source file and no prompt (e.g. upscale the chat's latest video)."""
     kind = settings.mode if settings.mode in ("image", "video") else None
     model = {"image": settings.image_model, "video": settings.video_model}.get(kind)
-    return bool((_model_info(kind, model) or {}).get("no_prompt")) if kind else False
+    return bool((model_info(kind, model) or {}).get("no_prompt")) if kind else False
 
 
 @router.post("/conversations/{conv_id}/messages")
 def api_send_message(conv_id: str, data: SendMessage):
-    _require_openrouter(data.mode)
-    conv = _require_conv(conv_id)
+    require_text_provider(data.mode)
+    conv = require_conv(conv_id)
     content = data.content.strip()
     if not content and not data.attachments and not _prompt_optional(data):
         raise HTTPException(400, "Message is empty")
 
-    conv_dir = _conv_dir(conv_id)
+    conv_dir = conversation_dir(conv_id)
     media = []
     for name in data.attachments[:8]:
         if not (conv_dir / safe_filename(name)).is_file():
             raise HTTPException(400, f"Attachment not found: {name}")
-        lower = name.lower()
-        if lower.endswith(".mp4"):
-            kind = "video"
-        elif lower.endswith((".mp3", ".wav", ".m4a", ".aac")):
-            kind = "audio"  # a lip-sync track, driven onto a portrait
-        else:
-            kind = "image"
-        media.append(_saved_media(kind, "upload", name))
+        # audio here is a lip-sync track, driven onto a portrait
+        media.append(saved_media(kind_of(name) or "image", "upload", name))
 
     db = get_db()
     lane = "gallery" if data.lane == "gallery" else None
     user_msg = db.add_chat_message(conv_id, "user", content, media=media, mode=data.mode, lane=lane)
-    _remember_settings(conv, data)
+    remember_settings(conv, data)
     return _start_turn(conv_id, data, user_msg, parent_id=user_msg.id, lane=lane)
 
 
@@ -149,16 +144,16 @@ def api_send_message(conv_id: str, data: SendMessage):
 def api_retry(conv_id: str, data: RetryMessage):
     """Generate another version of an assistant reply, as a new branch
     beside it. The old reply and everything after it stay on their branch."""
-    _require_openrouter(data.mode)
-    conv = _require_conv(conv_id)
+    require_text_provider(data.mode)
+    conv = require_conv(conv_id)
     msg = get_db().get_chat_message(data.message_id)
     if not msg or msg.conversation_id != conv_id or msg.role != "assistant":
         raise HTTPException(400, "Can only retry an assistant message in this conversation")
-    _require_idle(conv_id, msg.lane)
+    require_idle(conv_id, msg.lane)
     # The retry runs in the mode selected now; the prompt's mode tag follows it
     if msg.parent_id:
         get_db().update_chat_message(msg.parent_id, mode=data.mode)
-    _remember_settings(conv, data)
+    remember_settings(conv, data)
     return _start_turn(conv_id, data, None, parent_id=msg.parent_id, lane=msg.lane)
 
 
@@ -167,13 +162,13 @@ def api_edit(conv_id: str, data: EditMessage):
     """Resend a user message with new text, as a new branch beside it (same
     attachments), and stream a fresh reply. The original prompt and
     everything after it stay on their branch."""
-    _require_openrouter(data.mode)
-    conv = _require_conv(conv_id)
+    require_text_provider(data.mode)
+    conv = require_conv(conv_id)
     db = get_db()
     msg = db.get_chat_message(data.message_id)
     if not msg or msg.conversation_id != conv_id or msg.role != "user":
         raise HTTPException(400, "Can only edit a user message in this conversation")
-    _require_idle(conv_id, msg.lane)
+    require_idle(conv_id, msg.lane)
     content = data.content.strip()
     if not content and not msg.media:
         raise HTTPException(400, "Message is empty")
@@ -181,7 +176,7 @@ def api_edit(conv_id: str, data: EditMessage):
     user_msg = db.add_chat_message(
         conv_id, "user", content, media=media, parent_id=msg.parent_id, mode=data.mode, lane=msg.lane
     )
-    _remember_settings(conv, data)
+    remember_settings(conv, data)
     return _start_turn(conv_id, data, user_msg, parent_id=user_msg.id, lane=msg.lane)
 
 
@@ -200,8 +195,8 @@ def _start_turn(
     )
     start = {
         "type": "start",
-        "user_message": _message_out(user_msg) if user_msg else None,
-        "assistant_message": _message_out(assistant),
+        "user_message": message_out(user_msg) if user_msg else None,
+        "assistant_message": message_out(assistant),
     }
     return _stream_turn(conv_id, settings, assistant.id, start)
 
@@ -233,7 +228,7 @@ def _stream_turn(
                     events.put(
                         {
                             "type": "done",
-                            "message": _message_out(get_db().update_chat_message(assistant_id, content=restore)),
+                            "message": message_out(get_db().update_chat_message(assistant_id, content=restore)),
                         }
                     )
         finally:
@@ -243,7 +238,7 @@ def _stream_turn(
     # Run in a copy of the current context so the turn's DB writes/reads are
     # scoped to the signed-in user (tenant) and use their keys — a plain thread
     # would not inherit those contextvars.
-    _ctx_thread(worker, name=f"chat-turn-{assistant_id}").start()
+    ctx_thread(worker, name=f"chat-turn-{assistant_id}").start()
 
     def stream() -> Iterator[str]:
         yield _sse(start)
@@ -275,25 +270,25 @@ def api_reword(conv_id: str, data: RewordMessage):
     overwrites the text on the same message. The media items are left exactly
     as they are, so a reply whose picture is right but whose words aren't can
     be fixed without paying for the picture again."""
-    _require_openrouter("text")
-    conv = _require_conv(conv_id)
+    require_text_provider("text")
+    conv = require_conv(conv_id)
     db = get_db()
     msg = db.get_chat_message(data.message_id)
     if not msg or msg.conversation_id != conv_id or msg.role != "assistant":
         raise HTTPException(400, "Can only reword an assistant message in this conversation")
     if msg.status == "streaming":
         raise HTTPException(409, "Wait for the reply to finish first")
-    _require_idle(conv_id, msg.lane)
+    require_idle(conv_id, msg.lane)
     if any(i.get("status") == "pending" for i in msg.media):
         raise HTTPException(409, "Wait for this reply's media to finish first")
-    _remember_settings(conv, data)
+    remember_settings(conv, data)
     # Only the words are generated again, whatever mode the composer is in.
     settings = data.model_copy(update={"mode": "text"})
     # Its pictures keep their cost; the words it had are replaced by new ones.
     media_cost = sum(float(i.get("cost") or 0) for i in msg.media)
     previous = msg.content
     db.update_chat_message(data.message_id, content="", status="streaming", error=None)
-    start = {"type": "start", "user_message": None, "assistant_message": _message_out(msg), "replaces": msg.id}
+    start = {"type": "start", "user_message": None, "assistant_message": message_out(msg), "replaces": msg.id}
     start["assistant_message"] = {**start["assistant_message"], "content": "", "status": "streaming"}
     return _stream_turn(conv_id, settings, msg.id, start, initial_cost=media_cost, restore=previous)
 
@@ -308,10 +303,10 @@ def api_pin_media(message_id: int, media_id: str, data: PinMedia):
     later on this branch of the chat, until unpinned."""
     db = get_db()
     msg = db.get_chat_message(message_id)
-    item = _find_media(msg, media_id)
+    item = find_media(msg, media_id)
     if not item or item["kind"] != "image" or not item.get("file") or item.get("status", "done") != "done":
         raise HTTPException(404, "Image not found")
-    return _message_out(db.update_chat_media_item(message_id, media_id, pinned=data.pinned))
+    return message_out(db.update_chat_media_item(message_id, media_id, pinned=data.pinned))
 
 
 class FavouriteMedia(BaseModel):
@@ -326,10 +321,10 @@ def api_favourite_media(message_id: int, media_id: str, data: FavouriteMedia):
     and videos."""
     db = get_db()
     msg = db.get_chat_message(message_id)
-    item = _find_media(msg, media_id)
+    item = find_media(msg, media_id)
     if not item or not item.get("file") or item.get("status", "done") != "done":
         raise HTTPException(404, "Generation not found")
-    return _message_out(db.update_chat_media_item(message_id, media_id, favourite=data.favourite))
+    return message_out(db.update_chat_media_item(message_id, media_id, favourite=data.favourite))
 
 
 class RegenerateMedia(BaseModel):
@@ -360,7 +355,7 @@ def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia):
         raise HTTPException(404, "Message not found")
     if msg.status == "streaming":
         raise HTTPException(409, "Wait for the reply to finish first")
-    item = _find_media(msg, media_id)
+    item = find_media(msg, media_id)
     if not item or item.get("source") != "generated":
         raise HTTPException(404, "Media not found")
     if item.get("status") not in ("error", "done"):
@@ -424,7 +419,7 @@ def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia):
         daemon=True,
         name=f"chat-regen-{media_id}",
     ).start()
-    return _message_out(msg)
+    return message_out(msg)
 
 
 class ActiveQuery(BaseModel):
@@ -478,7 +473,7 @@ def api_active_generations(data: ActiveQuery):
     return {"items": items}
 
 
-@_with_owner_keys
+@with_owner_keys
 def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) -> None:
     db = get_db()
     media_id = item["id"]
@@ -486,24 +481,24 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
     try:
         if item["kind"] == "image":
             context = None
-            if _is_conversational(model):
+            if is_conversational(model):
                 msg = db.get_chat_message(message_id)
-                history = _branch_to(db.get_chat_messages(conv_id), message_id)[:-1]
+                history = branch_to(db.get_chat_messages(conv_id), message_id)[:-1]
                 direct = params.get("direct", False)
-                context = _image_context(
+                context = image_context(
                     conv_id,
                     history,
                     params.get("history_limit"),
                     msg.content if msg else "",
                     None if direct else item["prompt"],
                     params.get("refs") or [],
-                    _conversation_instructions(conv_id),
-                    _param_characters(params),
+                    conversation_instructions(conv_id),
+                    param_characters(params),
                     params.get("image_limit", DEFAULT_IMAGE_LIMIT),
                 )
             params["context"] = context is not None
-            names, cost, credits, sent = _run_image_generation(conv_id, model, item["prompt"], params, context)
-            sent, exchange = _take_log(sent)
+            names, cost, credits, sent = run_image_generation(conv_id, model, item["prompt"], params, context)
+            sent, exchange = take_log(sent)
             db.update_chat_media_item(
                 message_id,
                 media_id,
@@ -516,9 +511,9 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
             )
             for extra in names[1:]:
                 db.append_chat_media_item(
-                    message_id, _saved_media("image", "generated", extra, prompt=item["prompt"], model=model)
+                    message_id, saved_media("image", "generated", extra, prompt=item["prompt"], model=model)
                 )
-            _add_message_cost(message_id, cost)
+            add_message_cost(message_id, cost)
         elif item["kind"] == "audio":
             job = submit_audio_generation(conv_id, model, item["prompt"], params)
             db.update_chat_media_item(
@@ -526,25 +521,25 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
                 media_id,
                 job_id=job["id"],
                 params={**params, **job.get("params", {})},
-                **_exchange(job.get("log")),
+                **exchange_fields(job.get("log")),
             )
             polling.start_video_poller(conv_id, message_id, media_id, job["id"])
         else:
             # A different model may support different durations/ratios
-            params["duration"], params["aspect_ratio"], params["resolution"] = _fit_video_params(
+            params["duration"], params["aspect_ratio"], params["resolution"] = fit_video_params(
                 model, params.get("duration"), params.get("aspect_ratio"), params.get("resolution")
             )
-            job = _submit_video_generation(conv_id, model, item["prompt"], params)
+            job = submit_video_generation(conv_id, model, item["prompt"], params)
             db.update_chat_media_item(
                 message_id,
                 media_id,
                 job_id=job["id"],
                 params={**params, **job.get("params", {})},
-                **_exchange(job.get("log")),
+                **exchange_fields(job.get("log")),
             )
             polling.start_video_poller(conv_id, message_id, media_id, job["id"])
     except openrouter.OpenRouterError as e:
-        db.update_chat_media_item(message_id, media_id, **_failure_fields(e))
+        db.update_chat_media_item(message_id, media_id, **failure_fields(e))
     except Exception as e:  # noqa: BLE001 — never leave the card stuck on "pending"
         db.update_chat_media_item(
             message_id, media_id, status="error", error=f"{type(e).__name__}: {e}", moderated=False

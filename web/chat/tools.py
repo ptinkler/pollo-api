@@ -155,7 +155,7 @@ TOOLS_VIDEO = {
 }
 
 
-def _with_character_arg(tool: dict, names: list[str]) -> dict:
+def with_character_arg(tool: dict, names: list[str]) -> dict:
     """A generate_* tool with a `characters` argument listing the usable characters."""
     if not names:
         return tool

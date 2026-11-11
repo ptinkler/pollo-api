@@ -37,7 +37,7 @@ def _unb64(text: str) -> bytes:
 # Signed with SESSION_SECRET when set, else a dev fallback.
 
 
-def _user_secret() -> bytes:
+def user_secret() -> bytes:
     explicit = os.getenv("SESSION_SECRET", "").strip()
     if explicit:
         return hashlib.sha256(b"pollo-user-v1\x00" + explicit.encode()).digest()
@@ -47,7 +47,7 @@ def _user_secret() -> bytes:
 def make_user_session(user_id: str) -> str:
     """A signed cookie value for a signed-in user id."""
     payload = f"{user_id}.{int(time.time()) + SESSION_TTL}"
-    sig = hmac.new(_user_secret(), payload.encode(), hashlib.sha256).digest()
+    sig = hmac.new(user_secret(), payload.encode(), hashlib.sha256).digest()
     return f"{payload}.{_b64(sig)}"
 
 
@@ -92,7 +92,7 @@ def resolve_user_session(token: str | None) -> str | None:
         return None
     user_id, exp_s, sig_b64 = parts
     payload = f"{user_id}.{exp_s}"
-    expected = hmac.new(_user_secret(), payload.encode(), hashlib.sha256).digest()
+    expected = hmac.new(user_secret(), payload.encode(), hashlib.sha256).digest()
     try:
         if not hmac.compare_digest(expected, _unb64(sig_b64)):
             return None

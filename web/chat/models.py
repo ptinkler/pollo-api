@@ -29,7 +29,7 @@ class ConversationUpdate(BaseModel):
     instruction_ids: list[int] | None = None  # explicit [] detaches all snippets
     instruction_group_ids: list[int] | None = None  # explicit [] detaches all groups
     character_ids: list[int] | None = None
-    # Defaults switched off in this chat only: {kind: [ids]} (kinds as in _KINDS)
+    # Defaults switched off in this chat only: {kind: [ids]} (kinds as in KINDS)
     hidden_defaults: dict[str, list[int]] | None = None
     # Instruction snippets/groups paused in this chat: {"instruction" |
     # "instruction_group": [ids]} — attached but not sent until resumed

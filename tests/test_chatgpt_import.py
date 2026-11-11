@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+import web.chatgpt_import as imp_mod
 from tests.test_chat import SETTINGS, _png_bytes, _text_chunks, chat, client, db  # noqa: F401
 from web.providers import openrouter
 
@@ -32,7 +33,7 @@ def _pointer(file_id):
     return {"content_type": "image_asset_pointer", "asset_pointer": f"sediment://{file_id}"}
 
 
-def _conversation(cid, title, messages, update_time):
+def conversation(cid, title, messages, update_time):
     """A chat whose messages follow one another (the exported branch)."""
     mapping = {"root": {"id": "root", "message": None, "parent": None, "children": []}}
     parent = "root"
@@ -99,7 +100,6 @@ def _export(path, conversations, library, files=("file_up1", "file_gen1")):
 
 @pytest.fixture()
 def imp(chat, db, monkeypatch):
-    import web.chatgpt_import as imp_mod
 
     monkeypatch.setattr(imp_mod, "get_db", lambda: db)
     imp_mod._jobs.clear()  # per-tenant import progress, reset between tests
@@ -108,7 +108,7 @@ def imp(chat, db, monkeypatch):
 
 @pytest.fixture()
 def story_zip(tmp_path):
-    return _export(tmp_path / "export1.zip", [_conversation("c1", "Rain", _story_messages(), T0 + 200)], STORY_LIBRARY)
+    return _export(tmp_path / "export1.zip", [conversation("c1", "Rain", _story_messages(), T0 + 200)], STORY_LIBRARY)
 
 
 def _shown(client, conv_id):
@@ -153,7 +153,7 @@ class TestFirstImport:
 
     def test_a_missing_upload_is_noted(self, imp, client, tmp_path):
         path = _export(
-            tmp_path / "e.zip", [_conversation("c1", "Rain", _story_messages(), T0 + 200)], STORY_LIBRARY, files=()
+            tmp_path / "e.zip", [conversation("c1", "Rain", _story_messages(), T0 + 200)], STORY_LIBRARY, files=()
         )
         imp.run_import(path)
         [up] = _shown(client, _imported(client)[0]["id"])[0]["media"]
@@ -171,7 +171,7 @@ class TestFirstImport:
             _msg("t1", "tool", [_pointer("file_gen1")], T0 + 10, "multimodal_text"),
             _msg("a1", "assistant", ["Here it is"], T0 + 11),
         ]
-        imp.run_import(_export(tmp_path / "e.zip", [_conversation("c1", "Cat", messages, T0 + 20)], []))
+        imp.run_import(_export(tmp_path / "e.zip", [conversation("c1", "Cat", messages, T0 + 20)], []))
         msgs = _shown(client, _imported(client)[0]["id"])
         assert msgs[1]["content"] == "Here it is" and msgs[1]["media"][0]["source"] == "generated"
 
@@ -201,8 +201,8 @@ class TestImportingAgain:
         later = _export(
             tmp_path / "export2.zip",
             [
-                _conversation("c1", "Rain", messages, T0 + 400),
-                _conversation("c2", "Other", [_msg("x1", "user", ["hi"], T0)], T0 + 10),
+                conversation("c1", "Rain", messages, T0 + 400),
+                conversation("c2", "Other", [_msg("x1", "user", ["hi"], T0)], T0 + 10),
             ],
             library,
             files=("file_up1", "file_gen1", "file_gen2"),
@@ -228,7 +228,7 @@ class TestImportingAgain:
         assert mine[-1]["content"] == "Sure."
 
         messages = [*_story_messages(), _msg("u3", "user", ["from chatgpt"], T0 + 300)]
-        imp.run_import(_export(tmp_path / "e2.zip", [_conversation("c1", "Rain", messages, T0 + 400)], STORY_LIBRARY))
+        imp.run_import(_export(tmp_path / "e2.zip", [conversation("c1", "Rain", messages, T0 + 400)], STORY_LIBRARY))
         shown = _shown(client, conv["id"])
         assert [m["id"] for m in shown] == [m["id"] for m in mine]  # still showing what was carried on here
         assert shown[-2]["siblings"] == [mine[-2]["id"], shown[-2]["siblings"][1]]
@@ -261,14 +261,14 @@ class TestSpace:
         snippet = client.post("/api/chat/instructions", json={"name": "Style", "content": "Be brief."}).json()
         client.put("/api/chat/settings", json={"default_instruction_ids": [snippet["id"]]})
         imp.run_import(story_zip)
-        assert chat.generation._conversation_instructions(_imported(client)[0]["id"]) == "Be brief."
+        assert chat.generation.conversation_instructions(_imported(client)[0]["id"]) == "Be brief."
 
     def test_a_chat_moved_out_keeps_getting_imports_where_it_is(self, imp, client, story_zip, tmp_path):
         imp.run_import(story_zip)
         conv = _imported(client)[0]
         client.patch(f"/api/chat/conversations/{conv['id']}", json={"space_id": None})
         messages = [*_story_messages(), _msg("u3", "user", ["more"], T0 + 300)]
-        imp.run_import(_export(tmp_path / "e2.zip", [_conversation("c1", "Rain", messages, T0 + 400)], STORY_LIBRARY))
+        imp.run_import(_export(tmp_path / "e2.zip", [conversation("c1", "Rain", messages, T0 + 400)], STORY_LIBRARY))
         assert _shown(client, conv["id"])[-1]["content"] == "more"
         assert _imported(client) == []
         moved = client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]

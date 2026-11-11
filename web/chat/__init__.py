@@ -37,7 +37,7 @@ This package is pure wiring. The pieces live in their own modules:
 from . import routes, routes_turns  # noqa: F401 — imported for the route-registration side effect
 from .constants import CHAT_PREVIEW_SIZE, IMAGE_EXTS
 from .deps import router
-from .helpers import _conv_dir
+from .helpers import conversation_dir  # noqa: F401 — re-exported; see __all__
 from .models import ConversationCreate
 from .polling import startup_resume_chat
 from .routes import api_create_conversation
@@ -49,6 +49,6 @@ __all__ = [
     "ConversationCreate",
     "IMAGE_EXTS",
     "CHAT_PREVIEW_SIZE",
-    "_conv_dir",
+    "conversation_dir",
     "api_create_conversation",
 ]

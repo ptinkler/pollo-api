@@ -84,36 +84,15 @@ const groupedOptions = computed(() => {
   </div>
 </template>
 
+<style scoped src="./field.css"></style>
+
 <style scoped>
 .sleek-select {
   margin-bottom: 8px;
 }
 
-.field-header {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
-.field-label {
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--text2);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  transition: color 0.2s;
-}
-
 .sleek-select.focused .field-label {
   color: var(--accent2);
-}
-
-.field-hint {
-  font-size: 0.68rem;
-  color: var(--text2);
-  opacity: 0.5;
-  font-weight: 400;
 }
 
 .select-wrapper {
@@ -180,16 +159,6 @@ select:hover {
     inset 0 1px 2px rgba(0, 0, 0, 0.15),
     0 0 0 3px rgba(108, 92, 231, 0.12),
     0 4px 16px rgba(108, 92, 231, 0.06);
-}
-
-.focus-ring {
-  position: absolute;
-  inset: -1px;
-  border-radius: 11px;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.3s;
-  background: linear-gradient(135deg, rgba(108, 92, 231, 0.12), transparent 50%);
 }
 
 .sleek-select.focused .focus-ring {

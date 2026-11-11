@@ -72,12 +72,12 @@ AUDIO_MODELS: dict[str, dict[str, Any]] = {
 }
 
 
-def _cfg(model_id: str) -> dict[str, Any]:
+def cfg(model_id: str) -> dict[str, Any]:
     return {**_AUDIO_DEFAULTS, **AUDIO_MODELS[model_id]}
 
 
 def audio_model_url(model_id: str) -> str:
-    c = _cfg(model_id)
+    c = cfg(model_id)
     return f"{POLLO_GENERATION_BASE}/{c['PROVIDER']}/{c['MODEL']}/{c['endpoint']}"
 
 
@@ -126,7 +126,7 @@ def _music_payload(c: dict[str, Any], prompt: str, **kw) -> dict[str, Any]:
 
 
 def audio_payload(model_id: str, *, prompt: str, **kw) -> dict[str, Any]:
-    c = _cfg(model_id)
+    c = cfg(model_id)
     prompt = (prompt or "").strip()
     if not prompt:
         raise ValueError("Audio needs a prompt")

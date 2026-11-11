@@ -57,8 +57,11 @@ class TestRefItems:
 class TestSubmitRefBranch:
     def test_ref_items_route_to_refs_branch(self, monkeypatch, provider_keys):
         provider_keys["pollo"] = "K"
-        monkeypatch.setattr(pollo, "_upload", lambda p: f"https://h/img/{Path(p).name}")
-        monkeypatch.setattr(pollo, "_upload_video", lambda p: f"https://h/vid/{Path(p).name}")
+        monkeypatch.setattr(
+            pollo,
+            "_upload",
+            lambda p, what="image": f"https://h/{'vid' if what == 'video' else 'img'}/{Path(p).name}",
+        )
         captured = {}
 
         def fake_submit(gen):

@@ -5,6 +5,7 @@ import threading
 import time
 from typing import Any
 
+from web.caches import on_keys_changed
 from web.core.metadata import current_tenant
 
 from ..providers import PROVIDERS, venice
@@ -43,6 +44,7 @@ def seed_models(data: dict[str, Any], stale: bool = False) -> None:
         _models_cache[current_tenant()] = {"at": 0.0 if stale else _NEVER, "data": data}
 
 
+@on_keys_changed
 def clear_models() -> None:
     """Forget every cached catalogue — called when a user's provider keys
     change, since their keys decide what the catalogue contains."""
@@ -80,7 +82,7 @@ def get_models(refresh: bool = False) -> dict[str, Any]:
         return data
 
 
-def _model_info(kind: str, model_id: str | None) -> dict | None:
+def model_info(kind: str, model_id: str | None) -> dict | None:
     """Look up cached catalogue info without fetching every provider's list.
     That cache is empty after a restart or when any list failed to load;
     Venice models then come from Venice's own catalogue, so a model without
@@ -103,18 +105,18 @@ def _model_info(kind: str, model_id: str | None) -> dict | None:
 _AUTO_RATIOS = ("auto", "adaptive")
 
 
-def _auto_ratio(kind: str, model_id: str | None) -> str | None:
+def auto_ratio(kind: str, model_id: str | None) -> str | None:
     """The model's own 'auto' aspect-ratio value, if it offers one."""
-    ratios = (_model_info(kind, model_id) or {}).get("aspect_ratios") or []
+    ratios = (model_info(kind, model_id) or {}).get("aspect_ratios") or []
     return next((v for v in _AUTO_RATIOS if v in ratios), None)
 
 
-def _fit_video_params(
+def fit_video_params(
     model_id: str, duration: int | None, aspect_ratio: str | None, resolution: str | None
 ) -> tuple[int | None, str | None, str | None]:
     """Snap requested params onto what the video model supports (when known),
     so a model-chosen "7 seconds" doesn't fail on a 5/10-only model."""
-    info = _model_info("video", model_id)
+    info = model_info("video", model_id)
     if not info:
         return duration, aspect_ratio, resolution
     durations = info.get("durations") or []

@@ -2,10 +2,13 @@
 generation/projects/jobs subsystem was removed (auth, SPA serving, lifespan)."""
 
 import asyncio
+import sys
 
 import pytest
 from fastapi.testclient import TestClient
 
+import web.api as api_mod
+from web.api import _static_file
 from web.core.metadata import MetadataDB
 
 
@@ -27,9 +30,6 @@ def client(db, monkeypatch):
     already-imported web.* module that pulled in `get_db` (importing web.api
     loads the whole app graph), so it doesn't matter which submodule a route
     lives in."""
-    import sys
-
-    import web.api as api_mod  # noqa: F401 — loads the app and its whole import graph
 
     for name, mod in list(sys.modules.items()):
         if name.startswith("web.") and getattr(mod, "get_db", None) is not None:
@@ -39,7 +39,6 @@ def client(db, monkeypatch):
 
 class TestLifespan:
     def test_lifespan_runs(self, client, db):
-        import web.api as api_mod
 
         async def run_lifespan():
             async with api_mod.lifespan(api_mod.app):
@@ -50,7 +49,6 @@ class TestLifespan:
 
 class TestMainGuards:
     def test_api_main_guard(self):
-        import web.api as api_mod
 
         assert hasattr(api_mod, "app")
 
@@ -66,18 +64,15 @@ class TestStaticFile:
         return d
 
     def test_serves_existing_file(self, static):
-        from web.api import _static_file
 
         assert _static_file("favicon.ico", static) == (static / "favicon.ico").resolve()
 
     def test_unknown_path_falls_back_to_index(self, static):
-        from web.api import _static_file
 
         assert _static_file("project/foo/gallery", static) == static / "index.html"
 
     @pytest.mark.parametrize("path", ["../.env", "assets/../../.env", "/etc/passwd", "..", "../static2/x"])
     def test_traversal_falls_back_to_index(self, static, path):
-        from web.api import _static_file
 
         assert _static_file(path, static) == static / "index.html"
 
@@ -86,7 +81,6 @@ class TestLoginThrottle:
     def test_throttle_is_per_account_despite_ip_spoofing(self, client):
         """Rotating the client-IP headers must not lift the per-email cap: a
         brute-force against one account trips the throttle even from fresh IPs."""
-        import web.api as api_mod
 
         api_mod._login_attempts.clear()
         last = None

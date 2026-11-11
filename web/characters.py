@@ -200,7 +200,7 @@ def delete_for_conversation(conv_id: str, db=None) -> None:
 def _delete(character_id: int, db) -> None:
     db.delete_character(character_id)
     shutil.rmtree(char_dir(character_id), ignore_errors=True)
-    for conv in db.list_conversations(limit=100000):
+    for conv in db.list_conversations(limit=None):
         if character_id in conv.character_ids:
             db.update_conversation(conv.id, character_ids=[i for i in conv.character_ids if i != character_id])
 
@@ -236,7 +236,7 @@ def api_list_characters(conversation_id: str | None = None, include_adhoc: bool 
     db = get_db()
     titles = {}
     if include_adhoc:
-        titles = {c.id: c.title for c in db.list_conversations(limit=100000)}
+        titles = db.conversation_titles()
     items = []
     for c in db.list_characters():
         if c.conversation_id is None or include_adhoc or c.conversation_id == conversation_id:

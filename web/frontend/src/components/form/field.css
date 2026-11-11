@@ -1,0 +1,37 @@
+/* The chrome every Sleek* field shares: its label, the header row that holds
+   the label and an optional hint, and the focus ring. Each component imports
+   this alongside its own scoped styles, so the rules live once but still
+   scope per component. SleekTextarea overrides a few values after it. */
+
+.field-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  transition: color 0.2s;
+}
+
+.field-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.field-hint {
+  font-size: 0.68rem;
+  color: var(--text2);
+  opacity: 0.5;
+  font-weight: 400;
+}
+
+.focus-ring {
+  position: absolute;
+  inset: -1px;
+  border-radius: 11px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+  background: linear-gradient(135deg, rgba(108, 92, 231, 0.12), transparent 50%);
+}

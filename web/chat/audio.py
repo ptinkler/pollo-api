@@ -5,7 +5,7 @@ from typing import Any
 
 from .. import request_log
 from ..providers import openrouter, pollo
-from .helpers import _conv_dir
+from .helpers import conversation_dir
 from .models import AudioOptions
 
 # AudioOptions fields that go to the model as-is
@@ -33,6 +33,6 @@ def submit_audio_generation(conv_id: str, model: str, prompt: str, params: dict[
     if not pollo.is_pollo(model):
         raise openrouter.OpenRouterError("Audio generation needs a Pollo model")
     request_log.forget_last()
-    clip = _conv_dir(conv_id) / params["source_audio"] if params.get("source_audio") else None
+    clip = conversation_dir(conv_id) / params["source_audio"] if params.get("source_audio") else None
     job = pollo.submit_audio(model, prompt, clip, **{k: params[k] for k in _OPTION_FIELDS if k in params})
     return {**job, "log": request_log.take_last()}

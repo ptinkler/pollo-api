@@ -4,6 +4,7 @@ module, persists everything, and starts video pollers for async jobs."""
 
 import contextlib
 import json
+import logging
 import os
 import re
 import threading
@@ -16,7 +17,7 @@ from .. import characters
 from ..providers import openrouter, provider_for
 from . import generation, polling
 from .audio import audio_params, submit_audio_generation
-from .catalogue import _auto_ratio, _fit_video_params, _model_info
+from .catalogue import auto_ratio, fit_video_params, model_info
 from .constants import (
     CHAT_ROUND_SECONDS,
     CONSISTENCY_REFS,
@@ -25,21 +26,21 @@ from .constants import (
     TITLE_WAIT_SECONDS,
 )
 from .generation import (
-    _characters_note,
-    _conversation,
-    _conversation_instructions,
-    _dedupe,
-    _exchange,
-    _failure_fields,
-    _image_context,
-    _is_conversational,
-    _is_moderation_error,
-    _plan_refs,
-    _run_image_generation,
-    _submit_video_generation,
-    _take_log,
+    characters_note,
+    conversation,
+    conversation_instructions,
+    dedupe,
+    exchange_fields,
+    failure_fields,
+    image_context,
+    is_conversational,
+    is_moderation_error,
+    plan_refs,
+    run_image_generation,
+    submit_video_generation,
+    take_log,
 )
-from .helpers import _branch_to, _conv_dir, _effective_ids, _message_out, _new_media, _saved_media
+from .helpers import branch_to, conversation_dir, effective_ids, message_out, new_media, saved_media
 from .models import TurnSettings
 from .tools import (
     AUDIO_TOOL_RESULT,
@@ -51,9 +52,11 @@ from .tools import (
     TOOLS_IMAGE,
     TOOLS_VIDEO,
     VIDEO_TOOL_RESULT,
-    _with_character_arg,
+    with_character_arg,
 )
-from .workers import _ctx_thread
+from .workers import ctx_thread
+
+log = logging.getLogger(__name__)
 
 
 class Turn:
@@ -75,12 +78,12 @@ class Turn:
         self.cancel = cancel
         self.db = get_db()
         # Only this reply's own branch — other versions of earlier turns aren't context
-        self.history = _branch_to(self.db.get_chat_messages(conv_id), message_id)[:-1]
-        self.instructions = _conversation_instructions(conv_id)
+        self.history = branch_to(self.db.get_chat_messages(conv_id), message_id)[:-1]
+        self.instructions = conversation_instructions(conv_id)
         conv = self.db.get_conversation(conv_id)
         self.characters = []  # attached (to the chat, or by its defaults); the only ones a turn uses
         if self._characters_usable():  # attached ones stay attached, just unused, otherwise
-            self.characters = characters.load(_effective_ids(conv, "character"), self.db)
+            self.characters = characters.load(effective_ids(conv, "character"), self.db)
         self.content = ""
         # What this reply has already cost (its pictures, when only the words
         # are being generated again), so the total stays right.
@@ -116,7 +119,7 @@ class Turn:
         )
         if error:
             self.emit({"type": "error", "message": error})
-        self.emit({"type": "done", "message": _message_out(msg) if msg else None})
+        self.emit({"type": "done", "message": message_out(msg) if msg else None})
 
     # ― explicit modes ―
     def _last_user(self):
@@ -125,7 +128,7 @@ class Turn:
     def _direct_image(self) -> None:
         user = self._last_user()
         prompt = (user.content if user else "").strip()
-        info = _model_info("image", self.s.image_model) or {}
+        info = model_info("image", self.s.image_model) or {}
         if info.get("tool"):
             return self._direct_image_tool(user, prompt, info)
         if not prompt:
@@ -134,7 +137,7 @@ class Turn:
         dropped: list[str] = []
         refs = [m["file"] for m in (user.media if user else []) if m["kind"] == "image" and m.get("file")]
         if self._accepts_refs():
-            refs, dropped = _plan_refs(
+            refs, dropped = plan_refs(
                 refs + self._pinned_images(),
                 chars,
                 self.s.image_limit,
@@ -157,7 +160,7 @@ class Turn:
         user = self._last_user()
         prompt = (user.content if user else "").strip()
         frames = [m["file"] for m in (user.media if user else []) if m["kind"] == "image" and m.get("file")]
-        info = _model_info("video", self.s.video_model) or {}
+        info = model_info("video", self.s.video_model) or {}
         if not prompt and info.get("no_prompt"):
             prompt = info.get("name") or "Video tool"  # the source file is the whole input
         # Reference-to-video: a prompt that mentions refs as [@name], or any
@@ -217,17 +220,17 @@ class Turn:
         if not self.s.audio_model:
             raise openrouter.OpenRouterError("No audio model selected")
         params = audio_params(self.s.audio_options)
-        if (_model_info("audio", self.s.audio_model) or {}).get("audio_input"):
+        if (model_info("audio", self.s.audio_model) or {}).get("audio_input"):
             params["source_audio"] = self._latest_audio()  # the clip to clone the voice from
-        item = _new_media("audio", "generated", prompt=prompt, model=self.s.audio_model, params=params)
+        item = new_media("audio", "generated", prompt=prompt, model=self.s.audio_model, params=params)
         self._add_media(item)
         try:
             job = submit_audio_generation(self.conv_id, self.s.audio_model, prompt, params)
         except openrouter.OpenRouterError as e:
-            self._update_media(item, **_failure_fields(e))
+            self._update_media(item, **failure_fields(e))
             raise
         self._update_media(
-            item, job_id=job["id"], params={**params, **job.get("params", {})}, **_exchange(job.get("log"))
+            item, job_id=job["id"], params={**params, **job.get("params", {})}, **exchange_fields(job.get("log"))
         )
         polling.start_video_poller(self.conv_id, self.message_id, item["id"], job["id"])
 
@@ -235,7 +238,7 @@ class Turn:
     def _chat(self, tools_enabled: bool) -> None:
         if not self.s.text_model:
             raise openrouter.OpenRouterError("No text model selected")
-        info = _model_info("text", self.s.text_model)
+        info = model_info("text", self.s.text_model)
         use_tools = tools_enabled and (info is None or info.get("supports_tools"))
         vision = info is None or "image" in (info.get("input_modalities") or [])
         messages = self._build_llm_messages(vision, as_tool_calls=bool(use_tools and self._tools()))
@@ -279,9 +282,9 @@ class Turn:
         names = [c.name for c in self.characters]
         tools = [TOOLS_CREATE_CHARACTER] if self.s.image_model else []
         if self.s.image_model:
-            tools.insert(0, _with_character_arg(TOOLS_IMAGE, names))
+            tools.insert(0, with_character_arg(TOOLS_IMAGE, names))
         if self.s.video_model:
-            tools.append(_with_character_arg(TOOLS_VIDEO, names))
+            tools.append(with_character_arg(TOOLS_VIDEO, names))
         if self.s.audio_model:
             tools.append(TOOLS_AUDIO)
         tools.append(TOOLS_CREATE_INSTRUCTION)  # needs no media model: applies to the chat model itself
@@ -327,10 +330,15 @@ class Turn:
             c["id"] = c["id"] or f"call_{i}"
         # Diagnostics: distinguishes "model never called the tool" from
         # "we failed to parse the call" when media goes missing
-        print(
-            f"💬 chat msg {self.message_id} {self.s.text_model}: finish={finish} "
-            f"tools_offered={bool(tools)} tool_calls={[c['function']['name'] for c in tool_calls]} "
-            f"raw_call_slots={len(calls)} text_chars={len(text)}"
+        log.info(
+            "msg %s %s: finish=%s tools_offered=%s tool_calls=%s raw_call_slots=%d text_chars=%d",
+            self.message_id,
+            self.s.text_model,
+            finish,
+            bool(tools),
+            [c["function"]["name"] for c in tool_calls],
+            len(calls),
+            len(text),
         )
         return text, tool_calls
 
@@ -364,7 +372,7 @@ class Turn:
                 return self._image_tool(prompt, args, source, chars)
             return self._video_tool(prompt, args, source, chars)
         except openrouter.OpenRouterError as e:
-            return {"ok": False, "error": str(e), "moderated": _is_moderation_error(e)}
+            return {"ok": False, "error": str(e), "moderated": is_moderation_error(e)}
 
     def _audio_tool(self, args: dict) -> dict:
         prompt = str(args.get("prompt") or "").strip()
@@ -373,14 +381,14 @@ class Turn:
         try:
             self._generate_audio(prompt)
         except openrouter.OpenRouterError as e:
-            return {"ok": False, "error": str(e), "moderated": _is_moderation_error(e)}
+            return {"ok": False, "error": str(e), "moderated": is_moderation_error(e)}
         return {"ok": True, "result": AUDIO_TOOL_RESULT}
 
     def _image_tool(self, prompt: str, args: dict, source: str | None, chars: list) -> dict:
         # Aspect ratio is the composer's to set, not the chat model's. A ratio
         # picked there wins; left on "auto" it becomes the image model's own
         # "auto" value if it has one, else nothing — the model's natural shape.
-        ratio = self.s.image_options.aspect_ratio or _auto_ratio("image", self.s.image_model)
+        ratio = self.s.image_options.aspect_ratio or auto_ratio("image", self.s.image_model)
         refs, dropped = self._image_refs(args, source, chars)
         ref_args = {k: args[k] for k in ("source_image", "keep_consistent", "characters") if k in args}
         self._generate_image(prompt, ratio, refs, ref_args, chars, dropped)
@@ -403,7 +411,7 @@ class Turn:
         opts = self.s.video_options
         ratio = opts.aspect_ratio or (None if source else args.get("aspect_ratio"))
         last = None
-        if "last_frame" in ((_model_info("video", self.s.video_model) or {}).get("frame_images") or []):
+        if "last_frame" in ((model_info("video", self.s.video_model) or {}).get("frame_images") or []):
             # First+last-frame models: the two most recent images, older one first
             recent = self._latest_images(2)
             if len(recent) == 2:
@@ -484,7 +492,7 @@ class Turn:
             n = max(1, min(4, int(args.get("images") or 1)))
         except (TypeError, ValueError):
             n = 1
-        files = [p for p in (_conv_dir(self.conv_id) / f for f in self._latest_images(n)) if p.is_file()]
+        files = [p for p in (conversation_dir(self.conv_id) / f for f in self._latest_images(n)) if p.is_file()]
         if not files:
             return {"ok": False, "error": "There is no image in the conversation to make the character from"}
         char = characters.create_from_files(
@@ -532,26 +540,26 @@ class Turn:
             return True
         if self.s.mode == "video":
             # Only video models that take reference images (Venice's refs→video)
-            info = _model_info("video", self.s.video_model) or {}
+            info = model_info("video", self.s.video_model) or {}
             return bool(info.get("reference_images") or info.get("family") == "motion")
         if not self.s.image_model or not self._accepts_refs():
             return False
         if self.s.mode == "auto":
-            info = _model_info("text", self.s.text_model)
+            info = model_info("text", self.s.text_model)
             return info is None or bool(info.get("supports_tools"))
         return True
 
     def _accepts_refs(self) -> bool:
-        info = _model_info("image", self.s.image_model)
+        info = model_info("image", self.s.image_model)
         return not info or "image" in (info.get("input_modalities") or [])
 
     def _max_refs(self) -> int | None:
         """How many reference images the image model takes (None = unknown)."""
-        return (_model_info("image", self.s.image_model) or {}).get("max_refs")
+        return (model_info("image", self.s.image_model) or {}).get("max_refs")
 
     def _image_refs(self, args: dict, source: str | None, chars: list) -> tuple[list[str], list[str]]:
         """Reference images for generate_image, and those that didn't fit
-        (see _plan_refs for the priority): the edit source (source_image),
+        (see plan_refs for the priority): the edit source (source_image),
         the images of the characters it named, the images the user pinned,
         and the most recent images if the model asked (keep_consistent).
         Pins are the user's choice; the app never adds references on its own."""
@@ -562,8 +570,8 @@ class Turn:
         recent = []
         if args.get("keep_consistent") is True:
             recent = [f for f in self._latest_images(CONSISTENCY_REFS) if f not in pinned and f not in lead]
-        chat_refs = _dedupe(lead + pinned + recent[: max(CONSISTENCY_REFS - len(lead), 0)])
-        return _plan_refs(
+        chat_refs = dedupe(lead + pinned + recent[: max(CONSISTENCY_REFS - len(lead), 0)])
+        return plan_refs(
             chat_refs, chars, self.s.image_limit, after=len(lead), max_refs=self._max_refs(), choices=self.s.ref_choices
         )
 
@@ -599,13 +607,13 @@ class Turn:
             params["characters"] = [c.id for c in chars]  # described in the prompt at generation time
             params["character_names"] = [c.name for c in chars]  # for display
         context = None
-        if _is_conversational(self.s.image_model):
+        if is_conversational(self.s.image_model):
             # Like the Gemini app: the image model gets the conversation
             direct = self.s.mode == "image"
             params.update(
                 context=True, direct=direct, history_limit=self.s.history_limit, image_limit=self.s.image_limit
             )
-            context = _image_context(
+            context = image_context(
                 self.conv_id,
                 self.history,
                 self.s.history_limit,
@@ -616,18 +624,16 @@ class Turn:
                 chars,
                 self.s.image_limit,
             )
-        item = _new_media("image", "generated", prompt=prompt, model=self.s.image_model, params=params)
+        item = new_media("image", "generated", prompt=prompt, model=self.s.image_model, params=params)
         self._add_media(item)
         try:
-            names, cost, credits, sent = _run_image_generation(
-                self.conv_id, self.s.image_model, prompt, params, context
-            )
+            names, cost, credits, sent = run_image_generation(self.conv_id, self.s.image_model, prompt, params, context)
         except openrouter.OpenRouterError as e:
-            self._update_media(item, **_failure_fields(e))
+            self._update_media(item, **failure_fields(e))
             raise
         if cost:
             self.cost += float(cost)
-        sent, exchange = _take_log(sent)
+        sent, exchange = take_log(sent)
         for i, name in enumerate(names):
             if i == 0:
                 self._update_media(
@@ -640,7 +646,7 @@ class Turn:
                     **exchange,
                 )
             else:
-                self._add_media(_saved_media("image", "generated", name, prompt=prompt, model=self.s.image_model))
+                self._add_media(saved_media("image", "generated", name, prompt=prompt, model=self.s.image_model))
 
     def _generate_video(
         self,
@@ -655,7 +661,7 @@ class Turn:
     ) -> None:
         if not self.s.video_model:
             raise openrouter.OpenRouterError("No video model selected")
-        duration, aspect_ratio, resolution = _fit_video_params(
+        duration, aspect_ratio, resolution = fit_video_params(
             self.s.video_model, duration, aspect_ratio, self.s.video_options.resolution
         )
         # Reference-to-video supersedes the singular first frame: the attachments
@@ -677,16 +683,16 @@ class Turn:
         if chars:
             params["characters"] = [c.id for c in chars]
         params.update(self._video_inputs(first_frame, last_frame, attached or [], chars or []))
-        item = _new_media("video", "generated", prompt=prompt, model=self.s.video_model, params=params)
+        item = new_media("video", "generated", prompt=prompt, model=self.s.video_model, params=params)
         self._add_media(item)
         try:
-            job = _submit_video_generation(self.conv_id, self.s.video_model, prompt, params)
+            job = submit_video_generation(self.conv_id, self.s.video_model, prompt, params)
         except openrouter.OpenRouterError as e:
-            self._update_media(item, **_failure_fields(e))
+            self._update_media(item, **failure_fields(e))
             raise
         # Pollo reports what it was actually sent, defaults included
         self._update_media(
-            item, job_id=job["id"], params={**params, **job.get("params", {})}, **_exchange(job.get("log"))
+            item, job_id=job["id"], params={**params, **job.get("params", {})}, **exchange_fields(job.get("log"))
         )
         polling.start_video_poller(self.conv_id, self.message_id, item["id"], job["id"])
 
@@ -694,11 +700,11 @@ class Turn:
         """The extra inputs the video model's family takes (Venice): reference
         images (attached ones, the frame, characters' images and pins), a
         last frame, or the chat's latest video."""
-        info = _model_info("video", self.s.video_model) or {}
+        info = model_info("video", self.s.video_model) or {}
         out: dict[str, Any] = {}
         if info.get("reference_images") or info.get("family") == "motion":
-            own = _dedupe([*attached, *([first_frame] if first_frame else []), *self._pinned_images()])
-            out["refs"], _ = _plan_refs(
+            own = dedupe([*attached, *([first_frame] if first_frame else []), *self._pinned_images()])
+            out["refs"], _ = plan_refs(
                 own,
                 chars,
                 None,
@@ -735,10 +741,10 @@ class Turn:
         if self.instructions:
             # The user's own custom instructions, verbatim
             messages.append({"role": "system", "content": self.instructions})
-        note = _characters_note(self.characters)
+        note = characters_note(self.characters)
         if note:
             messages.append({"role": "system", "content": note})
-        return messages + _conversation(
+        return messages + conversation(
             self.conv_id, self.history, self.s.history_limit, vision, as_tool_calls, self.s.image_limit
         )
 
@@ -766,7 +772,7 @@ class Turn:
                 with contextlib.suppress(Exception):
                     job["title"], job["cost"] = generation._generate_title(model, first.content)
 
-            job["thread"] = _ctx_thread(work, name=f"chat-title-{self.message_id}")
+            job["thread"] = ctx_thread(work, name=f"chat-title-{self.message_id}")
             job["thread"].start()
         return job
 

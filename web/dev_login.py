@@ -10,6 +10,7 @@ web/oauth_routes.py and the api.py lifespan).
 from __future__ import annotations
 
 import json
+import logging
 import os
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -18,6 +19,8 @@ from web.core.env import bool_env
 from web.core.metadata import get_db
 
 from .auth import set_user_cookie
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/auth")
 
@@ -72,10 +75,10 @@ def seed_dev_user() -> None:
     if not dev_login_enabled():
         return
     if db_has_encrypted_keys():
-        print("🛠 DEV_LOGIN set but the database holds encrypted keys — dev login is refused here.")
+        log.warning("DEV_LOGIN set but the database holds encrypted keys — dev login is refused here")
         return
     dev_user()
-    print(f"🛠 DEV_LOGIN on: one-click dev account '{dev_email()}' ready (keys stored unencrypted).")
+    log.info("DEV_LOGIN on: one-click dev account %r ready (keys stored unencrypted)", dev_email())
 
 
 @router.post("/dev-login")

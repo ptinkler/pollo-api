@@ -6,6 +6,8 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+import web.api as api_mod
+from web import dev_login, user_keys
 from web.core.metadata import MetadataDB
 
 # These exercise REAL session resolution (cookie -> user), so opt out of the
@@ -21,7 +23,6 @@ def db(tmp_path):
 
 @pytest.fixture()
 def client(db, monkeypatch):
-    import web.api as api_mod
 
     monkeypatch.setattr(api_mod, "get_db", lambda: db)
     monkeypatch.setattr("web.users.get_db", lambda: db)
@@ -57,14 +58,11 @@ def test_keys_stored_plaintext_in_dev(client, db, monkeypatch):
     (blob,) = db.list_api_key_blobs()
     assert json.loads(blob) == {"pollo": "sk-dev-123"}
 
-    from web import dev_login
-
     assert dev_login.db_has_encrypted_keys() is False
 
 
 def test_refused_on_encrypted_db(client, db, monkeypatch):
     monkeypatch.setenv("DEV_LOGIN", "true")
-    from web import dev_login, user_keys
 
     # A pre-existing user with an ENCRYPTED key blob makes this look like prod.
     user = db.upsert_oauth_user({"provider": "local", "sub": "admin", "email": "a@b", "name": "A"}, is_admin=True)

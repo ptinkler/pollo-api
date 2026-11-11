@@ -1,5 +1,5 @@
 // Which reference images the next image will be sent with, and which won't
-// fit the image model (mirrors _plan_refs in web/chat.py). The priority:
+// fit the image model (mirrors plan_refs in web/chat/generation.py). The priority:
 // `lead` (attachments), the ones switched on, each character's main image,
 // the other chat images (pins), then the characters' other images.
 

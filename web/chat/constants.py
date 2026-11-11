@@ -1,5 +1,7 @@
 """Tunables and small constant tables shared across the chat package."""
 
+from web.media_types import IMAGE_EXTS  # noqa: F401 — re-exported for the chat package
+
 MAX_TOOL_ROUNDS = 4
 CONSISTENCY_REFS = 2  # recent images passed to the image model to keep characters consistent
 # Chat images per request unless the composer's slider says otherwise: the most
@@ -16,18 +18,17 @@ DEFAULT_TITLE = "New chat"
 TITLE_SECONDS = 20  # cap on the title request, which runs alongside the first reply
 TITLE_WAIT_SECONDS = 8  # how long a finished first reply waits for it before using the prompt
 
-IMAGE_EXTS = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/svg+xml": ".svg"}
 # px on the shorter side: sharp in the chat, a fraction of a full-size image
 CHAT_PREVIEW_SIZE = 768
 
 CONVERSATION_LIST_LIMIT = 200
 SNIPPET_CHARS = 120
 THREAD_KINDS = ("chat", "gallery")
-_KINDS = ("character", "instruction", "instruction_group")
-_PAUSE_KINDS = ("instruction", "instruction_group")
-_PARAM_FILES = ("first_frame", "last_frame", "source_video")  # media params naming one reference file
+KINDS = ("character", "instruction", "instruction_group")
+PAUSE_KINDS = ("instruction", "instruction_group")
+PARAM_FILES = ("first_frame", "last_frame", "source_video")  # media params naming one reference file
 # The turn settings remembered on the conversation (so a reopen restores them)
-_REMEMBERED_SETTINGS = {
+REMEMBERED_SETTINGS = {
     "mode",
     "history_limit",
     "image_limit",

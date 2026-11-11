@@ -43,10 +43,11 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from web.core import config
-from web.core.metadata import get_db
+from web.core.metadata import current_tenant, get_db
 
 from . import media
-from .chat import CHAT_PREVIEW_SIZE, IMAGE_EXTS, ConversationCreate, _conv_dir, api_create_conversation
+from .chat import CHAT_PREVIEW_SIZE, ConversationCreate, api_create_conversation, conversation_dir
+from .media_types import IMAGE_EXTS, VIDEO_EXTS
 from .uploads import safe_filename
 from .users import require_user
 
@@ -58,7 +59,7 @@ UPLOAD_CHUNK = 16 * 1024 * 1024  # bytes per upload request, under nginx's 25 MB
 UPLOAD_STALE_SECONDS = 24 * 60 * 60  # unfinished uploads older than this are deleted
 DEFAULT_TITLE = "Imported chat"
 MISSING = "Not included in the ChatGPT export"
-VIDEO_EXTS = {"video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov"}
+
 # Search citations ChatGPT leaves in replies: citeturn0search1
 _CITATION = re.compile("[^]*|[-]")
 _FILE_ID = re.compile(r"^(file[-_][A-Za-z0-9]+)")
@@ -71,8 +72,6 @@ _TITLE_ATTR = re.compile(r'title="([^"]*)"')
 def _import_dir() -> Path:
     # Per-tenant (<data>/imports/<uid>/) so one user can't import another user's
     # uploaded export by guessing its filename.
-    from web.core.metadata import current_tenant
-
     base = config.ROOT_DIR / "imports"
     uid = current_tenant()
     return base / uid if uid else base
@@ -251,8 +250,8 @@ class _ChatMedia:
         ext = _ext(raw, mime)
         kind = "video" if ext in VIDEO_EXTS.values() else "image"
         file = f"{'up' if source == 'upload' else 'img'}_{uuid.uuid4().hex[:12]}{ext}"
-        (_conv_dir(self.conv_id) / file).write_bytes(raw)
-        self.export.new_files.append(_conv_dir(self.conv_id) / file)
+        (conversation_dir(self.conv_id) / file).write_bytes(raw)
+        self.export.new_files.append(conversation_dir(self.conv_id) / file)
         self.stats["images"] += 1
         item = {**fields, "kind": kind, "status": "done", "file": file}
         self.saved[file_id] = item
@@ -433,8 +432,6 @@ _job_lock = threading.Lock()
 
 
 def _job_key() -> str:
-    from web.core.metadata import current_tenant
-
     return current_tenant() or ""
 
 

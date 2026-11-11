@@ -4,6 +4,7 @@ catalogue attaches them to every model it assembles."""
 import pytest
 
 from web.chat import catalogue
+from web.core.metadata import current_tenant, reset_tenant, set_tenant
 from web.providers.model_tags import tags_for
 
 pytestmark = pytest.mark.no_tenant
@@ -105,7 +106,6 @@ def test_catalogue_attaches_tags_to_every_model(monkeypatch):
 def test_each_user_gets_their_own_catalogue(monkeypatch):
     """The catalogue is built from the requesting user's provider keys, so it
     must be cached per user: one user's list must never be served to another."""
-    from web.core.metadata import reset_tenant, set_tenant
 
     seen: list[str | None] = []
 
@@ -115,7 +115,6 @@ def test_each_user_gets_their_own_catalogue(monkeypatch):
         NAME = "fake"
 
         def list_models(self, kind, refresh=False):
-            from web.core.metadata import current_tenant
 
             seen.append(current_tenant())
             if kind != "image" or current_tenant() != "has-key":

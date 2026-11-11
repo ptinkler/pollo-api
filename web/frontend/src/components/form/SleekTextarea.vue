@@ -35,35 +35,31 @@ const hasValue = computed(() => !!props.modelValue)
   </div>
 </template>
 
+<style scoped src="./field.css"></style>
+
 <style scoped>
-.sleek-textarea {
-  margin-bottom: 16px;
-}
-
+/* A textarea is taller and softer than the one-line fields */
 .field-header {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
   margin-bottom: 8px;
-}
-
-.field-label {
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--text2);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  transition: color 0.2s;
-}
-
-.sleek-textarea.focused .field-label {
-  color: var(--accent2);
 }
 
 .field-hint {
   font-size: 0.7rem;
-  color: var(--text2);
   opacity: 0.6;
+  font-weight: inherit; /* the shared base sets 400; this field never did */
+}
+
+.focus-ring {
+  border-radius: 13px;
+  background: linear-gradient(135deg, rgba(108, 92, 231, 0.15), transparent 50%);
+}
+
+.sleek-textarea {
+  margin-bottom: 16px;
+}
+
+.sleek-textarea.focused .field-label {
+  color: var(--accent2);
 }
 
 .textarea-wrapper {
@@ -105,16 +101,6 @@ textarea:hover {
     inset 0 1px 2px rgba(0, 0, 0, 0.15),
     0 0 0 3px rgba(108, 92, 231, 0.12),
     0 4px 20px rgba(108, 92, 231, 0.08);
-}
-
-.focus-ring {
-  position: absolute;
-  inset: -1px;
-  border-radius: 13px;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.3s;
-  background: linear-gradient(135deg, rgba(108, 92, 231, 0.15), transparent 50%);
 }
 
 .sleek-textarea.focused .focus-ring {

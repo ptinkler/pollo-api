@@ -3,7 +3,10 @@
 import pytest
 from fastapi.testclient import TestClient
 
+import web.api as api_mod
+from web import passwords
 from web.core.metadata import MetadataDB
+from web.passwords import hash_password
 
 
 @pytest.fixture()
@@ -14,7 +17,6 @@ def db(tmp_path):
 
 @pytest.fixture()
 def client(db, monkeypatch):
-    import web.api as api_mod
 
     monkeypatch.setattr(api_mod, "get_db", lambda: db)
     monkeypatch.setenv("ADMIN_EMAILS", "admin@x.com")
@@ -23,7 +25,6 @@ def client(db, monkeypatch):
 
 class TestHashing:
     def test_roundtrip_and_pepper(self, monkeypatch):
-        from web import passwords
 
         monkeypatch.setenv("PASSWORD_PEPPER", "pepper-one")
         h = passwords.hash_password("correct horse battery")
@@ -36,7 +37,6 @@ class TestHashing:
         assert not passwords.verify_password(h, "correct horse battery")
 
     def test_unique_salt(self, monkeypatch):
-        from web import passwords
 
         monkeypatch.setenv("PASSWORD_PEPPER", "p")
         assert passwords.hash_password("samepassword") != passwords.hash_password("samepassword")
@@ -70,7 +70,6 @@ class TestLogin:
         assert r.status_code == 401
 
     def test_cli_created_admin_can_log_in(self, client, db):
-        from web.passwords import hash_password
 
         db.create_local_admin("admin@x.com", hash_password("longenough1"), name="Admin")
         assert client.post("/api/auth/login", json={"email": "admin@x.com", "password": "nope"}).status_code == 401

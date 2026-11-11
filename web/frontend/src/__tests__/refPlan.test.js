@@ -6,7 +6,7 @@ const B = { id: 2, images: ['b0', 'b1', 'b2'] }
 const a = i => charRef(1, `a${i}`)
 const b = i => charRef(2, `b${i}`)
 
-describe('planRefs (mirrors _plan_refs in web/chat.py)', () => {
+describe('planRefs (mirrors plan_refs in web/chat/generation.py)', () => {
   it('sends everything in priority order when the maximum is unknown', () => {
     const plan = planRefs({ lead: ['att'], chat: ['p0'], characters: [A, B] })
     expect(plan.sent).toEqual(['att', a(0), b(0), 'p0', a(1), b(1), a(2), b(2)])

@@ -6,7 +6,7 @@ from typing import Any
 
 from web.core.config import POLLO_GENERATION_BASE
 
-from ._shared import _aspect_ratio, _valid_length
+from ._shared import parse_aspect_ratio, valid_length
 
 # Config rows (introspected from the generator classes). Fields omitted here
 # take the base defaults below.
@@ -694,7 +694,7 @@ VIDEO_MODELS: dict[str, dict[str, Any]] = {
 }
 
 
-def _cfg(model_id: str) -> dict[str, Any]:
+def cfg(model_id: str) -> dict[str, Any]:
     row = VIDEO_MODELS[model_id]
     base = {**_V1_VIDEO_DEFAULTS}
     if row.get("builder") == "kling":
@@ -703,7 +703,7 @@ def _cfg(model_id: str) -> dict[str, Any]:
 
 
 def video_model_url(model_id: str) -> str:
-    c = _cfg(model_id)
+    c = cfg(model_id)
     if c.get("V1_URL"):
         return c["V1_URL"]
     return f"{POLLO_GENERATION_BASE}/{c['PROVIDER']}/{c['MODEL']}/{c['endpoint']}"
@@ -739,13 +739,13 @@ def _resolve_length(c: dict[str, Any], **kw) -> int:
     if kw.get("refs") and c["REF_VALID_LENGTHS"]:
         length = int(length_str) if length_str.isdigit() else c["DEFAULT_LENGTH"]
         return min(c["REF_VALID_LENGTHS"], key=lambda v: abs(v - length))
-    return _valid_length(length_str, c["VALID_LENGTHS"], c["DEFAULT_LENGTH"])
+    return valid_length(length_str, c["VALID_LENGTHS"], c["DEFAULT_LENGTH"])
 
 
 def _resolve_aspect_ratio(c: dict[str, Any], **kw) -> str:
     # the explicit kwarg, then a model default ("adaptive" on a few), else the
     # base "portrait" → 9:16.
-    return kw.get("aspect_ratio") or c.get("DEFAULT_RATIO") or _aspect_ratio("portrait")
+    return kw.get("aspect_ratio") or c.get("DEFAULT_RATIO") or parse_aspect_ratio("portrait")
 
 
 def _resolve_mode(c: dict[str, Any], resolution: str, mode: str | None) -> str | None:
@@ -943,7 +943,7 @@ _BUILDERS = {
 
 def video_payload(model_id: str, *, prompt: str, image_url: str | None, **kw) -> dict[str, Any]:
     """Build the video API body for any model, dispatching on its family."""
-    c = _cfg(model_id)
+    c = cfg(model_id)
     build = _BUILDERS.get(c["builder"])
     if build is None:
         raise ValueError(f"unknown builder {c['builder']!r} for {model_id}")

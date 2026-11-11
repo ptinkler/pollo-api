@@ -37,9 +37,12 @@ from typing import Any
 
 import httpx
 
-from .. import request_log, sse
+from web.core.metadata import current_tenant
+
+from .. import keyctx, request_log, sse
+from ..caches import on_keys_changed
 from ..core.cache import MISS, TTLCache
-from .openrouter import CHAT_TIMEOUT, IMAGE_TIMEOUT, OpenRouterError, _keepalive_socket_options
+from .openrouter import CHAT_TIMEOUT, IMAGE_TIMEOUT, OpenRouterError, keepalive_socket_options
 
 VENICE_BASE = os.getenv("VENICE_BASE_URL", "https://api.venice.ai/api/v1").rstrip("/")
 PREFIX = "venice/"
@@ -70,7 +73,7 @@ DEFAULT_CAMERA_TRAJECTORY = [
     {"time": 1, "azimuth": 90, "elevation": 10, "distance": 1},
 ]
 
-_client = httpx.Client(transport=httpx.HTTPTransport(socket_options=_keepalive_socket_options()))
+_client = httpx.Client(transport=httpx.HTTPTransport(socket_options=keepalive_socket_options()))
 # Per tenant: the catalogue is built with the requesting user's key, and the
 # balance is that account's (see _tenant()).
 _catalogue: dict[str, dict[str, Any]] = {}
@@ -82,7 +85,8 @@ _balance: dict[str, float | None] = {}  # tenant -> the x-venice-balance-usd hea
 JOB_STATE_TTL = 24 * 3600
 _video_quotes = TTLCache(JOB_STATE_TTL, maxsize=2048)  # job id -> quoted USD, its cost once done
 _download_urls = TTLCache(JOB_STATE_TTL, maxsize=2048)  # job id -> download link (private models)
-_VIDEO_DIR = Path(tempfile.gettempdir()) / "venice-videos"  # finished videos, between retrieve and download
+# Finished videos live here between retrieve and download
+_VIDEO_DIR = Path(tempfile.gettempdir()) / "venice-videos"
 QUOTE_TTL = 24 * 3600
 QUOTE_SECONDS = 5  # videos are priced (for sorting) at ~5s, lowest resolution
 _quotes = TTLCache(QUOTE_TTL, maxsize=1024)  # (model, duration, resolution) -> USD, or None if unpriced
@@ -93,16 +97,12 @@ class VeniceError(OpenRouterError):
 
 
 def get_api_key() -> str:
-    from .. import keyctx
-
     return keyctx.provider_key("venice") or ""
 
 
 def _tenant() -> str:
     """Who the per-account caches below belong to. The signed-in user, or ""
     outside a request (a background poller works on one job's owner's key)."""
-    from web.core.metadata import current_tenant
-
     return current_tenant()
 
 
@@ -496,6 +496,7 @@ def _get_catalogue(refresh: bool = False) -> dict[str, Any]:
         return entry["data"]
 
 
+@on_keys_changed
 def clear_caches() -> None:
     """Drop every in-process cache (catalogue, quotes, balances, job state).
     Called when a user's keys change, and by tests between cases."""

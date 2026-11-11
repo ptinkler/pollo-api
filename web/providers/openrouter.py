@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 
-from .. import net_guard, request_log, sse
+from .. import keyctx, net_guard, request_log, sse
 
 # Overridable so a local fake can stand in during manual testing
 OPENROUTER_BASE = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
@@ -37,7 +37,7 @@ class OpenRouterError(Exception):
         self.status = status
 
 
-def _keepalive_socket_options() -> list[tuple[int, int, int]]:
+def keepalive_socket_options() -> list[tuple[int, int, int]]:
     """TCP keepalive probes every 5s while a request waits. Image and video
     calls sit silent for a minute or more (Seedream 5.0 Pro with references:
     ~2 min), and some networks — VPNs, NAT routers, NAS/Docker hosts — drop
@@ -56,7 +56,7 @@ def _keepalive_socket_options() -> list[tuple[int, int, int]]:
 
 
 # One shared, thread-safe client so every OpenRouter connection gets keepalive
-_client = httpx.Client(transport=httpx.HTTPTransport(socket_options=_keepalive_socket_options()))
+_client = httpx.Client(transport=httpx.HTTPTransport(socket_options=keepalive_socket_options()))
 
 
 @contextmanager
@@ -76,8 +76,6 @@ def _connection_guard(waiting_for: str):
 
 
 def get_api_key() -> str:
-    from .. import keyctx
-
     return keyctx.provider_key("openrouter") or ""
 
 

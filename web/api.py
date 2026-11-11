@@ -4,11 +4,13 @@ Pollo Studio — API Backend (FastAPI)
 Run:  make dev-api   (uvicorn web.api:app, from the repo root)
 """
 
+import logging
 import os
 import sys
 import threading
 import time
 from contextlib import asynccontextmanager
+from http.cookies import SimpleCookie
 from pathlib import Path
 
 import uvicorn
@@ -24,38 +26,43 @@ sys.path.insert(0, str(ROOT_DIR))
 os.chdir(ROOT_DIR)
 
 from web.core import config  # noqa: E402, F401 — imported first: loads .env before anything reads it
+from web.core.logs import setup as _setup_logging  # noqa: E402
+
+_setup_logging()
+log = logging.getLogger(__name__)
 from web.core.env import bool_env  # noqa: E402
 from web.core.get_task import get_credit_balance
-from web.core.metadata import get_db
+from web.core.metadata import get_db, reset_tenant, set_tenant
+from web.core.metadata.schema import ensure_schema
 
-from . import characters, keyctx, media, vpn
+from . import characters, keyctx, media, user_keys, vpn
 from .auth import USER_COOKIE, set_user_cookie
 from .chat import router as chat_router
 from .chat import startup_resume_chat
 from .chatgpt_import import router as chatgpt_import_router
-from .users import require_user
+from .dev_login import seed_dev_user
+from .oauth import configured_providers, register_providers
+from .passwords import hash_password, needs_rehash, verify_password
+from .users import admin_emails, require_user, resolve_current_user
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown events."""
     # Startup: announce the auth posture so a misconfigured deploy is obvious
-    from .users import admin_emails
-
     admins = admin_emails()
     if admins:
-        print(f"🔒 Auth: email+password login for admin(s) {', '.join(sorted(admins))}; others via OAuth.")
+        log.info("auth: email+password login for admin(s) %s; others via OAuth", ", ".join(sorted(admins)))
     else:
-        print("🔒 Auth: no ADMIN_EMAILS set — no one can create a local admin until it is configured.")
+        log.warning("auth: no ADMIN_EMAILS set — no one can create a local admin until it is configured")
     # Register any OAuth providers that have credentials configured
-    from .oauth import configured_providers, register_providers
-
     register_providers()
     providers = configured_providers()
-    print(f"🔑 OAuth providers: {', '.join(providers) if providers else 'none configured'}")
+    log.info("OAuth providers: %s", ", ".join(providers) if providers else "none configured")
+    # Alembic owns the schema; bring it up to date before anything reads it.
+    db = get_db()
+    ensure_schema(db.engine, db.db_path, fresh=getattr(db, "_fresh", False))
     # Dev: seed the one-click dev account when enabled (no-op otherwise).
-    from .dev_login import seed_dev_user
-
     seed_dev_user()
     startup_resume_chat()
     yield
@@ -94,11 +101,11 @@ app.add_middleware(
 # plain-HTTP LAN dev via COOKIE_SECURE=false.
 from starlette.middleware.sessions import SessionMiddleware  # noqa: E402
 
-from .auth import _user_secret  # noqa: E402
+from .auth import user_secret  # noqa: E402
 
 app.add_middleware(
     SessionMiddleware,
-    secret_key=_user_secret().hex(),
+    secret_key=user_secret().hex(),
     same_site="lax",
     https_only=bool_env("COOKIE_SECURE", default=True),
 )
@@ -116,13 +123,6 @@ class UserContextMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or not scope.get("path", "").startswith("/api"):
             return await self.app(scope, receive, send)
-
-        from http.cookies import SimpleCookie
-
-        from web.core.metadata import reset_tenant, set_tenant
-
-        from . import user_keys
-        from .users import resolve_current_user
 
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
         jar = SimpleCookie()
@@ -197,15 +197,11 @@ async def api_auth_login(data: LoginRequest, response: Response, request: Reques
     email = data.email.strip().lower()
     if _login_rate_limited(request, email):
         raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
-    from .passwords import needs_rehash, verify_password
-
     db = get_db()
     user = db.get_user_by_email(email)
     if not user or not user.password_hash or not verify_password(user.password_hash, data.password):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
     if needs_rehash(user.password_hash):  # transparently upgrade to stronger params
-        from .passwords import hash_password
-
         db.set_user_password(user.id, hash_password(data.password))
     set_user_cookie(response, request, user.id)
     return {"ok": True, "email": user.email, "name": user.name}
@@ -221,8 +217,6 @@ async def api_auth_logout(response: Response):
 async def api_auth_status(user_session: str | None = Cookie(None)):
     """Who (if anyone) is signed in. Admin accounts are created via the CLI
     (web.provision_admin), never through the app."""
-    from .users import resolve_current_user
-
     user = resolve_current_user(user_session)
     return {
         "authenticated": user is not None,

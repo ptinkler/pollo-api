@@ -15,31 +15,32 @@ from web.core import config
 from web.core.metadata import get_db, iso
 
 from .. import characters, media, request_log
+from ..media_types import VIDEO_SUFFIXES
 from ..providers import openrouter, venice
 from ..uploads import read_audio_upload, read_image_upload, read_video_upload, safe_filename, store_deduped
 from .catalogue import get_models
 from .constants import (
-    _KINDS,
-    _PARAM_FILES,
-    _PAUSE_KINDS,
     CHAT_PREVIEW_SIZE,
     CONVERSATION_LIST_LIMIT,
     DEFAULT_TITLE,
+    KINDS,
+    PARAM_FILES,
+    PAUSE_KINDS,
     SNIPPET_CHARS,
     THREAD_KINDS,
 )
 from .deps import router
 from .helpers import (
-    _branch_to,
-    _chat_root,
-    _conv_dir,
-    _message_out,
-    _require_conv,
-    _require_idle,
-    _require_openrouter,
-    _require_own_conversation,
-    _shown_branch,
-    _spend,
+    branch_to,
+    chat_root,
+    conversation_dir,
+    message_out,
+    require_conv,
+    require_idle,
+    require_own_conversation,
+    require_text_provider,
+    shown_branch,
+    spend,
 )
 from .models import (
     ConversationCreate,
@@ -66,7 +67,7 @@ def api_chat_status():
 @router.get("/credits")
 def api_chat_credits():
     """OpenRouter balance for the chat header (Pollo's is /api/usage/balance)."""
-    _require_openrouter()
+    require_text_provider()
     try:
         return openrouter.get_credits()
     except openrouter.OpenRouterError as e:
@@ -171,14 +172,14 @@ def api_create_conversation(data: ConversationCreate):
 
 
 def _require_hidden_defaults(value: dict | None) -> dict[str, list[int]]:
-    unknown = set(value or {}) - set(_KINDS)
+    unknown = set(value or {}) - set(KINDS)
     if unknown:
         raise HTTPException(400, f"Unknown kind of default: {', '.join(sorted(unknown))}")
     return {k: list(dict.fromkeys(ids)) for k, ids in (value or {}).items()}
 
 
 def _require_paused(value: dict | None) -> dict[str, list[int]]:
-    unknown = set(value or {}) - set(_PAUSE_KINDS)
+    unknown = set(value or {}) - set(PAUSE_KINDS)
     if unknown:
         raise HTTPException(400, f"Can't pause kind: {', '.join(sorted(unknown))}")
     return {k: list(dict.fromkeys(ids)) for k, ids in (value or {}).items()}
@@ -318,7 +319,7 @@ def api_delete_space(space_id: int):
 
 @router.get("/conversations/{conv_id}")
 def api_get_conversation(conv_id: str):
-    conv = _require_conv(conv_id)
+    conv = require_conv(conv_id)
     db = get_db()
     origin = None
     if conv.forked_from_id:
@@ -333,8 +334,8 @@ def api_get_conversation(conv_id: str):
     for f in db.list_conversation_forks(conv_id):
         forks.setdefault(f.forked_from_message_id, []).append({"id": f.id, "title": f.title})
     return {
-        "conversation": {**conv.to_dict(), "forked_from": origin, "spend": _spend(conv)},
-        "messages": [{**m, "forks": forks.get(m["id"], [])} for m in _shown_branch(conv_id)],
+        "conversation": {**conv.to_dict(), "forked_from": origin, "spend": spend(conv)},
+        "messages": [{**m, "forks": forks.get(m["id"], [])} for m in shown_branch(conv_id)],
     }
 
 
@@ -346,7 +347,7 @@ def api_spend_breakdown(days: int = 0):
     db = get_db()
     cutoff = datetime.now() - timedelta(days=days) if days > 0 else None
     groups: dict[tuple[str, str], dict] = {}
-    for r in db.spend_rows([c.id for c in db.list_conversations(limit=100000)]):
+    for r in db.spend_rows([c.id for c in db.list_conversations(limit=None)]):
         if cutoff and r["at"] and r["at"] < cutoff:
             continue
         g = groups.setdefault(
@@ -364,14 +365,14 @@ def api_spend_breakdown(days: int = 0):
 
 @router.get("/conversations/{conv_id}/spend")
 def api_conversation_spend(conv_id: str):
-    return _spend(_require_conv(conv_id))
+    return spend(require_conv(conv_id))
 
 
 @router.post("/conversations/{conv_id}/branch")
 def api_switch_branch(conv_id: str, data: SwitchBranch):
     """Show the branch through `message_id`, down to its newest message."""
-    _require_conv(conv_id)
-    _require_idle(conv_id)
+    require_conv(conv_id)
+    require_idle(conv_id)
     db = get_db()
     messages = db.get_chat_messages(conv_id)
     if not any(m.id == data.message_id for m in messages):
@@ -394,17 +395,17 @@ def api_fork_conversation(conv_id: str, data: ForkConversation):
     composer settings. It remembers where it came from. Media files are
     linked (or copied) into the new chat and characters made in this chat
     are copied into it, so either chat can be edited or deleted on its own."""
-    conv = _require_conv(conv_id)
-    _require_idle(conv_id)
+    conv = require_conv(conv_id)
+    require_idle(conv_id)
     db = get_db()
     messages = db.get_chat_messages(conv_id)
     at = next((m for m in messages if m.id == data.message_id), None)
     if not at:
         raise HTTPException(400, "Message not in this conversation")
-    path = _branch_to(messages, at.id)
+    path = branch_to(messages, at.id)
     replies = [m for m in messages if m.parent_id == at.id] if at.role == "user" else []
     if replies:
-        shown = {m.id for m in _branch_to(messages, db.get_chat_leaf_id(conv_id))}
+        shown = {m.id for m in branch_to(messages, db.get_chat_leaf_id(conv_id))}
         path.append(next((m for m in replies if m.id in shown), replies[-1]))
 
     new = db.create_conversation(
@@ -436,7 +437,7 @@ def api_fork_conversation(conv_id: str, data: ForkConversation):
     }
     db.update_conversation(new.id, character_ids=[char_map.get(i, i) for i in conv.character_ids])
 
-    fork = _Fork(_chat_root() / conv_id, _conv_dir(new.id), char_map)
+    fork = _Fork(chat_root() / conv_id, conversation_dir(new.id), char_map)
     db.add_chat_branch(
         new.id,
         [
@@ -459,7 +460,7 @@ def api_fork_conversation(conv_id: str, data: ForkConversation):
 def _media_character_ids(params: dict) -> set[int]:
     """Characters a media item was made with: by id, or through their images."""
     ids = {i for i in params.get("characters") or [] if isinstance(i, int)}
-    for ref in [*(params.get("refs") or []), *(params.get(k) for k in _PARAM_FILES)]:
+    for ref in [*(params.get("refs") or []), *(params.get(k) for k in PARAM_FILES)]:
         if isinstance(ref, str) and ref.startswith(characters.REF_PREFIX):
             cid = ref[len(characters.REF_PREFIX) :].partition("/")[0]
             if cid.isdigit():
@@ -492,7 +493,7 @@ class _Fork:
                 params["characters"] = [self.char_map.get(i, i) for i in params["characters"]]
             if params.get("refs"):
                 params["refs"] = [self._ref(r) for r in params["refs"]]
-            for key in _PARAM_FILES:
+            for key in PARAM_FILES:
                 if params.get(key):
                     params[key] = self._ref(params[key])
         return item
@@ -544,7 +545,7 @@ def _clean_conv_update(fields: dict) -> None:
 
 @router.patch("/conversations/{conv_id}")
 def api_update_conversation(conv_id: str, data: ConversationUpdate):
-    _require_conv(conv_id)
+    require_conv(conv_id)
     fields = data.model_dump(exclude_unset=True)
     _clean_conv_update(fields)
     if "pinned" in fields:
@@ -559,11 +560,11 @@ def api_update_conversation(conv_id: str, data: ConversationUpdate):
 def api_delete_conversation(conv_id: str, delete_media: bool = True):
     """Delete a chat. Its images/videos/uploads go with it unless delete_media=false
     (the files then stay and show up under "Orphaned" in the Media library)."""
-    _require_conv(conv_id)
+    require_conv(conv_id)
     characters.delete_for_conversation(conv_id, get_db())
     get_db().delete_conversation(conv_id)
     # Its files go in the background: hundreds of images take a while on a NAS
-    folder = _chat_root() / conv_id
+    folder = chat_root() / conv_id
     if delete_media and folder.exists():
         folder.rename(folder.with_name(f".deleting-{conv_id}"))  # out of the way at once
         threading.Thread(target=_empty_trash, daemon=True).start()
@@ -572,40 +573,40 @@ def api_delete_conversation(conv_id: str, delete_media: bool = True):
 
 def _empty_trash() -> None:
     """Remove deleted chats' folders (any left by a restart mid-delete too)."""
-    for trash in _chat_root().glob(".deleting-*"):
+    for trash in chat_root().glob(".deleting-*"):
         shutil.rmtree(trash, ignore_errors=True)
 
 
 @router.post("/conversations/{conv_id}/attachments")
 async def api_upload_attachment(conv_id: str, file: UploadFile = File(...)):
-    _require_conv(conv_id)
+    require_conv(conv_id)
     content, ext = await read_image_upload(file)
-    return {"file": store_deduped(_conv_dir(conv_id), "up_", content, ext)}
+    return {"file": store_deduped(conversation_dir(conv_id), "up_", content, ext)}
 
 
 @router.post("/conversations/{conv_id}/attachments/video")
 async def api_upload_video_attachment(conv_id: str, file: UploadFile = File(...)):
     """A source video upload (e.g. Recast). Saved with a 'upv_' prefix so the
     message endpoint records it as a video (not image) media item."""
-    _require_conv(conv_id)
+    require_conv(conv_id)
     content, ext = await read_video_upload(file)
-    return {"file": store_deduped(_conv_dir(conv_id), "upv_", content, ext)}
+    return {"file": store_deduped(conversation_dir(conv_id), "upv_", content, ext)}
 
 
 @router.post("/conversations/{conv_id}/attachments/audio")
 async def api_upload_audio_attachment(conv_id: str, file: UploadFile = File(...)):
     """A lip-sync audio upload. Saved with a 'upa_' prefix so the message
     endpoint records it as an audio (not image) media item."""
-    _require_conv(conv_id)
+    require_conv(conv_id)
     content, ext = await read_audio_upload(file)
-    return {"file": store_deduped(_conv_dir(conv_id), "upa_", content, ext)}
+    return {"file": store_deduped(conversation_dir(conv_id), "upa_", content, ext)}
 
 
 @router.delete("/conversations/{conv_id}/attachments/{filename}")
 def api_discard_attachment(conv_id: str, filename: str):
     """Drop an attachment that was uploaded but never sent (removed from the
     composer). Files any message or library entry still uses are kept."""
-    _require_conv(conv_id)
+    require_conv(conv_id)
     name = safe_filename(filename)
     if not name.startswith(("up_", "upv_", "upa_")):
         return {"deleted": False}
@@ -613,7 +614,7 @@ def api_discard_attachment(conv_id: str, filename: str):
     in_use = any(name in media._referenced_files(i) for m in db.get_chat_messages(conv_id) for i in m.media) or any(
         lib.conversation_id == conv_id and name in media._referenced_files(lib.item) for lib in db.list_chat_library()
     )
-    path = _conv_dir(conv_id) / name
+    path = conversation_dir(conv_id) / name
     if in_use or not path.is_file():
         return {"deleted": False}
     path.unlink()
@@ -622,8 +623,8 @@ def api_discard_attachment(conv_id: str, filename: str):
 
 @router.get("/media/{conv_id}/{filename}")
 def api_chat_media(conv_id: str, filename: str):
-    path = _chat_root() / safe_filename(conv_id) / safe_filename(filename)  # rejects traversal (400)
-    _require_own_conversation(conv_id)
+    path = chat_root() / safe_filename(conv_id) / safe_filename(filename)  # rejects traversal (400)
+    require_own_conversation(conv_id)
     if not path.is_file():
         raise HTTPException(404, "Not found")
     return FileResponse(path, headers={"Cache-Control": "private, max-age=31536000, immutable"})
@@ -633,8 +634,8 @@ def api_chat_media(conv_id: str, filename: str):
 async def api_chat_media_preview(conv_id: str, filename: str):
     """A chat image (or a video's first frame) scaled down for showing in the
     chat, cached; the full file is for the lightbox and downloads."""
-    path = _chat_root() / safe_filename(conv_id) / safe_filename(filename)  # rejects traversal (400)
-    _require_own_conversation(conv_id)
+    path = chat_root() / safe_filename(conv_id) / safe_filename(filename)  # rejects traversal (400)
+    require_own_conversation(conv_id)
     if not path.is_file():
         raise HTTPException(404, "Not found")
     try:
@@ -642,7 +643,7 @@ async def api_chat_media_preview(conv_id: str, filename: str):
     except HTTPException:
         # No thumbnail could be made (odd format, half-written file): show the
         # image itself rather than a broken tile. Videos have nothing to fall back to.
-        if path.suffix.lower() in (".mp4", ".webm", ".mov"):
+        if path.suffix.lower() in VIDEO_SUFFIXES:
             raise
         return FileResponse(path, headers={"Cache-Control": "no-cache"})
 
@@ -660,7 +661,7 @@ def api_chat_library():
     items are still in their chat (on some branch); the rest were detached
     by edits/retries made before chats had branches."""
     db = get_db()
-    titles = {c.id: c.title for c in db.list_conversations(limit=100000)}
+    titles = db.conversation_titles()
     items = []
     for msg in db.get_chat_messages_with_media():
         for item in msg.media:
@@ -702,7 +703,7 @@ def api_delete_library_item(media_id: str):
         raise HTTPException(404, "Not in the library (only unattached items can be deleted here)")
     db.delete_chat_library_item(media_id)
     if lib.item.get("file"):
-        (_chat_root() / lib.conversation_id / safe_filename(lib.item["file"])).unlink(missing_ok=True)
+        (chat_root() / lib.conversation_id / safe_filename(lib.item["file"])).unlink(missing_ok=True)
     return {"deleted": media_id}
 
 
@@ -711,7 +712,7 @@ def api_get_message(message_id: int):
     msg = get_db().get_chat_message(message_id)
     if not msg:
         raise HTTPException(404, "Message not found")
-    return _message_out(msg)
+    return message_out(msg)
 
 
 @router.get("/messages/{message_id}/delete-info")
@@ -737,14 +738,14 @@ def api_delete_exchange(message_id: int, delete_media: bool = False):
         raise HTTPException(404, "Message not found")
     if msg.role != "user":
         raise HTTPException(400, "Delete the prompt; its reply goes with it")
-    _require_idle(msg.conversation_id)
+    require_idle(msg.conversation_id)
     detached = db.delete_chat_exchange(msg.conversation_id, message_id)
     if delete_media:
         for item in detached:
             if item.get("file"):
-                (_conv_dir(msg.conversation_id) / safe_filename(item["file"])).unlink(missing_ok=True)
+                (conversation_dir(msg.conversation_id) / safe_filename(item["file"])).unlink(missing_ok=True)
             db.delete_chat_library_item(item["id"])
     return {
         "conversation": db.get_conversation(msg.conversation_id).to_dict(),
-        "messages": _shown_branch(msg.conversation_id),
+        "messages": shown_branch(msg.conversation_id),
     }

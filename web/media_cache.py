@@ -18,6 +18,7 @@ Every call degrades to "not cached" if the file can't be opened or read: it's
 a cache, so losing it costs time, never correctness.
 """
 
+import logging
 import sqlite3
 import threading
 from collections.abc import Callable
@@ -25,6 +26,8 @@ from pathlib import Path
 from typing import Any
 
 from web.core import config
+
+log = logging.getLogger(__name__)
 
 _SCHEMA = "CREATE TABLE IF NOT EXISTS durations (path TEXT PRIMARY KEY, mtime_ns INTEGER, seconds REAL)"
 _TIMEOUT = 5.0
@@ -56,7 +59,7 @@ def _with_db(work: Callable[[sqlite3.Connection], Any], default: Any = None) -> 
         conn.commit()
         return result
     except Exception as e:  # noqa: BLE001 — see above
-        print(f"[MediaCache] unusable ({e}) — lengths will be read from the files")
+        log.warning("media cache unusable (%s) — lengths will be read from the files", e)
         return default
     finally:
         if conn is not None:

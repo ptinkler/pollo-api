@@ -25,7 +25,7 @@ export const MEMORY_STEPS = [2, 4, 6, 10, 14, 20, 30, 40, 60, 80, 100, null]
 const DEFAULT_MEMORY = 20
 // Image slider stops: how many recent chat images go with each request (null = all)
 export const IMAGE_STEPS = [0, 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, null]
-const DEFAULT_IMAGES = 6 // mirrors DEFAULT_IMAGE_LIMIT in web/chat.py
+const DEFAULT_IMAGES = 6 // mirrors DEFAULT_IMAGE_LIMIT in web/chat/constants.py
 
 function loadPrefs() {
   try {

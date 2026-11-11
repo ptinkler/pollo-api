@@ -9,14 +9,20 @@ an instance-wide default from the environment.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import secrets
 
+import httpx
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from web.core import config
 from web.core.metadata import current_tenant, get_db
 
+from .net_guard import UnsafeURLError, get_public
+from .public_media import selfhost_url
 from .users import require_user
 
 router = APIRouter(prefix="/api/settings/uploads")
@@ -130,16 +136,6 @@ async def test_selfhost(data: SelfhostTest, user=Depends(require_user)):
     """Confirm a self-host base URL is reachable from the outside the way Pollo
     would reach it: stage a tiny file, sign a link at that base, fetch it back
     through the public-URL guard, and check the bytes come through."""
-    import contextlib
-    import secrets
-
-    import httpx
-
-    from web.core import config
-
-    from .net_guard import UnsafeURLError, get_public
-    from .public_media import selfhost_url
-
     base = (data.selfhost_base or resolve_prefs(user).get("selfhost_base") or "").strip()
     token = secrets.token_hex(8)
     test_dir = config.ROOT_DIR / "chat" / "__selfhost_test__"

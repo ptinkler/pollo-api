@@ -14,7 +14,10 @@ from __future__ import annotations
 import argparse
 import getpass
 
+from web.core import config
 from web.core.metadata import get_db
+
+from .passwords import hash_password
 
 
 def main() -> None:
@@ -28,8 +31,6 @@ def main() -> None:
 
     db = get_db()
     if args.set_password:
-        from .passwords import hash_password
-
         pw = args.password or getpass.getpass("New admin password: ")
         if len(pw) < 10:
             raise SystemExit("Password must be at least 10 characters.")
@@ -46,8 +47,6 @@ def main() -> None:
 
 def _migrate_library(admin_id: str) -> int:
     """Move the shared (legacy) library uploads into the admin's per-user folder."""
-    from web.core import config
-
     base = config.ROOT_DIR / "library"
     if not base.is_dir():
         return 0

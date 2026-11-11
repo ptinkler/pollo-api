@@ -2,6 +2,7 @@
      folders, recents) with per-thread hover actions. Presentational — all
      state/actions come from props/emits. -->
 <script setup>
+import SidebarThreadRow from './SidebarThreadRow.vue'
 import { ref, computed } from 'vue'
 
 const props = defineProps({
@@ -86,8 +87,6 @@ function matchesKind(t) {
   if (props.filter === 'gallery') return k === 'gallery'
   return true
 }
-// Icon per thread kind: the gallery icon (same as "New gallery") vs the chat icon.
-const threadIcon = t => (t.kind === 'gallery' ? '#s-image' : '#s-chat')
 const filtered = computed(() => {
   const q = props.search.trim().toLowerCase()
   return props.threads.filter(t => matchesKind(t) && (!q || (t.title || '').toLowerCase().includes(q)))
@@ -174,30 +173,18 @@ const bySpace = computed(() => {
         <template v-if="pinned.length">
           <div class="nlabel">Pinned</div>
           <div v-for="t in pinned" :key="t.id" class="nrow" :class="{ active: t.id === active }">
-            <input
-              v-if="renamingId === t.id"
-              v-focus-select
-              class="nrename"
-              :value="renameText"
-              @input="renameText = $event.target.value"
-              @keydown.enter.prevent="commitRename(t)"
-              @keydown.esc="cancelRename"
-              @blur="commitRename(t)"
+            <SidebarThreadRow
+              v-model:rename-text="renameText"
+              :thread="t"
+              :renaming="renamingId === t.id"
+              always-pinned
+              @open="emit('open', t.id)"
+              @pin="emit('pin', t)"
+              @start-rename="startRename(t)"
+              @commit-rename="commitRename(t)"
+              @cancel-rename="cancelRename"
+              @delete="emit('delete', t)"
             />
-            <a v-else class="nitem" :href="`/${t.id}`" @click.prevent="emit('open', t.id)">
-              <svg class="ic"><use :href="threadIcon(t)" /></svg><span class="lbl">{{ t.title || 'Untitled' }}</span>
-            </a>
-            <div class="nactions">
-              <button class="nact on" title="Unpin" @click.stop="emit('pin', t)">
-                <svg class="ic sm"><use href="#s-pin" /></svg>
-              </button>
-              <button class="nact" title="Rename" @click.stop="startRename(t)">
-                <svg class="ic sm"><use href="#s-pencil" /></svg>
-              </button>
-              <button class="nact" title="Delete" @click.stop="emit('delete', t)">
-                <svg class="ic sm"><use href="#s-trash" /></svg>
-              </button>
-            </div>
           </div>
         </template>
 
@@ -253,30 +240,18 @@ const bySpace = computed(() => {
               draggable="true"
               @dragstart="dragId = t.id"
             >
-              <input
-                v-if="renamingId === t.id"
-                v-focus-select
-                class="nrename"
-                :value="renameText"
-                @input="renameText = $event.target.value"
-                @keydown.enter.prevent="commitRename(t)"
-                @keydown.esc="cancelRename"
-                @blur="commitRename(t)"
+              <SidebarThreadRow
+                v-model:rename-text="renameText"
+                :thread="t"
+                :renaming="renamingId === t.id"
+                :pinned="t.pinned"
+                @open="emit('open', t.id)"
+                @pin="emit('pin', t)"
+                @start-rename="startRename(t)"
+                @commit-rename="commitRename(t)"
+                @cancel-rename="cancelRename"
+                @delete="emit('delete', t)"
               />
-              <a v-else class="nitem" :href="`/${t.id}`" @click.prevent="emit('open', t.id)">
-                <svg class="ic"><use :href="threadIcon(t)" /></svg><span class="lbl">{{ t.title || 'Untitled' }}</span>
-              </a>
-              <div class="nactions">
-                <button class="nact" :class="{ on: t.pinned }" title="Pin" @click.stop="emit('pin', t)">
-                  <svg class="ic sm"><use href="#s-pin" /></svg>
-                </button>
-                <button class="nact" title="Rename" @click.stop="startRename(t)">
-                  <svg class="ic sm"><use href="#s-pencil" /></svg>
-                </button>
-                <button class="nact" title="Delete" @click.stop="emit('delete', t)">
-                  <svg class="ic sm"><use href="#s-trash" /></svg>
-                </button>
-              </div>
             </div>
             <div v-if="!g.items.length" class="fempty">Empty — drag threads here</div>
           </div>
@@ -299,30 +274,18 @@ const bySpace = computed(() => {
           draggable="true"
           @dragstart="dragId = t.id"
         >
-          <input
-            v-if="renamingId === t.id"
-            v-focus-select
-            class="nrename"
-            :value="renameText"
-            @input="renameText = $event.target.value"
-            @keydown.enter.prevent="commitRename(t)"
-            @keydown.esc="cancelRename"
-            @blur="commitRename(t)"
+          <SidebarThreadRow
+            v-model:rename-text="renameText"
+            :thread="t"
+            :renaming="renamingId === t.id"
+            :pinned="t.pinned"
+            @open="emit('open', t.id)"
+            @pin="emit('pin', t)"
+            @start-rename="startRename(t)"
+            @commit-rename="commitRename(t)"
+            @cancel-rename="cancelRename"
+            @delete="emit('delete', t)"
           />
-          <a v-else class="nitem" :href="`/${t.id}`" @click.prevent="emit('open', t.id)">
-            <svg class="ic"><use :href="threadIcon(t)" /></svg><span class="lbl">{{ t.title || 'Untitled' }}</span>
-          </a>
-          <div class="nactions">
-            <button class="nact" :class="{ on: t.pinned }" title="Pin" @click.stop="emit('pin', t)">
-              <svg class="ic sm"><use href="#s-pin" /></svg>
-            </button>
-            <button class="nact" title="Rename" @click.stop="startRename(t)">
-              <svg class="ic sm"><use href="#s-pencil" /></svg>
-            </button>
-            <button class="nact" title="Delete" @click.stop="emit('delete', t)">
-              <svg class="ic sm"><use href="#s-trash" /></svg>
-            </button>
-          </div>
         </div>
       </div>
       <div class="pfoot">
@@ -500,74 +463,9 @@ const bySpace = computed(() => {
 .nrow.active .ic {
   color: var(--saccent);
 }
-.nitem {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1;
-  min-width: 0;
-  padding: 7px 10px;
-  color: var(--smuted);
-  background: none;
-  border: none;
-  cursor: pointer;
-  text-align: left;
-  text-decoration: none;
-  font-size: 13.5px;
-}
-.nrename {
-  flex: 1;
-  min-width: 0;
-  margin: 3px 6px;
-  padding: 6px 8px;
-  border: 1px solid var(--saccent);
-  border-radius: 7px;
-  background: var(--spanel2, var(--sbg2));
-  color: var(--sfg);
-  outline: none;
-  font: inherit;
-  font-size: 13px;
-}
 .nrow.sm .nitem {
   padding: 6px 10px;
   font-size: 13px;
-}
-.nitem .ic {
-  color: var(--sfaint);
-}
-.nitem .lbl {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.nactions {
-  display: none;
-  align-items: center;
-  gap: 1px;
-  padding-right: 5px;
-}
-.nrow:hover .nactions {
-  display: flex;
-}
-.nact {
-  width: 25px;
-  height: 25px;
-  display: grid;
-  place-items: center;
-  border-radius: 6px;
-  color: var(--sfaint);
-  background: none;
-  border: none;
-  cursor: pointer;
-}
-.nact:hover {
-  background: var(--sborder);
-  color: var(--sfg);
-}
-.nact.on {
-  color: var(--saccent);
 }
 .folder {
   display: flex;

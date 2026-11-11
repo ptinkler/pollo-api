@@ -4,10 +4,14 @@ Get task status from the Pollo API.
 API Docs: https://docs.pollo.ai/task/get-task-status?playground=open
 """
 
+import logging
+
 import requests
 
 from .cloudflare import is_cloudflare_block
 from .config import POLLO_API_TIMEOUT, POLLO_PLATFORM_BASE, POLLO_TASK_BASE
+
+log = logging.getLogger(__name__)
 
 # Each result tuple: (status, failMsg, url, credits)
 TaskResult = tuple[str, str | None, str | None, int | None]
@@ -24,7 +28,6 @@ def get_task_status(task_id: str, api_key: str) -> list[TaskResult]:
     if is_cloudflare_block(response):
         return [("cloudflare_blocked", CLOUDFLARE_MESSAGE, None, None)]
     if response.status_code != 200:
-        print("Error fetching task status.")
         return [("error", _error_message(response), None, None)]
     try:
         data = response.json().get("data", {})
@@ -34,7 +37,7 @@ def get_task_status(task_id: str, api_key: str) -> list[TaskResult]:
     # Generations come under "generations" or, in another response shape, "result"
     generations = data.get("generations") or data.get("result") or []
     if not generations:
-        print("No generations found in the response.")
+        log.warning("task %s: no generations in the response", task_id)
         return [("error", "No generations found.", None, None)]
     results = [
         (gen.get("status"), gen.get("failMsg"), gen.get("url") or gen.get("videoUrl"), _credit(gen.get("credit")))
@@ -83,7 +86,7 @@ def get_credit_balance(api_key: str) -> dict[str, int] | None:
                 "availableCredits": data.get("availableCredits", 0),
                 "totalCredits": data.get("totalCredits", 0),
             }
-        print(f"[Credits] Balance fetch {response.status_code} from {url}: {response.text[:300]}")
+        log.warning("credit balance fetch returned HTTP %s from %s: %s", response.status_code, url, response.text[:300])
     except Exception as e:
-        print(f"[Credits] Failed to fetch balance: {e}")
+        log.warning("could not fetch the credit balance: %s", e)
     return None

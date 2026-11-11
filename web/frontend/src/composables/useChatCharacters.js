@@ -10,7 +10,7 @@ export function upsert(list, item) {
 }
 
 // Why the current mode and models can't use characters, or null if they can
-// (mirrors _characters_usable in web/chat.py). Unknown models (catalogue still
+// (mirrors Turn._characters_usable in web/chat/turn.py). Unknown models (catalogue still
 // loading) count as able, like on the server.
 function characterBlocker({ mode, selected, textInfo, imageInfo, videoInfo }) {
   if (mode === 'text') return null

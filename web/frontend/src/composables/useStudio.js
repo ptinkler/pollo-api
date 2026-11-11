@@ -1,5 +1,5 @@
 import { confirmDialog, promptDialog } from './useDialog'
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, onScopeDispose } from 'vue'
 import {
   fetchConversations,
   fetchConversation,
@@ -309,10 +309,16 @@ export function useStudio({ models, settings, showToast }) {
     refreshBalances()
   }
   // Balances also drift outside this tab (other devices, other chats): re-check
-  // when the tab is shown again and every couple of minutes while it is.
+  // when the tab is shown again and every couple of minutes while it is. Both
+  // are torn down with the scope that created them — a listener and a timer
+  // that outlive it would keep firing against a dead component.
   const onShown = () => document.visibilityState === 'visible' && refreshBalances()
   document.addEventListener('visibilitychange', onShown)
-  setInterval(onShown, 120000)
+  const balanceTimer = setInterval(onShown, 120000)
+  onScopeDispose(() => {
+    document.removeEventListener('visibilitychange', onShown)
+    clearInterval(balanceTimer)
+  })
 
   async function loadModels() {
     modelsLoading.value = true
