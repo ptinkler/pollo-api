@@ -1,6 +1,8 @@
 """Tunables and small constant tables shared across the chat package."""
 
-from web.media_types import IMAGE_EXTS  # noqa: F401 — re-exported for the chat package
+from web.media_types import IMAGE_EXTS
+
+__all__ = ["IMAGE_EXTS"]  # re-exported for the chat package
 
 MAX_TOOL_ROUNDS = 4
 CONSISTENCY_REFS = 2  # recent images passed to the image model to keep characters consistent

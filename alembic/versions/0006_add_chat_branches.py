@@ -1,4 +1,4 @@
-"""add chat_messages.parent_id and chat_conversations.current_leaf_id
+"""add chat_messages.parent_id and chat_conversations.current_leaf_id.
 
 Revision ID: 0006
 Revises: 0005

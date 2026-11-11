@@ -1,4 +1,4 @@
-"""add users table (OAuth multi-tenant)
+"""add users table (OAuth multi-tenant).
 
 Revision ID: 0019
 Revises: 0018

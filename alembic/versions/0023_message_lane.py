@@ -1,4 +1,4 @@
-"""add chat_messages.lane (standalone gallery exchanges beside the chat)
+"""add chat_messages.lane (standalone gallery exchanges beside the chat).
 
 Revision ID: 0023
 Revises: 0022

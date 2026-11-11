@@ -1,5 +1,4 @@
-"""
-Public hosting for local source media, for providers that only take a URL
+"""Public hosting for local source media, for providers that only take a URL
 (Pollo): the per-user preference picks the host (litterbox / tmpfiles /
 self-host) and retention — see web/upload_settings.py. A primary host is tried
 first, then the backup. Self-host serves the file from this instance itself
@@ -14,8 +13,8 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 
-from .public_media import selfhost_url
-from .upload_settings import current_upload_prefs
+from web.public_media import selfhost_url
+from web.upload_settings import current_upload_prefs
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +42,8 @@ _URL_CACHE_MAX = 256  # bound the dict; prune expired first, then oldest
 
 def _cache_key(filepath: Path, host: str, expiry_minutes: int) -> tuple | None:
     """A cache key identifying this exact file content for this host/span, or
-    None when the file can't be stat'd (then it just isn't cached)."""
+    None when the file can't be stat'd (then it just isn't cached).
+    """
     try:
         st = Path(filepath).stat()
     except OSError:
@@ -82,7 +82,8 @@ def upload_file(filepath: Path, prefs: dict | None = None) -> str:
     trying the primary host then the backup. `prefs` defaults to the current
     user's resolved upload preferences (web/upload_settings.py). A still-live
     URL from an earlier upload of the same file+host is reused instead of
-    re-uploading (see the cache above)."""
+    re-uploading (see the cache above).
+    """
     if prefs is None:
         prefs = current_upload_prefs()
     expiry = prefs.get("expiry_minutes", 60)
@@ -159,7 +160,8 @@ def _litterbox_time(expiry_minutes: int) -> str:
 
 def _upload_to_litterbox(filepath: Path, expiry_minutes: int = 60) -> str:
     """Upload a file to litterbox.catbox.moe and return the public URL.
-    Fails fast (no retry) so VPN/Cloudflare blocks surface immediately."""
+    Fails fast (no retry) so VPN/Cloudflare blocks surface immediately.
+    """
     try:
         with open(filepath, "rb") as f:
             resp = requests.post(
@@ -183,7 +185,8 @@ def _upload_to_litterbox(filepath: Path, expiry_minutes: int = 60) -> str:
 
 def _upload_to_tmpfiles(filepath: Path, expiry_minutes: int = 60) -> str:
     """Upload a file to tmpfiles.org and return its direct download URL.
-    (tmpfiles honors its own retention; we pass the requested span as a hint.)"""
+    (tmpfiles honors its own retention; we pass the requested span as a hint.).
+    """
     try:
         with open(filepath, "rb") as f:
             resp = requests.post(
@@ -200,13 +203,14 @@ def _upload_to_tmpfiles(filepath: Path, expiry_minutes: int = 60) -> str:
         return _tmpfiles_direct_url(data["data"]["url"])
     except ValueError:
         raise
-    except Exception as exc:  # noqa: BLE001 — any failure falls back to litterbox
+    except Exception as exc:
         raise ValueError(f"tmpfiles.org upload failed — {exc}") from exc
 
 
 def _tmpfiles_direct_url(page_url: str) -> str:
     """tmpfiles.org's dl/ URLs need a {timestamp}.{hash} segment the upload
-    API doesn't return, so scrape it from the file's HTML page."""
+    API doesn't return, so scrape it from the file's HTML page.
+    """
     page = requests.get(page_url, timeout=(8, 30))
     page.raise_for_status()
     soup = BeautifulSoup(page.text, "html.parser")

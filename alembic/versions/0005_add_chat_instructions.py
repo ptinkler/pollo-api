@@ -1,4 +1,4 @@
-"""add chat_instructions table and chat_conversations.instruction_id
+"""add chat_instructions table and chat_conversations.instruction_id.
 
 Revision ID: 0005
 Revises: 0004

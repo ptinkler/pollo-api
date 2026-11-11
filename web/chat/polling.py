@@ -1,6 +1,7 @@
 """Background video polling: start a poller thread for a submitted job, poll it
 to completion (downloading the finished file), and resume unfinished jobs +
-warm missing thumbnails at startup."""
+warm missing thumbnails at startup.
+"""
 
 import logging
 import threading
@@ -9,15 +10,14 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from web import media
+from web.chat.constants import CHAT_PREVIEW_SIZE, VIDEO_MAX_POLL_ERRORS, VIDEO_POLL_INTERVAL, VIDEO_POLL_TIMEOUT
+from web.chat.generation import MODERATION
+from web.chat.helpers import add_message_cost, chat_root, conversation_dir
+from web.chat.workers import with_owner_keys
 from web.core.metadata import get_db
-
-from .. import media
-from ..media_types import AUDIO_SUFFIXES, IMAGE_SUFFIXES, VIDEO_SUFFIXES
-from ..providers import provider_for_job
-from .constants import CHAT_PREVIEW_SIZE, VIDEO_MAX_POLL_ERRORS, VIDEO_POLL_INTERVAL, VIDEO_POLL_TIMEOUT
-from .generation import MODERATION
-from .helpers import add_message_cost, chat_root, conversation_dir
-from .workers import with_owner_keys
+from web.media_types import AUDIO_SUFFIXES, IMAGE_SUFFIXES, VIDEO_SUFFIXES
+from web.providers import provider_for_job
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +26,8 @@ _RESULT_EXTS = VIDEO_SUFFIXES | AUDIO_SUFFIXES
 
 def _result_name(kind: str | None, job: dict) -> str:
     """A fresh file name; the extension follows the result's URL (tools return
-    .webm / .mov, speech may be .wav), else .mp3 for audio and .mp4 for video."""
+    .webm / .mov, speech may be .wav), else .mp3 for audio and .mp4 for video.
+    """
     audio = kind == "audio"
     ext = Path(urlsplit((job.get("urls") or [""])[0]).path).suffix.lower()
     if ext not in _RESULT_EXTS:
@@ -54,7 +55,7 @@ def _poll_video(conv_id: str, message_id: int, media_id: str, job_id: str) -> No
         try:
             job = source.get_video(job_id)
             errors = 0
-        except Exception as e:  # noqa: BLE001 — transient network/VPN hiccups
+        except Exception as e:  # transient network/VPN hiccups
             errors += 1
             log.warning("video %s: poll error %d/%d: %s", job_id, errors, VIDEO_MAX_POLL_ERRORS, e)
             if errors >= VIDEO_MAX_POLL_ERRORS:
@@ -67,7 +68,7 @@ def _poll_video(conv_id: str, message_id: int, media_id: str, job_id: str) -> No
             name = _result_name(item.get("kind"), job)
             try:
                 source.download_video(job_id, conversation_dir(conv_id) / name)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 db.update_chat_media_item(message_id, media_id, status="error", error=f"Download failed: {e}")
                 return
             cost = (job.get("usage") or {}).get("cost")
@@ -126,7 +127,8 @@ def startup_resume_chat() -> None:
 def _warm_missing_thumbnails() -> None:
     """Make any missing grid thumbnails and chat previews for chat images, one
     at a time in the background, so the Media page and big chats (imports)
-    don't wait for them on first view. Ones already made are skipped quickly."""
+    don't wait for them on first view. Ones already made are skipped quickly.
+    """
     root = chat_root()
     if not root.is_dir():
         return

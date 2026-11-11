@@ -8,8 +8,10 @@ from datetime import UTC, datetime
 import pytest
 
 import web.chatgpt_import as imp_mod
-from tests.test_chat import SETTINGS, _png_bytes, _text_chunks, chat, client, db  # noqa: F401
+from tests.chat_fixtures import SETTINGS, _png_bytes, _text_chunks
 from web.providers import openrouter
+
+pytest_plugins = ["tests.chat_fixtures"]
 
 T0 = 1_790_000_000.0  # the first prompt's time
 
@@ -98,7 +100,7 @@ def _export(path, conversations, library, files=("file_up1", "file_gen1")):
     return path
 
 
-@pytest.fixture()
+@pytest.fixture
 def imp(chat, db, monkeypatch):
 
     monkeypatch.setattr(imp_mod, "get_db", lambda: db)
@@ -106,7 +108,7 @@ def imp(chat, db, monkeypatch):
     return imp_mod
 
 
-@pytest.fixture()
+@pytest.fixture
 def story_zip(tmp_path):
     return _export(tmp_path / "export1.zip", [conversation("c1", "Rain", _story_messages(), T0 + 200)], STORY_LIBRARY)
 
@@ -129,9 +131,12 @@ def _imported(client):
 class TestFirstImport:
     def test_turns_become_a_prompt_and_one_reply(self, imp, client, story_zip):
         stats = imp.run_import(story_zip)
-        assert stats["new"] == 1 and stats["images"] == 2 and stats["missing_images"] == 1
+        assert stats["new"] == 1
+        assert stats["images"] == 2
+        assert stats["missing_images"] == 1
         [conv] = _imported(client)
-        assert conv["title"] == "Rain" and conv["import_source"] == "chatgpt"
+        assert conv["title"] == "Rain"
+        assert conv["import_source"] == "chatgpt"
         msgs = _shown(client, conv["id"])
         assert [m["role"] for m in msgs] == ["user", "assistant", "user", "assistant"]
         assert msgs[0]["content"] == "draw her in the rain"
@@ -144,9 +149,13 @@ class TestFirstImport:
         conv = _imported(client)[0]
         msgs = _shown(client, conv["id"])
         [up] = msgs[0]["media"]
-        assert up["source"] == "upload" and up["status"] == "done" and up["file"].endswith(".png")
+        assert up["source"] == "upload"
+        assert up["status"] == "done"
+        assert up["file"].endswith(".png")
         [gen] = msgs[1]["media"]  # the unfinished one is left out
-        assert gen["source"] == "generated" and gen["prompt"] == "Rainy Street" and gen["model"] == "chatgpt"
+        assert gen["source"] == "generated"
+        assert gen["prompt"] == "Rainy Street"
+        assert gen["model"] == "chatgpt"
         assert (tmp_path / "chat" / conv["id"] / gen["file"]).is_file()
         assert client.get(f"/api/chat/media/{conv['id']}/{gen['file']}").status_code == 200
         assert msgs[3]["media"] == []
@@ -157,7 +166,8 @@ class TestFirstImport:
         )
         imp.run_import(path)
         [up] = _shown(client, _imported(client)[0]["id"])[0]["media"]
-        assert up["status"] == "error" and up["error"] == imp.MISSING
+        assert up["status"] == "error"
+        assert up["error"] == imp.MISSING
 
     def test_keeps_chatgpt_dates(self, imp, client, story_zip):
         imp.run_import(story_zip)
@@ -173,13 +183,14 @@ class TestFirstImport:
         ]
         imp.run_import(_export(tmp_path / "e.zip", [conversation("c1", "Cat", messages, T0 + 20)], []))
         msgs = _shown(client, _imported(client)[0]["id"])
-        assert msgs[1]["content"] == "Here it is" and msgs[1]["media"][0]["source"] == "generated"
+        assert msgs[1]["content"] == "Here it is"
+        assert msgs[1]["media"][0]["source"] == "generated"
 
     def test_not_an_export(self, imp, tmp_path):
         path = tmp_path / "other.zip"
         with zipfile.ZipFile(path, "w") as zf:
             zf.writestr("readme.txt", "hi")
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=r"conversations\.json"):
             imp.run_import(path)
 
 
@@ -187,7 +198,9 @@ class TestImportingAgain:
     def test_unchanged_chats_are_skipped(self, imp, client, story_zip):
         imp.run_import(story_zip)
         stats = imp.run_import(story_zip)
-        assert stats["unchanged"] == 1 and stats["new"] == 0 and stats["images"] == 0
+        assert stats["unchanged"] == 1
+        assert stats["new"] == 0
+        assert stats["images"] == 0
         assert len(_imported(client)) == 1
 
     def test_new_turns_are_added(self, imp, client, story_zip, tmp_path):
@@ -208,7 +221,9 @@ class TestImportingAgain:
             files=("file_up1", "file_gen1", "file_gen2"),
         )
         stats = imp.run_import(later)
-        assert stats["updated"] == 1 and stats["new"] == 1 and stats["images"] == 1
+        assert stats["updated"] == 1
+        assert stats["new"] == 1
+        assert stats["images"] == 1
         conv = next(c for c in _imported(client) if c["title"] == "Rain")
         msgs = _shown(client, conv["id"])
         assert [m["content"] for m in msgs[4:]] == ["one more picture", ""]
@@ -239,14 +254,16 @@ class TestImportingAgain:
         imp.run_import(story_zip)
         client.delete(f"/api/chat/conversations/{_imported(client)[0]['id']}")
         stats = imp.run_import(story_zip)
-        assert stats["deleted"] == 1 and _imported(client) == []
+        assert stats["deleted"] == 1
+        assert _imported(client) == []
 
 
 class TestSpace:
     def test_imported_chats_go_in_a_chatgpt_space(self, imp, client, story_zip):
         stats = imp.run_import(story_zip)
         space = _space(client)
-        assert space and stats["space_id"] == space["id"]
+        assert space
+        assert stats["space_id"] == space["id"]
         assert [c["title"] for c in _imported(client)] == ["Rain"]
         imp.run_import(story_zip)
         assert [sp["name"] for sp in client.get("/api/chat/spaces").json()["spaces"]] == ["ChatGPT"]  # just the one
@@ -285,14 +302,16 @@ class TestRoutes:
         (tmp_path / "imports" / "test-user").mkdir(parents=True)
         story_zip.rename(tmp_path / "imports" / "test-user" / "export1.zip")
         data = client.get("/api/chat/import/chatgpt").json()
-        assert [f["name"] for f in data["files"]] == ["export1.zip"] and data["job"]["state"] == "idle"
+        assert [f["name"] for f in data["files"]] == ["export1.zip"]
+        assert data["job"]["state"] == "idle"
         assert client.post("/api/chat/import/chatgpt", json={"file": "export1.zip"}).status_code == 200
         for _ in range(100):
             job = client.get("/api/chat/import/chatgpt").json()["job"]
             if job["state"] != "running":
                 break
             time.sleep(0.05)
-        assert job["state"] == "done" and job["new"] == 1
+        assert job["state"] == "done"
+        assert job["new"] == 1
         assert len(_imported(client)) == 1
 
     def test_only_exports_in_the_imports_folder(self, imp, client):
@@ -301,7 +320,8 @@ class TestRoutes:
 
     def test_another_users_export_is_not_importable(self, imp, client, story_zip, tmp_path):
         """The imports folder is per-tenant, so a user can't list or import an
-        export another user uploaded (even knowing its filename)."""
+        export another user uploaded (even knowing its filename).
+        """
         (tmp_path / "imports" / "other-user").mkdir(parents=True)
         story_zip.rename(tmp_path / "imports" / "other-user" / "export1.zip")
         assert client.get("/api/chat/import/chatgpt").json()["files"] == []  # not listed
@@ -309,7 +329,7 @@ class TestRoutes:
 
 
 class TestUpload:
-    @pytest.fixture()
+    @pytest.fixture
     def small_chunks(self, imp, monkeypatch):
         monkeypatch.setattr(imp, "UPLOAD_CHUNK", 1000)
 

@@ -11,12 +11,11 @@ import os
 from fastapi import APIRouter, Cookie, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
+from web import users
+from web.auth import set_user_cookie
 from web.core.metadata import get_db
-
-from . import users
-from .auth import set_user_cookie
-from .dev_login import dev_login_enabled
-from .oauth import configured_providers, normalize_profile, oauth
+from web.dev_login import dev_login_enabled
+from web.oauth import configured_providers, normalize_profile, oauth
 
 router = APIRouter(prefix="/api/auth")
 
@@ -34,7 +33,8 @@ def _user_dict(u) -> dict:
 
 def _redirect_uri(request: Request, provider: str) -> str:
     """The provider's callback URL. PUBLIC_BASE_URL pins the public https host
-    (needed behind a reverse proxy / NAS); otherwise it's derived from request."""
+    (needed behind a reverse proxy / NAS); otherwise it's derived from request.
+    """
     base = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
     if base:
         return f"{base}/api/auth/callback/{provider}"

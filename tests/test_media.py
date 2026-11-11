@@ -16,8 +16,9 @@ from PIL import Image
 import web.core.config as config
 import web.media as media_mod
 import web.media_cache as media_cache
-from tests.test_api import _setup_env, client, db  # noqa: F401 — fixtures
 from web.core import metadata
+
+pytest_plugins = ["tests.api_fixtures"]
 
 
 def _png(color="red") -> bytes:
@@ -26,7 +27,7 @@ def _png(color="red") -> bytes:
     return buf.getvalue()
 
 
-@pytest.fixture()
+@pytest.fixture
 def conv(db, tmp_path):
 
     c = db.create_conversation(title="Fox chat")
@@ -72,13 +73,15 @@ class TestListing:
         assert any(i["origin"] == "library" and i["source"] == "upload" for i in items.values())
         assert items[f"chat:{conv.id}:up_1.png"]["source"] == "upload"
         chat_gen = items[f"chat:{conv.id}:img_1.png"]
-        assert chat_gen["source"] == "generated" and chat_gen["conversation_title"] == "Fox chat"
+        assert chat_gen["source"] == "generated"
+        assert chat_gen["conversation_title"] == "Fox chat"
         assert not any(i.startswith(f"chat:{conv.id}:") and "None" in i for i in items)  # pending skipped
 
     def test_upload_serve_delete(self, client):
         r = client.post("/api/media/upload", files={"file": ("a.png", _png(), "image/png")})
         item = r.json()
-        assert item["origin"] == "library" and item["source"] == "upload"
+        assert item["origin"] == "library"
+        assert item["source"] == "upload"
         assert client.get(item["url"]).content == _png()
         assert item["id"] in _items(client)
         assert client.delete(f"/api/media/{item['id']}").status_code == 200
@@ -94,7 +97,8 @@ class TestListing:
         assert r.headers["content-type"] == "application/zip"
         assert len(zipfile.ZipFile(io.BytesIO(r.content)).namelist()) == 2  # the missing one is skipped
         r = client.post("/api/media/bulk-delete", json={"ids": [*ids, "lib:missing.png"]}).json()
-        assert sorted(r["deleted"]) == sorted(ids) and r["failed"] == ["lib:missing.png"]
+        assert sorted(r["deleted"]) == sorted(ids)
+        assert r["failed"] == ["lib:missing.png"]
         assert not set(ids) & set(_items(client))
 
     def test_rejects_non_images(self, client):
@@ -108,8 +112,8 @@ class TestListing:
         """Chat files live under a global folder keyed only by the (random)
         conversation id. Knowing another user's id must not let you view,
         delete, or copy their files — only the owning user, or anyone for a
-        truly orphaned folder with no conversation row (see test_delete)."""
-
+        truly orphaned folder with no conversation row (see test_delete).
+        """
         token = metadata.set_tenant("other-user")  # a conversation someone else owns
         try:
             other = db.create_conversation(title="Not yours")
@@ -132,28 +136,33 @@ class TestListing:
         for n in range(5):
             client.post("/api/media/upload", files={"file": (f"a{n}.png", _png((n, 0, 0)), "image/png")})
         full = client.get("/api/media").json()
-        assert full["total"] == 5 and len(full["items"]) == 5  # no limit → everything
+        assert full["total"] == 5
+        assert len(full["items"]) == 5
         page = client.get("/api/media?offset=0&limit=2").json()
-        assert page["total"] == 5 and [i["id"] for i in page["items"]] == [i["id"] for i in full["items"][:2]]
+        assert page["total"] == 5
+        assert [i["id"] for i in page["items"]] == [i["id"] for i in full["items"][:2]]
         rest = client.get("/api/media?offset=2&limit=2").json()
         assert [i["id"] for i in rest["items"]] == [i["id"] for i in full["items"][2:4]]
 
     def test_filters_server_side(self, client, conv):
         images = client.get("/api/media?kind=image").json()
-        assert images["items"] and all(i["kind"] == "image" for i in images["items"])
+        assert images["items"]
+        assert all(i["kind"] == "image" for i in images["items"])
         assert images["total"] == len(images["items"])
         chats = client.get("/api/media?origin=chat").json()
-        assert chats["items"] and all(i["origin"] == "chat" for i in chats["items"])
+        assert chats["items"]
+        assert all(i["origin"] == "chat" for i in chats["items"])
         found = client.get("/api/media?q=fox").json()  # matches prompts / names / where-from
-        assert found["items"] and found["total"] == len(found["items"])
+        assert found["items"]
+        assert found["total"] == len(found["items"])
 
 
 class TestOrphans:
-    @pytest.fixture()
+    @pytest.fixture
     def orphans(self, db, conv):
-        """conv plus an attachment nothing sent, a reference a reply was made
-        from, and the folder of a deleted chat — all old enough."""
-
+        """Conv plus an attachment nothing sent, a reference a reply was made
+        from, and the folder of a deleted chat — all old enough.
+        """
         root = config.ROOT_DIR / "chat"
         (root / conv.id / "up_lost.png").write_bytes(_png())
         (root / conv.id / "up_ref.png").write_bytes(_png())
@@ -202,7 +211,8 @@ class TestImport:
             "/api/media/import",
             json={"media_id": lib["id"], "target": "chat", "conversation_id": conv.id},
         ).json()
-        assert r["file"].startswith("up_") and (config.ROOT_DIR / "chat" / conv.id / r["file"]).is_file()
+        assert r["file"].startswith("up_")
+        assert (config.ROOT_DIR / "chat" / conv.id / r["file"]).is_file()
 
     def test_into_a_character(self, client, conv):
         char = client.post("/api/characters", json={"name": "Fox"}).json()
@@ -244,11 +254,11 @@ class TestDelete:
 
 
 class TestBlocked:
-    @pytest.fixture()
+    @pytest.fixture
     def blocked(self, db, conv):
-        """conv plus: a moderated failure and a black image in a reply, an
-        ordinary failure (kept), and a moderated failure detached to the library."""
-
+        """Conv plus: a moderated failure and a black image in a reply, an
+        ordinary failure (kept), and a moderated failure detached to the library.
+        """
         d = config.ROOT_DIR / "chat" / conv.id
         (d / "img_black.png").write_bytes(_png("black"))
         db.add_chat_message(conv.id, "user", "again")
@@ -338,8 +348,10 @@ class TestBlocked:
     def test_clear_removes_them_and_keeps_the_rest(self, client, db, conv, blocked):
         assert client.post("/api/media/blocked/clear").json() == {"cleared": 3}
         media = {i["id"] for m in db.get_chat_messages(conv.id) for i in m.media}
-        assert {"m", "b", "lm"}.isdisjoint(media) and {"t", "g", "u", "p"} <= media
-        assert not (blocked / "img_black.png").exists() and (blocked / "img_1.png").exists()
+        assert {"m", "b", "lm"}.isdisjoint(media)
+        assert {"t", "g", "u", "p"} <= media
+        assert not (blocked / "img_black.png").exists()
+        assert (blocked / "img_1.png").exists()
         assert db.list_chat_library() == []
         assert client.get("/api/media/blocked").json() == {"moderated": 0, "black": 0}
 
@@ -353,9 +365,11 @@ class TestThumbnails:
     def test_image_thumb_is_small_and_cached(self, client, monkeypatch):
         item = client.post("/api/media/upload", files={"file": ("a.png", self._big_png(), "image/png")}).json()
         r = client.get(item["thumb_url"])
-        assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "image/jpeg"
         thumb = Image.open(io.BytesIO(r.content))
-        assert min(thumb.size) == 320 and thumb.size[0] > thumb.size[1]  # shorter side, shape kept
+        assert min(thumb.size) == 320
+        assert thumb.size[0] > thumb.size[1]
         # Second request comes from the cache — no re-encoding
 
         monkeypatch.setattr(media_mod.Image, "open", lambda *a, **k: pytest.fail("re-encoded"))
@@ -368,7 +382,8 @@ class TestThumbnails:
         Image.new("RGB", (640, 360), "orange").save(buf, "JPEG")
         monkeypatch.setattr(media_mod, "first_frame_jpeg", lambda p: buf.getvalue())
         r = client.get(f"/api/media/thumb/chat:{conv.id}:vid.mp4")
-        assert r.status_code == 200 and Image.open(io.BytesIO(r.content)).size == (569, 320)
+        assert r.status_code == 200
+        assert Image.open(io.BytesIO(r.content)).size == (569, 320)
 
     def test_unreadable_file_has_no_thumb(self, client, conv, monkeypatch):
 
@@ -446,7 +461,8 @@ class TestFirstFrameJpeg:
         monkeypatch.setattr(media_mod, "make_thumb", slow_thumb)
         with ThreadPoolExecutor(8) as pool:
             codes = list(pool.map(lambda u: client.get(u).status_code, ids))
-        assert codes == [200] * 8 and state["peak"] <= media_mod.THUMB_WORKERS
+        assert codes == [200] * 8
+        assert state["peak"] <= media_mod.THUMB_WORKERS
 
 
 class TestUploadDedupe:
@@ -463,9 +479,10 @@ class TestUploadDedupe:
 class TestVideoDurations:
     """Reading a length opens the file with OpenCV, which is slow on a NAS, so
     building the list never does it: a request fills in the page it returns,
-    and what's been read is kept in the database (MediaDuration)."""
+    and what's been read is kept in the database (MediaDuration).
+    """
 
-    @pytest.fixture()
+    @pytest.fixture
     def clips(self, db, conv):
 
         d = config.ROOT_DIR / "chat" / conv.id
@@ -496,20 +513,24 @@ class TestVideoDurations:
         # The clips are in the library and get built into the list, but this
         # page holds no video, so nothing opens one
         r = client.get("/api/media?kind=image")
-        assert r.status_code == 200 and r.json()["total"] and not any(i["kind"] == "video" for i in r.json()["items"])
+        assert r.status_code == 200
+        assert r.json()["total"]
+        assert not any(i["kind"] == "video" for i in r.json()["items"])
 
     def test_a_page_fills_in_its_own_lengths_and_remembers_them(self, client, clips, monkeypatch):
         reads = []
         monkeypatch.setattr(clips, "_video_seconds", lambda path, mtime: reads.append(path) or 12.5)
         items = {i["id"]: i for i in client.get("/api/media").json()["items"]}
         clip = next(i for i in items.values() if i["name"] == "clip_0.mp4")
-        assert clip["duration"] == 12.5 and len(reads) == 3
+        assert clip["duration"] == 12.5
+        assert len(reads) == 3
         # Read once: the next request (and the next process) uses what's stored
         reads.clear()
         clips._invalidate_list()
         clips._durations = None  # as a fresh process would start: nothing in memory
         again = {i["name"]: i for i in client.get("/api/media").json()["items"]}
-        assert again["clip_0.mp4"]["duration"] == 12.5 and reads == []
+        assert again["clip_0.mp4"]["duration"] == 12.5
+        assert reads == []
 
     def test_a_re_encoded_file_is_read_again(self, client, clips, db, monkeypatch):
 
@@ -519,7 +540,8 @@ class TestVideoDurations:
         monkeypatch.setattr(clips, "_video_seconds", lambda path, mtime: 9.0)
         clips._invalidate_list()
         items = {i["name"]: i for i in client.get("/api/media").json()["items"]}
-        assert items["clip_0.mp4"]["duration"] == 9.0 and items["clip_1.mp4"]["duration"] == 4.0
+        assert items["clip_0.mp4"]["duration"] == 9.0
+        assert items["clip_1.mp4"]["duration"] == 4.0
 
     def test_fill_is_capped_so_one_request_cannot_stall(self, client, clips, monkeypatch):
         monkeypatch.setattr(clips, "_DURATION_FILL_BUDGET", 2)
@@ -531,15 +553,16 @@ class TestVideoDurations:
 
 class TestMediaCache:
     """The cache lives under <data>/cache with the thumbnails, so deleting that
-    folder wipes it — and it can't grow past one row per file that exists."""
+    folder wipes it — and it can't grow past one row per file that exists.
+    """
 
-    @pytest.fixture()
+    @pytest.fixture
     def cached(self, client, clips, db, conv):
 
         client.get("/api/media")  # fills in the clips' lengths
         return media_cache
 
-    @pytest.fixture()
+    @pytest.fixture
     def clips(self, db, conv):
         return TestVideoDurations.clips.__wrapped__(TestVideoDurations(), db, conv)
 

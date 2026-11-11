@@ -9,7 +9,7 @@ import web.core.config as config_mod
 from web.core.metadata import MetadataDB, _base, get_db, manager
 
 
-@pytest.fixture()
+@pytest.fixture
 def db(tmp_path):
     """Return a MetadataDB backed by a fresh temp file."""
     return MetadataDB(db_path=tmp_path / "test.db")
@@ -32,8 +32,8 @@ class TestGlobalDB:
 def test_timestamps_carry_the_servers_utc_offset(tmp_path, monkeypatch, tz):
     """Stored timestamps are naive server-local time. Serialised without an
     offset, a browser in another timezone misreads them (a UTC server and a
-    UTC+1 browser showed a 1:20 render as 61:20)."""
-
+    UTC+1 browser showed a 1:20 render as 61:20).
+    """
     monkeypatch.setenv("TZ", tz)
     time.tzset()
     try:

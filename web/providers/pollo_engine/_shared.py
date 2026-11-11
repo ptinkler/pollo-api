@@ -1,5 +1,6 @@
 """Shared primitives for the Pollo engine family builders: terminal statuses,
-input-parsing helpers, and aspect-ratio maths."""
+input-parsing helpers, and aspect-ratio maths.
+"""
 
 from __future__ import annotations
 

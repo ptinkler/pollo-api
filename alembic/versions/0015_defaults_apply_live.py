@@ -1,4 +1,4 @@
-"""chat defaults apply live: take the copies of them out of existing chats
+"""chat defaults apply live: take the copies of them out of existing chats.
 
 Revision ID: 0015
 Revises: 0014

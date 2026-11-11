@@ -9,8 +9,8 @@ a model id to the module that owns it (OpenRouter is the fallback).
 
 from pathlib import Path
 
-from ..uploads import file_to_data_url
-from . import openrouter, pollo, pollo_models, venice  # noqa: F401
+from web.providers import openrouter, pollo, pollo_models, venice
+from web.uploads import file_to_data_url
 
 # Dispatch order for the model catalogue (Pollo first, OpenRouter last). Each
 # exposes the uniform surface: NAME, is_configured(), list_models(kind, refresh).
@@ -28,7 +28,8 @@ def provider_for(model_id: str | None):
 
 def provider_for_job(job_id: str | None):
     """The provider module that owns an async job id — "pollo:…", "venice:…",
-    else OpenRouter. Used by the background pollers, which only have the id."""
+    else OpenRouter. Used by the background pollers, which only have the id.
+    """
     if pollo.is_pollo_job(job_id):
         return pollo
     if venice.is_venice_job(job_id):
@@ -144,3 +145,7 @@ def submit_video(
         first_frame=file_to_data_url(first_frame) if first_frame else None,
         session_id=session_id,
     )
+
+
+# Re-exported: importing the package registers these submodules' routes/providers.
+__all__ = ["openrouter", "pollo", "pollo_models", "venice"]

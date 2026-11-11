@@ -1,6 +1,6 @@
 """The chat library: media detached from its message (edits/retries)."""
 
-from .models import ChatLibraryItem
+from web.core.metadata.models import ChatLibraryItem
 
 
 class LibraryMixin:

@@ -1,5 +1,4 @@
-"""
-Thin OpenRouter client (https://openrouter.ai/docs) used by the chat mode.
+"""Thin OpenRouter client (https://openrouter.ai/docs) used by the chat mode.
 
 Covers the three surfaces chat needs:
   • text   — POST /chat/completions (SSE streaming, tool calls)
@@ -22,7 +21,7 @@ from typing import Any
 
 import httpx
 
-from .. import keyctx, net_guard, request_log, sse
+from web import keyctx, net_guard, request_log, sse
 
 # Overridable so a local fake can stand in during manual testing
 OPENROUTER_BASE = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
@@ -32,7 +31,8 @@ DEFAULT_TIMEOUT = httpx.Timeout(30)
 
 
 class OpenRouterError(Exception):
-    def __init__(self, message: str, status: int | None = None):
+    def __init__(self, message: str, status: int | None = None) -> None:
+        """Carry the message plus the HTTP status, when the call got that far."""
         super().__init__(message)
         self.status = status
 
@@ -47,7 +47,8 @@ def keepalive_socket_options() -> list[tuple[int, int, int]]:
     NB: observed cuts at ~62s on both OpenRouter and Venice through the
     Surfshark/gluetun tunnel suggest the VPN ignores these keepalive ACKs
     (they carry no payload) and times out on idle *data*. If so, tightening
-    the interval won't help and the fix is at the VPN layer."""
+    the interval won't help and the fix is at the VPN layer.
+    """
     options = [(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)]
     for name, value in (("TCP_KEEPIDLE", 5), ("TCP_KEEPINTVL", 5), ("TCP_KEEPCNT", 8)):
         if hasattr(socket, name):  # Linux names; other platforms keep OS defaults
@@ -62,7 +63,8 @@ _client = httpx.Client(transport=httpx.HTTPTransport(socket_options=keepalive_so
 @contextmanager
 def _connection_guard(waiting_for: str):
     """Turn a dropped connection into an OpenRouterError (so the chat marks the
-    media failed instead of leaving it pending), saying how long it waited."""
+    media failed instead of leaving it pending), saying how long it waited.
+    """
     start = time.monotonic()
     try:
         yield
@@ -141,7 +143,8 @@ def _get(path: str, params: dict | None = None) -> dict:
 
 def get_credits() -> dict[str, float]:
     """The account's balance in dollars: bought, used, and what's left. (Not
-    GET /key, which is only this key's own spending limit.)"""
+    GET /key, which is only this key's own spending limit.).
+    """
     data = _get("/credits").get("data") or {}
     total, used = float(data.get("total_credits") or 0), float(data.get("total_usage") or 0)
     return {"total_credits": total, "total_usage": used, "remaining": round(total - used, 4)}
@@ -173,7 +176,8 @@ def list_image_models() -> list[dict[str, Any]]:
     """Image models from the Images API, plus the *conversational* ones: chat
     models that output both text and images (Gemini image, GPT-5 Image). Those
     are marked `conversational` — they can be given the whole conversation,
-    as the Gemini app does, instead of a lone prompt."""
+    as the Gemini app does, instead of a lone prompt.
+    """
     data = _get("/images/models").get("data", [])
     models = []
     for m in data:
@@ -342,7 +346,8 @@ def _images_from_json(data: dict) -> tuple[list[tuple[bytes, str]], float | None
 
 def _images_from_stream(lines: Iterator[str]) -> tuple[list[tuple[bytes, str]], float | None]:
     """The finished images from an /images SSE stream (image_generation.completed
-    events; partial previews and ": OPENROUTER PROCESSING" keep-alives skipped)."""
+    events; partial previews and ": OPENROUTER PROCESSING" keep-alives skipped).
+    """
     images: list[tuple[bytes, str]] = []
     cost = None
     event = ""
@@ -380,7 +385,8 @@ def generate_image_chat(
 ) -> tuple[list[tuple[bytes, str]], float | None]:
     """Generate images with a conversational image model via /chat/completions
     (modalities image+text), giving it the conversation as context.
-    Returns ([(image_bytes, media_type), ...], cost_usd)."""
+    Returns ([(image_bytes, media_type), ...], cost_usd).
+    """
     body: dict[str, Any] = {"model": model, "messages": messages, "modalities": ["image", "text"]}
     if aspect_ratio:
         body["image_config"] = {"aspect_ratio": aspect_ratio}
@@ -470,6 +476,5 @@ def download_video(job_id: str, dest: Path, index: int = 0) -> None:
             resp.read()
             _raise_for_response(resp)
         with open(tmp, "wb") as f:
-            for chunk in resp.iter_bytes():
-                f.write(chunk)
+            f.writelines(resp.iter_bytes())
     tmp.replace(dest)

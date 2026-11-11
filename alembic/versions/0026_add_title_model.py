@@ -1,4 +1,4 @@
-"""add title_model to chat_settings
+"""add title_model to chat_settings.
 
 Revision ID: 0026
 Revises: 0025

@@ -1,4 +1,4 @@
-"""add chat_conversations and chat_messages tables
+"""add chat_conversations and chat_messages tables.
 
 Revision ID: 0003
 Revises: 0002

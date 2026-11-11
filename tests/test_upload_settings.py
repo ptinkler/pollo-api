@@ -1,5 +1,6 @@
 """Per-user source-media hosting: prefs resolution, host dispatch order, and
-the signed self-host serving route."""
+the signed self-host serving route.
+"""
 
 import time
 import types
@@ -22,19 +23,23 @@ class TestPrefsResolution:
         monkeypatch.setenv("UPLOAD_BACKUP", "litterbox")
         monkeypatch.setenv("UPLOAD_EXPIRY_MINUTES", "1440")
         d = upload_settings.default_prefs()
-        assert d["primary"] == "tmpfiles" and d["backup"] == "litterbox" and d["expiry_minutes"] == 1440
+        assert d["primary"] == "tmpfiles"
+        assert d["backup"] == "litterbox"
+        assert d["expiry_minutes"] == 1440
 
     def test_unset_user_gets_default(self):
         assert upload_settings.resolve_prefs(_user())["primary"] == upload_settings.default_prefs()["primary"]
 
     def test_stored_overrides_default(self):
         prefs = upload_settings.resolve_prefs(_user('{"primary": "selfhost", "selfhost_base": "https://x.test"}'))
-        assert prefs["primary"] == "selfhost" and prefs["selfhost_base"] == "https://x.test"
+        assert prefs["primary"] == "selfhost"
+        assert prefs["selfhost_base"] == "https://x.test"
 
     def test_invalid_host_and_expiry_dropped(self):
         prefs = upload_settings.resolve_prefs(_user('{"primary": "nope", "expiry_minutes": 7}'))
         d = upload_settings.default_prefs()
-        assert prefs["primary"] == d["primary"] and prefs["expiry_minutes"] == d["expiry_minutes"]
+        assert prefs["primary"] == d["primary"]
+        assert prefs["expiry_minutes"] == d["expiry_minutes"]
 
     def test_backup_equal_to_primary_becomes_none(self):
         prefs = upload_settings.resolve_prefs(_user('{"primary": "litterbox", "backup": "litterbox"}'))
@@ -47,7 +52,8 @@ class TestPrefsResolution:
 @pytest.fixture
 def _no_url_check(monkeypatch):
     """Dispatch/cache tests stub the hosts themselves, so there's no real URL
-    to fetch — the served-file check is exercised in TestServedCheck."""
+    to fetch — the served-file check is exercised in TestServedCheck.
+    """
     monkeypatch.setattr(image_hosts, "_verify_served", lambda host, url, filepath: None)
 
 
@@ -58,7 +64,8 @@ class TestDispatchOrder:
         monkeypatch.setattr(image_hosts, "_upload_to_litterbox", lambda p, e=60: calls.append("litterbox") or "L")
         monkeypatch.setattr(image_hosts, "_upload_to_tmpfiles", lambda p, e=60: calls.append("tmpfiles") or "T")
         prefs = {"primary": "tmpfiles", "backup": "litterbox", "expiry_minutes": 60}
-        assert image_hosts.upload_file("f", prefs) == "T" and calls == ["tmpfiles"]
+        assert image_hosts.upload_file("f", prefs) == "T"
+        assert calls == ["tmpfiles"]
 
     def test_falls_back_to_backup_on_failure(self, monkeypatch):
         def boom(p, e=60):
@@ -76,7 +83,8 @@ class TestDispatchOrder:
             image_hosts.upload_file("f", prefs)
 
     def test_litterbox_expiry_bucketed(self):
-        assert image_hosts._litterbox_time(70) == "1h" and image_hosts._litterbox_time(4000) == "72h"
+        assert image_hosts._litterbox_time(70) == "1h"
+        assert image_hosts._litterbox_time(4000) == "72h"
 
 
 @pytest.mark.usefixtures("_no_url_check")
@@ -127,7 +135,8 @@ class TestUploadCache:
 
 class TestServedCheck:
     """A host can take the upload and still not serve the file to a plain
-    client; the provider would then be charged for fetching a web page."""
+    client; the provider would then be charged for fetching a web page.
+    """
 
     def _resp(self, status=200, content_type="video/mp4"):
         return types.SimpleNamespace(status_code=status, headers={"content-type": content_type}, close=lambda: None)
@@ -175,7 +184,8 @@ class TestServedCheck:
         f.write_bytes(b"v")
         calls = []
         monkeypatch.setattr(image_hosts.requests, "get", lambda url, **kw: calls.append(url) or self._resp())
-        monkeypatch.setattr("web.public_media.selfhost_url", lambda p, base, ttl_seconds: "https://my.box/t")
+        # patch where image_hosts looks the name up, not where it is defined
+        monkeypatch.setattr(image_hosts, "selfhost_url", lambda p, base, ttl_seconds: "https://my.box/t")
         prefs = {"primary": "selfhost", "backup": None, "expiry_minutes": 60, "selfhost_base": "https://my.box"}
         assert image_hosts.upload_file(f, prefs) == "https://my.box/t"
         assert calls == []
@@ -198,7 +208,8 @@ class TestSelfHost:
         token = url.rsplit("/", 1)[1]
         client = TestClient(_app())
         r = client.get(f"/api/public-media/{token}")
-        assert r.status_code == 200 and r.content == b"hello"
+        assert r.status_code == 200
+        assert r.content == b"hello"
 
     def test_serves_from_character_refs_root(self, tmp_path, monkeypatch):
         # Character reference images (ROOT_DIR/characters) are a valid Pollo
@@ -245,7 +256,8 @@ class TestApi:
         assert r.status_code == 200
         body = r.json()
         assert body["prefs"]["primary"] in upload_settings.HOSTS
-        assert "litterbox" in body["hosts"] and body["expiry_options"] == list(upload_settings.EXPIRY_OPTIONS)
+        assert "litterbox" in body["hosts"]
+        assert body["expiry_options"] == list(upload_settings.EXPIRY_OPTIONS)
 
 
 def _app():

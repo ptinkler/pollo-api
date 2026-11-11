@@ -1,4 +1,4 @@
-"""multi-tenant: add user_id to tenant tables and backfill to the admin
+"""multi-tenant: add user_id to tenant tables and backfill to the admin.
 
 Revision ID: 0020
 Revises: 0019

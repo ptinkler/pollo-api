@@ -1,8 +1,9 @@
 """Instruction snippets and groups, the per-user defaults bucket, and spaces."""
 
 from datetime import datetime
+from typing import Any
 
-from .models import ChatConversation, ChatInstruction, ChatInstructionGroup, ChatSettings, ChatSpace
+from web.core.metadata.models import ChatConversation, ChatInstruction, ChatInstructionGroup, ChatSettings, ChatSpace
 
 
 class InstructionMixin:
@@ -23,7 +24,7 @@ class InstructionMixin:
                 session.expunge(i)
             return items
 
-    def save_instruction(self, instruction_id: int | None = None, **fields) -> ChatInstruction | None:
+    def save_instruction(self, instruction_id: int | None = None, **fields: Any) -> ChatInstruction | None:
         """Create (id None) or update a snippet."""
         return self._save(ChatInstruction, instruction_id, **fields)
 
@@ -59,7 +60,7 @@ class InstructionMixin:
     def get_instruction_group(self, group_id: int) -> ChatInstructionGroup | None:
         return self._get(ChatInstructionGroup, group_id)
 
-    def save_instruction_group(self, group_id: int | None = None, **fields) -> ChatInstructionGroup | None:
+    def save_instruction_group(self, group_id: int | None = None, **fields: Any) -> ChatInstructionGroup | None:
         """Create (id None) or update a group."""
         return self._save(ChatInstructionGroup, group_id, **fields)
 
@@ -110,7 +111,7 @@ class InstructionMixin:
             session.expunge(item)
             return item
 
-    def save_settings(self, **fields) -> ChatSettings:
+    def save_settings(self, **fields: Any) -> ChatSettings:
         with self._session() as session:
             item = session.query(ChatSettings).first() or ChatSettings()
             session.add(item)
@@ -128,7 +129,7 @@ class InstructionMixin:
     def get_space(self, space_id: int) -> ChatSpace | None:
         return self._get(ChatSpace, space_id)
 
-    def save_space(self, space_id: int | None = None, **fields) -> ChatSpace | None:
+    def save_space(self, space_id: int | None = None, **fields: Any) -> ChatSpace | None:
         """Create (id None) or update a space."""
         return self._save(ChatSpace, space_id, **fields)
 

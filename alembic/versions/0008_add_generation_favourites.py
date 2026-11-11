@@ -1,4 +1,4 @@
-"""add generation_favourites
+"""add generation_favourites.
 
 Revision ID: 0008
 Revises: 0007

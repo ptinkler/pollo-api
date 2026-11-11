@@ -1,5 +1,6 @@
 """SQLAlchemy ORM models for the metadata database, plus the `iso` timestamp
-helper and the JSON-list / defaults-bucket descriptors the models use."""
+helper and the JSON-list / defaults-bucket descriptors the models use.
+"""
 
 import json
 from datetime import datetime
@@ -13,7 +14,8 @@ def iso(dt: datetime | None) -> str | None:
     """A stored timestamp as ISO 8601 with its UTC offset. Timestamps are
     saved as naive server-local time (datetime.now); without an offset the
     browser reads them as *its* local time, which is wrong whenever the
-    server's timezone differs (e.g. a UTC container and a UTC+1 browser)."""
+    server's timezone differs (e.g. a UTC container and a UTC+1 browser).
+    """
     return dt.astimezone().isoformat() if dt else None
 
 
@@ -25,7 +27,8 @@ class User(Base):
     """A person who signs in via OAuth (Google/Microsoft/X). Multi-tenant: each
     user owns their own threads/media (user_id added to those tables in a later
     migration). Provider API keys are per-user (api_keys_json), so each person
-    pays their own way; the admin (the instance owner) also controls the VPN."""
+    pays their own way; the admin (the instance owner) also controls the VPN.
+    """
 
     __tablename__ = "users"
     id: Mapped[str] = mapped_column(String(50), primary_key=True)  # uuid hex
@@ -50,15 +53,19 @@ class User(Base):
 class JsonIds:
     """A list kept as JSON in the text column named after it plus "_json"
     (`character_ids` → `character_ids_json`). Reads [] when empty or
-    unreadable; writes it without repeats unless `unique=False`."""
+    unreadable; writes it without repeats unless `unique=False`.
+    """
 
-    def __init__(self, unique: bool = True):
+    def __init__(self, unique: bool = True) -> None:
+        """Set whether writes drop repeated items."""
         self.unique = unique
 
     def __set_name__(self, owner, name: str) -> None:
+        """Record the backing column's name, which is the attribute's plus `_json`."""
         self.column = f"{name}_json"
 
     def __get__(self, obj, owner=None):
+        """Decode the backing column, or [] when it is empty or unreadable."""
         if obj is None:
             return self
         raw = getattr(obj, self.column)
@@ -68,13 +75,15 @@ class JsonIds:
             return []
 
     def __set__(self, obj, value) -> None:
+        """Encode `value` into the backing column as JSON."""
         items = list(value or [])
         setattr(obj, self.column, json.dumps(list(dict.fromkeys(items)) if self.unique else items))
 
 
 class DefaultsBucket:
     """The chat defaults kept by ChatSettings (every chat) and ChatSpace (the
-    chats in it): default characters, instruction snippets and groups."""
+    chats in it): default characters, instruction snippets and groups.
+    """
 
     default_character_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     default_instruction_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -133,12 +142,12 @@ class ChatConversation(Base):
     kind: Mapped[str] = mapped_column(String(10), default="chat", server_default="chat")
     # The composer settings last used here (mode, sliders, media options; JSON)
     settings_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Defaults (global or its space's) switched off in this chat only:
-    # {"character" | "instruction" | "instruction_group": [ids]} (JSON)
+    # Defaults (global or its space's) switched off in this chat only. JSON
+    # object keyed by character, instruction or instruction_group, each a list of ids.
     hidden_defaults_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Instruction snippets/groups paused in this chat: still attached (own or
-    # inherited) but temporarily not sent to the model, until resumed.
-    # {"instruction" | "instruction_group": [ids]} (JSON)
+    # inherited) but temporarily not sent to the model, until resumed. JSON
+    # object keyed by instruction or instruction_group, each a list of ids.
     paused_instructions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Imported from another app (web/chatgpt_import.py): where from, its id
     # there and when it was last changed there, so a later import of the
@@ -228,7 +237,8 @@ class Character(Base):
     """A reusable character: a name, a description and a few reference images
     (files under <data>/characters/<id>/, see web/characters.py), attachable
     to chats and generations. With `conversation_id` set it's ad hoc — made
-    in that chat and deleted with it — until promoted (conversation_id None)."""
+    in that chat and deleted with it — until promoted (conversation_id None).
+    """
 
     __tablename__ = "characters"
     # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020
@@ -259,7 +269,8 @@ class Character(Base):
 class ChatInstruction(Base):
     """A reusable instruction snippet. Which snippets a new chat starts with is
     decided by the settings buckets (ChatSettings, ChatSpace), not a per-snippet
-    flag."""
+    flag.
+    """
 
     __tablename__ = "chat_instructions"
     # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020
@@ -284,7 +295,8 @@ class ChatInstructionGroup(Base):
     """A named bundle of instruction snippets (ChatInstruction). Attaching a
     group to a chat contributes all its snippets; a snippet may be in several
     groups and is sent only once. Which groups a new chat starts with is decided
-    by the settings buckets (ChatSettings, ChatSpace)."""
+    by the settings buckets (ChatSettings, ChatSpace).
+    """
 
     __tablename__ = "chat_instruction_groups"
     # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020
@@ -310,7 +322,8 @@ class ChatInstructionGroup(Base):
 class ChatSpace(DefaultsBucket, Base):
     """A chat-only grouping of conversations, with its own default characters
     and instruction snippets/groups: every chat in it uses them, live (on top
-    of the global ones). Unrelated to the generation-side Project."""
+    of the global ones). Unrelated to the generation-side Project.
+    """
 
     __tablename__ = "chat_spaces"
     # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020
@@ -333,7 +346,8 @@ class ChatSpace(DefaultsBucket, Base):
 class ChatSettings(DefaultsBucket, Base):
     """Global chat defaults (a single row, id=1): the characters and instruction
     snippets/groups every chat uses, live. A space's own defaults stack on top
-    of these; the two are kept as separate buckets."""
+    of these; the two are kept as separate buckets.
+    """
 
     __tablename__ = "chat_settings"
     # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020
@@ -352,7 +366,8 @@ class ChatMessage(Base):
     uploaded or generated) — see web/chat/__init__.py for the item shape.
 
     Messages form a tree through `parent_id` (None = first message of a
-    branch); siblings are alternative versions of the same turn."""
+    branch); siblings are alternative versions of the same turn.
+    """
 
     __tablename__ = "chat_messages"
     # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020
@@ -423,7 +438,8 @@ class ChatImportSkip(Base):
 class ChatLibraryItem(Base):
     """Chat media detached from its message (the message was removed by an
     edit or retry). Media still attached to messages lives in
-    ChatMessage.media_json; the library view shows both."""
+    ChatMessage.media_json; the library view shows both.
+    """
 
     __tablename__ = "chat_library_items"
     # Tenant owner (multi-tenant isolation); backfilled to the admin in 0020

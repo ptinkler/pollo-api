@@ -1,4 +1,4 @@
-"""backfill Generate projects into the unified thread model
+"""backfill Generate projects into the unified thread model.
 
 Revision ID: 0018
 Revises: 0017

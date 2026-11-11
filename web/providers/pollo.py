@@ -1,5 +1,4 @@
-"""
-Pollo image, video and audio models for chat mode.
+"""Pollo image, video and audio models for chat mode.
 
 Chat's generate_image / generate_video tools normally run on OpenRouter
 models; this module lets them run on Pollo's models too, through the payload
@@ -23,13 +22,12 @@ from urllib.parse import urlsplit
 import requests
 from PIL import Image
 
+from web import image_hosts, keyctx, request_log
 from web.core.config import POLLO_API_TIMEOUT, POLLO_PLATFORM_BASE
 from web.core.get_task import get_task_status
-
-from .. import image_hosts, keyctx, request_log
-from . import pollo_estimate
-from .openrouter import OpenRouterError
-from .pollo_engine import (
+from web.providers import pollo_estimate
+from web.providers.openrouter import OpenRouterError
+from web.providers.pollo_engine import (
     AUDIO_GENERATORS,
     ERROR_STATUSES,
     IMAGE_GENERATORS,
@@ -37,16 +35,17 @@ from .pollo_engine import (
     VIDEO_GENERATORS,
     closest_aspect_ratio,
 )
-from .pollo_engine import audio_generator as get_audio_generator
-from .pollo_engine import image_generator as get_image_generator
-from .pollo_engine import video_generator as get_video_generator
-from .pollo_models import MODEL_INFO
+from web.providers.pollo_engine import audio_generator as get_audio_generator
+from web.providers.pollo_engine import image_generator as get_image_generator
+from web.providers.pollo_engine import video_generator as get_video_generator
+from web.providers.pollo_models import MODEL_INFO
 
 
 class PolloError(OpenRouterError):
     """A Pollo failure. Subclasses OpenRouterError so chat handles it the
     same way — except moderation detection: Pollo answers 403 for "This model
-    is not enabled for API access", which isn't a content block."""
+    is not enabled for API access", which isn't a content block.
+    """
 
 
 PREFIX = "pollo/"
@@ -67,7 +66,8 @@ NAME = "pollo"
 
 def list_models(kind: str, refresh: bool = False) -> list[dict]:
     """Uniform provider interface. Pollo has no text models; image/video lists
-    are already key-gated (empty without a Pollo key)."""
+    are already key-gated (empty without a Pollo key).
+    """
     if kind == "image":
         return list_image_models()
     if kind == "video":
@@ -194,7 +194,8 @@ def list_voices(page: int = 1, page_size: int = 50, **filters: str) -> dict[str,
 
 def submit_audio(model_id: str, prompt: str, source_audio: Path | None = None, **opts: Any) -> dict:
     """Start a speech / music job. Returns {"id": "pollo:<task>", "params": the
-    settings actually sent}, like submit_video."""
+    settings actually sent}, like submit_video.
+    """
     key = _generator_key(model_id, AUDIO_GENERATORS)
     if MODEL_INFO.get(key, {}).get("audio_input"):
         if not source_audio:
@@ -219,7 +220,8 @@ def _generator_key(model_id: str, generators: dict) -> str:
 
 def _upload(path: Path, what: str = "image") -> str:
     """Put a local file on the user's configured public host — Pollo only takes
-    URLs. The host and retention come from their upload preferences."""
+    URLs. The host and retention come from their upload preferences.
+    """
     try:
         return image_hosts.upload_file(path)
     except ValueError as e:
@@ -229,7 +231,8 @@ def _upload(path: Path, what: str = "image") -> str:
 def _upload_ref_item(item: dict) -> dict:
     """Upload one reference element (image / video / audio) and return it as a
     Pollo ref: {url, name, type}. The upload URL is cached and reused across
-    retries (web/image_hosts.py), so re-rendering doesn't re-upload."""
+    retries (web/image_hosts.py), so re-rendering doesn't re-upload.
+    """
     typ = item.get("type") or "image"
     path = item["path"]
     url = _upload(path, "video") if typ == "video" else _upload(path, "audio") if typ == "audio" else _upload(path)
@@ -251,7 +254,8 @@ def _submit_ref_video_job(
 ) -> dict:
     """Reference-to-video: a named list of image/video/audio refs the prompt
     mentions as [@name] (Kling 4.0 / Flash / 3.0 Omni, MiniMax H3…). The engine
-    routes to the refs branch whenever `refs` is present (_generic_payload)."""
+    routes to the refs branch whenever `refs` is present (_generic_payload).
+    """
     refs = [_upload_ref_item(ri) for ri in ref_items]
     # Some models (Kling 3.0 Omni) can't generate a soundtrack when a video ref
     # is present — Pollo rejects generateAudio:true in that case.
@@ -282,7 +286,8 @@ def generate_image(
     """Generate on Pollo and wait for the result. Returns ([(bytes, media
     type)], credits, the settings actually sent — see _sent_params).
     Reference images are uploaded to a temporary public host first (Pollo
-    only takes URLs), the same way the Generate page sends local images."""
+    only takes URLs), the same way the Generate page sends local images.
+    """
     generators = IMAGE_GENERATORS
     key = _generator_key(model_id, generators)
     if aspect_ratio not in generators[key].VALID_RATIOS:
@@ -342,7 +347,8 @@ def _submit_source_video_job(
     """Submit a job for a family that works on a source video — Motion
     (video + reference image + mode), Extend (video, adds duration) or Video Edit
     (video + instruction prompt) or Upscale (video + scale/mode). Returns the job dict, or None if `typ` isn't one
-    of those (so the caller falls through to the image/text path)."""
+    of those (so the caller falls through to the image/text path).
+    """
     if typ not in (*_IMAGE_AND_VIDEO, *_VIDEO_ONLY):
         return None
     if not source_video:
@@ -386,7 +392,8 @@ def submit_video(
     settings actually sent}, shaped like openrouter.submit_video's result.
     A first frame is uploaded to a temporary public host first (Pollo only takes URLs).
     `ref_items` (named image/video/audio refs — {path, name, type}) routes a
-    ref_mode model to its reference-to-video branch, superseding first_frame."""
+    ref_mode model to its reference-to-video branch, superseding first_frame.
+    """
     key = _generator_key(model_id, VIDEO_GENERATORS)
     typ = MODEL_INFO.get(key, {}).get("type")
     if ref_items and MODEL_INFO.get(key, {}).get("ref_mode"):
@@ -462,7 +469,8 @@ def estimate_cost(
 ) -> dict | None:
     """Pollo's own price for a request ({"credits", "full_credits"}), or None if
     it can't say (a ref2video model has no estimate endpoint; errors). Free, and
-    nothing is uploaded: stand-in URLs are priced the same as real ones."""
+    nothing is uploaded: stand-in URLs are priced the same as real ones.
+    """
     try:
         if kind == "audio":
             key = _generator_key(model_id, AUDIO_GENERATORS)
@@ -501,13 +509,14 @@ def estimate_cost(
                 generate_audio=generate_audio,
             )
         return pollo_estimate.estimate(generator)
-    except Exception:  # noqa: BLE001 — an estimate is a nicety; never fail the composer over it
+    except Exception:  # an estimate is a nicety; never fail the composer over it
         return None
 
 
 def _job(generator, params: dict | None = None) -> dict:
     """Submit and describe the job: its id, and the settings actually sent.
-    `params` overrides the video/image view of them (audio reports its own)."""
+    `params` overrides the video/image view of them (audio reports its own).
+    """
     return {"id": JOB_PREFIX + _submit(generator), "params": params or _sent_params(generator)}
 
 
@@ -516,7 +525,8 @@ def _sent_params(generator) -> dict[str, Any]:
     shows the real settings, including defaults the generator filled in. A
     None means the field wasn't sent (e.g. no aspectRatio when animating an
     image: the image sets it). Kling's quality tier ("mode") shows as the
-    resolution, the way it's picked."""
+    resolution, the way it's picked.
+    """
     attrs = generator.payload_attrs or {}
     return {
         "aspect_ratio": attrs.get("aspectRatio"),
@@ -542,7 +552,8 @@ def _ratio_for_image(path: Path, ratios: list[str]) -> str | None:
 def get_video(job_id: str) -> dict:
     """The job in openrouter.get_video's shape: status completed | failed |
     in_progress, plus "error", and "credits" once done. Transient poll
-    failures raise, so the poller's error budget handles them."""
+    failures raise, so the poller's error budget handles them.
+    """
     task = _task_state(job_id[len(JOB_PREFIX) :])
     if task["status"] == "transient":
         raise PolloError(task["error"])
@@ -558,8 +569,7 @@ def download_video(job_id: str, dest: Path, index: int = 0) -> None:
         with requests.get(task["urls"][index], stream=True, timeout=DOWNLOAD_TIMEOUT) as resp:
             resp.raise_for_status()
             with open(tmp, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=1 << 16):
-                    f.write(chunk)
+                f.writelines(resp.iter_content(chunk_size=1 << 16))
     except requests.RequestException as e:
         raise PolloError(f"Couldn't download the Pollo video: {e}") from e
     tmp.replace(dest)
@@ -576,7 +586,7 @@ def _payload(generator) -> Any:
     """What the generator will send (None if it refuses to build one)."""
     try:
         return generator.get_payload()
-    except Exception:  # noqa: BLE001 — send_request reports the real problem
+    except Exception:  # send_request reports the real problem
         return None
 
 
@@ -612,10 +622,11 @@ def _submit_logged(generator, outcome: dict) -> str:
 def _task_state(task_id: str) -> dict:
     """One status check: {"status": completed | failed | in_progress |
     transient, "error", "urls", "credits"}. "transient" = Cloudflare/network/
-    HTTP trouble worth retrying, not a verdict on the generation."""
+    HTTP trouble worth retrying, not a verdict on the generation.
+    """
     try:
         results = get_task_status(task_id, keyctx.provider_key("pollo"))
-    except Exception as e:  # noqa: BLE001 — network/VPN hiccups
+    except Exception as e:  # network/VPN hiccups
         return {"status": "transient", "error": f"Pollo: {e}"}
     status, fail_msg = results[0][0], results[0][1]
     if status == "cloudflare_blocked" or (status == "error" and (fail_msg or "").startswith("HTTP ")):

@@ -1,5 +1,4 @@
-"""
-Shared configuration — single source of truth for data paths and API settings.
+"""Shared configuration — single source of truth for data paths and API settings.
 
 All modules that need ROOT_DIR, ASSETS_DIR, DB_PATH, or API constants should
 import from here instead of computing them independently.

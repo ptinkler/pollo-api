@@ -1,5 +1,6 @@
 """One-click dev login (DEV_LOGIN): signs in a local admin with no password,
-stores keys unencrypted, and is refused on an already-encrypted (prod) DB."""
+stores keys unencrypted, and is refused on an already-encrypted (prod) DB.
+"""
 
 import json
 
@@ -15,13 +16,13 @@ from web.core.metadata import MetadataDB
 pytestmark = pytest.mark.no_tenant
 
 
-@pytest.fixture()
+@pytest.fixture
 def db(tmp_path):
     (tmp_path / "data").mkdir(parents=True, exist_ok=True)
     return MetadataDB(db_path=tmp_path / "data" / "metadata.db")
 
 
-@pytest.fixture()
+@pytest.fixture
 def client(db, monkeypatch):
 
     monkeypatch.setattr(api_mod, "get_db", lambda: db)
@@ -44,10 +45,12 @@ def test_disabled_is_404(client, monkeypatch):
 def test_signs_in_an_admin(client, monkeypatch):
     monkeypatch.setenv("DEV_LOGIN", "true")
     r = client.post("/api/auth/dev-login")
-    assert r.status_code == 200 and r.json()["email"] == "dev@local"
+    assert r.status_code == 200
+    assert r.json()["email"] == "dev@local"
     assert client.cookies.get("user_session")
     status = client.get("/api/auth/status").json()
-    assert status["authenticated"] and status["user"]["is_admin"]
+    assert status["authenticated"]
+    assert status["user"]["is_admin"]
 
 
 def test_keys_stored_plaintext_in_dev(client, db, monkeypatch):
@@ -70,4 +73,5 @@ def test_refused_on_encrypted_db(client, db, monkeypatch):
     assert dev_login.db_has_encrypted_keys() is True
 
     r = client.post("/api/auth/dev-login")
-    assert r.status_code == 403 and "encrypted" in r.json()["detail"].lower()
+    assert r.status_code == 403
+    assert "encrypted" in r.json()["detail"].lower()

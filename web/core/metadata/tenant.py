@@ -13,7 +13,7 @@ from contextvars import ContextVar
 from sqlalchemy import event
 from sqlalchemy.orm import Session, with_loader_criteria
 
-from .models import (
+from web.core.metadata.models import (
     Character,
     ChatConversation,
     ChatImportSkip,

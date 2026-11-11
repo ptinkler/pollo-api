@@ -58,7 +58,7 @@ def _with_db(work: Callable[[sqlite3.Connection], Any], default: Any = None) -> 
         result = work(conn)
         conn.commit()
         return result
-    except Exception as e:  # noqa: BLE001 — see above
+    except Exception as e:  # see above
         log.warning("media cache unusable (%s) — lengths will be read from the files", e)
         return default
     finally:
@@ -104,7 +104,8 @@ def _still_there(path: str, mtime_ns: int) -> bool:
 
 def sweep_in_background() -> None:
     """Sweep once per process, off the request that triggered it (it stats
-    every cached path, which on a NAS is worth not waiting for)."""
+    every cached path, which on a NAS is worth not waiting for).
+    """
     global _swept
     with _sweep_lock:
         if _swept:

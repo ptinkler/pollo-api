@@ -1,10 +1,10 @@
-"""
-VPN control — status, restart and server country, through Gluetun's
+"""VPN control — status, restart and server country, through Gluetun's
 control server.
 
 Docs: https://github.com/qdm12/gluetun-wiki/blob/main/setup/advanced/control-server.md
 """
 
+import logging
 import os
 import time
 from typing import Any
@@ -13,7 +13,9 @@ import requests
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from .users import require_admin
+from web.users import require_admin
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/vpn")
 
@@ -60,20 +62,23 @@ def _gluetun_json(path: str, if_not_ok: Any, if_unreachable: Any, timeout: int =
     """A Gluetun GET's JSON, or a stand-in when it fails or can't be reached."""
     try:
         r = _gluetun_get(path, timeout=timeout)
-    except Exception:  # noqa: BLE001 — any connection failure means unreachable
+    except Exception:  # any connection failure means unreachable
         return if_unreachable
     return r.json() if r.ok else if_not_ok
 
 
 def _egress_ip() -> str | None:
-    """This app's own egress IP — in vpn mode it shares gluetun's network, so
-    it's the tunnel's exit IP. Fallback when the control server gives none."""
+    """The app's own egress IP, used when the control server reports none.
+
+    In vpn mode the app shares gluetun's network, so this is the tunnel's exit IP.
+    """
     for url in ("https://api.ipify.org", "https://icanhazip.com"):
         try:
             r = requests.get(url, timeout=6)
             if r.ok and r.text.strip():
                 return r.text.strip()
-        except Exception:  # noqa: BLE001, S112 — try the next service
+        except Exception:
+            log.debug("egress-IP lookup failed at %s; trying the next service", url, exc_info=True)
             continue
     return None
 
@@ -114,7 +119,7 @@ def vpn_restart(_admin=Depends(require_admin)):
 
 @router.put("/country")
 def vpn_change_country(data: VpnCountryRequest, _admin=Depends(require_admin)):
-    """Change VPN server country. Body: {"country": "United Kingdom"}"""
+    """Change VPN server country. Body: {"country": "United Kingdom"}."""
     country = data.country.strip()
     if not country:
         raise HTTPException(400, detail="Missing 'country' field")

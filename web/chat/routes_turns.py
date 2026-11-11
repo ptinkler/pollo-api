@@ -1,7 +1,8 @@
 """HTTP routes for running turns and acting on generated media: the SSE
 message/retry/edit endpoints (streamed from a Turn worker), the cancel hook,
 and the pin / favourite / regenerate media endpoints. They register on the
-shared router; the turn engine itself lives in turn.py / generation.py."""
+shared router; the turn engine itself lives in turn.py / generation.py.
+"""
 
 import json
 import queue
@@ -13,17 +14,12 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from web.core.metadata import get_db, iso
-
-from ..media_types import kind_of
-from ..providers import openrouter, pollo
-from ..uploads import safe_filename
-from . import polling
-from .audio import audio_params, submit_audio_generation
-from .catalogue import fit_video_params, model_info
-from .constants import DEFAULT_IMAGE_LIMIT
-from .deps import router
-from .generation import (
+from web.chat import polling
+from web.chat.audio import audio_params, submit_audio_generation
+from web.chat.catalogue import fit_video_params, model_info
+from web.chat.constants import DEFAULT_IMAGE_LIMIT
+from web.chat.deps import router
+from web.chat.generation import (
     conversation_instructions,
     enhance_prompt,
     exchange_fields,
@@ -35,7 +31,7 @@ from .generation import (
     submit_video_generation,
     take_log,
 )
-from .helpers import (
+from web.chat.helpers import (
     add_message_cost,
     branch_to,
     conversation_dir,
@@ -47,9 +43,13 @@ from .helpers import (
     require_text_provider,
     saved_media,
 )
-from .models import EditMessage, EnhancePrompt, EstimateRequest, RetryMessage, SendMessage, TurnSettings
-from .turn import Turn
-from .workers import ctx_thread, with_owner_keys
+from web.chat.models import EditMessage, EnhancePrompt, EstimateRequest, RetryMessage, SendMessage, TurnSettings
+from web.chat.turn import Turn
+from web.chat.workers import ctx_thread, with_owner_keys
+from web.core.metadata import get_db, iso
+from web.media_types import kind_of
+from web.providers import openrouter, pollo
+from web.uploads import safe_filename
 
 # Live turns' cancel flags, keyed by the assistant message id (set by the
 # cancel route, checked by the running Turn).
@@ -59,7 +59,8 @@ _cancel_events: dict[int, threading.Event] = {}
 @router.post("/enhance-prompt")
 def api_enhance_prompt(data: EnhancePrompt):
     """Rewrite a prompt with the chat model. Only ever called by the user's
-    Enhance button — generations themselves always use the prompt as written."""
+    Enhance button — generations themselves always use the prompt as written.
+    """
     try:
         prompt, cost = enhance_prompt(data.model, data.prompt, "video" if data.kind == "video" else "image")
     except (openrouter.OpenRouterError, ValueError) as e:
@@ -70,7 +71,8 @@ def api_enhance_prompt(data: EnhancePrompt):
 @router.post("/estimate")
 def api_estimate(data: EstimateRequest):
     """What Pollo says a generation would cost (credits), for the composer's
-    price hint. {"estimate": null} for other providers or when Pollo can't say."""
+    price hint. {"estimate": null} for other providers or when Pollo can't say.
+    """
     if not pollo.is_pollo(data.model):
         return {"estimate": None}
     duration, ratio, resolution = data.duration, data.aspect_ratio, data.resolution
@@ -143,7 +145,8 @@ def api_send_message(conv_id: str, data: SendMessage):
 @router.post("/conversations/{conv_id}/retry")
 def api_retry(conv_id: str, data: RetryMessage):
     """Generate another version of an assistant reply, as a new branch
-    beside it. The old reply and everything after it stay on their branch."""
+    beside it. The old reply and everything after it stay on their branch.
+    """
     require_text_provider(data.mode)
     conv = require_conv(conv_id)
     msg = get_db().get_chat_message(data.message_id)
@@ -161,7 +164,8 @@ def api_retry(conv_id: str, data: RetryMessage):
 def api_edit(conv_id: str, data: EditMessage):
     """Resend a user message with new text, as a new branch beside it (same
     attachments), and stream a fresh reply. The original prompt and
-    everything after it stay on their branch."""
+    everything after it stay on their branch.
+    """
     require_text_provider(data.mode)
     conv = require_conv(conv_id)
     db = get_db()
@@ -214,12 +218,13 @@ def _stream_turn(
 
     `restore` is the text the message had before: if the run comes back with
     nothing (it failed, or was stopped before a word arrived), it is put back,
-    so regenerating a reply's words can't lose the ones it had."""
+    so regenerating a reply's words can't lose the ones it had.
+    """
     events: queue.Queue = queue.Queue()
     cancel = threading.Event()
     _cancel_events[assistant_id] = cancel
 
-    def worker():
+    def worker() -> None:
         try:
             Turn(conv_id, settings, assistant_id, events.put, cancel, initial_cost=initial_cost).run()
             if restore:
@@ -269,7 +274,8 @@ def api_reword(conv_id: str, data: RewordMessage):
     new media), this re-runs only the chat model, with its tools withheld, and
     overwrites the text on the same message. The media items are left exactly
     as they are, so a reply whose picture is right but whose words aren't can
-    be fixed without paying for the picture again."""
+    be fixed without paying for the picture again.
+    """
     require_text_provider("text")
     conv = require_conv(conv_id)
     db = get_db()
@@ -300,7 +306,8 @@ class PinMedia(BaseModel):
 @router.post("/messages/{message_id}/media/{media_id}/pin")
 def api_pin_media(message_id: int, media_id: str, data: PinMedia):
     """Pin an image as a reference: it's sent with every image generated
-    later on this branch of the chat, until unpinned."""
+    later on this branch of the chat, until unpinned.
+    """
     db = get_db()
     msg = db.get_chat_message(message_id)
     item = find_media(msg, media_id)
@@ -318,7 +325,8 @@ def api_favourite_media(message_id: int, media_id: str, data: FavouriteMedia):
     """Star/un-star a generation. Unlike pinning (which re-sends an image as a
     reference with every new generation), a favourite is just a bookmark: it
     surfaces the item in the cross-thread Favourites gallery. Works for images
-    and videos."""
+    and videos.
+    """
     db = get_db()
     msg = db.get_chat_message(message_id)
     item = find_media(msg, media_id)
@@ -348,7 +356,8 @@ def _as_version(item: dict) -> dict:
 def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia):
     """Retry a failed image/video in place (or re-roll a finished one as an
     extra item beside it), optionally on a different model.
-    Runs in the background; the UI polls the message like a rendering video."""
+    Runs in the background; the UI polls the message like a rendering video.
+    """
     db = get_db()
     msg = db.get_chat_message(message_id)
     if not msg:
@@ -450,7 +459,8 @@ def api_active_generations(data: ActiveQuery):
     """The signed-in user's in-flight (and tracked) generations across every
     thread — the data behind the always-visible generation queue. Returns every
     currently-pending generated image/video, plus the current state of any
-    `known` message the client is still tracking (so completions resolve)."""
+    `known` message the client is still tracking (so completions resolve).
+    """
     db = get_db()
     msgs: dict[int, object] = {m.id: m for m in db.get_chat_messages_with_pending_media()}
     for m in db.get_chat_messages_by_ids([i for i in data.known if i not in msgs]):
@@ -540,7 +550,7 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
             polling.start_video_poller(conv_id, message_id, media_id, job["id"])
     except openrouter.OpenRouterError as e:
         db.update_chat_media_item(message_id, media_id, **failure_fields(e))
-    except Exception as e:  # noqa: BLE001 — never leave the card stuck on "pending"
+    except Exception as e:  # never leave the card stuck on "pending"
         db.update_chat_media_item(
             message_id, media_id, status="error", error=f"{type(e).__name__}: {e}", moderated=False
         )

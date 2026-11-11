@@ -1,5 +1,4 @@
-"""
-Importing chats from a ChatGPT data export (Settings → Data controls →
+"""Importing chats from a ChatGPT data export (Settings → Data controls →
 Export data), to carry them on here.
 
 The export's zip goes in <data>/imports/: copied there, or uploaded from
@@ -42,14 +41,13 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
+from web import media
+from web.chat import CHAT_PREVIEW_SIZE, ConversationCreate, api_create_conversation, conversation_dir
 from web.core import config
 from web.core.metadata import current_tenant, get_db
-
-from . import media
-from .chat import CHAT_PREVIEW_SIZE, ConversationCreate, api_create_conversation, conversation_dir
-from .media_types import IMAGE_EXTS, VIDEO_EXTS
-from .uploads import safe_filename
-from .users import require_user
+from web.media_types import IMAGE_EXTS, VIDEO_EXTS
+from web.uploads import safe_filename
+from web.users import require_user
 
 router = APIRouter(prefix="/api/chat/import", dependencies=[Depends(require_user)])
 
@@ -92,7 +90,7 @@ class _Turn:
 
 
 class _Export:
-    def __init__(self, zf: zipfile.ZipFile):
+    def __init__(self, zf: zipfile.ZipFile) -> None:
         self.zf = zf
         self.new_files: list[Path] = []  # images written by this import (their thumbnails are made after)
         self.files: dict[str, str] = {}  # file id → zip entry
@@ -196,7 +194,8 @@ def _turns(data: dict, library: list[dict]) -> list[_Turn]:
 
 def _place_generated(turns: list[_Turn], library: list[dict]) -> None:
     """Generated images, which the export doesn't link to a message: each goes
-    on the reply to the latest prompt sent before it was made."""
+    on the reply to the latest prompt sent before it was made.
+    """
     shown = {f for t in turns for f in t.uploads} | {g["id"] for t in turns for g in t.generated}
     for f in sorted(library, key=lambda f: f.get("created_at") or ""):
         if f["file_id"] in shown:
@@ -228,7 +227,7 @@ def _ext(raw: bytes, mime: str | None) -> str:
 class _ChatMedia:
     """Media items for one chat, writing each export file into its folder once."""
 
-    def __init__(self, export: _Export, conv_id: str, known: list[dict], stats: dict):
+    def __init__(self, export: _Export, conv_id: str, known: list[dict], stats: dict) -> None:
         self.export, self.conv_id, self.stats = export, conv_id, stats
         self.saved = {i["import_file"]: i for i in known if i.get("import_file") and i.get("file")}
 
@@ -265,16 +264,17 @@ def _when(ts: float | None) -> datetime | None:
 class _Merge:
     """What one chat's import adds to it: new messages (`rows`, each after
     the one before on the exported branch) and changes to replies imported
-    before (`updates`)."""
+    before (`updates`).
+    """
 
-    def __init__(self, export: _Export, conv_id: str, known: dict, stats: dict):
+    def __init__(self, export: _Export, conv_id: str, known: dict, stats: dict) -> None:
         self.known = known
         self.media = _ChatMedia(export, conv_id, [i for m in known.values() for i in m.media], stats)
         self.rows: list[dict] = []
         self.updates: dict[int, dict] = {}
         self.parent: dict[str, Any] = {"parent_id": None}
 
-    def _add(self, import_id: str, **row) -> None:
+    def _add(self, import_id: str, **row: Any) -> None:
         self.rows.append({**self.parent, "import_id": import_id, **row})
         self.parent = {"parent_import_id": import_id}
 
@@ -369,7 +369,8 @@ def _import_conversation(export: _Export, data: dict, conv, stats: dict) -> str:
 
 def run_import(path: Path, progress: dict | None = None) -> dict:
     """Import the export at `path`. Returns (and keeps `progress` up to
-    date with) how many chats were new, updated, unchanged or skipped."""
+    date with) how many chats were new, updated, unchanged or skipped.
+    """
     stats = progress if progress is not None else {}
     stats.update(
         total=0,
@@ -405,7 +406,7 @@ def run_import(path: Path, progress: dict | None = None) -> dict:
             else:
                 try:
                     outcome = _import_conversation(export, data, conv, stats)
-                except Exception as e:  # noqa: BLE001 — one bad chat shouldn't stop the rest
+                except Exception as e:  # one bad chat shouldn't stop the rest
                     outcome = None
                     stats["failed"].append({"title": data.get("title"), "error": str(e)})
             if outcome:
@@ -419,7 +420,8 @@ def run_import(path: Path, progress: dict | None = None) -> dict:
 def _warm_thumbnails(paths: list[Path]) -> None:
     """Make the new images' grid thumbnails and chat previews now, one at a
     time in the background, so opening the chats and Media page later
-    doesn't wait for hundreds of them to be made."""
+    doesn't wait for hundreds of them to be made.
+    """
     for path in paths:
         for size in (media.THUMB_SIZE, CHAT_PREVIEW_SIZE):
             media.make_thumb(path, size)
@@ -484,7 +486,7 @@ def _run_job(path: Path, job: dict[str, Any]) -> None:
     try:
         run_import(path, job)
         job["state"] = "done"
-    except Exception as e:  # noqa: BLE001 — reported to the UI
+    except Exception as e:  # reported to the UI
         job.update(state="error", error=str(e))
 
 
@@ -530,7 +532,8 @@ def api_start_upload(data: StartUpload):
 @router.post("/chatgpt/uploads/{upload_id}")
 async def api_upload_chunk(upload_id: str, offset: int = Form(..., ge=0), chunk: UploadFile = File(...)):
     """Write one chunk at `offset`. Returns how much has arrived, and once
-    it's all there, the export's `file` name in the imports folder."""
+    it's all there, the export's `file` name in the imports folder.
+    """
     part, meta = _upload_paths(upload_id)
     if not part.is_file() or not meta.is_file():
         raise HTTPException(404, "Upload not found (unfinished uploads are cleared after a day)")

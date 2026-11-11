@@ -20,16 +20,18 @@ _clearers: list[Callable[[], None]] = []
 
 def on_keys_changed(fn: Callable[[], None]) -> Callable[[], None]:
     """Register a cache to be dropped when a user's provider keys change.
-    Usable as a decorator; returns the function unchanged."""
+    Usable as a decorator; returns the function unchanged.
+    """
     _clearers.append(fn)
     return fn
 
 
 def keys_changed() -> None:
     """Drop every registered cache. One failing must not stop the others, or
-    block the key from being saved."""
+    block the key from being saved.
+    """
     for fn in _clearers:
         try:
             fn()
-        except Exception:  # noqa: BLE001 — a cache that won't clear is not fatal
+        except Exception:
             log.exception("could not clear %s", getattr(fn, "__qualname__", fn))

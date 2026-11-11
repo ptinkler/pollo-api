@@ -1,6 +1,7 @@
 """Chat CRUD + catalogue/media HTTP routes (everything but the turn-engine,
 media-generation and SSE endpoints, which stay in the package root). They hang
-off the shared router in deps.py and lean on helpers.py for the common bits."""
+off the shared router in deps.py and lean on helpers.py for the common bits.
+"""
 
 import shutil
 import threading
@@ -11,15 +12,9 @@ from pathlib import Path
 from fastapi import File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
-from web.core import config
-from web.core.metadata import get_db, iso
-
-from .. import characters, media, request_log
-from ..media_types import VIDEO_SUFFIXES
-from ..providers import openrouter, venice
-from ..uploads import read_audio_upload, read_image_upload, read_video_upload, safe_filename, store_deduped
-from .catalogue import get_models
-from .constants import (
+from web import characters, media, request_log
+from web.chat.catalogue import get_models
+from web.chat.constants import (
     CHAT_PREVIEW_SIZE,
     CONVERSATION_LIST_LIMIT,
     DEFAULT_TITLE,
@@ -29,8 +24,8 @@ from .constants import (
     SNIPPET_CHARS,
     THREAD_KINDS,
 )
-from .deps import router
-from .helpers import (
+from web.chat.deps import router
+from web.chat.helpers import (
     branch_to,
     chat_root,
     conversation_dir,
@@ -42,7 +37,7 @@ from .helpers import (
     shown_branch,
     spend,
 )
-from .models import (
+from web.chat.models import (
     ConversationCreate,
     ConversationUpdate,
     DefaultsIn,
@@ -53,6 +48,11 @@ from .models import (
     SwitchBranch,
     TitleModelIn,
 )
+from web.core import config
+from web.core.metadata import get_db, iso
+from web.media_types import VIDEO_SUFFIXES
+from web.providers import openrouter, venice
+from web.uploads import read_audio_upload, read_image_upload, read_video_upload, safe_filename, store_deduped
 
 
 @router.get("/status")
@@ -96,7 +96,8 @@ def api_chat_models(refresh: bool = False):
 def api_list_conversations(q: str = ""):
     """Pinned chats, then the most recent (`more` = older ones left out).
     With `q`, chats whose title or messages contain it, each with a snippet
-    of the matching message when the title didn't match."""
+    of the matching message when the title didn't match.
+    """
     db = get_db()
     q = q.strip()
     if q:
@@ -118,7 +119,8 @@ def api_list_conversations(q: str = ""):
 def api_conversation_thumbs(ids: str = ""):
     """Newest image file per conversation id (comma-separated), for gallery
     cover thumbnails. Declared before /conversations/{conv_id} so "thumbs"
-    isn't read as an id."""
+    isn't read as an id.
+    """
     conv_ids = [i for i in ids.split(",") if i]
     return {"thumbs": get_db().conversation_thumbs(conv_ids)}
 
@@ -343,7 +345,8 @@ def api_get_conversation(conv_id: str):
 def api_spend_breakdown(days: int = 0):
     """What the user's money went on: per model (and kind) over the last `days`
     days (0 = all time). Pollo's credits are converted to USD at its fixed rate
-    so everything adds up in one currency; the credits stay alongside."""
+    so everything adds up in one currency; the credits stay alongside.
+    """
     db = get_db()
     cutoff = datetime.now() - timedelta(days=days) if days > 0 else None
     groups: dict[tuple[str, str], dict] = {}
@@ -394,7 +397,8 @@ def api_fork_conversation(conv_id: str, data: ForkConversation):
     came after — plus this chat's models, instructions, characters and
     composer settings. It remembers where it came from. Media files are
     linked (or copied) into the new chat and characters made in this chat
-    are copied into it, so either chat can be edited or deleted on its own."""
+    are copied into it, so either chat can be edited or deleted on its own.
+    """
     conv = require_conv(conv_id)
     require_idle(conv_id)
     db = get_db()
@@ -471,9 +475,10 @@ def _media_character_ids(params: dict) -> set[int]:
 class _Fork:
     """Copies media items into a branched chat: files are linked into its
     folder under the same names (Media shows each pair once) and references
-    to copied characters point at the copies, so regenerating works there."""
+    to copied characters point at the copies, so regenerating works there.
+    """
 
-    def __init__(self, src: Path, dst: Path, char_map: dict[int, int]):
+    def __init__(self, src: Path, dst: Path, char_map: dict[int, int]) -> None:
         self.src, self.dst, self.char_map = src, dst, char_map
 
     def media_item(self, item: dict) -> dict:
@@ -524,7 +529,8 @@ class _Fork:
 
 def _clean_conv_update(fields: dict) -> None:
     """Normalize/validate the mutable ConversationUpdate fields in place
-    (everything except `pinned`, which the route handles separately)."""
+    (everything except `pinned`, which the route handles separately).
+    """
     if "instruction_ids" in fields:
         fields["instruction_ids"] = _require_instructions(fields["instruction_ids"] or [])
     if "instruction_group_ids" in fields:
@@ -559,7 +565,8 @@ def api_update_conversation(conv_id: str, data: ConversationUpdate):
 @router.delete("/conversations/{conv_id}")
 def api_delete_conversation(conv_id: str, delete_media: bool = True):
     """Delete a chat. Its images/videos/uploads go with it unless delete_media=false
-    (the files then stay and show up under "Orphaned" in the Media library)."""
+    (the files then stay and show up under "Orphaned" in the Media library).
+    """
     require_conv(conv_id)
     characters.delete_for_conversation(conv_id, get_db())
     get_db().delete_conversation(conv_id)
@@ -587,7 +594,8 @@ async def api_upload_attachment(conv_id: str, file: UploadFile = File(...)):
 @router.post("/conversations/{conv_id}/attachments/video")
 async def api_upload_video_attachment(conv_id: str, file: UploadFile = File(...)):
     """A source video upload (e.g. Recast). Saved with a 'upv_' prefix so the
-    message endpoint records it as a video (not image) media item."""
+    message endpoint records it as a video (not image) media item.
+    """
     require_conv(conv_id)
     content, ext = await read_video_upload(file)
     return {"file": store_deduped(conversation_dir(conv_id), "upv_", content, ext)}
@@ -596,7 +604,8 @@ async def api_upload_video_attachment(conv_id: str, file: UploadFile = File(...)
 @router.post("/conversations/{conv_id}/attachments/audio")
 async def api_upload_audio_attachment(conv_id: str, file: UploadFile = File(...)):
     """A lip-sync audio upload. Saved with a 'upa_' prefix so the message
-    endpoint records it as an audio (not image) media item."""
+    endpoint records it as an audio (not image) media item.
+    """
     require_conv(conv_id)
     content, ext = await read_audio_upload(file)
     return {"file": store_deduped(conversation_dir(conv_id), "upa_", content, ext)}
@@ -605,14 +614,15 @@ async def api_upload_audio_attachment(conv_id: str, file: UploadFile = File(...)
 @router.delete("/conversations/{conv_id}/attachments/{filename}")
 def api_discard_attachment(conv_id: str, filename: str):
     """Drop an attachment that was uploaded but never sent (removed from the
-    composer). Files any message or library entry still uses are kept."""
+    composer). Files any message or library entry still uses are kept.
+    """
     require_conv(conv_id)
     name = safe_filename(filename)
     if not name.startswith(("up_", "upv_", "upa_")):
         return {"deleted": False}
     db = get_db()
-    in_use = any(name in media._referenced_files(i) for m in db.get_chat_messages(conv_id) for i in m.media) or any(
-        lib.conversation_id == conv_id and name in media._referenced_files(lib.item) for lib in db.list_chat_library()
+    in_use = any(name in media.referenced_files(i) for m in db.get_chat_messages(conv_id) for i in m.media) or any(
+        lib.conversation_id == conv_id and name in media.referenced_files(lib.item) for lib in db.list_chat_library()
     )
     path = conversation_dir(conv_id) / name
     if in_use or not path.is_file():
@@ -633,7 +643,8 @@ def api_chat_media(conv_id: str, filename: str):
 @router.get("/media/{conv_id}/{filename}/preview")
 async def api_chat_media_preview(conv_id: str, filename: str):
     """A chat image (or a video's first frame) scaled down for showing in the
-    chat, cached; the full file is for the lightbox and downloads."""
+    chat, cached; the full file is for the lightbox and downloads.
+    """
     path = chat_root() / safe_filename(conv_id) / safe_filename(filename)  # rejects traversal (400)
     require_own_conversation(conv_id)
     if not path.is_file():
@@ -651,7 +662,8 @@ async def api_chat_media_preview(conv_id: str, filename: str):
 @router.get("/request-log")
 def api_request_log(limit: int = 100):
     """The latest provider requests (Venice image/video calls): what was sent
-    and what came back, newest first. See web/request_log.py."""
+    and what came back, newest first. See web/request_log.py.
+    """
     return {"entries": request_log.recent(max(1, min(limit, 1000)))}
 
 
@@ -659,22 +671,23 @@ def api_request_log(limit: int = 100):
 def api_chat_library():
     """Every generated image/video across chats, newest first. `attached`
     items are still in their chat (on some branch); the rest were detached
-    by edits/retries made before chats had branches."""
+    by edits/retries made before chats had branches.
+    """
     db = get_db()
     titles = db.conversation_titles()
     items = []
     for msg in db.get_chat_messages_with_media():
-        for item in msg.media:
-            if item.get("source") != "upload":
-                items.append(
-                    {
-                        **item,
-                        "conversation_id": msg.conversation_id,
-                        "message_id": msg.id,
-                        "attached": True,
-                        "created_at": iso(msg.created_at),
-                    }
-                )
+        items.extend(
+            {
+                **item,
+                "conversation_id": msg.conversation_id,
+                "message_id": msg.id,
+                "attached": True,
+                "created_at": iso(msg.created_at),
+            }
+            for item in msg.media
+            if item.get("source") != "upload"
+        )
     for lib in db.list_chat_library():
         if lib.item.get("source") == "upload":
             continue
@@ -696,7 +709,8 @@ def api_chat_library():
 @router.delete("/library/{media_id}")
 def api_delete_library_item(media_id: str):
     """Delete an unattached library item and its file. Attached media goes
-    away with its message/chat instead."""
+    away with its message/chat instead.
+    """
     db = get_db()
     lib = db.get_chat_library_item(media_id)
     if not lib:
@@ -718,7 +732,8 @@ def api_get_message(message_id: int):
 @router.get("/messages/{message_id}/delete-info")
 def api_delete_exchange_info(message_id: int):
     """What deleting this prompt would also remove (other versions of it and
-    the messages that followed them), for the confirmation."""
+    the messages that followed them), for the confirmation.
+    """
     msg = get_db().get_chat_message(message_id)
     info = msg and get_db().chat_exchange_delete_info(msg.conversation_id, message_id)
     if not info:
@@ -731,7 +746,8 @@ def api_delete_exchange(message_id: int, delete_media: bool = False):
     """Delete a prompt's turn (every version of the prompt and its replies)
     from the chat, so the models no longer see it; what followed on the shown
     branch is kept. Generated images and videos move to the library, or are
-    deleted with delete_media=true. Returns the conversation as now shown."""
+    deleted with delete_media=true. Returns the conversation as now shown.
+    """
     db = get_db()
     msg = db.get_chat_message(message_id)
     if not msg:

@@ -1,6 +1,7 @@
 """Reference-to-video (refs branch): the named refs list a ref_mode model gets,
 how attachments map to [@name] handles with per-type caps, and the submit path
-that uploads each ref and routes to Pollo's reference-to-video branch."""
+that uploads each ref and routes to Pollo's reference-to-video branch.
+"""
 
 import types
 from pathlib import Path
@@ -39,7 +40,8 @@ class TestRefItems:
         rm = {"types": ["image", "video"], "max": 7, "limits": {"image": 4, "video": 1}}
         items = self._items(rm, _user(("video", "v1.mp4"), ("video", "v2.mp4"), ("image", "a.png")))
         names = [i["name"] for i in items]
-        assert "video1" in names and "video2" not in names  # 2nd video over the cap
+        assert "video1" in names
+        assert "video2" not in names
         assert "image1" in names
 
     def test_disallowed_type_excluded(self):
@@ -81,7 +83,8 @@ class TestSubmitRefBranch:
         assert job["id"] == "pollo:task1"
         refs = captured["p"]["input"]["refs"]
         assert [r["name"] for r in refs] == ["video1", "image1"]
-        assert refs[0]["url"].startswith("https://h/vid/") and refs[1]["url"].startswith("https://h/img/")
+        assert refs[0]["url"].startswith("https://h/vid/")
+        assert refs[1]["url"].startswith("https://h/img/")
         assert "image" not in captured["p"]["input"]  # refs branch, not image-to-video
 
     def test_empty_ref_items_use_normal_branch(self, monkeypatch, provider_keys):

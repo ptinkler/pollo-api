@@ -19,9 +19,8 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
+from web.auth import user_secret
 from web.core import config
-
-from .auth import user_secret
 
 router = APIRouter(prefix="/api/public-media")
 
@@ -37,7 +36,8 @@ def _unb64(s: str) -> bytes:
 def _media_roots() -> list[Path]:
     """Directories a self-host link may serve from — every source a Pollo upload
     can draw from: chat uploads/outputs, character reference images, and the
-    per-user library. Resolved so a signed-but-crafted path can't escape."""
+    per-user library. Resolved so a signed-but-crafted path can't escape.
+    """
     return [(config.ROOT_DIR / d).resolve() for d in ("chat", "characters", "library")]
 
 
@@ -78,7 +78,8 @@ def _resolve_token(token: str) -> Path | None:
 
 def selfhost_url(filepath: Path, base_url: str, ttl_seconds: int) -> str:
     """Public URL for a provider to fetch *filepath* from this instance.
-    Raises ValueError if no reachable base URL is configured."""
+    Raises ValueError if no reachable base URL is configured.
+    """
     base = (base_url or "").strip().rstrip("/")
     if not base.startswith(("http://", "https://")):
         raise ValueError(
@@ -92,7 +93,8 @@ def selfhost_url(filepath: Path, base_url: str, ttl_seconds: int) -> str:
 def serve_public_media(token: str):
     """Stream a signed, unexpired media file. Public (no login): providers can't
     present our cookie. 404 on a bad/expired/out-of-bounds token so the route
-    leaks nothing about what does or doesn't exist."""
+    leaks nothing about what does or doesn't exist.
+    """
     path = _resolve_token(token)
     if path is None:
         raise HTTPException(status_code=404, detail="Not found")

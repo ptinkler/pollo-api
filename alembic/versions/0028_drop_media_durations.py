@@ -1,4 +1,4 @@
-"""drop the leftover media_durations table
+"""drop the leftover media_durations table.
 
 Revision ID: 0028
 Revises: 0027

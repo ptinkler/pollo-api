@@ -1,4 +1,4 @@
-"""add hidden_defaults to chat_conversations
+"""add hidden_defaults to chat_conversations.
 
 Revision ID: 0016
 Revises: 0015

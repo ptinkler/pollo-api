@@ -1,12 +1,12 @@
-"""
-Pollo Studio — API Backend (FastAPI)
+"""Pollo Studio — API Backend (FastAPI).
 
 Run:  make dev-api   (uvicorn web.api:app, from the repo root)
+
+.env loading and logging setup live in web/__init__.py, which Python runs
+before any web.* module, so everything here is a plain top-level import.
 """
 
 import logging
-import os
-import sys
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -19,31 +19,30 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.middleware.sessions import SessionMiddleware
 
-ROOT_DIR = Path(__file__).parent.parent.resolve()
-WEB_DIR = Path(__file__).parent.resolve()
-sys.path.insert(0, str(ROOT_DIR))
-os.chdir(ROOT_DIR)
-
-from web.core import config  # noqa: E402, F401 — imported first: loads .env before anything reads it
-from web.core.logs import setup as _setup_logging  # noqa: E402
-
-_setup_logging()
-log = logging.getLogger(__name__)
-from web.core.env import bool_env  # noqa: E402
+from web import characters, keyctx, media, user_keys, vpn
+from web.auth import USER_COOKIE, set_user_cookie, user_secret
+from web.chat import router as chat_router
+from web.chat import startup_resume_chat
+from web.chatgpt_import import router as chatgpt_import_router
+from web.core.env import bool_env
 from web.core.get_task import get_credit_balance
 from web.core.metadata import get_db, reset_tenant, set_tenant
 from web.core.metadata.schema import ensure_schema
+from web.dev_login import router as dev_login_router
+from web.dev_login import seed_dev_user
+from web.oauth import configured_providers, register_providers
+from web.oauth_routes import router as oauth_router
+from web.passwords import hash_password, needs_rehash, verify_password
+from web.public_media import router as public_media_router
+from web.upload_settings import router as upload_settings_router
+from web.user_keys import router as keys_router
+from web.users import admin_emails, require_user, resolve_current_user
 
-from . import characters, keyctx, media, user_keys, vpn
-from .auth import USER_COOKIE, set_user_cookie
-from .chat import router as chat_router
-from .chat import startup_resume_chat
-from .chatgpt_import import router as chatgpt_import_router
-from .dev_login import seed_dev_user
-from .oauth import configured_providers, register_providers
-from .passwords import hash_password, needs_rehash, verify_password
-from .users import admin_emails, require_user, resolve_current_user
+log = logging.getLogger(__name__)
+ROOT_DIR = Path(__file__).parent.parent.resolve()
+WEB_DIR = Path(__file__).parent.resolve()
 
 
 @asynccontextmanager
@@ -99,10 +98,6 @@ app.add_middleware(
 # SameSite=lax so the state cookie survives the return hop from the provider;
 # Secure (https_only) by default, matching the login cookie — disable only for
 # plain-HTTP LAN dev via COOKIE_SECURE=false.
-from starlette.middleware.sessions import SessionMiddleware  # noqa: E402
-
-from .auth import user_secret  # noqa: E402
-
 app.add_middleware(
     SessionMiddleware,
     secret_key=user_secret().hex(),
@@ -115,9 +110,11 @@ class UserContextMiddleware:
     """Bind the signed-in user's provider keys AND tenant for the whole request,
     the streamed response body included. A pure ASGI middleware (not
     BaseHTTPMiddleware) is required: its context survives into the response
-    streaming, where chat turns run and would otherwise see no keys/tenant."""
+    streaming, where chat turns run and would otherwise see no keys/tenant.
+    """
 
-    def __init__(self, app):
+    def __init__(self, app) -> None:
+        """Wrap the ASGI app this middleware sits in front of."""
         self.app = app
 
     async def __call__(self, scope, receive, send):
@@ -127,7 +124,9 @@ class UserContextMiddleware:
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
         jar = SimpleCookie()
         jar.load(headers.get("cookie", ""))
-        cookie = lambda name: jar[name].value if name in jar else None  # noqa: E731
+
+        def cookie(name):
+            return jar[name].value if name in jar else None
 
         user = resolve_current_user(cookie("user_session"))
         ktoken = keyctx.set_keys(user_keys.get_user_keys(user) if user else {})
@@ -159,7 +158,8 @@ _login_lock = threading.Lock()
 def _client_ip(request: Request) -> str:
     """The real client IP. Behind the reverse proxy, request.client is the
     proxy, so prefer the IP nginx stamps (X-Real-IP; it overwrites any client
-    value), then the first X-Forwarded-For hop, then the socket peer."""
+    value), then the first X-Forwarded-For hop, then the socket peer.
+    """
     real = request.headers.get("x-real-ip", "").strip()
     if real:
         return real
@@ -180,7 +180,8 @@ def _record_attempt(key: str, now: float) -> bool:
 def _login_rate_limited(request: Request, email: str) -> bool:
     """Record this login attempt and report whether the client IP OR the target
     account is over the limit. Keying on the email too means spoofing the
-    X-Forwarded-For / X-Real-IP headers can't lift the per-account cap."""
+    X-Forwarded-For / X-Real-IP headers can't lift the per-account cap.
+    """
     now = time.time()
     with _login_lock:
         over_ip = _record_attempt(f"ip:{_client_ip(request)}", now)
@@ -216,7 +217,8 @@ async def api_auth_logout(response: Response):
 @app.get("/api/auth/status")
 async def api_auth_status(user_session: str | None = Cookie(None)):
     """Who (if anyone) is signed in. Admin accounts are created via the CLI
-    (web.provision_admin), never through the app."""
+    (web.provision_admin), never through the app.
+    """
     user = resolve_current_user(user_session)
     return {
         "authenticated": user is not None,
@@ -247,12 +249,6 @@ def api_usage_balance(_api_key: str = Depends(require_user)):
 
 
 # Must be registered before the SPA catch-all below.
-from .dev_login import router as dev_login_router  # noqa: E402
-from .oauth_routes import router as oauth_router  # noqa: E402
-from .public_media import router as public_media_router  # noqa: E402
-from .upload_settings import router as upload_settings_router  # noqa: E402
-from .user_keys import router as keys_router  # noqa: E402
-
 app.include_router(oauth_router)
 app.include_router(keys_router)
 app.include_router(upload_settings_router)
@@ -291,7 +287,5 @@ if STATIC_DIR.is_dir():
 
 
 if __name__ == "__main__":
-    print("Starting Pollo API Server...")
-    print("API: http://localhost:5000")
-    print("Docs: http://localhost:5000/docs")
+    log.info("starting Pollo API server on http://localhost:5000 (docs at /docs)")
     uvicorn.run(app, host="127.0.0.1", port=5000)

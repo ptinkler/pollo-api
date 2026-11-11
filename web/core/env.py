@@ -22,7 +22,8 @@ def bool_env(name: str, default: bool = False) -> bool:
 
 def bool_env_or_none(name: str) -> bool | None:
     """A boolean setting, or None when it isn't set to a recognised value — for
-    settings whose default is computed rather than fixed."""
+    settings whose default is computed rather than fixed.
+    """
     value = os.getenv(name, "").strip().lower()
     return True if value in _TRUE else False if value in _FALSE else None
 

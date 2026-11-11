@@ -1,4 +1,4 @@
-"""add branch origin, pinning and composer settings to chat_conversations
+"""add branch origin, pinning and composer settings to chat_conversations.
 
 Revision ID: 0010
 Revises: 0009

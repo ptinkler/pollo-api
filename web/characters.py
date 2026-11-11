@@ -1,5 +1,4 @@
-"""
-Characters — reusable people/creatures/mascots: a name, a description and a
+"""Characters — reusable people/creatures/mascots: a name, a description and a
 few reference images.
 
 Attached to a chat (ChatConversation.character_ids), a character's description
@@ -25,9 +24,8 @@ from pydantic import BaseModel, Field
 
 from web.core import config
 from web.core.metadata import get_db
-
-from .uploads import image_media_type, read_image_upload, safe_filename
-from .users import require_user
+from web.uploads import image_media_type, read_image_upload, safe_filename
+from web.users import require_user
 
 router = APIRouter(prefix="/api/characters", dependencies=[Depends(require_user)])
 
@@ -88,7 +86,8 @@ def _part_of(char, other) -> bool:
 def _short_name(char, chars: list) -> str | None:
     """A multi-word name's first word ("Chloe" for "Chloe Muscle"), when it
     picks out this character alone: no other character is called that or
-    shares the first word."""
+    shares the first word.
+    """
     words = char.name.split()
     if len(words) < 2:
         return None
@@ -102,7 +101,8 @@ def mentioned(chars: list, text: str, prefer: list = ()) -> list:
     """The characters named in the text as a whole word (any case), by full
     name or by an unambiguous short name. A name that's part of a longer
     matched name, or of a `prefer` character's name, means that character:
-    "Chloe" in a picture of "Chloe Muscle" is her, not another "Chloe"."""
+    "Chloe" in a picture of "Chloe Muscle" is her, not another "Chloe".
+    """
     found = [c for c in chars if _has_name(text, c.name)]
     covering = found + list(prefer)
     found = [c for c in found if not any(_part_of(c, o) for o in covering)]
@@ -114,7 +114,8 @@ def mentioned(chars: list, text: str, prefer: list = ()) -> list:
 
 def named(chars: list, names) -> list:
     """The characters these names (from the chat model) refer to, by full
-    name or unambiguous short name."""
+    name or unambiguous short name.
+    """
     out = []
     for n in names or []:
         n = str(n).strip().lower()
@@ -142,7 +143,8 @@ def create_from_files(name: str, description: str, files: list[Path], conversati
 
 def copy_to_conversation(char, conversation_id: str, db=None):
     """A copy of a character, ad hoc in another chat (a branch of the one it
-    was made in), its images kept under the same file names."""
+    was made in), its images kept under the same file names.
+    """
     db = db or get_db()
     copy = db.create_character(char.name, char.description, conversation_id)
     d = char_dir(copy.id)
@@ -174,7 +176,8 @@ def reference_refs(chars: list, limit: int | None = None, per_character: int | N
     """The characters' "char:" image refs (up to `limit`, None = all; up to
     `per_character` of each, None = all; never those in `skip`): each
     character's first image, then their second, and so on — so every
-    character gets in before any gets two."""
+    character gets in before any gets two.
+    """
     refs: list[str] = []
     files = {
         c.id: [f for f in c.images if (char_dir(c.id) / f).is_file() and image_ref(c.id, f) not in skip] for c in chars
@@ -232,15 +235,17 @@ def _require_char(character_id: int):
 @router.get("")
 def api_list_characters(conversation_id: str | None = None, include_adhoc: bool = False):
     """Saved characters, plus the ad-hoc ones of `conversation_id` (a chat
-    shows its own), or every ad-hoc one too with include_adhoc (management page)."""
+    shows its own), or every ad-hoc one too with include_adhoc (management page).
+    """
     db = get_db()
     titles = {}
     if include_adhoc:
         titles = db.conversation_titles()
-    items = []
-    for c in db.list_characters():
-        if c.conversation_id is None or include_adhoc or c.conversation_id == conversation_id:
-            items.append({**c.to_dict(), "conversation_title": titles.get(c.conversation_id)})
+    items = [
+        {**c.to_dict(), "conversation_title": titles.get(c.conversation_id)}
+        for c in db.list_characters()
+        if c.conversation_id is None or include_adhoc or c.conversation_id == conversation_id
+    ]
     return {"characters": items}
 
 
@@ -254,7 +259,7 @@ def api_create_character(data: CharacterIn):
             raise HTTPException(400, "Conversation not found")
     char = db.create_character(data.name.strip(), data.description.strip(), data.conversation_id)
     if conv:
-        db.update_conversation(conv.id, character_ids=conv.character_ids + [char.id])
+        db.update_conversation(conv.id, character_ids=[*conv.character_ids, char.id])
     return char.to_dict()
 
 
@@ -284,7 +289,8 @@ def api_update_character(character_id: int, data: CharacterUpdate):
 @router.delete("/{character_id}")
 def api_delete_character(character_id: int):
     """Delete a character and its images. Chats/generations that used it keep
-    working; it's just no longer sent."""
+    working; it's just no longer sent.
+    """
     _require_char(character_id)
     _delete(character_id, get_db())
     return {"deleted": character_id}
@@ -304,7 +310,7 @@ def _add_image(char, content: bytes, ext: str) -> dict:
     d = char_dir(char.id)
     d.mkdir(parents=True, exist_ok=True)
     (d / name).write_bytes(content)
-    return get_db().update_character(char.id, images=char.images + [name]).to_dict()
+    return get_db().update_character(char.id, images=[*char.images, name]).to_dict()
 
 
 def add_image_from_file(char, source: Path) -> dict:

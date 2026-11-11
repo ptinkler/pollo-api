@@ -1,5 +1,4 @@
-"""
-User session tokens for signed-in accounts.
+"""User session tokens for signed-in accounts.
 
 Login is by user session only: a local admin signs in with email + password, an
 allowed user signs in via OAuth, and either way the browser carries a signed
@@ -58,7 +57,8 @@ def cookie_secure(request: Request) -> bool:
     one automatic exemption is plain-HTTP access to a loopback host, where
     local dev would otherwise break — browsers treat localhost as secure, so
     the cookie still works there. COOKIE_SECURE=true/false overrides either
-    way: set it false only to serve auth over plain HTTP on a LAN."""
+    way: set it false only to serve auth over plain HTTP on a LAN.
+    """
     override = bool_env_or_none("COOKIE_SECURE")
     if override is not None:
         return override
@@ -71,7 +71,8 @@ def cookie_secure(request: Request) -> bool:
 
 def set_user_cookie(response: Response, request: Request, user_id: str) -> None:
     """Sign this user in on `response`. The one place the login cookie is set —
-    password login, OAuth and dev login all come through here."""
+    password login, OAuth and dev login all come through here.
+    """
     response.set_cookie(
         key=USER_COOKIE,
         value=make_user_session(user_id),
@@ -84,7 +85,8 @@ def set_user_cookie(response: Response, request: Request, user_id: str) -> None:
 
 def resolve_user_session(token: str | None) -> str | None:
     """The user id a user-session cookie authenticates, or None (bad signature
-    or expired). User ids are uuid hex, so they carry no '.' of their own."""
+    or expired). User ids are uuid hex, so they carry no '.' of their own.
+    """
     if not token:
         return None
     parts = token.strip().split(".")

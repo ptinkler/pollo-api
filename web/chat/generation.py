@@ -1,6 +1,7 @@
 """Building the model request and running generation: the chat-title helper,
 conversation/history shaping, reference planning, moderation handling, and the
-image/video submit primitives shared by turns and media retries."""
+image/video submit primitives shared by turns and media retries.
+"""
 
 import json
 import re
@@ -8,16 +9,15 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from web import characters, providers, request_log
+from web.chat.catalogue import auto_ratio, model_info
+from web.chat.constants import DEFAULT_IMAGE_LIMIT, IMAGE_EXTS, TITLE_SECONDS
+from web.chat.helpers import conversation_dir, effective_ids
+from web.chat.models import RefChoices
+from web.chat.tools import AUDIO_TOOL_RESULT, IMAGE_TOOL_RESULT, TITLE_PROMPT, VIDEO_TOOL_RESULT
 from web.core.metadata import get_db
-
-from .. import characters, providers, request_log
-from ..providers import openrouter, pollo, provider_for
-from ..uploads import file_to_data_url, is_blank_image
-from .catalogue import auto_ratio, model_info
-from .constants import DEFAULT_IMAGE_LIMIT, IMAGE_EXTS, TITLE_SECONDS
-from .helpers import conversation_dir, effective_ids
-from .models import RefChoices
-from .tools import AUDIO_TOOL_RESULT, IMAGE_TOOL_RESULT, TITLE_PROMPT, VIDEO_TOOL_RESULT
+from web.providers import openrouter, pollo, provider_for
+from web.uploads import file_to_data_url, is_blank_image
 
 # Chat APIs don't accept images inside assistant messages, so images the
 # model generated ride along with the next user message, after this label
@@ -34,7 +34,8 @@ _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 def _ask(model: str, prompt: str, max_seconds: float) -> tuple[str, float]:
     """One short, non-streamed-to-the-UI completion: (the whole reply, its cost
     in USD). For the asides a turn makes on its own — naming a chat, rewriting
-    a prompt — not for the chat itself, which streams (see Turn._stream_round)."""
+    a prompt — not for the chat itself, which streams (see Turn._stream_round).
+    """
     text, cost = "", 0.0
     for chunk in provider_for(model).stream_chat(model, [{"role": "user", "content": prompt}], max_seconds=max_seconds):
         usage = chunk.get("usage")
@@ -45,7 +46,7 @@ def _ask(model: str, prompt: str, max_seconds: float) -> tuple[str, float]:
     return text, cost
 
 
-def _generate_title(model: str, prompt: str) -> tuple[str | None, float]:
+def generate_title(model: str, prompt: str) -> tuple[str | None, float]:
     """(a short title for a chat starting with `prompt`, its cost in USD)."""
     text, cost = _ask(model, TITLE_PROMPT.format(prompt=prompt[:2000]), TITLE_SECONDS)
     return _clean_title(text), cost
@@ -62,7 +63,8 @@ ENHANCE_PROMPT = (
 
 def enhance_prompt(model: str, prompt: str, kind: str) -> tuple[str, float]:
     """(the prompt rewritten by the chat model, its cost in USD). Raises
-    ValueError when the model returns nothing usable."""
+    ValueError when the model returns nothing usable.
+    """
     text, cost = _ask(model, ENHANCE_PROMPT.format(kind=kind, prompt=prompt[:4000]), ENHANCE_SECONDS)
     text = _THINK.sub("", text).strip().strip("\"'`").strip()
     if not text:
@@ -72,7 +74,8 @@ def enhance_prompt(model: str, prompt: str, kind: str) -> tuple[str, float]:
 
 def _clean_title(text: str) -> str | None:
     """The model's reply as a title: its first line, without a "Title:" label,
-    quotes, markdown or a full stop. None if nothing usable is left."""
+    quotes, markdown or a full stop. None if nothing usable is left.
+    """
     text = _THINK.sub("", text)
     line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
     line = re.sub(r"^(?:\*\*)?title(?:\*\*)?\s*:\s*", "", line, flags=re.IGNORECASE)
@@ -111,7 +114,8 @@ def plan_refs(
     keeps the important ones too: the first `after` chat images (attachments,
     the edit source), the ones the user switched on in the composer, each
     character's main image, the other chat images (pins, recent), then the
-    characters' other images. Images the user switched off never go."""
+    characters' other images. Images the user switched off never go.
+    """
     on, off = (choices.on, set(choices.off)) if choices else ([], set())
     kept = [r for r in dedupe(chat_refs) if r not in off]
     lead = kept if after is None else [r for r in dedupe(chat_refs[:after]) if r not in off]
@@ -138,7 +142,8 @@ def _ref_file(conv_id: str, ref: str) -> Path:
 
 def _history_window(history: list, limit: int | None) -> list:
     """The last `limit` messages (None = all), starting on a user message so
-    the model never sees a reply without the prompt that caused it."""
+    the model never sees a reply without the prompt that caused it.
+    """
     if not limit or len(history) <= limit:
         return history
     window = history[-limit:]
@@ -162,7 +167,8 @@ def conversation(
 
     `as_tool_calls` (only when tools are offered — providers reject tool
     calls otherwise) records generated media as the tool calls and results
-    that produced it; without it, media is summarised in bracketed notes."""
+    that produced it; without it, media is summarised in bracketed notes.
+    """
     history = _history_window(history, history_limit)
     pixels = _pixels_for(conversation_dir(conv_id), _pixel_files(history, image_limit if vision else 0))
     messages: list[dict] = []
@@ -184,7 +190,8 @@ def conversation(
 def _pixel_files(history: list, budget: int | None) -> set[str]:
     """The most recent `budget` images (None = all) — uploaded or generated —
     which go over as pixels so the model can see what's in them; older ones
-    are described by a note instead."""
+    are described by a note instead.
+    """
     images = [
         item["file"]
         for msg in reversed(history)
@@ -246,7 +253,8 @@ def image_context(
     """What a conversational image model is sent: the conversation, then —
     when the chat model called the tool — its reply so far and its prompt,
     verbatim, with any reference images it asked for. In Image mode
-    (prompt=None) the user's own message is already the last one."""
+    (prompt=None) the user's own message is already the last one.
+    """
     messages = conversation(conv_id, history, history_limit, vision=True, image_limit=image_limit)
     system = [s for s in (instructions, characters.describe(chars or [])) if s]
     messages[:0] = [{"role": "system", "content": s} for s in system]
@@ -273,7 +281,8 @@ def conversation_instructions(conv_id: str) -> str | None:
     """The instructions a chat uses — its defaults' and its own — flattened for
     the model (user's text, verbatim): every snippet from the groups (in group
     order), then the single snippets — each sent once — joined by blank lines.
-    None when nothing with content is attached."""
+    None when nothing with content is attached.
+    """
     db = get_db()
     conv = db.get_conversation(conv_id)
     if not conv:
@@ -354,7 +363,8 @@ def is_moderation_error(e: openrouter.OpenRouterError) -> bool:
     """OpenRouter's own moderation returns 403; providers phrase their
     content-policy refusals in many ways, so also match on the message.
     Pollo's 403 means "model not enabled for API access", so for Pollo only
-    the message counts."""
+    the message counts.
+    """
     if isinstance(e, pollo.PolloError):
         return bool(MODERATION.search(str(e)))
     return e.status == 403 or bool(MODERATION.search(str(e)))
@@ -364,14 +374,16 @@ def failure_fields(e: openrouter.OpenRouterError) -> dict[str, Any]:
     """A failed media item's fields. Called right after the generation call,
     on its thread: what it sent and got back comes from the error, or — when
     the call itself worked but the result didn't (a Pollo task that failed, a
-    black image) — from the request log."""
+    black image) — from the request log.
+    """
     fields = {"status": "error", "error": str(e), "moderated": is_moderation_error(e)}
     return {**fields, **exchange_fields(getattr(e, "log_entry", None) or request_log.take_last())}
 
 
 def exchange_fields(entry: dict | None) -> dict[str, Any]:
     """A request-log entry as media item fields: the body sent to the provider
-    and what it answered, for the UI's "Request" view."""
+    and what it answered, for the UI's "Request" view.
+    """
     return {"request": entry.get("request"), "response": entry.get("response")} if entry else {}
 
 
@@ -394,7 +406,8 @@ def run_image_generation(
     """Generate and save images; returns (filenames, dollar cost, Pollo credits,
     the params actually sent — Pollo and Venice, defaults included — for display).
     With `context` (conversational models) the model gets the conversation;
-    otherwise the Images API — or Pollo, or Venice — gets the prompt plus any reference images."""
+    otherwise the Images API — or Pollo, or Venice — gets the prompt plus any reference images.
+    """
     conv_dir = conversation_dir(conv_id)
     refs = [p for p in (_ref_file(conv_id, f) for f in params.get("refs") or []) if p.is_file()]
     if context is None:
@@ -425,7 +438,8 @@ def run_image_generation(
 
 def submit_video_generation(conv_id: str, model: str, prompt: str, params: dict[str, Any]) -> dict:
     """Start a video job on the model's provider. Returns the job plus
-    "log": what was sent and answered (from the request log)."""
+    "log": what was sent and answered (from the request log).
+    """
     request_log.forget_last()
     return {**_submit_video(conv_id, model, prompt, params), "log": request_log.take_last()}
 

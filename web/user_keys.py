@@ -17,12 +17,11 @@ from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from web import caches
+from web.auth import user_secret
 from web.core.metadata import get_db
-
-from . import caches
-from .auth import user_secret
-from .dev_login import store_keys_plaintext
-from .users import require_user
+from web.dev_login import store_keys_plaintext
+from web.users import require_user
 
 KEY_PROVIDERS = ("pollo", "venice", "openrouter")
 

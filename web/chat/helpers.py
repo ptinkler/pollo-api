@@ -1,21 +1,24 @@
 """Helpers shared by the chat routes and the turn engine: chat-folder paths,
 media-item builders, branch/message shaping, ownership/idle guards, spend, and
-the live default-inheritance resolution."""
+the live default-inheritance resolution.
+"""
 
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException
 
+from web.chat.constants import KINDS, REMEMBERED_SETTINGS
 from web.core import config
 from web.core.metadata import get_db
+from web.providers import openrouter, venice
 
-from ..providers import openrouter, venice
-from .constants import KINDS, REMEMBERED_SETTINGS
-from .models import TurnSettings
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from web.chat.models import TurnSettings
 
 
 def chat_root() -> Path:
@@ -26,17 +29,18 @@ def chat_root() -> Path:
 def conversation_dir(conv_id: str) -> Path:
     """A chat's media folder, created if it isn't there yet. (It is made here
     rather than on upload because every path that writes into it goes
-    through this.)"""
+    through this.).
+    """
     d = chat_root() / conv_id
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def new_media(kind: str, source: str, **fields) -> dict[str, Any]:
+def new_media(kind: str, source: str, **fields: Any) -> dict[str, Any]:
     return {"id": uuid.uuid4().hex[:8], "kind": kind, "source": source, "status": "pending", "file": None, **fields}
 
 
-def saved_media(kind: str, source: str, file: str, **fields) -> dict[str, Any]:
+def saved_media(kind: str, source: str, file: str, **fields: Any) -> dict[str, Any]:
     """A media item whose file is already on disk."""
     return {**new_media(kind, source, **fields), "status": "done", "file": file}
 
@@ -75,10 +79,11 @@ def shown_branch(conv_id: str) -> list[dict]:
     return [{**m.to_dict(), "siblings": siblings[(m.lane, m.parent_id)]} for m in shown]
 
 
-def require_text_provider(mode: str | None = None):
+def require_text_provider(mode: str | None = None) -> None:
     """Chat needs a text-model provider — OpenRouter or Venice. Image, Video
     and Audio modes send the prompt straight to the media model, so they
-    don't (hence the mode check rather than a blanket gate)."""
+    don't (hence the mode check rather than a blanket gate).
+    """
     if mode in ("image", "video", "audio"):
         return
     if not (openrouter.is_configured() or venice.is_configured()):
@@ -89,7 +94,8 @@ def _inherited(conv) -> dict[str, list[int]]:
     """What a chat gets from the defaults, live: the global defaults, then its
     space's own, de-duped, per kind ("character", "instruction",
     "instruction_group") — less any it has switched off for itself. Changing a
-    default changes every chat it applies to."""
+    default changes every chat it applies to.
+    """
     db = get_db()
     buckets = [db.get_settings()]
     space = db.get_space(conv.space_id) if conv and conv.space_id is not None else None
@@ -114,7 +120,8 @@ def effective_ids(conv, kind: str) -> list[int]:
 
 def spend(conv) -> dict:
     """What the chat cost: `usd` and `credits` in total, of which `inherited_*`
-    came with the messages copied in when it was branched off another chat."""
+    came with the messages copied in when it was branched off another chat.
+    """
     usd, credits = get_db().get_chat_spend(conv.id)
     return {
         "usd": usd,
@@ -126,14 +133,16 @@ def spend(conv) -> dict:
 
 def require_own_conversation(conv_id: str) -> None:
     """404 unless the conversation belongs to the current user (get_conversation
-    is tenant-scoped, so another user's id reads as not found)."""
+    is tenant-scoped, so another user's id reads as not found).
+    """
     if not get_db().get_conversation(conv_id):
         raise HTTPException(404, "Not found")
 
 
 def require_idle(conv_id: str, lane: str | None = None) -> None:
     """Edits/retries rewrite history, so they can't overlap a running reply
-    in the same lane (gallery exchanges never block the chat or each other)."""
+    in the same lane (gallery exchanges never block the chat or each other).
+    """
     if lane:
         return
     if any(m.status == "streaming" and not m.lane for m in get_db().get_chat_messages(conv_id)):
@@ -142,7 +151,8 @@ def require_idle(conv_id: str, lane: str | None = None) -> None:
 
 def remember_settings(conv, settings: TurnSettings) -> None:
     """Persist the model picks and composer settings on the conversation so
-    reopening it restores them."""
+    reopening it restores them.
+    """
     fields: dict[str, Any] = {
         k: getattr(settings, k)
         for k in ("text_model", "image_model", "video_model")

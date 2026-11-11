@@ -1,4 +1,4 @@
-"""add password_hash to users (local email+password admin accounts)
+"""add password_hash to users (local email+password admin accounts).
 
 Revision ID: 0021
 Revises: 0020

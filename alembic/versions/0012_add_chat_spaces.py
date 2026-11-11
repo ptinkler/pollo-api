@@ -1,4 +1,4 @@
-"""add chat spaces
+"""add chat spaces.
 
 Revision ID: 0012
 Revises: 0011

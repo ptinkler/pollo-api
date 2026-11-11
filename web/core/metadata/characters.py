@@ -1,10 +1,11 @@
 """Reusable characters (name, description, reference images)."""
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import func
 
-from .models import Character, ChatConversation, ChatSettings, ChatSpace
+from web.core.metadata.models import Character, ChatConversation, ChatSettings, ChatSpace
 
 
 class CharacterMixin:
@@ -31,7 +32,7 @@ class CharacterMixin:
                 session.expunge(c)
             return chars
 
-    def update_character(self, character_id: int, **fields) -> Character | None:
+    def update_character(self, character_id: int, **fields: Any) -> Character | None:
         """Set name / description / images (list of filenames) / conversation_id."""
         with self._session() as session:
             char = session.get(Character, character_id)
@@ -47,7 +48,8 @@ class CharacterMixin:
 
     def delete_character(self, character_id: int) -> bool:
         """Delete a character and remove it from any chats and from the global
-        and space default buckets using it (symmetric with delete_instruction)."""
+        and space default buckets using it (symmetric with delete_instruction).
+        """
         with self._session() as session:
             char = session.get(Character, character_id)
             if not char:

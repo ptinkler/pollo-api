@@ -1,16 +1,17 @@
 """The database manager, composed from the domain mixins, plus the global
-singleton accessor."""
+singleton accessor.
+"""
 
 import threading
 
-from ._base import _DBBase
-from .characters import CharacterMixin
-from .conversations import ConversationMixin
-from .imports import ImportMixin
-from .instructions import InstructionMixin
-from .library import LibraryMixin
-from .messages import MessageMixin
-from .users import UserMixin
+from web.core.metadata._base import _DBBase
+from web.core.metadata.characters import CharacterMixin
+from web.core.metadata.conversations import ConversationMixin
+from web.core.metadata.imports import ImportMixin
+from web.core.metadata.instructions import InstructionMixin
+from web.core.metadata.library import LibraryMixin
+from web.core.metadata.messages import MessageMixin
+from web.core.metadata.users import UserMixin
 
 
 class MetadataDB(
@@ -24,7 +25,8 @@ class MetadataDB(
     LibraryMixin,
 ):
     """SQLAlchemy-based database manager. The engine, schema catch-up and the
-    locked session live on _DBBase; each domain's methods come from a mixin."""
+    locked session live on _DBBase; each domain's methods come from a mixin.
+    """
 
 
 _db_instance: MetadataDB | None = None

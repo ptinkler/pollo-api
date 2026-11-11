@@ -1,4 +1,4 @@
-"""strip the v1 suffix from stored Pollo model ids
+"""strip the v1 suffix from stored Pollo model ids.
 
 Revision ID: 0027
 Revises: 0026
@@ -55,7 +55,8 @@ _JSON_KEYS = ("model", "audio_model", "text_model", "image_model", "video_model"
 
 def _renamed(value, to_v1: bool):
     """One model id, with the v1 suffix stripped (or put back on a downgrade).
-    Anything that isn't a suffixed Pollo id is returned unchanged."""
+    Anything that isn't a suffixed Pollo id is returned unchanged.
+    """
     if not isinstance(value, str) or not value.startswith(PREFIX):
         return value
     key = value[len(PREFIX) :]
@@ -84,7 +85,8 @@ def _walk(data, to_v1: bool) -> bool:
 
 def rewrite(bind, to_v1: bool = False) -> int:
     """Rewrite every stored Pollo model id; returns how many rows changed.
-    Takes the bind so it can be tested without an Alembic context."""
+    Takes the bind so it can be tested without an Alembic context.
+    """
     changed_rows = 0
     tables = set(sa.inspect(bind).get_table_names())
 

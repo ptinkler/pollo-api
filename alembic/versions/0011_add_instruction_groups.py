@@ -1,4 +1,4 @@
-"""add instruction groups and multi-snippet chat attachments
+"""add instruction groups and multi-snippet chat attachments.
 
 Revision ID: 0011
 Revises: 0010

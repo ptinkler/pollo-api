@@ -1,6 +1,7 @@
 """The Turn: one chat turn run in a worker thread. Streams the chat model,
 runs its generate_image/generate_video/create_* tools via the generation
-module, persists everything, and starts video pollers for async jobs."""
+module, persists everything, and starts video pollers for async jobs.
+"""
 
 import contextlib
 import json
@@ -11,21 +12,18 @@ import threading
 from datetime import datetime
 from typing import Any
 
-from web.core.metadata import get_db
-
-from .. import characters
-from ..providers import openrouter, provider_for
-from . import generation, polling
-from .audio import audio_params, submit_audio_generation
-from .catalogue import auto_ratio, fit_video_params, model_info
-from .constants import (
+from web import characters
+from web.chat import generation, polling
+from web.chat.audio import audio_params, submit_audio_generation
+from web.chat.catalogue import auto_ratio, fit_video_params, model_info
+from web.chat.constants import (
     CHAT_ROUND_SECONDS,
     CONSISTENCY_REFS,
     DEFAULT_TITLE,
     MAX_TOOL_ROUNDS,
     TITLE_WAIT_SECONDS,
 )
-from .generation import (
+from web.chat.generation import (
     characters_note,
     conversation,
     conversation_instructions,
@@ -40,9 +38,9 @@ from .generation import (
     submit_video_generation,
     take_log,
 )
-from .helpers import branch_to, conversation_dir, effective_ids, message_out, new_media, saved_media
-from .models import TurnSettings
-from .tools import (
+from web.chat.helpers import branch_to, conversation_dir, effective_ids, message_out, new_media, saved_media
+from web.chat.models import TurnSettings
+from web.chat.tools import (
     AUDIO_TOOL_RESULT,
     IMAGE_TOOL_RESULT,
     SYSTEM_PROMPT,
@@ -54,7 +52,9 @@ from .tools import (
     VIDEO_TOOL_RESULT,
     with_character_arg,
 )
-from .workers import ctx_thread
+from web.chat.workers import ctx_thread
+from web.core.metadata import get_db
+from web.providers import openrouter, provider_for
 
 log = logging.getLogger(__name__)
 
@@ -70,7 +70,8 @@ class Turn:
         emit,
         cancel: threading.Event,
         initial_cost: float = 0.0,
-    ):
+    ) -> None:
+        """Set up the turn: which conversation, which settings, which message row."""
         self.conv_id = conv_id
         self.s = settings
         self.message_id = message_id
@@ -105,7 +106,7 @@ class Turn:
             status, error = ("done", None)
         except openrouter.OpenRouterError as e:
             status, error = "error", str(e)
-        except Exception as e:  # noqa: BLE001 — never leave a message stuck in "streaming"
+        except Exception as e:  # never leave a message stuck in "streaming"
             status, error = "error", f"{type(e).__name__}: {e}"
         if self.cancel.is_set() and status == "done":
             self.content = self.content.rstrip() + ("\n\n" if self.content else "") + "*(stopped)*"
@@ -146,11 +147,13 @@ class Turn:
                 choices=self.s.ref_choices,
             )
         self._generate_image(prompt, self.s.image_options.aspect_ratio, refs, chars=chars, dropped=dropped)
+        return None
 
     def _direct_image_tool(self, user, prompt: str, info: dict) -> None:
         """An image tool (upscale, background remover…): the attached image is
         the whole input. The model's name stands in for the prompt, so the
-        card can be retried."""
+        card can be retried.
+        """
         files = [m["file"] for m in (user.media if user else []) if m["kind"] == "image" and m.get("file")]
         if not files:
             raise openrouter.OpenRouterError("This tool needs an image — attach one")
@@ -190,7 +193,8 @@ class Turn:
         video model: each image/video/audio becomes {file, name, type} with a
         handle (image1, video1…) the prompt mentions as [@name], capped per the
         model's ref_mode per-type limits and total max. Order matches the
-        composer, so [@video1] resolves to the same attachment on both sides."""
+        composer, so [@video1] resolves to the same attachment on both sides.
+        """
         user = self._last_user()
         types = set(ref_mode.get("types") or ("image", "video", "audio"))
         limits = ref_mode.get("limits") or {}
@@ -425,14 +429,17 @@ class Turn:
 
     def _latest_images(self, n: int) -> list[str]:
         """The n most recent finished images (this turn first, then history)."""
-        found: list[str] = []
-        for item in reversed(self.media):
-            if item["kind"] == "image" and item["status"] == "done" and item.get("file"):
-                found.append(item["file"])
+
+        def done_images(media: list[dict]) -> list[str]:
+            return [
+                item["file"]
+                for item in reversed(media)
+                if item["kind"] == "image" and item.get("status") == "done" and item.get("file")
+            ]
+
+        found = done_images(self.media)
         for msg in reversed(self.history):
-            for item in reversed(msg.media):
-                if item["kind"] == "image" and item.get("status") == "done" and item.get("file"):
-                    found.append(item["file"])
+            found.extend(done_images(msg.media))
         return found[:n]
 
     def _pinned_images(self) -> list[str]:
@@ -450,7 +457,8 @@ class Turn:
     def _pick_characters(self, names, prompt: str) -> list:
         """The attached characters in a picture: those the model named in the
         tool call, plus any whose name is in its prompt (models sometimes
-        forget the argument). Unattached characters are never used."""
+        forget the argument). Unattached characters are never used.
+        """
         named = characters.named(self.characters, names)  # "Chloe" can mean attached "Chloe Muscle"
         # "Chloe" in the prompt of a picture of "Chloe Muscle" is her, not an attached "Chloe"
         mentioned = characters.mentioned(self.characters, prompt, prefer=named)
@@ -509,7 +517,8 @@ class Turn:
         """Save a reusable instruction snippet and attach it to this chat — the
         instruction counterpart of _create_character. It's added alongside any
         snippets and groups already attached, and takes effect from the next
-        reply (this turn's system prompt is already built)."""
+        reply (this turn's system prompt is already built).
+        """
         name = str(args.get("name") or "").strip()[:255]
         content = str(args.get("content") or "").strip()[:20000]
         if not name:
@@ -535,7 +544,8 @@ class Turn:
         ChatView. Their point is reference images, so it takes an image model
         that accepts them (and, in Auto, a chat model that can call it).
         Chat mode just tells the chat model about them; Video mode only
-        uses them with video models that take reference images."""
+        uses them with video models that take reference images.
+        """
         if self.s.mode == "text":
             return True
         if self.s.mode == "video":
@@ -562,7 +572,8 @@ class Turn:
         (see plan_refs for the priority): the edit source (source_image),
         the images of the characters it named, the images the user pinned,
         and the most recent images if the model asked (keep_consistent).
-        Pins are the user's choice; the app never adds references on its own."""
+        Pins are the user's choice; the app never adds references on its own.
+        """
         if not self._accepts_refs():
             return [], []  # this image model can't take references
         lead = [source] if source else []
@@ -581,7 +592,7 @@ class Turn:
         self.db.append_chat_media_item(self.message_id, item)
         self.emit({"type": "media", "message_id": self.message_id, "item": dict(item)})
 
-    def _update_media(self, item: dict, **fields) -> None:
+    def _update_media(self, item: dict, **fields: Any) -> None:
         item.update(fields)
         self.db.update_chat_media_item(self.message_id, item["id"], **fields)
         self.emit({"type": "media", "message_id": self.message_id, "item": dict(item)})
@@ -699,7 +710,8 @@ class Turn:
     def _video_inputs(self, first_frame: str | None, last_frame: str | None, attached: list[str], chars: list) -> dict:
         """The extra inputs the video model's family takes (Venice): reference
         images (attached ones, the frame, characters' images and pins), a
-        last frame, or the chat's latest video."""
+        last frame, or the chat's latest video.
+        """
         info = model_info("video", self.s.video_model) or {}
         out: dict[str, Any] = {}
         if info.get("reference_images") or info.get("family") == "motion":
@@ -726,7 +738,8 @@ class Turn:
 
     def _latest_audio(self) -> str | None:
         """The most recent audio attachment (this turn first, then history) —
-        the uploaded track a lip-sync model drives a portrait with."""
+        the uploaded track a lip-sync model drives a portrait with.
+        """
         return self._latest_media_file("audio")
 
     def _latest_media_file(self, kind: str) -> str | None:
@@ -751,7 +764,8 @@ class Turn:
     # ― title ―
     def _start_title(self) -> dict | None:
         """A new chat's first turn asks a text model for a short title while
-        the reply is made (CHAT_TITLE_MODEL, else the chat model)."""
+        the reply is made (CHAT_TITLE_MODEL, else the chat model).
+        """
         conv = self.db.get_conversation(self.conv_id)
         if not conv or conv.title != DEFAULT_TITLE:
             return None
@@ -767,10 +781,10 @@ class Turn:
         direct = self.s.mode in ("image", "video", "audio") and not chosen
         if model and not direct and provider_for(model).is_configured():
 
-            def work():
+            def work() -> None:
                 # No title from the model: the prompt stands in
                 with contextlib.suppress(Exception):
-                    job["title"], job["cost"] = generation._generate_title(model, first.content)
+                    job["title"], job["cost"] = generation.generate_title(model, first.content)
 
             job["thread"] = ctx_thread(work, name=f"chat-title-{self.message_id}")
             job["thread"].start()
@@ -778,7 +792,8 @@ class Turn:
 
     def _finish_title(self, job: dict | None) -> None:
         """Title the chat: the model's title if it came back in time, else the
-        start of the first prompt. Its cost goes on this reply."""
+        start of the first prompt. Its cost goes on this reply.
+        """
         if not job:
             return
         title = None

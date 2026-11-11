@@ -23,7 +23,7 @@ def _migration():
     return mod
 
 
-@pytest.fixture()
+@pytest.fixture
 def bind():
     eng = sa.create_engine("sqlite://")
     with eng.begin() as c:

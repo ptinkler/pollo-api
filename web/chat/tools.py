@@ -1,5 +1,6 @@
 """The system/title prompts and the generate_* / create_* tool schemas the
-chat model is given, plus the helper that adds the `characters` argument."""
+chat model is given, plus the helper that adds the `characters` argument.
+"""
 
 TITLE_PROMPT = """Write a short title, 2 to 6 words, for a chat that starts with the message below. \
 Reply with the title alone: no quotes, no "Title:", no full stop.

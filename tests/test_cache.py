@@ -58,4 +58,5 @@ def test_clear():
     c = TTLCache(ttl=60)
     c.put("k", 1)
     c.clear()
-    assert len(c) == 0 and c.get("k", MISS) is MISS
+    assert len(c) == 0
+    assert c.get("k", MISS) is MISS

@@ -1,4 +1,4 @@
-"""add global chat settings (default buckets)
+"""add global chat settings (default buckets).
 
 Revision ID: 0013
 Revises: 0012

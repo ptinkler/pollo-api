@@ -3,8 +3,8 @@
 import uuid
 from datetime import datetime
 
-from .models import User
-from .tenant import TENANT_MODELS
+from web.core.metadata.models import User
+from web.core.metadata.tenant import TENANT_MODELS
 
 
 class UserMixin:
@@ -24,7 +24,8 @@ class UserMixin:
 
     def upsert_oauth_user(self, profile: dict, is_admin: bool = False) -> User:
         """Create or refresh a user from an OAuth profile {provider, sub, email,
-        name, avatar}. Matches on (provider, sub) first, then email."""
+        name, avatar}. Matches on (provider, sub) first, then email.
+        """
         with self._session() as session:
             user = (
                 session.query(User)
@@ -64,7 +65,8 @@ class UserMixin:
 
     def ensure_admin(self, email: str, name: str = "Admin") -> User:
         """Create the user with this email as admin, or promote an existing one
-        (without changing their sign-in provider)."""
+        (without changing their sign-in provider).
+        """
         with self._session() as session:
             user = session.query(User).filter(User.email == email.lower()).first()
             if user:
@@ -86,7 +88,8 @@ class UserMixin:
 
     def claim_orphans(self, user_id: str) -> int:
         """Assign every tenant row that has no owner to this user. For setup /
-        after an import; runs with no tenant bound, so it sees all rows."""
+        after an import; runs with no tenant bound, so it sees all rows.
+        """
         count = 0
         with self._session() as session:
             for model in TENANT_MODELS:
@@ -104,7 +107,8 @@ class UserMixin:
 
     def set_user_upload_prefs(self, user_id: str, upload_prefs_json: str | None) -> None:
         """Store the user's source-media hosting preferences (plain JSON, or
-        None to fall back to the instance default)."""
+        None to fall back to the instance default).
+        """
         with self._session() as session:
             user = session.get(User, user_id)
             if user:
@@ -113,13 +117,15 @@ class UserMixin:
 
     def list_api_key_blobs(self) -> list[str]:
         """Every stored api_keys_json across all users (non-empty), for deciding
-        whether the DB already holds encrypted key material."""
+        whether the DB already holds encrypted key material.
+        """
         with self._session() as session:
             return [b for (b,) in session.query(User.api_keys_json).filter(User.api_keys_json.isnot(None)) if b]
 
     def create_local_admin(self, email: str, password_hash: str, name: str = "Admin") -> User:
         """Create (or promote + set the password of) a local email+password admin
-        account. Caller enforces that the email is an allowed admin email."""
+        account. Caller enforces that the email is an allowed admin email.
+        """
         with self._session() as session:
             user = session.query(User).filter(User.email == email.lower()).first()
             if not user:

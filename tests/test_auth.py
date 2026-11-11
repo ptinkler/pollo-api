@@ -9,13 +9,13 @@ from web.core.metadata import MetadataDB
 from web.passwords import hash_password
 
 
-@pytest.fixture()
+@pytest.fixture
 def db(tmp_path):
     (tmp_path / "data").mkdir(parents=True, exist_ok=True)
     return MetadataDB(db_path=tmp_path / "data" / "metadata.db")
 
 
-@pytest.fixture()
+@pytest.fixture
 def client(db, monkeypatch):
 
     monkeypatch.setattr(api_mod, "get_db", lambda: db)
@@ -59,7 +59,8 @@ class TestKeys:
 
 class TestLogin:
     """Admins are created via the CLI (web.provision_admin), not the app — there
-    is no register endpoint. Login verifies against that CLI-set password."""
+    is no register endpoint. Login verifies against that CLI-set password.
+    """
 
     def test_no_register_endpoint(self, client):
         r = client.post("/api/auth/register", json={"email": "admin@x.com", "password": "longenough1"})
@@ -74,5 +75,6 @@ class TestLogin:
         db.create_local_admin("admin@x.com", hash_password("longenough1"), name="Admin")
         assert client.post("/api/auth/login", json={"email": "admin@x.com", "password": "nope"}).status_code == 401
         ok = client.post("/api/auth/login", json={"email": "admin@x.com", "password": "longenough1"})
-        assert ok.status_code == 200 and ok.json()["email"] == "admin@x.com"
+        assert ok.status_code == 200
+        assert ok.json()["email"] == "admin@x.com"
         assert client.cookies.get("user_session")

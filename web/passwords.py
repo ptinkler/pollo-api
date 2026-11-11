@@ -1,4 +1,4 @@
-"""Password hashing for local (email + password) admin accounts:
+"""Password hashing for local (email + password) admin accounts.
 
     argon2id( HMAC-SHA256(pepper, password) )   # unique salt is embedded by argon2
 
@@ -13,7 +13,6 @@ import hmac
 import os
 
 from argon2 import PasswordHasher
-from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
 _hasher = PasswordHasher()
 
@@ -41,19 +40,21 @@ def hash_password(password: str) -> str:
 
 def verify_password(stored_hash: str | None, password: str) -> bool:
     """Whether `password` matches the stored hash. False (never raises) for a
-    missing hash, a wrong password, or a malformed/foreign hash string."""
+    missing hash, a wrong password, or a malformed/foreign hash string.
+    """
     if not stored_hash:
         return False
     try:
         return _hasher.verify(stored_hash, _peppered(password))
-    except (VerifyMismatchError, InvalidHashError, Exception):  # noqa: BLE001 — any failure is "no match"
+    except Exception:  # any failure — mismatch, malformed hash — is "no match"
         return False
 
 
 def needs_rehash(stored_hash: str) -> bool:
     """Whether a stored hash was made with weaker-than-current argon2 params
-    (so it can be transparently upgraded on the next successful login)."""
+    (so it can be transparently upgraded on the next successful login).
+    """
     try:
         return _hasher.check_needs_rehash(stored_hash)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False

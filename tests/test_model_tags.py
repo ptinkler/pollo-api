@@ -1,5 +1,6 @@
 """Capability tags: the uniform derivation (model_tags.tags_for) and that the
-catalogue attaches them to every model it assembles."""
+catalogue attaches them to every model it assembles.
+"""
 
 import pytest
 
@@ -105,8 +106,8 @@ def test_catalogue_attaches_tags_to_every_model(monkeypatch):
 
 def test_each_user_gets_their_own_catalogue(monkeypatch):
     """The catalogue is built from the requesting user's provider keys, so it
-    must be cached per user: one user's list must never be served to another."""
-
+    must be cached per user: one user's list must never be served to another.
+    """
     seen: list[str | None] = []
 
     class PerKeyProvider:
@@ -140,4 +141,5 @@ def test_ref_mode_models_are_tagged_for_references_and_video_refs():
     image_ref = {"type": "img2vid", "frame_images": ["first_frame"], "ref_mode": {"types": ["image"]}}
     assert {"ref2vid", "video_refs"} <= set(tags_for("video", video_ref))
     tags = tags_for("video", image_ref)
-    assert "ref2vid" in tags and "video_refs" not in tags
+    assert "ref2vid" in tags
+    assert "video_refs" not in tags

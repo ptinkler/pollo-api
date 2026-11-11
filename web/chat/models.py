@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, Field
 
-from .constants import DEFAULT_IMAGE_LIMIT
+from web.chat.constants import DEFAULT_IMAGE_LIMIT
 
 
 class ConversationCreate(BaseModel):
@@ -74,7 +74,8 @@ class VideoTurnOptions(TurnOptions):
     """Video options carry one extra: whether the length was left on Auto. The
     duration still arrives resolved (the source clip's length, or the model's
     default), so without this flag "reuse these settings" couldn't tell a
-    hand-picked 30s from an auto 30s."""
+    hand-picked 30s from an auto 30s.
+    """
 
     duration_auto: bool = False
 

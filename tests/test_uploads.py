@@ -12,6 +12,7 @@ from web.uploads import image_media_type, read_image_upload, safe_filename
 
 class FakeUpload:
     def __init__(self, content: bytes, content_type: str):
+        """Hold the bytes and content type the fake upload will report."""
         self._content = content
         self.content_type = content_type
 
@@ -44,11 +45,12 @@ def test_image_media_type():
 
 def test_read_image_upload_ok():
     content, ext = asyncio.run(read_image_upload(FakeUpload(_png(), "image/png")))
-    assert ext == ".png" and content.startswith(b"\x89PNG")
+    assert ext == ".png"
+    assert content.startswith(b"\x89PNG")
 
 
 @pytest.mark.parametrize(
-    "content,content_type,msg",
+    ("content", "content_type", "msg"),
     [
         (b"x", "text/plain", "Unsupported file type"),
         (b"not an image", "image/png", "not a valid image"),
@@ -57,4 +59,5 @@ def test_read_image_upload_ok():
 def test_read_image_upload_rejects(content, content_type, msg):
     with pytest.raises(HTTPException) as e:
         asyncio.run(read_image_upload(FakeUpload(content, content_type)))
-    assert e.value.status_code == 400 and msg in e.value.detail
+    assert e.value.status_code == 400
+    assert msg in e.value.detail

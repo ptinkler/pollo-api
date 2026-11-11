@@ -20,10 +20,9 @@ from pydantic import BaseModel
 
 from web.core import config
 from web.core.metadata import current_tenant, get_db
-
-from .net_guard import UnsafeURLError, get_public
-from .public_media import selfhost_url
-from .users import require_user
+from web.net_guard import UnsafeURLError, get_public
+from web.public_media import selfhost_url
+from web.users import require_user
 
 router = APIRouter(prefix="/api/settings/uploads")
 
@@ -41,7 +40,8 @@ def _public_base_default() -> str:
 
 def default_prefs() -> dict:
     """The instance-wide default, from the environment. Litterbox first keeps
-    today's behavior (handles large video, up to ~1GB), tmpfiles as backup."""
+    today's behavior (handles large video, up to ~1GB), tmpfiles as backup.
+    """
     primary = os.getenv("UPLOAD_PRIMARY", "litterbox").strip()
     backup = os.getenv("UPLOAD_BACKUP", "tmpfiles").strip()
     try:
@@ -58,7 +58,8 @@ def default_prefs() -> dict:
 
 def _sanitize(raw: dict, base: dict) -> dict:
     """Merge a stored/partial prefs dict over the defaults, dropping anything
-    invalid so a bad stored blob can never break uploads."""
+    invalid so a bad stored blob can never break uploads.
+    """
     out = dict(base)
     if raw.get("primary") in HOSTS:
         out["primary"] = raw["primary"]
@@ -89,7 +90,8 @@ def resolve_prefs(user) -> dict:
 
 def current_upload_prefs() -> dict:
     """Prefs for whoever's request is running (resolved at upload time via the
-    bound tenant). Falls back to the instance default when unauthenticated."""
+    bound tenant). Falls back to the instance default when unauthenticated.
+    """
     uid = current_tenant()
     if uid:
         user = get_db().get_user(uid)
@@ -132,10 +134,11 @@ class SelfhostTest(BaseModel):
 
 
 @router.post("/test-selfhost")
-async def test_selfhost(data: SelfhostTest, user=Depends(require_user)):
+async def check_selfhost(data: SelfhostTest, user=Depends(require_user)):
     """Confirm a self-host base URL is reachable from the outside the way Pollo
     would reach it: stage a tiny file, sign a link at that base, fetch it back
-    through the public-URL guard, and check the bytes come through."""
+    through the public-URL guard, and check the bytes come through.
+    """
     base = (data.selfhost_base or resolve_prefs(user).get("selfhost_base") or "").strip()
     token = secrets.token_hex(8)
     test_dir = config.ROOT_DIR / "chat" / "__selfhost_test__"

@@ -1,4 +1,4 @@
-"""add chat_messages.mode
+"""add chat_messages.mode.
 
 Revision ID: 0007
 Revises: 0006

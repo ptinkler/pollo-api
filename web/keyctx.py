@@ -30,5 +30,6 @@ def reset_keys(token) -> None:
 
 def provider_key(provider: str) -> str | None:
     """The current user's key for a provider (from their encrypted DB keys), or
-    None. There is no .env fallback — keys are per user only."""
+    None. There is no .env fallback — keys are per user only.
+    """
     return (_current_keys.get() or {}).get(provider) or None

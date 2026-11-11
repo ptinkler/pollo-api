@@ -1,5 +1,4 @@
-"""
-Media library — one place for every upload and creation in the app.
+"""Media library — one place for every upload and creation in the app.
 
 It's an index over files that already live elsewhere, not a store of its own:
 
@@ -40,12 +39,11 @@ from fastapi.responses import FileResponse, Response
 from PIL import Image, ImageOps
 from pydantic import BaseModel
 
+from web import characters, media_cache
 from web.core import config
 from web.core.metadata import current_tenant, get_db, iso
-
-from . import characters, media_cache
-from .media_types import VIDEO_SUFFIXES
-from .uploads import (
+from web.media_types import VIDEO_SUFFIXES
+from web.uploads import (
     image_media_type,
     is_blank_image,
     read_image_upload,
@@ -53,7 +51,7 @@ from .uploads import (
     safe_filename,
     store_deduped,
 )
-from .users import require_user
+from web.users import require_user
 
 router = APIRouter(prefix="/api/media", dependencies=[Depends(require_user)])
 
@@ -98,7 +96,8 @@ def _mtime_iso(path: Path) -> str | None:
 
 def first_frame_jpeg(video_path: Path) -> bytes | None:
     """A video's first frame as JPEG bytes, or None if it can't be read.
-    Uncached — the caller caches the thumbnail it makes from this."""
+    Uncached — the caller caches the thumbnail it makes from this.
+    """
     try:
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
@@ -109,7 +108,7 @@ def first_frame_jpeg(video_path: Path) -> bytes | None:
             return None
         _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         return jpeg.tobytes()
-    except Exception:  # noqa: BLE001 — an unreadable video simply has no frame
+    except Exception:  # an unreadable video simply has no frame
         return None
 
 
@@ -137,7 +136,8 @@ _durations_lock = threading.Lock()
 
 def _durations_map() -> dict[str, tuple[int, float | None]]:
     """Known lengths: path → (the mtime it was read at, seconds). Read from the
-    cache once per process; filling adds to it."""
+    cache once per process; filling adds to it.
+    """
     global _durations
     with _durations_lock:
         if _durations is None:
@@ -148,7 +148,8 @@ def _durations_map() -> dict[str, tuple[int, float | None]]:
 
 def _duration_known(path: Path) -> bool:
     """Whether this exact version of the file has been read before — including
-    one whose length couldn't be worked out, so it isn't retried every request."""
+    one whose length couldn't be worked out, so it isn't retried every request.
+    """
     try:
         mtime_ns = path.stat().st_mtime_ns
     except OSError:
@@ -180,7 +181,8 @@ def _read_duration(path: Path) -> tuple[int, float | None] | None:
 
 def _fill_durations(items: list[dict[str, Any]]) -> None:
     """Read the lengths still missing from *items*, up to a budget, so a page
-    full of videos never seen before can't make one request slow."""
+    full of videos never seen before can't make one request slow.
+    """
     budget = _DURATION_FILL_BUDGET
     read: list[tuple[str, int, float | None]] = []
     for item in items:
@@ -214,7 +216,8 @@ def _item_path(item: dict[str, Any]) -> Path | None:
 
 def resolve(media_id: str) -> tuple[str, Path, dict[str, str]]:
     """(origin, file path, location parts) for an item id; 400/404 if it's
-    malformed or gone."""
+    malformed or gone.
+    """
     origin, _, rest = media_id.partition(":")
     if origin == "lib":
         path, parts = library_dir() / safe_filename(rest), {}
@@ -242,7 +245,8 @@ def resolve(media_id: str) -> tuple[str, Path, dict[str, str]]:
 
 def _forget_file(path: Path) -> None:
     """Drop what was cached about a file that's being deleted, so nothing is
-    left behind for it."""
+    left behind for it.
+    """
     _thumb_path(path).unlink(missing_ok=True)
     media_cache.forget(path)
 
@@ -253,18 +257,20 @@ def _thumb_url(media_id: str) -> str:
 
 def _thumb_path(path: Path, size: int = THUMB_SIZE) -> Path:
     """Where a file's thumbnail is cached — keyed by path, mtime and size, so
-    an edited file gets a fresh one."""
+    an edited file gets a fresh one.
+    """
     try:
         mtime = path.stat().st_mtime
     except OSError:
         mtime = 0
     key = f"{path}:{mtime}" + (f":{size}" if size != THUMB_SIZE else "")
-    return thumb_dir() / f"{hashlib.md5(key.encode()).hexdigest()}.jpg"
+    return thumb_dir() / f"{hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()}.jpg"
 
 
 def make_thumb(path: Path, size: int = THUMB_SIZE) -> Path | None:
     """A small JPEG of an image, or of a video's first frame (cached), `size`
-    px on its shorter side. None if the file can't be read."""
+    px on its shorter side. None if the file can't be read.
+    """
     out = _thumb_path(path, size)
     if out.is_file():
         return out
@@ -287,7 +293,7 @@ def make_thumb(path: Path, size: int = THUMB_SIZE) -> Path | None:
         img.save(tmp, "JPEG", quality=80)
         tmp.replace(out)
         return out
-    except Exception:  # noqa: BLE001 — a broken file just has no thumbnail
+    except Exception:  # a broken file just has no thumbnail
         return None
 
 
@@ -298,7 +304,8 @@ _thumb_pool = ThreadPoolExecutor(max_workers=THUMB_WORKERS, thread_name_prefix="
 async def thumb_response(path: Path, size: int = THUMB_SIZE) -> FileResponse:
     """A file's thumbnail: cached ones straight back, new ones queued for the
     thumbnail pool (awaited, so queued requests don't tie up the worker
-    threads every other, sync, endpoint runs on)."""
+    threads every other, sync, endpoint runs on).
+    """
     thumb = _thumb_path(path, size)
     if not thumb.is_file():
         thumb = await asyncio.wrap_future(_thumb_pool.submit(make_thumb, path, size))
@@ -375,10 +382,11 @@ def _chat_records(msgs, lib_items, titles: dict[str, str]) -> list[dict[str, Any
     return list(items.values())
 
 
-def _referenced_files(item: dict) -> list[str]:
+def referenced_files(item: dict) -> list[str]:
     """Files a chat media item uses: its own, the references it was made from
     (kept so it can be retried), and the pictures it replaced (kept so the card
-    can flip back through its earlier versions)."""
+    can flip back through its earlier versions).
+    """
     files = [item.get("file")]
     for source in (item, *(item.get("versions") or [])):
         params = source.get("params") or {}
@@ -393,9 +401,9 @@ def _chat_orphans(msgs, lib_items, titles: dict[str, str]) -> list[dict[str, Any
         return []
     used: set[tuple[str, str]] = set()
     for msg in msgs:
-        used.update((msg.conversation_id, f) for i in msg.media for f in _referenced_files(i))
+        used.update((msg.conversation_id, f) for i in msg.media for f in referenced_files(i))
     for lib in lib_items:
-        used.update((lib.conversation_id, f) for f in _referenced_files(lib.item))
+        used.update((lib.conversation_id, f) for f in referenced_files(lib.item))
     cutoff = time.time() - ORPHAN_GRACE
     items = []
     # Only the current user's conversation folders (titles is tenant-scoped), so
@@ -430,7 +438,8 @@ def _chat_orphans(msgs, lib_items, titles: dict[str, str]) -> list[dict[str, Any
 def _build_items(db) -> list[dict[str, Any]]:
     """The whole library, newest first. The two chat queries (every message
     with media, and the detached library) are each run once and shared by the
-    records and orphans passes — they were the list's main cost."""
+    records and orphans passes — they were the list's main cost.
+    """
     msgs = db.get_chat_messages_with_media()  # newest first (id desc)
     lib_items = db.list_chat_library()
     titles = db.conversation_titles()
@@ -495,7 +504,8 @@ def api_list_media(
     q: str = "",
 ):
     """A page of the library, newest first, narrowed by the same filters as the
-    Media page. `total` is how many match before paging, for infinite scroll."""
+    Media page. `total` is how many match before paging, for infinite scroll.
+    """
     items = _all_items()
     ql = q.strip().lower()
     if kind != "all" or source != "all" or origin != "all" or ql:
@@ -517,7 +527,8 @@ def api_library_file(filename: str):
 @router.post("/upload")
 async def api_upload_media(file: UploadFile = File(...)):
     """Upload an image or video straight to the library (so it can be picked as
-    a reference). Audio stays a chat-only upload."""
+    a reference). Audio stays a chat-only upload.
+    """
     ct = file.content_type or ""
     content, ext = await (read_video_upload(file) if ct.startswith("video/") else read_image_upload(file))
     name = store_deduped(library_dir(), "up_", content, ext)
@@ -548,7 +559,8 @@ def api_bulk_delete_media(data: MediaIds):
 @router.post("/bulk-download")
 def api_bulk_download_media(data: MediaIds):
     """The chosen items in one zip (stored, not compressed: images and videos
-    are already compressed)."""
+    are already compressed).
+    """
     buf = io.BytesIO()
     used: set[str] = set()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
@@ -578,7 +590,8 @@ def api_delete_media(media_id: str):
 def _delete_item(media_id: str) -> dict:
     """Delete an item's file — and what records it: a generation's job, or
     the chat message's media item. Copies already made from it (character
-    images, attachments, Generate sources) are separate files and stay."""
+    images, attachments, Generate sources) are separate files and stay.
+    """
     origin, path, parts = resolve(media_id)
     _forget_file(path)
     db = get_db()
@@ -629,7 +642,8 @@ def _save_blank_checks() -> None:
 
 def _is_blank_file(path: Path) -> bool:
     """is_blank_image for a saved file, remembered per file version. Reads its
-    small thumbnail when there is one rather than the full image."""
+    small thumbnail when there is one rather than the full image.
+    """
     try:
         key = f"{path}:{path.stat().st_mtime}"
     except OSError:
@@ -646,7 +660,8 @@ def _is_blank_file(path: Path) -> bool:
 def _blocked_reason(conv_id: str, item: dict) -> str | None:
     """Why a chat media item counts as a blocked generation: "moderated" (a
     content filter refused it) or "black" (a black image saved before the
-    app caught those); None otherwise."""
+    app caught those); None otherwise.
+    """
     if item.get("source") == "upload" or item.get("import_file"):  # imports weren't made by this app's providers
         return None
     if item.get("status") == "error":
@@ -675,7 +690,8 @@ def _blocked(db) -> list[tuple[Any, dict, str]]:
 @router.get("/blocked")
 def api_blocked_count():
     """How many chat generations a content filter blocked: failed ones
-    (moderated) and black images saved before those were caught."""
+    (moderated) and black images saved before those were caught.
+    """
     found = _blocked(get_db())
     return {"moderated": sum(r == "moderated" for *_, r in found), "black": sum(r == "black" for *_, r in found)}
 
@@ -683,7 +699,8 @@ def api_blocked_count():
 @router.post("/blocked/clear")
 def api_clear_blocked():
     """Remove every blocked chat generation: the failed cards from their chats
-    (and detached ones from the library) and the black images' files."""
+    (and detached ones from the library) and the black images' files.
+    """
     db = get_db()
     found = _blocked(db)
     by_message: dict[int, list[str]] = {}
@@ -715,7 +732,8 @@ class ImportMedia(BaseModel):
 def api_import_media(data: ImportMedia):
     """Copy a library item to where it's being used:
     chat      → {"file": "<file>"} to attach to the next message (image or video)
-    character → the character, with the image added (images only)"""
+    character → the character, with the image added (images only).
+    """
     origin, path, parts = resolve(data.media_id)
     kind = _kind(path)
     db = get_db()

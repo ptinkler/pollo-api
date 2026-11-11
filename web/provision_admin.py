@@ -16,8 +16,7 @@ import getpass
 
 from web.core import config
 from web.core.metadata import get_db
-
-from .passwords import hash_password
+from web.passwords import hash_password
 
 
 def main() -> None:

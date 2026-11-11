@@ -1,4 +1,4 @@
-"""add imported chats: their origin, and deleted imports
+"""add imported chats: their origin, and deleted imports.
 
 Revision ID: 0014
 Revises: 0013

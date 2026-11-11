@@ -1,4 +1,4 @@
-"""add characters
+"""add characters.
 
 Revision ID: 0009
 Revises: 0008

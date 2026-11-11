@@ -1,4 +1,4 @@
-"""add upload_prefs_json to users
+"""add upload_prefs_json to users.
 
 Revision ID: 0025
 Revises: 0024

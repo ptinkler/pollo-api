@@ -1,5 +1,4 @@
-"""
-SSRF guard for server-side fetches of URLs we don't fully control.
+"""SSRF guard for server-side fetches of URLs we don't fully control.
 
 A provider's API response can hand us a URL to download (e.g. an image the
 model generated). Before fetching, confirm it's a public http(s) address so a
@@ -35,7 +34,8 @@ def _is_public_ip(ip: str) -> bool:
 
 def assert_public_url(url: str) -> None:
     """Raise UnsafeURLError unless *url* is http(s) and every address its host
-    resolves to is public."""
+    resolves to is public.
+    """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise UnsafeURLError(f"Unsupported URL scheme: {parsed.scheme!r}")
@@ -54,7 +54,8 @@ def assert_public_url(url: str) -> None:
 
 def get_public(client: httpx.Client, url: str, *, timeout, max_redirects: int = 3) -> httpx.Response:
     """GET *url* with SSRF checks, following redirects manually so each hop's
-    target is validated too (httpx's own redirect handling would skip that)."""
+    target is validated too (httpx's own redirect handling would skip that).
+    """
     for _ in range(max_redirects + 1):
         assert_public_url(url)
         resp = client.get(url, timeout=timeout, follow_redirects=False)

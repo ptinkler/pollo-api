@@ -1,4 +1,4 @@
-"""add job_type column to jobs
+"""add job_type column to jobs.
 
 Revision ID: 0002
 Revises: 0001

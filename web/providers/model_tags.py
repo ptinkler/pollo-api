@@ -11,8 +11,10 @@ so nothing new has to be stored per model.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # slug -> human label shown on the filter chips, grouped by the kind it applies
 # to. Order here is the order the chips appear in.
@@ -132,7 +134,8 @@ def _video_tags(m: dict[str, Any], add: Callable[..., None]) -> None:
 def _video_img_tags(m: dict[str, Any], typ, fam, frames: list, add: Callable[..., None]) -> None:
     """Whether the model can animate an image / do pure text-to-video. A
     "first_frame" only means img2vid for a plain generator, not for an edit
-    family where the image plays a different role."""
+    family where the image plays a different role.
+    """
     special = typ in _EDIT_TYPES or fam in _VENICE_EDIT_FAMS
     if "first_frame" in frames and not special:
         add("img2vid")

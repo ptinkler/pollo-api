@@ -35,28 +35,24 @@ import contextlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import urllib.request
 from datetime import date
 from pathlib import Path
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(_HERE))  # repo root, for `web.*`
-sys.path.insert(0, _HERE)  # this scripts/ dir, for the probe import
-
-from probe_pollo_models import _probe_estimate  # noqa: E402 — sibling script, after the sys.path bootstrap above
-
-from web.providers.pollo_engine.video import VIDEO_MODELS  # noqa: E402
-from web.providers.pollo_models import MODEL_INFO  # noqa: E402
+from scripts.probe_pollo_models import _probe_estimate
+from web.providers.pollo_engine.video import VIDEO_MODELS
+from web.providers.pollo_models import MODEL_INFO
 
 SPEC_URL = "https://docs.pollo.ai/openapi.json"
 # Per-type ref caps live in the free-text "constraints" of the refs description;
 # pull the common phrasings so the audit can compare them to our ref_mode limits.
 _LIMIT_PATTERNS = {
-    "image": re.compile(r"(?:up to|most)\s+(\d+)\s+image", re.I),
-    "video": re.compile(r"(?:up to|most)\s+(\d+)\s+(?:reference\s+)?video", re.I),
-    "audio": re.compile(r"(?:up to|most)\s+(\d+)\s+(?:audio|voice)", re.I),
+    "image": re.compile(r"(?:up to|most)\s+(\d+)\s+image", re.IGNORECASE),
+    "video": re.compile(r"(?:up to|most)\s+(\d+)\s+(?:reference\s+)?video", re.IGNORECASE),
+    "audio": re.compile(r"(?:up to|most)\s+(\d+)\s+(?:audio|voice)", re.IGNORECASE),
 }
 
 
@@ -65,7 +61,7 @@ def _load_spec(path_or_none: str | None) -> dict:
         with open(path_or_none, encoding="utf-8") as f:
             return json.load(f)
     print(f"Fetching {SPEC_URL} (~10 MB)…", file=sys.stderr)
-    with urllib.request.urlopen(SPEC_URL, timeout=60) as resp:  # noqa: S310 — fixed, trusted docs URL
+    with urllib.request.urlopen(SPEC_URL, timeout=60) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -170,11 +166,12 @@ def _enablement(keys: list[str], api_key: str) -> dict[str, str]:
 # labels, deliberate "Superseded" hides, ref_mode's own quirks like
 # `no_audio_with_video` — are merged around, never overwritten.
 _REMOVE = object()
-_REPO = os.path.dirname(_HERE)
+_REPO = str(Path(__file__).resolve().parent.parent)  # repo root
+_RUFF = shutil.which("ruff")
 MODELS_FILE = os.path.join(_REPO, "web", "providers", "pollo_models.py")
 ENGINE_FILE = os.path.join(_REPO, "web", "providers", "pollo_engine", "v1_video.py")
 # A hide we may clear is one justified by enablement; a deliberate hide is kept.
-_ENABLEMENT_HIDE = re.compile(r"enabled|403|404|unavailable|access", re.I)
+_ENABLEMENT_HIDE = re.compile(r"enabled|403|404|unavailable|access", re.IGNORECASE)
 
 
 def py_literal(v) -> str:
@@ -192,7 +189,8 @@ def py_literal(v) -> str:
 
 def _block_range(lines: list[str], key: str) -> tuple[int, int] | None:
     """(first, last) line index of a `    "key": {` … `    },` entry. A one-line
-    inline entry (`    "key": {…},`) returns (i, i)."""
+    inline entry (`    "key": {…},`) returns (i, i).
+    """
     opener = re.compile(r'^    "' + re.escape(key) + r'": \{')
     for i, ln in enumerate(lines):
         if opener.match(ln):
@@ -207,7 +205,8 @@ def _block_range(lines: list[str], key: str) -> tuple[int, int] | None:
 
 def _edit_inline(line: str, field: str, val: str) -> str:
     """Add/replace a member inside a one-line entry `    "key": {…},` (an inline
-    value can't carry a comment, so any comment is dropped)."""
+    value can't carry a comment, so any comment is dropped).
+    """
     val = re.sub(r"\s+#.*$", "", val)
     m = re.match(r'^(\s*".*?": \{)(.*?)(\},?\s*)$', line)
     prefix, inner, suffix = m.group(1), m.group(2).rstrip(), m.group(3)
@@ -221,7 +220,8 @@ def _edit_inline(line: str, field: str, val: str) -> str:
 
 def _field_range(lines: list[str], start: int, end: int, field: str) -> tuple[int, int] | None:
     """(first, last) line index of a `        "field": …,` member, following a
-    multi-line dict/list value to its closing line via brace balance."""
+    multi-line dict/list value to its closing line via brace balance.
+    """
     pat = re.compile(r'^        "' + re.escape(field) + r'":')
     for i in range(start + 1, end):
         if pat.match(lines[i]):
@@ -237,7 +237,8 @@ def _field_range(lines: list[str], start: int, end: int, field: str) -> tuple[in
 
 def apply_edits(path: str, edits: dict[str, dict], warnings: list[str]) -> int:
     """Apply {model_key: {field: literal-str | _REMOVE}} to a source file,
-    re-scanning after each change so indices stay valid. Returns edit count."""
+    re-scanning after each change so indices stay valid. Returns edit count.
+    """
     lines = Path(path).read_text(encoding="utf-8").split("\n")
     n = 0
     for key, fields in edits.items():
@@ -274,7 +275,8 @@ def apply_edits(path: str, edits: dict[str, dict], warnings: list[str]) -> int:
 def plan_writes(ours: dict, docs: dict[str, dict], enabled: dict[str, str]) -> tuple[dict, dict, list[str]]:
     """(pollo_models.py edits, v1_video.py edits, human-only notes). ref_mode is
     only ever added/updated from the docs, never removed (the spec is
-    incomplete); hides are only cleared when they were enablement-justified."""
+    incomplete); hides are only cleared when they were enablement-justified.
+    """
     models_edits: dict[str, dict] = {}
     engine_edits: dict[str, dict] = {}
     notes: list[str] = []
@@ -318,7 +320,9 @@ def _write(ours: dict, docs: dict, enabled: dict) -> None:
             print(f"  - {note}")
     # Re-flow to our formatting; harmless if ruff isn't installed.
     with contextlib.suppress(Exception):
-        subprocess.run(["ruff", "format", MODELS_FILE, ENGINE_FILE], cwd=_REPO, check=False, capture_output=True)
+        subprocess.run(
+            [_RUFF or "ruff", "format", MODELS_FILE, ENGINE_FILE], cwd=_REPO, check=False, capture_output=True
+        )
     print(f"\nApplied {n} edit(s) to pollo_models.py / v1_video.py. Review with `git diff` before committing.")
 
 

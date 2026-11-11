@@ -1,4 +1,4 @@
-"""add paused_instructions to chat_conversations
+"""add paused_instructions to chat_conversations.
 
 Revision ID: 0017
 Revises: 0016

@@ -2,27 +2,30 @@
 pragmas, the locked session context manager, the small list/get/save helpers
 the domain mixins share, and the one cross-domain helper (_detach_id).
 
-The schema itself is Alembic's — see web/core/metadata/schema.py."""
+The schema itself is Alembic's — see web/core/metadata/schema.py.
+"""
 
 import threading
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from ..config import DB_PATH
-from .models import Base
+from web.core.config import DB_PATH
+from web.core.metadata.models import Base
 
 
 class _DBBase:
     """Engine, schema catch-up and the locked session context the domain mixins
-    (users, conversations, …) build on."""
+    (users, conversations, …) build on.
+    """
 
-    def __init__(self, db_path: Path | None = None):
+    def __init__(self, db_path: Path | None = None) -> None:
         self.db_path = db_path or DB_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
@@ -38,7 +41,7 @@ class _DBBase:
         )
 
         @event.listens_for(self.engine, "connect")
-        def _set_sqlite_pragma(dbapi_conn, connection_record):
+        def _set_sqlite_pragma(dbapi_conn, connection_record) -> None:
             cursor = dbapi_conn.cursor()
             cursor.execute("PRAGMA journal_mode=DELETE")
             cursor.execute("PRAGMA synchronous=NORMAL")
@@ -82,7 +85,7 @@ class _DBBase:
                 session.expunge(item)
             return item
 
-    def _save(self, model, pk, **fields):
+    def _save(self, model, pk, **fields: Any):
         """Create (pk None) or update one row; None if the pk isn't there."""
         with self._session() as session:
             if pk is None:
@@ -103,7 +106,8 @@ class _DBBase:
     @staticmethod
     def _detach_id(session, model, json_column, list_attr: str, target_id: int) -> None:
         """Remove target_id from the JSON id-list (`list_attr`) of every row
-        whose `json_column` text mentions it (exact check after the LIKE)."""
+        whose `json_column` text mentions it (exact check after the LIKE).
+        """
         for row in session.query(model).filter(json_column.like(f"%{target_id}%")).all():
             ids = getattr(row, list_attr)
             if target_id in ids:

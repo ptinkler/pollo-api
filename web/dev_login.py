@@ -15,10 +15,9 @@ import os
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
+from web.auth import set_user_cookie
 from web.core.env import bool_env
 from web.core.metadata import get_db
-
-from .auth import set_user_cookie
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +38,8 @@ def dev_email() -> str:
 
 def dev_user():
     """The dev account, created on first use as an admin (so owner/VPN controls
-    are testable). Matched by email, like the local admin."""
+    are testable). Matched by email, like the local admin.
+    """
     db = get_db()
     existing = db.get_user_by_email(dev_email())
     if existing:
@@ -59,19 +59,22 @@ def _looks_encrypted(blob: str | None) -> bool:
 
 def db_has_encrypted_keys() -> bool:
     """Any user's keys are encrypted at rest — i.e. a real/prod DB. You can't
-    un-encrypt those, so dev no-encryption mode must refuse to touch it."""
+    un-encrypt those, so dev no-encryption mode must refuse to touch it.
+    """
     return any(_looks_encrypted(b) for b in get_db().list_api_key_blobs())
 
 
 def store_keys_plaintext() -> bool:
     """Whether provider keys should be stored unencrypted: dev only, and only on
-    a DB that was never encrypted (so prod is never silently downgraded)."""
+    a DB that was never encrypted (so prod is never silently downgraded).
+    """
     return dev_login_enabled() and not db_has_encrypted_keys()
 
 
 def seed_dev_user() -> None:
     """Ensure the dev account exists at startup, when enabled and safe. A no-op
-    otherwise (so this never runs in production)."""
+    otherwise (so this never runs in production).
+    """
     if not dev_login_enabled():
         return
     if db_has_encrypted_keys():
@@ -85,7 +88,8 @@ def seed_dev_user() -> None:
 async def dev_login(response: Response, request: Request):
     """One-click sign-in as the local dev account — no password or OAuth. 404
     unless DEV_LOGIN is set; refused (403) on a DB that already holds encrypted
-    keys (can't un-encrypt a prod database)."""
+    keys (can't un-encrypt a prod database).
+    """
     if not dev_login_enabled():
         raise HTTPException(status_code=404, detail="Not found")
     if db_has_encrypted_keys():

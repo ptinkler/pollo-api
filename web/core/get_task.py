@@ -1,5 +1,4 @@
-"""
-Get task status from the Pollo API.
+"""Get task status from the Pollo API.
 
 API Docs: https://docs.pollo.ai/task/get-task-status?playground=open
 """
@@ -8,8 +7,8 @@ import logging
 
 import requests
 
-from .cloudflare import is_cloudflare_block
-from .config import POLLO_API_TIMEOUT, POLLO_PLATFORM_BASE, POLLO_TASK_BASE
+from web.core.cloudflare import is_cloudflare_block
+from web.core.config import POLLO_API_TIMEOUT, POLLO_PLATFORM_BASE, POLLO_TASK_BASE
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +21,8 @@ CLOUDFLARE_MESSAGE = "Cloudflare blocked the request — check your VPN or switc
 
 def get_task_status(task_id: str, api_key: str) -> list[TaskResult]:
     """One result per generation of the task; a single ("error", …) or
-    ("cloudflare_blocked", …) result when the status can't be read."""
+    ("cloudflare_blocked", …) result when the status can't be read.
+    """
     url = f"{POLLO_TASK_BASE}/{task_id}/status"
     response = requests.request("GET", url, headers={"x-api-key": api_key}, timeout=POLLO_API_TIMEOUT)
     if is_cloudflare_block(response):

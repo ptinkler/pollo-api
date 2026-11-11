@@ -4,13 +4,14 @@ import json
 import re
 import uuid
 from datetime import datetime
+from typing import Any
 
-from .models import ChatConversation, ChatImportSkip, ChatLibraryItem, ChatMessage
-from .tenant import reset_tenant, set_tenant
+from web.core.metadata.models import ChatConversation, ChatImportSkip, ChatLibraryItem, ChatMessage
+from web.core.metadata.tenant import reset_tenant, set_tenant
 
 
 class ConversationMixin:
-    def create_conversation(self, title: str = "New chat", **fields) -> ChatConversation:
+    def create_conversation(self, title: str = "New chat", **fields: Any) -> ChatConversation:
         with self._session() as session:
             conv = ChatConversation(id=uuid.uuid4().hex, title=title, **fields)
             session.add(conv)
@@ -21,7 +22,8 @@ class ConversationMixin:
 
     def conversation_titles(self) -> dict[str, str]:
         """Every conversation's title, by id — for labelling media and
-        characters with the chat they came from."""
+        characters with the chat they came from.
+        """
         return {c.id: c.title for c in self.list_conversations(limit=None)}
 
     def get_conversation(self, conv_id: str) -> ChatConversation | None:
@@ -35,7 +37,8 @@ class ConversationMixin:
         """Whether ANY user owns a conversation with this id (tenant scope
         bypassed). Lets a caller tell a cross-tenant id (a real chat that isn't
         the current user's) from a truly orphaned chat folder with no DB row at
-        all — only the former must be refused."""
+        all — only the former must be refused.
+        """
         token = set_tenant(None)  # None disables the per-tenant select filter
         try:
             with self._session() as session:
@@ -45,7 +48,8 @@ class ConversationMixin:
 
     def list_conversations(self, limit: int | None = 200) -> list[ChatConversation]:
         """Pinned chats first, then the most recently active. `limit=None` is
-        every one of them."""
+        every one of them.
+        """
         with self._session() as session:
             query = session.query(ChatConversation).order_by(
                 ChatConversation.pinned.desc(), ChatConversation.updated_at.desc()
@@ -57,7 +61,8 @@ class ConversationMixin:
 
     def conversation_thumbs(self, conv_ids: list[str]) -> dict[str, str]:
         """Newest done image file per conversation, for gallery cover thumbnails
-        (conversations without one are simply absent). One query over the ids."""
+        (conversations without one are simply absent). One query over the ids.
+        """
         out: dict[str, str] = {}
         if not conv_ids:
             return out
@@ -83,7 +88,8 @@ class ConversationMixin:
     def search_conversations(self, query: str, limit: int = 100) -> list[tuple[ChatConversation, str | None]]:
         """Chats whose title or any message (on any branch) contains `query`,
         ignoring case, most recently active first. Each comes with the first
-        matching message's text, or None when only the title matched."""
+        matching message's text, or None when only the title matched.
+        """
         pattern = "%" + re.sub(r"([\\%_])", r"\\\1", query) + "%"
         with self._session() as session:
             snippets: dict[str, str] = {}
@@ -127,7 +133,7 @@ class ConversationMixin:
             )
             session.commit()
 
-    def update_conversation(self, conv_id: str, **fields) -> ChatConversation | None:
+    def update_conversation(self, conv_id: str, **fields: Any) -> ChatConversation | None:
         with self._session() as session:
             conv = session.get(ChatConversation, conv_id)
             if not conv:

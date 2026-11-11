@@ -1,5 +1,4 @@
-"""
-Provider request log — what was sent to the generation APIs, and what came back.
+"""Provider request log — what was sent to the generation APIs, and what came back.
 
 One JSON object per line in <data>/logs/requests.jsonl (newest last), so it
 can be read in the app (GET /api/chat/request-log) or filtered with jq:
@@ -51,7 +50,8 @@ def log_path() -> Path:
 
 def redact(value: Any) -> Any:
     """A request body as it can be shown and logged: images (data URLs) cut
-    down to their type and size, everything else exactly as sent."""
+    down to their type and size, everything else exactly as sent.
+    """
     if isinstance(value, dict):
         return {k: redact(v) for k, v in value.items()}
     if isinstance(value, list):
@@ -66,7 +66,8 @@ def redact(value: Any) -> Any:
 
 def response_of(resp: Any) -> Any:
     """What an HTTP response (httpx or requests, already read) said, for the
-    log: its JSON (images cut short), its text, or a file's type and size."""
+    log: its JSON (images cut short), its text, or a file's type and size.
+    """
     content_type = ((getattr(resp, "headers", None) or {}).get("content-type") or "").split(";")[0].strip()
     if "json" in content_type or not content_type:
         with contextlib.suppress(Exception):
@@ -82,7 +83,8 @@ def response_of(resp: Any) -> Any:
 def chat_reply(chunks: Iterator[dict], outcome: dict) -> Iterator[dict]:
     """Pass a streamed chat reply's chunks through, building its response for
     the log as they go (so a reply cut short still shows how far it got):
-    the text, the tool calls, why it finished, and the usage."""
+    the text, the tool calls, why it finished, and the usage.
+    """
     reply: dict[str, Any] = {"content": "", "tool_calls": {}, "finish_reason": None, "usage": None}
     outcome["response"] = reply
     for chunk in chunks:
@@ -114,7 +116,8 @@ def record(
     response: Any = None,
 ) -> dict:
     """Append one entry and return it. `request` and `response` should
-    already be redacted. Never raises: a full disk mustn't fail a generation."""
+    already be redacted. Never raises: a full disk mustn't fail a generation.
+    """
     entry = {
         "at": datetime.now().isoformat(timespec="seconds"),
         "provider": provider,
@@ -173,7 +176,8 @@ def logged(provider: str, method: str, path: str, body: Any, model: str | None =
     and "response" (see response_of / chat_reply) — set it before raising on
     an error response, so the log shows what the provider said. An exception
     leaving the block is recorded as the error and gets the entry as its
-    `log_entry` attribute."""
+    `log_entry` attribute.
+    """
     shown = redact(body)
     outcome: dict[str, Any] = {"status": None, "flags": None, "response": None}
     _last.entry = {"request": shown, "response": None}

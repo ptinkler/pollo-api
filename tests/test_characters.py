@@ -3,18 +3,10 @@
 import json
 
 import web.characters as characters_mod
-from tests.test_chat import (  # noqa: F401
-    SETTINGS,
-    _events,
-    _png_bytes,
-    _text_chunks,
-    _tool_chunks,
-    chat,
-    client,
-    conv,
-    db,
-)
+from tests.chat_fixtures import SETTINGS, _events, _png_bytes, _text_chunks, _tool_chunks
 from web.providers import openrouter
+
+pytest_plugins = ["tests.chat_fixtures"]
 
 
 def _make(client, name="Linh", description="Short black hair, red scarf", images=1, **extra):
@@ -30,12 +22,16 @@ def _make(client, name="Linh", description="Short black hair, red scarf", images
 class TestManagement:
     def test_crud(self, client):
         c = _make(client, images=2)
-        assert c["name"] == "Linh" and len(c["images"]) == 2 and c["adhoc"] is False
+        assert c["name"] == "Linh"
+        assert len(c["images"]) == 2
+        assert c["adhoc"] is False
         img = client.get(f"/api/characters/{c['id']}/images/{c['images'][0]}")
-        assert img.status_code == 200 and img.headers["content-type"] == "image/png"
+        assert img.status_code == 200
+        assert img.headers["content-type"] == "image/png"
 
         r = client.patch(f"/api/characters/{c['id']}", json={"name": " Linh Tran ", "images": [c["images"][1]]})
-        assert r.json()["name"] == "Linh Tran" and r.json()["images"] == [c["images"][1]]
+        assert r.json()["name"] == "Linh Tran"
+        assert r.json()["images"] == [c["images"][1]]
         # The dropped image's file is gone
         assert client.get(f"/api/characters/{c['id']}/images/{c['images'][0]}").status_code == 404
 
@@ -73,7 +69,9 @@ class TestManagement:
         # Created in a chat = attached to it
         assert db.get_conversation(conv["id"]).character_ids == [adhoc["id"]]
 
-        names = lambda q: [c["name"] for c in client.get(f"/api/characters{q}").json()["characters"]]  # noqa: E731
+        def names(q):
+            return [c["name"] for c in client.get(f"/api/characters{q}").json()["characters"]]
+
         assert names(f"?conversation_id={conv['id']}") == ["Adhoc", "Saved"]
         assert names(f"?conversation_id={other['id']}") == ["Saved"]
         assert names("?include_adhoc=true") == ["Adhoc", "Saved"]
@@ -82,7 +80,8 @@ class TestManagement:
     def test_promote(self, client, conv):
         adhoc = _make(client, images=0, conversation_id=conv["id"])
         r = client.post(f"/api/characters/{adhoc['id']}/promote").json()
-        assert r["adhoc"] is False and r["conversation_id"] is None
+        assert r["adhoc"] is False
+        assert r["conversation_id"] is None
         # Promoted characters survive their chat
         client.delete(f"/api/chat/conversations/{conv['id']}")
         assert client.get(f"/api/characters/{adhoc['id']}").status_code == 200
@@ -145,7 +144,8 @@ class TestInChat:
         ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "go", **SETTINGS}))
         item = ev[-1]["message"]["media"][0]
         assert item["prompt"] == "Linh at the beach"  # stored as the model wrote it
-        assert "Linh: Short black hair" in got["prompt"] and "Bao" not in got["prompt"]
+        assert "Linh: Short black hair" in got["prompt"]
+        assert "Bao" not in got["prompt"]
         assert item["params"]["refs"] == [f"char:{linh['id']}/{f}" for f in linh["images"]]
         assert item["params"]["characters"] == [linh["id"]]
         assert len(got["input_images"]) == 2
@@ -160,7 +160,7 @@ class TestInChat:
         return client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["character_ids"]
 
     def test_short_name_means_the_attached_character_in_auto_mode(self, client, conv, chat, monkeypatch):
-        chloe, muscle = self._overlapping_names(client, conv)
+        _chloe, muscle = self._overlapping_names(client, conv)
         # The model calls her by the short name, in the argument and its prompt
         replies = iter(
             [
@@ -177,7 +177,8 @@ class TestInChat:
             )
         )
         assert ev[-1]["message"]["media"][0]["params"]["characters"] == [muscle["id"]]
-        assert "Bodybuilder" in got["prompt"] and "Slim" not in got["prompt"]
+        assert "Bodybuilder" in got["prompt"]
+        assert "Slim" not in got["prompt"]
         assert self._attached_ids(client, conv) == [muscle["id"]]
 
     def test_short_name_is_ignored_when_ambiguous(self, client, conv, chat, monkeypatch):
@@ -215,7 +216,8 @@ class TestInChat:
             f"char:{linh['id']}/{linh['images'][0]}",
             f"char:{bao['id']}/{bao['images'][0]}",
         ]
-        assert "Linh:" in got["prompt"] and "- Bao" in got["prompt"]
+        assert "Linh:" in got["prompt"]
+        assert "- Bao" in got["prompt"]
 
     def test_main_character_images_come_before_pins_and_recent_picks(self, client, conv, chat, db, monkeypatch):
         """The priority when a model takes fewer images than that (see TestReferenceCaps)."""
@@ -336,7 +338,8 @@ class TestUseByName:
 
         monkeypatch.setattr(openrouter, "stream_chat", stream)
         _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", **SETTINGS}))
-        assert "Linh" not in json.dumps(seen["messages"]) and "Linh" not in json.dumps(seen["tools"])
+        assert "Linh" not in json.dumps(seen["messages"])
+        assert "Linh" not in json.dumps(seen["tools"])
 
     def test_naming_an_unattached_character_neither_uses_nor_attaches_it(self, client, conv, chat, db, monkeypatch):
         _make(client)
@@ -353,7 +356,8 @@ class TestUseByName:
                 f"/api/chat/conversations/{conv['id']}/messages", json={"content": "use Linh, at the beach", **SETTINGS}
             )
         )
-        assert "Short black hair" not in got["prompt"] and not got.get("input_images")
+        assert "Short black hair" not in got["prompt"]
+        assert not got.get("input_images")
         assert not any(e["type"] == "characters" for e in ev)
         assert db.get_conversation(conv["id"]).character_ids == []
 
@@ -418,7 +422,8 @@ class TestUseByName:
             )
         )
         mai = next(c for c in db.list_characters() if c.name == "Mai")
-        assert mai.conversation_id == conv["id"] and len(mai.images) == 1  # ad hoc, from g.png
+        assert mai.conversation_id == conv["id"]
+        assert len(mai.images) == 1
         # The second round's tool offers Mai by name
         enum = next(t for t in tools_seen[1] if t["function"]["name"] == "generate_image")
         assert "Mai" in enum["function"]["parameters"]["properties"]["characters"]["items"]["enum"]
@@ -573,7 +578,10 @@ class TestReferenceCaps:
         client.patch(f"/api/chat/conversations/{conv['id']}", json={"character_ids": [a["id"], b["id"]]})
         self._pins(chat, db, conv, 2)
         params = self._send_image(client, conv, chat, monkeypatch, max_refs=6)
-        ref = lambda c, i: f"char:{c['id']}/{c['images'][i]}"  # noqa: E731
+
+        def ref(c, i):
+            return f"char:{c['id']}/{c['images'][i]}"
+
         assert params["refs"] == [ref(a, 0), ref(b, 0), "p0.png", "p1.png", ref(a, 1), ref(b, 1)]
         assert params["refs_dropped"] == [ref(a, 2), ref(b, 2)]
 
@@ -581,7 +589,10 @@ class TestReferenceCaps:
         a = _make(client, name="A", images=3)
         client.patch(f"/api/chat/conversations/{conv['id']}", json={"character_ids": [a["id"]]})
         self._pins(chat, db, conv, 2)
-        ref = lambda i: f"char:{a['id']}/{a['images'][i]}"  # noqa: E731
+
+        def ref(i):
+            return f"char:{a['id']}/{a['images'][i]}"
+
         choices = {"on": [ref(2), "not-a-candidate.png"], "off": [ref(0), "p1.png"]}
         params = self._send_image(client, conv, chat, monkeypatch, max_refs=2, ref_choices=choices)
         # The forced one goes first, then the (new) main image; switched-off ones never go

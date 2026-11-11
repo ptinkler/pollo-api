@@ -1,5 +1,4 @@
-"""
-Reading and storing uploaded media, and encoding a stored file for a provider
+"""Reading and storing uploaded media, and encoding a stored file for a provider
 that wants it inline. Shared by the HTTP routes and the provider layer.
 """
 
@@ -53,7 +52,8 @@ def image_media_type(path: Path | str) -> str | None:
 
 def is_blank_image(data: bytes) -> bool:
     """A solid black picture: what many providers' safety filters send instead
-    of the image they blocked. Even a night scene has some brighter pixels."""
+    of the image they blocked. Even a night scene has some brighter pixels.
+    """
     try:
         with Image.open(io.BytesIO(data)) as im:
             im = im.convert("L")
@@ -67,14 +67,15 @@ def _is_real_image(content: bytes) -> bool:
     """The bytes really are an image, whatever content type the client claimed."""
     try:
         Image.open(io.BytesIO(content)).verify()
-    except Exception:  # noqa: BLE001 — anything Pillow rejects is not an image
+    except Exception:  # anything Pillow rejects is not an image
         return False
     return True
 
 
 def _is_real_video(content: bytes) -> bool:
     """MP4/QuickTime files carry an "ftyp" box near the start — a cheap check
-    that the bytes are really a video, not a renamed file."""
+    that the bytes are really a video, not a renamed file.
+    """
     return b"ftyp" in content[:64]
 
 
@@ -89,7 +90,8 @@ async def _read_upload(
     """Validate one upload against its type map, size cap and (optionally) its
     real content; returns (bytes, the extension to save it with). `accepted`
     names the formats for the wrong-type message, `kind` the thing it should
-    have been for the bad-content one."""
+    have been for the bad-content one.
+    """
     ext = types.get(file.content_type or "")
     if not ext:
         raise HTTPException(400, f"Unsupported file type: {file.content_type}. Use {accepted}.")
@@ -117,7 +119,8 @@ async def read_audio_upload(file: UploadFile) -> tuple[bytes, str]:
 
 def file_to_data_url(path: Path) -> str:
     """Encode a local image as a data URL, downscaling big ones (and GIFs,
-    which several providers reject) so request bodies stay reasonable."""
+    which several providers reject) so request bodies stay reasonable.
+    """
     raw = path.read_bytes()
     mime = mimetypes.guess_type(path.name)[0] or "image/png"
     if len(raw) > MAX_INLINE_IMAGE_BYTES or mime == "image/gif":
@@ -133,7 +136,8 @@ def file_to_data_url(path: Path) -> str:
 def store_deduped(directory: Path, prefix: str, content: bytes, ext: str) -> str:
     """Save `content` as `<prefix><content hash><ext>` in `directory` and return
     the name. The same bytes always get the same name, so re-uploading or
-    re-importing an image reuses the file instead of storing another copy."""
+    re-importing an image reuses the file instead of storing another copy.
+    """
     name = f"{prefix}{hashlib.sha256(content).hexdigest()[:16]}{ext}"
     path = directory / name
     if not path.is_file():

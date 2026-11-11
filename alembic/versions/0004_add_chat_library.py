@@ -1,4 +1,4 @@
-"""add chat_library_items table
+"""add chat_library_items table.
 
 Revision ID: 0004
 Revises: 0003

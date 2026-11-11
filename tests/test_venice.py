@@ -1,15 +1,18 @@
 """Tests for web.providers.venice — Venice text, image and video models in chat (no network)."""
 
 import base64
+import contextlib
 import json
 
 import httpx
 import pytest
 
 import web.providers.venice as v
-from tests.test_chat import SETTINGS, _events, _png_bytes, chat, client, conv, db  # noqa: F401
+from tests.chat_fixtures import SETTINGS, _events, _png_bytes
 from web import request_log
 from web.providers import openrouter
+
+pytest_plugins = ["tests.chat_fixtures"]
 
 MODELS = {
     "text": [
@@ -138,6 +141,7 @@ class FakeVenice:
     """Stands in for venice._client; records requests, answers from `routes`."""
 
     def __init__(self):
+        """Start with no recorded calls and no canned routes."""
         self.calls = []
         self.routes = {}
 
@@ -159,17 +163,14 @@ class FakeVenice:
     def stream(self, method, url, **kw):
         resp = self._answer(method, url, kw)
 
-        class Ctx:
-            def __enter__(self_inner):
-                return resp
+        @contextlib.contextmanager
+        def ctx():
+            yield resp
 
-            def __exit__(self_inner, *a):
-                return False
-
-        return Ctx()
+        return ctx()
 
 
-@pytest.fixture()
+@pytest.fixture
 def venice(chat, monkeypatch, tmp_path, provider_keys):
 
     provider_keys["venice"] = "v-test"
@@ -190,10 +191,14 @@ class TestCatalogue:
     def test_lists_text_models_with_prices_and_tools(self, venice):
         v, _ = venice
         unc, m = v.list_models("text")  # uncensored first
-        assert m["id"] == "venice/llama-big" and m["name"] == "Venice: Llama Big"
-        assert m["uncensored"] is None and unc["uncensored"] is True
-        assert m["supports_tools"] is True and m["input_modalities"] == ["text", "image"]
-        assert m["prompt_price"] == pytest.approx(1e-6) and m["completion_price"] == pytest.approx(4e-6)
+        assert m["id"] == "venice/llama-big"
+        assert m["name"] == "Venice: Llama Big"
+        assert m["uncensored"] is None
+        assert unc["uncensored"] is True
+        assert m["supports_tools"] is True
+        assert m["input_modalities"] == ["text", "image"]
+        assert m["prompt_price"] == pytest.approx(1e-6)
+        assert m["completion_price"] == pytest.approx(4e-6)
 
     def test_image_models_pair_with_their_edit_twins(self, venice):
         v, _ = venice
@@ -201,12 +206,12 @@ class TestCatalogue:
         assert by_id["venice/seedream-v5-pro"]["input_modalities"] == ["text", "image"]
         assert by_id["venice/grok-imagine-image-quality"]["input_modalities"] == ["text", "image"]  # "-image" dropped
         assert by_id["venice/lustify-v8"]["input_modalities"] == ["text"]
-        assert (
-            by_id["venice/lustify-v8"]["uncensored"] is True and by_id["venice/seedream-v5-pro"]["uncensored"] is None
-        )
+        assert by_id["venice/lustify-v8"]["uncensored"] is True
+        assert by_id["venice/seedream-v5-pro"]["uncensored"] is None
         assert by_id["venice/qwen-edit-uncensored"]["uncensored"] is True
         assert "edit only" in by_id["venice/firered-image-edit"]["name"]
-        assert "venice/seedream-v5-pro-edit" not in by_id and "venice/gone" not in by_id
+        assert "venice/seedream-v5-pro-edit" not in by_id
+        assert "venice/gone" not in by_id
         assert not any(k.startswith("_") for m in by_id.values() for k in m)  # internals stay server-side
 
     def test_video_models_pair_text_and_image_variants(self, venice):
@@ -227,22 +232,23 @@ class TestCatalogue:
         assert by_id["venice/flux-3-first-last-frame-to-video"]["frame_images"] == ["first_frame", "last_frame"]
         assert by_id["venice/wan-2-7-video-to-video"]["video_input"] is True
         ids = [m["id"] for m in v.list_models("video")]
-        assert all(by_id[i]["uncensored"] for i in ids[:2]) and not any(
-            by_id[i]["uncensored"] for i in ids[2:]
-        )  # uncensored first
+        assert all(by_id[i]["uncensored"] for i in ids[:2])
+        assert not any(by_id[i]["uncensored"] for i in ids[2:])
         assert by_id["venice/wan-3-0-reference-to-video"]["family"] == "reference"
         assert by_id["venice/wan-3-0-reference-to-video"]["reference_images"] is True
         assert "refs→video" in by_id["venice/wan-3-0-reference-to-video"]["name"]
         wan = by_id["venice/wan-3-0-text-to-video"]
-        assert wan["frame_images"] == ["first_frame"] and wan["durations"] == [2, 5, 10]
+        assert wan["frame_images"] == ["first_frame"]
+        assert wan["durations"] == [2, 5, 10]
         assert wan["generate_audio"] is True
         assert "image→video only" in by_id["venice/ovi-image-to-video"]["name"]
-        assert by_id["venice/ovi-image-to-video"]["uncensored"] is True and wan["uncensored"] is None
+        assert by_id["venice/ovi-image-to-video"]["uncensored"] is True
+        assert wan["uncensored"] is None
 
     def test_chat_catalogue_includes_venice_alongside_openrouter(self, client, chat, venice, monkeypatch):
         monkeypatch.setattr(openrouter, "list_text_models", lambda: [{"id": "or/text", "name": "OR"}])
-        monkeypatch.setattr(openrouter, "list_image_models", lambda: [])
-        monkeypatch.setattr(openrouter, "list_video_models", lambda: [])
+        monkeypatch.setattr(openrouter, "list_image_models", list)
+        monkeypatch.setattr(openrouter, "list_video_models", list)
         data = client.get("/api/chat/models").json()
         assert [m["id"] for m in data["text"]] == ["venice/venice-uncensored", "venice/llama-big", "or/text"]
         assert any(m["id"] == "venice/seedream-v5-pro" for m in data["image"])
@@ -250,7 +256,8 @@ class TestCatalogue:
     def test_not_listed_without_a_key(self, venice, provider_keys):
         v, fake = venice
         provider_keys["venice"] = None
-        assert v.list_models("image") == [] and fake.calls == []
+        assert v.list_models("image") == []
+        assert fake.calls == []
 
 
 class TestPriceOrder:
@@ -352,9 +359,13 @@ class TestImages:
         fake.routes["/image/generate"] = httpx.Response(200, json={"images": [base64.b64encode(_png_bytes()).decode()]})
         images, cost, sent = v.generate_image("venice/seedream-v5-pro", "a fox", aspect_ratio="16:9", resolution="4K")
         body = _calls(fake, "/image/generate")[0][2]
-        assert body["model"] == "seedream-v5-pro" and body["safe_mode"] is False and body["hide_watermark"] is True
-        assert body["aspect_ratio"] == "16:9" and "resolution" not in body  # 4K isn't offered
-        assert images == [(_png_bytes(), "image/png")] and cost == 0.05
+        assert body["model"] == "seedream-v5-pro"
+        assert body["safe_mode"] is False
+        assert body["hide_watermark"] is True
+        assert body["aspect_ratio"] == "16:9"
+        assert "resolution" not in body
+        assert images == [(_png_bytes(), "image/png")]
+        assert cost == 0.05
         assert sent == {"aspect_ratio": "16:9", "resolution": None}
 
     def test_references_go_to_the_edit_twin_capped_at_its_limit(self, venice, tmp_path):
@@ -367,9 +378,13 @@ class TestImages:
         fake.routes["/image/multi-edit"] = httpx.Response(200, content=b"IMG", headers={"content-type": "image/webp"})
         images, cost, sent = v.generate_image("venice/seedream-v5-pro", "same fox, at night", ref_paths=refs)
         body = _calls(fake, "/image/multi-edit")[0][2]
-        assert body["modelId"] == "seedream-v5-pro-edit" and body["safe_mode"] is False
-        assert len(body["images"]) == 2 and body["images"][0].startswith("data:image/png;base64,")
-        assert images == [(b"IMG", "image/webp")] and cost == 0.06 and sent["refs_used"] == 2
+        assert body["modelId"] == "seedream-v5-pro-edit"
+        assert body["safe_mode"] is False
+        assert len(body["images"]) == 2
+        assert body["images"][0].startswith("data:image/png;base64,")
+        assert images == [(b"IMG", "image/webp")]
+        assert cost == 0.06
+        assert sent["refs_used"] == 2
 
     def test_edit_only_model_needs_a_reference(self, venice):
         v, _ = venice
@@ -383,7 +398,7 @@ class TestImages:
             v.generate_image("venice/lustify-v8", "x" * 10)
 
     def test_chat_image_mode_runs_on_venice(self, client, conv, chat, venice, monkeypatch):
-        v, fake = venice
+        _v, fake = venice
         fake.routes["/image/generate"] = httpx.Response(200, json={"images": [base64.b64encode(_png_bytes()).decode()]})
         monkeypatch.setattr(openrouter, "generate_image", lambda *a, **k: pytest.fail("not OpenRouter"))
         ev = _events(
@@ -393,7 +408,8 @@ class TestImages:
             )
         )
         item = ev[-1]["message"]["media"][0]
-        assert item["status"] == "done" and item["cost"] == 0.05
+        assert item["status"] == "done"
+        assert item["cost"] == 0.05
 
     def test_content_violation_flag_is_a_moderation_block(self, venice):
         v, fake = venice
@@ -408,7 +424,7 @@ class TestImages:
 
     def test_black_image_fails_as_moderated(self, client, conv, chat, venice):
         """Provider filters send a solid black image instead of an error."""
-        v, fake = venice
+        _v, fake = venice
         black = base64.b64encode(_png_bytes(color="black")).decode()
         fake.routes["/image/generate"] = httpx.Response(200, json={"images": [black]})
         ev = _events(
@@ -418,11 +434,12 @@ class TestImages:
             )
         )
         item = ev[-1]["message"]["media"][0]
-        assert item["status"] == "error" and item["moderated"] is True
+        assert item["status"] == "error"
+        assert item["moderated"] is True
         assert "black image" in item["error"]
 
     def test_dark_but_not_black_image_is_kept(self, client, conv, chat, venice):
-        v, fake = venice
+        _v, fake = venice
         night = base64.b64encode(_png_bytes(color=(20, 20, 30))).decode()
         fake.routes["/image/generate"] = httpx.Response(200, json={"images": [night]})
         ev = _events(
@@ -449,10 +466,13 @@ class TestImages:
         with pytest.raises(v.VeniceError) as e:
             v.generate_image("venice/seedream-v5-pro", "a fox", ref_paths=[ref])
         [entry] = request_log.recent()
-        assert entry["provider"] == "venice" and entry["path"] == "/image/multi-edit"
-        assert entry["model"] == "seedream-v5-pro-edit" and entry["status"] == 422
+        assert entry["provider"] == "venice"
+        assert entry["path"] == "/image/multi-edit"
+        assert entry["model"] == "seedream-v5-pro-edit"
+        assert entry["status"] == 422
         assert "content policy" in entry["error"]
-        assert entry["request"]["prompt"] == "a fox" and entry["request"]["safe_mode"] is False
+        assert entry["request"]["prompt"] == "a fox"
+        assert entry["request"]["safe_mode"] is False
         assert entry["request"]["images"] == ["data:image/png;base64,… (0 KB)"]
         assert entry["response"] == {
             "error": "Your prompt violates the content policy of Venice.ai or the model provider"
@@ -460,7 +480,7 @@ class TestImages:
         assert e.value.log_entry == entry
 
     def test_failed_card_keeps_the_request_and_the_log_is_readable(self, client, conv, chat, venice):
-        v, fake = venice
+        _v, fake = venice
         fake.routes["/image/generate"] = httpx.Response(422, json={"error": "Your prompt violates the content policy"})
         ev = _events(
             client.post(
@@ -469,14 +489,16 @@ class TestImages:
             )
         )
         item = ev[-1]["message"]["media"][0]
-        assert item["status"] == "error" and item["request"]["model"] == "seedream-v5-pro"
+        assert item["status"] == "error"
+        assert item["request"]["model"] == "seedream-v5-pro"
         assert item["response"] == {"error": "Your prompt violates the content policy"}
         log = client.get("/api/chat/request-log").json()["entries"]
-        assert log[0]["request"] == item["request"] and log[0]["response"] == item["response"]
+        assert log[0]["request"] == item["request"]
+        assert log[0]["response"] == item["response"]
         assert log[0]["status"] == 422
 
     def test_done_card_keeps_the_request_outside_params(self, client, conv, chat, venice):
-        v, fake = venice
+        _v, fake = venice
         big = base64.b64encode(_png_bytes() + b"\0" * 4096).decode()
         fake.routes["/image/generate"] = httpx.Response(200, json={"id": "gen-1", "images": [big]})
         ev = _events(
@@ -486,8 +508,10 @@ class TestImages:
             )
         )
         item = ev[-1]["message"]["media"][0]
-        assert item["request"]["prompt"] == "a fox" and "request" not in item["params"]
-        assert item["response"]["id"] == "gen-1" and item["response"]["images"][0].endswith("KB of base64)")
+        assert item["request"]["prompt"] == "a fox"
+        assert "request" not in item["params"]
+        assert item["response"]["id"] == "gen-1"
+        assert item["response"]["images"][0].endswith("KB of base64)")
 
 
 class TestVideo:
@@ -533,8 +557,11 @@ class TestVideo:
             first_frame=self._frame(tmp_path),
         )
         body = _calls(fake, "/video/queue")[0][2]
-        assert body["model"] == "wan-3-0-image-to-video" and body["image_url"].startswith("data:image/png")
-        assert "aspect_ratio" not in body and "resolution" not in body and body["duration"] == "10s"
+        assert body["model"] == "wan-3-0-image-to-video"
+        assert body["image_url"].startswith("data:image/png")
+        assert "aspect_ratio" not in body
+        assert "resolution" not in body
+        assert body["duration"] == "10s"
         assert job["id"] == "venice:wan-3-0-image-to-video:q2"
 
     def test_image_only_model_needs_a_frame(self, venice):
@@ -584,8 +611,10 @@ class TestText:
             )
         )
         body = _calls(fake, "/chat/completions")[0][2]
-        assert body["model"] == "llama-big" and body["venice_parameters"] == {"include_venice_system_prompt": False}
-        assert body["stream_options"] == {"include_usage": True} and body["tools"][0]["function"]["name"] == "f"
+        assert body["model"] == "llama-big"
+        assert body["venice_parameters"] == {"include_venice_system_prompt": False}
+        assert body["stream_options"] == {"include_usage": True}
+        assert body["tools"][0]["function"]["name"] == "f"
         assert chunks[0]["choices"][0]["delta"]["content"] == "Hi"
         assert chunks[1]["usage"]["cost"] == pytest.approx(1000 * 1e-6 + 500 * 4e-6)
 
@@ -599,7 +628,8 @@ class TestText:
         )
         list(v.stream_chat("venice/llama-big", [{"role": "user", "content": "draw a fox"}]))
         entry = request_log.recent()[0]
-        assert entry["path"] == "/chat/completions" and entry["status"] == 200
+        assert entry["path"] == "/chat/completions"
+        assert entry["status"] == 200
         assert entry["response"]["content"] == "Here you go"
         assert entry["response"]["tool_calls"] == [{"name": "generate_image", "arguments": '{"prompt": "a fox"}'}]
         assert entry["response"]["finish_reason"] == "tool_calls"
@@ -613,7 +643,7 @@ class TestText:
         assert chunk["usage"]["cost"] == 0.0123
 
     def test_chat_turn_uses_venice_for_a_venice_text_model(self, client, conv, chat, venice, monkeypatch):
-        v, fake = venice
+        _v, fake = venice
         fake.routes["/chat/completions"] = self._sse({"choices": [{"delta": {"content": "From Venice"}}]})
         monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: pytest.fail("not OpenRouter"))
         ev = _events(
@@ -626,8 +656,9 @@ class TestText:
 
     def test_no_images_for_a_model_without_vision_before_the_model_list_loads(self, client, conv, chat, venice):
         """After a restart (or a failed model list) the app still knows from
-        Venice's own catalogue that the model can't see images."""
-        v, fake = venice
+        Venice's own catalogue that the model can't see images.
+        """
+        _v, fake = venice
         fake.routes["/chat/completions"] = self._sse({"choices": [{"delta": {"content": "ok"}}]})
         assert chat.catalogue.cached_models() is None
         up = client.post(
@@ -647,11 +678,12 @@ class TestText:
         )
         assert ev[-1]["message"]["status"] != "error"
         sent = json.dumps(_calls(fake, "/chat/completions")[0][2]["messages"])
-        assert "image_url" not in sent and "[user attached an image]" in sent
+        assert "image_url" not in sent
+        assert "[user attached an image]" in sent
 
 
 def test_balance_reads_usd_from_the_rate_limits_body(client, venice):
-    v, fake = venice
+    _v, fake = venice
     # Inference keys can't read /billing/balance; the USD figure is in the
     # rate-limits body under balances.USD (not a response header).
     fake.routes["/api_keys/rate_limits"] = httpx.Response(
@@ -661,7 +693,7 @@ def test_balance_reads_usd_from_the_rate_limits_body(client, venice):
 
 
 def test_balance_includes_the_plans_bundled_credits(client, venice):
-    v, fake = venice
+    _v, fake = venice
     fake.routes["/api_keys/rate_limits"] = httpx.Response(
         200, json={"data": {"balances": {"USD": 0.76, "DIEM": 0, "BUNDLED_CREDITS": 4.7635423}}}
     )
@@ -669,7 +701,7 @@ def test_balance_includes_the_plans_bundled_credits(client, venice):
 
 
 def test_balance_falls_back_to_the_response_header_when_rate_limits_unreadable(client, venice):
-    v, fake = venice
+    _v, fake = venice
     # If the endpoint errors, fall back to the balance a prior response's header
     # reported (_note_balance runs on the error response too).
     fake.routes["/api_keys/rate_limits"] = httpx.Response(
@@ -683,7 +715,7 @@ class TestVideoFamiliesInChat:
 
     def _load_catalogue(self, client, chat, monkeypatch):
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
-            monkeypatch.setattr(openrouter, fn, lambda: [])
+            monkeypatch.setattr(openrouter, fn, list)
         client.get("/api/chat/models")
 
     def _queue(self, fake, queue_id="q"):
@@ -696,7 +728,7 @@ class TestVideoFamiliesInChat:
     def test_reference_model_gets_attached_pinned_and_character_images(
         self, client, conv, chat, db, venice, monkeypatch
     ):
-        v, fake = venice
+        _v, fake = venice
         self._load_catalogue(client, chat, monkeypatch)
         self._queue(fake)
         for f in ("pin.png", "a.png", "b.png"):
@@ -714,7 +746,7 @@ class TestVideoFamiliesInChat:
         ups = [
             client.post(
                 f"/api/chat/conversations/{conv['id']}/attachments",
-                files={"file": (n, _png_bytes(color=n[0] == "a" and "red" or "blue"), "image/png")},
+                files={"file": (n, _png_bytes(color=(n[0] == "a" and "red") or "blue"), "image/png")},
             ).json()["file"]
             for n in ("a.png", "b.png")
         ]
@@ -731,18 +763,20 @@ class TestVideoFamiliesInChat:
             )
         )
         body = _calls(fake, "/video/queue")[0][2]
-        assert body["model"] == "wan-3-0-reference-to-video" and len(body["reference_image_urls"]) == 3
+        assert body["model"] == "wan-3-0-reference-to-video"
+        assert len(body["reference_image_urls"]) == 3
         item = ev[-1]["message"]["media"][0]
-        assert item["params"]["refs"] == [*ups, "pin.png"] and item["params"]["refs_used"] == 3
+        assert item["params"]["refs"] == [*ups, "pin.png"]
+        assert item["params"]["refs_used"] == 3
 
     def test_first_and_last_frame_from_two_attachments(self, client, conv, chat, venice, monkeypatch):
-        v, fake = venice
+        _v, fake = venice
         self._load_catalogue(client, chat, monkeypatch)
         self._queue(fake)
         ups = [
             client.post(
                 f"/api/chat/conversations/{conv['id']}/attachments",
-                files={"file": (n, _png_bytes(color=n[0] == "a" and "red" or "blue"), "image/png")},
+                files={"file": (n, _png_bytes(color=(n[0] == "a" and "red") or "blue"), "image/png")},
             ).json()["file"]
             for n in ("s.png", "e.png")
         ]
@@ -759,11 +793,12 @@ class TestVideoFamiliesInChat:
             )
         )
         body = _calls(fake, "/video/queue")[0][2]
-        assert body["image_url"].startswith("data:image") and body["end_image_url"].startswith("data:image")
+        assert body["image_url"].startswith("data:image")
+        assert body["end_image_url"].startswith("data:image")
         assert ev[-1]["message"]["media"][0]["params"]["last_frame"] == ups[1]
 
     def test_video_to_video_uses_the_latest_chat_video(self, client, conv, chat, db, venice, monkeypatch):
-        v, fake = venice
+        _v, fake = venice
         self._load_catalogue(client, chat, monkeypatch)
         self._queue(fake)
         (chat.conversation_dir(conv["id"]) / "vid_old.mp4").write_bytes(b"MP4")
@@ -795,7 +830,8 @@ class TestVideoFamiliesInChat:
             )
         )
         body = _calls(fake, "/video/queue")[0][2]
-        assert body["video_url"].startswith("data:") and body["duration"] == "Auto"
+        assert body["video_url"].startswith("data:")
+        assert body["duration"] == "Auto"
         assert ev[-1]["message"]["media"][0]["params"]["source_video"] == "vid_old.mp4"
 
     def test_upscale_maps_the_resolution_pick_to_a_factor(self, venice, tmp_path):
@@ -805,7 +841,9 @@ class TestVideoFamiliesInChat:
         src.write_bytes(b"MP4")
         job = v.submit_video("venice/topaz-video-upscale", "", resolution="4x", source_video=src)
         body = _calls(fake, "/video/queue")[0][2]
-        assert body["upscale_factor"] == 4 and "resolution" not in body and job["params"]["resolution"] == "4x"
+        assert body["upscale_factor"] == 4
+        assert "resolution" not in body
+        assert job["params"]["resolution"] == "4x"
 
     def test_missing_inputs_explain_what_is_needed(self, venice, tmp_path):
         v, _ = venice

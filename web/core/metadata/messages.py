@@ -1,5 +1,6 @@
 """Chat messages: the branch tree, media items on a message, spend totals,
-truncation and whole-turn (exchange) deletion."""
+truncation and whole-turn (exchange) deletion.
+"""
 
 import json
 from datetime import datetime
@@ -8,7 +9,7 @@ from typing import Any
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from .models import ChatConversation, ChatLibraryItem, ChatMessage
+from web.core.metadata.models import ChatConversation, ChatLibraryItem, ChatMessage
 
 # add_chat_message's default parent: continue the branch being shown
 _APPEND = object()
@@ -42,7 +43,8 @@ class MessageMixin:
         default it continues the shown branch; pass `parent_id` (None for a
         first message) to start a new branch beside an existing message.
         A `lane` message starts its own standalone exchange: it never joins
-        or moves the shown branch."""
+        or moves the shown branch.
+        """
         with self._session() as session:
             conv = session.get(ChatConversation, conversation_id)
             if parent_id is _APPEND:
@@ -73,7 +75,8 @@ class MessageMixin:
         """Add messages one after another (the first starts the chat) in one
         transaction, and show the branch they make. `rows`: ChatMessage
         fields, `media` as a list. One commit, not one per message: a long
-        chat's copy is slow on a NAS otherwise."""
+        chat's copy is slow on a NAS otherwise.
+        """
         with self._session() as session:
             conv = session.get(ChatConversation, conversation_id)
             parent_id = None
@@ -115,7 +118,8 @@ class MessageMixin:
 
     def get_chat_sibling_ids(self, conversation_id: str, parent_id: int | None, lane: str | None = None) -> list[int]:
         """Ids of every version of a turn (messages sharing a parent in the
-        same lane), oldest first."""
+        same lane), oldest first.
+        """
         with self._session() as session:
             rows = (
                 session.query(ChatMessage.id)
@@ -130,7 +134,7 @@ class MessageMixin:
             return [r[0] for r in rows]
 
     def update_chat_message(
-        self, message_id: int, media: list[dict[str, Any]] | None = None, **fields
+        self, message_id: int, media: list[dict[str, Any]] | None = None, **fields: Any
     ) -> ChatMessage | None:
         with self._session() as session:
             msg = session.get(ChatMessage, message_id)
@@ -146,7 +150,7 @@ class MessageMixin:
             session.expunge(msg)
             return msg
 
-    def update_chat_media_item(self, message_id: int, media_id: str, **fields) -> ChatMessage | None:
+    def update_chat_media_item(self, message_id: int, media_id: str, **fields: Any) -> ChatMessage | None:
         """Atomically merge `fields` into one media item.
 
         Looks in the message first, then the library (the message may have
@@ -190,7 +194,7 @@ class MessageMixin:
             msg = session.get(ChatMessage, message_id)
             if not msg:
                 return None
-            msg.media_json = json.dumps(msg.media + [item])
+            msg.media_json = json.dumps([*msg.media, item])
             session.commit()
             session.refresh(msg)
             session.expunge(msg)
@@ -213,7 +217,8 @@ class MessageMixin:
     def get_chat_spend(self, conversation_id: str) -> tuple[float, int]:
         """What a chat has cost on every branch: dollars (OpenRouter/Venice —
         a reply's cost includes its media) and Pollo credits (per media item).
-        Media detached into the library still counts; its message is gone."""
+        Media detached into the library still counts; its message is gone.
+        """
         with self._session() as session:
             usd, credits = 0.0, 0
             for cost, media_json in session.query(ChatMessage.cost, ChatMessage.media_json).filter(
@@ -231,7 +236,8 @@ class MessageMixin:
         """One row per charge across the given chats, for the usage breakdown:
         {conversation_id, at, model, kind, usd, credits}. A Pollo media item is
         one row (credits); a message's dollar cost (OpenRouter/Venice, media
-        included) is one row. Media detached into the library still counts."""
+        included) is one row. Media detached into the library still counts.
+        """
         rows: list[dict[str, Any]] = []
         if not conversation_ids:
             return rows
@@ -255,13 +261,17 @@ class MessageMixin:
                             "credits": 0,
                         }
                     )
-                for item in json.loads(media_json) if media_json else []:
-                    if item.get("credits"):
-                        rows.append(_media_row(conv_id, at, item))
+                rows.extend(
+                    _media_row(conv_id, at, item)
+                    for item in (json.loads(media_json) if media_json else [])
+                    if item.get("credits")
+                )
             libs = session.query(ChatLibraryItem).filter(ChatLibraryItem.conversation_id.in_(conversation_ids))
-            for lib in libs:
-                if lib.item.get("credits") or lib.item.get("cost"):
-                    rows.append(_media_row(lib.conversation_id, lib.created_at, lib.item))
+            rows.extend(
+                _media_row(lib.conversation_id, lib.created_at, lib.item)
+                for lib in libs
+                if lib.item.get("credits") or lib.item.get("cost")
+            )
         return rows
 
     def get_chat_messages(self, conversation_id: str) -> list[ChatMessage]:
@@ -367,7 +377,8 @@ class MessageMixin:
         """How much deleting this prompt's turn removes, for the confirmation:
         the other versions/messages that go with it, and the generated files it
         holds, per kind — the ones the "also delete its media" box decides on
-        (a turn that generated nothing, or only failed, has none)."""
+        (a turn that generated nothing, or only failed, has none).
+        """
         with self._session() as session:
             plan = self._chat_exchange_plan(session, conversation_id, user_message_id)
             if not plan:

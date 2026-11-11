@@ -1,5 +1,4 @@
-"""
-Credit estimates from Pollo itself: every generation endpoint has an
+"""Credit estimates from Pollo itself: every generation endpoint has an
 ".../estimate" twin (docs.pollo.ai/openapi.json, 2026-10-18) that takes the
 same body as the generation request and returns its price without starting
 a task. The Generate page asks while the form
@@ -39,7 +38,8 @@ _cache = TTLCache(CACHE_SECONDS, maxsize=1024)
 def estimate(generator) -> dict | None:
     """{"credits": what it would cost, "full_credits": before any discount}
     for the generator's request, or None if Pollo can't say (no estimate
-    endpoint for it, an error, or not reachable)."""
+    endpoint for it, an error, or not reachable).
+    """
     url = getattr(generator, "estimate_url", None)
     if not url:
         return None
@@ -63,7 +63,8 @@ def clear_cache() -> None:
 
 def _ask(url: str, payload: dict, api_key: str | None) -> tuple[dict | None, bool]:
     """(the estimate or None, whether the answer can be cached — a refusal
-    can, a server hiccup or a Cloudflare block can't)."""
+    can, a server hiccup or a Cloudflare block can't).
+    """
     headers = {"x-api-key": api_key or "", "Content-Type": "application/json"}
     resp = requests.post(url, json=payload, headers=headers, timeout=TIMEOUT)
     if is_cloudflare_block(resp) or resp.status_code >= 500:
@@ -81,7 +82,8 @@ def _ask(url: str, payload: dict, api_key: str | None) -> tuple[dict | None, boo
 def _credits(data: Any) -> dict | None:
     """The price out of an estimate answer: `cost`, or `discountCost` when
     the account gets a discount. `totalCost` is accepted as an older spelling
-    of the undiscounted price."""
+    of the undiscounted price.
+    """
     if not isinstance(data, dict):
         return None
     full = _number(data.get("totalCost")) if data.get("totalCost") is not None else _number(data.get("cost"))

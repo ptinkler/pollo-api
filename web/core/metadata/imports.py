@@ -1,11 +1,12 @@
 """Imported chats (web/chatgpt_import.py): tracking what came from where, and
-applying one chat's import in a single transaction."""
+applying one chat's import in a single transaction.
+"""
 
 import json
 from datetime import datetime
 from typing import Any
 
-from .models import ChatConversation, ChatImportSkip, ChatMessage
+from web.core.metadata.models import ChatConversation, ChatImportSkip, ChatMessage
 
 
 class ImportMixin:
@@ -35,7 +36,8 @@ class ImportMixin:
         messages in order, each with its `import_id` and either `parent_id`
         or `parent_import_id` (a message imported earlier in `rows`);
         `updates` maps existing message ids to new `content`/`media`. With
-        `show`, the last new message becomes the shown branch's end."""
+        `show`, the last new message becomes the shown branch's end.
+        """
         with self._session() as session:
             conv = session.get(ChatConversation, conversation_id)
             ids: dict[str, int] = {}

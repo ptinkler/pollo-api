@@ -1,12 +1,13 @@
 """Audio generation (speech / music): submit a Pollo job; the video poller
-finishes it (audio rides the same job + download path, saved as .mp3)."""
+finishes it (audio rides the same job + download path, saved as .mp3).
+"""
 
 from typing import Any
 
-from .. import request_log
-from ..providers import openrouter, pollo
-from .helpers import conversation_dir
-from .models import AudioOptions
+from web import request_log
+from web.chat.helpers import conversation_dir
+from web.chat.models import AudioOptions
+from web.providers import openrouter, pollo
 
 # AudioOptions fields that go to the model as-is
 _OPTION_FIELDS = (

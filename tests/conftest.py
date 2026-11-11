@@ -1,12 +1,18 @@
 """Global test fixtures — prevent tests from touching the real database, the
-real assets, the developer's .env, or the network."""
+real assets, the developer's .env, or the network.
+"""
 
 import types
 
 import pytest
 import requests
 
+# Imported at collection, before any fixture patches anything: a module's
+# `from x import y` names bind once, and whatever they point at then is what
+# runs for the rest of the session.
+import web.api
 import web.core.config as config_mod
+import web.users
 from web.core import metadata
 
 # Every setting the app reads from the environment. A developer's .env is
@@ -49,8 +55,8 @@ def _clean_env(monkeypatch):
 @pytest.fixture(autouse=True)
 def _guard_real_db(monkeypatch, tmp_path):
     """Redirect config paths to a temp directory so no test can accidentally
-    create files in the real data/assets directories."""
-
+    create files in the real data/assets directories.
+    """
     monkeypatch.setattr(config_mod, "ROOT_DIR", tmp_path)
     monkeypatch.setattr(config_mod, "ASSETS_DIR", tmp_path / "assets")
     monkeypatch.setattr(config_mod, "DB_PATH", tmp_path / "data" / "metadata.db")
@@ -66,8 +72,8 @@ _TEST_PROVIDER_KEYS: dict[str, str | None] = {}
 @pytest.fixture(autouse=True)
 def provider_keys(monkeypatch):
     """Inject per-user provider keys for a test via an in-memory dict, patching
-    only the resolver seam. No API key is read from the environment."""
-
+    only the resolver seam. No API key is read from the environment.
+    """
     _TEST_PROVIDER_KEYS.clear()
     monkeypatch.setattr(
         "web.keyctx.provider_key",
@@ -88,15 +94,33 @@ def _tenant(request, monkeypatch):
     and the middleware resolves this same admin without touching the real DB.
 
     Tests marked `no_tenant` opt out — they build pre-user_id schemas where the
-    scope filter can't reference the column yet."""
-
+    scope filter can't reference the column yet.
+    """
     if "no_tenant" in request.keywords:
         yield None
         return
 
-    admin = types.SimpleNamespace(id="test-user", is_admin=True, email="admin@local", api_keys_json=None)
+    admin = types.SimpleNamespace(
+        id="test-user",
+        is_admin=True,
+        email="admin@local",
+        name="Admin",
+        password_hash=None,
+        api_keys_json=None,
+    )
+
     # Match the real 1-arg signature so a stale multi-arg call fails here too.
-    monkeypatch.setattr("web.users.resolve_current_user", lambda user_cookie=None: admin, raising=False)
+    # Patch every module that imported the name, not just where it is defined:
+    # `from .users import resolve_current_user` binds at import, so patching
+    # web.users alone would leave web.api's middleware calling the real one.
+    def resolve(user_cookie=None):
+        return admin
+
+    # Patch every module that imported the name, not just where it is defined:
+    # `from .users import resolve_current_user` binds at import, so patching
+    # web.users alone would leave web.api's middleware calling the real one.
+    for module in (web.users, web.api):
+        monkeypatch.setattr(module, "resolve_current_user", resolve)
     token = metadata.set_tenant(admin.id)
     try:
         yield admin
@@ -112,7 +136,8 @@ def _no_outbound_http(monkeypatch):
     wrong — usually a background thread (a video poller, a turn worker) that
     outlived the test that started it and is now running with the mocks undone.
     Left alone that shows up as an unrelated test timing out 30 seconds later,
-    which is very hard to trace back; this names it on the spot."""
+    which is very hard to trace back; this names it on the spot.
+    """
 
     def blocked(*args, **kwargs):
         target = args[1] if len(args) > 1 else (args[0] if args else kwargs.get("url", "?"))

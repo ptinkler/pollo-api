@@ -10,7 +10,7 @@ from web.media_types import AUDIO_SUFFIXES, IMAGE_SUFFIXES, VIDEO_SUFFIXES, kind
 
 
 @pytest.mark.parametrize(
-    "name,kind",
+    ("name", "kind"),
     [
         ("a.png", "image"),
         ("a.JPG", "image"),

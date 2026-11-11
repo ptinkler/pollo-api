@@ -1,4 +1,4 @@
-"""move pure-gallery threads' exchanges into the gallery lane
+"""move pure-gallery threads' exchanges into the gallery lane.
 
 Revision ID: 0024
 Revises: 0023

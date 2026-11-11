@@ -1,4 +1,4 @@
-"""add thread kind, and split favourite from pinned on chat media
+"""add thread kind, and split favourite from pinned on chat media.
 
 Revision ID: 0022
 Revises: 0021

@@ -1,5 +1,4 @@
-"""
-Reading OpenAI-style streamed chat completions (server-sent events), shared
+"""Reading OpenAI-style streamed chat completions (server-sent events), shared
 by the OpenRouter and Venice clients.
 """
 

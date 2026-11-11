@@ -35,10 +35,10 @@ import requests
 # Run from the repo root so `web` imports resolve.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from web.providers.pollo_engine import VIDEO_GENERATORS  # noqa: E402
-from web.providers.pollo_engine import video_generator as get_video_generator  # noqa: E402
-from web.providers.pollo_estimate import PLACEHOLDERS  # noqa: E402
-from web.providers.pollo_models import MODEL_INFO  # noqa: E402
+from web.providers.pollo_engine import VIDEO_GENERATORS
+from web.providers.pollo_engine import video_generator as get_video_generator
+from web.providers.pollo_estimate import PLACEHOLDERS
+from web.providers.pollo_models import MODEL_INFO
 
 TIMEOUT = 20
 
@@ -55,7 +55,8 @@ def _models(family: str | None, all_video: bool) -> list[str]:
 
 def _build(key: str, api_key: str):
     """A video generator for `key` with placeholder media, like the composer's
-    estimate path does (web/providers/pollo.py estimate_cost)."""
+    estimate path does (web/providers/pollo.py estimate_cost).
+    """
     info = MODEL_INFO.get(key, {})
     cls = VIDEO_GENERATORS[key]
     kw = {"api_key": api_key, "project": "probe", "prompt": "probe"}
@@ -77,7 +78,8 @@ def _classify(status: int, text: str) -> tuple[str, str]:
     media FIRST, so a fake URL yields a 400 "can't read the video" BEFORE the
     enablement check — the 403 is never reached. Those are UNKNOWN here; only a
     real submit with valid media settles them (e.g. Wan Animate Mix reads as
-    reachable but actually 403s on a real generation)."""
+    reachable but actually 403s on a real generation).
+    """
     low = text.lower()
     if status == 401:
         return "KEY?", "401 — check the API key itself"
@@ -94,7 +96,7 @@ def _probe_estimate(key: str, api_key: str) -> tuple[str, str]:
     try:
         gen = _build(key, api_key)
         payload = gen.get_payload()
-    except Exception as e:  # noqa: BLE001 — a model whose probe body we can't build
+    except Exception as e:  # a model whose probe body we can't build
         return "N/A", f"can't build a probe request: {e}"
     url = getattr(gen, "estimate_url", None)
     if not url:
@@ -114,11 +116,12 @@ def _probe_estimate(key: str, api_key: str) -> tuple[str, str]:
 def _probe_live(key: str, api_key: str) -> tuple[str, str]:
     """Really submit (SPENDS CREDITS on enabled models). Uses real placeholder
     URLs — Pollo will reject the fake media on some models even when enabled,
-    which still proves the model itself isn't 403-gated."""
+    which still proves the model itself isn't 403-gated.
+    """
     gen = _build(key, api_key)
     try:
         resp = gen.send_request()
-    except Exception as e:  # noqa: BLE001 — report whatever the generator raised
+    except Exception as e:  # report whatever the generator raised
         return "ERR", str(e)[:140]
     try:
         body = resp.json()

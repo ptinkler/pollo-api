@@ -14,10 +14,9 @@ from __future__ import annotations
 
 from fastapi import Cookie, HTTPException
 
+from web.auth import resolve_user_session
 from web.core.env import bool_env, email_set
 from web.core.metadata import get_db
-
-from .auth import resolve_user_session
 
 
 def open_signup() -> bool:
@@ -62,7 +61,8 @@ def current_user(user_cookie: str | None):
 
 def resolve_current_user(user_cookie: str | None):
     """The current User, resolved from the signed user-session cookie, or None.
-    Email+password (local admin) and OAuth both mint that same cookie."""
+    Email+password (local admin) and OAuth both mint that same cookie.
+    """
     return current_user(user_cookie)
 
 
@@ -76,7 +76,8 @@ def require_user(user_session: str | None = Cookie(None)):
 
 def require_admin(user_session: str | None = Cookie(None)):
     """Dependency: the admin (the instance owner), else 401/403. Used for VPN
-    controls and other owner-only actions."""
+    controls and other owner-only actions.
+    """
     user = resolve_current_user(user_session)
     if not user:
         raise HTTPException(status_code=401, detail="Sign in required")

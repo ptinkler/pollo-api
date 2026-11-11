@@ -5,12 +5,12 @@ import importlib.util
 import io
 import json
 import socket
-import sys
 import threading
 import time
 import time as _t
 from datetime import datetime
 from pathlib import Path
+from typing import ClassVar
 
 import httpx
 import pytest
@@ -18,92 +18,32 @@ import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
 from fastapi import HTTPException
-from fastapi.testclient import TestClient
 from PIL import Image
 
-import web.api as api_mod
 import web.characters as characters_mod
 import web.chat as chat_mod
 import web.core.config as config
 import web.media as media_mod
 import web.providers.pollo_engine as registry
+from tests.chat_fixtures import SETTINGS, _events, _png_bytes, _text_chunks, _tool_chunks
 from web import request_log
 from web.chat import catalogue
 from web.core.metadata import MetadataDB, reset_tenant, set_tenant
 from web.providers import openrouter, pollo_estimate
 from web.providers import pollo as pollo_provider
 
+pytest_plugins = ["tests.chat_fixtures"]
+
+# Fixtures (db, chat, client, conv) come from this plugin; pytest injects them
+# by name, so they are not imported here.
+
 ROOT_DIR = Path(__file__).parent.parent.resolve()
-
-
-def _png_bytes(size=(8, 8), color="red") -> bytes:
-    buf = io.BytesIO()
-    Image.new("RGB", size, color).save(buf, "PNG")
-    return buf.getvalue()
-
-
-def _text_chunks(*parts, cost=0.001):
-    for p in parts:
-        yield {"choices": [{"delta": {"content": p}}]}
-    yield {"choices": [{"delta": {}, "finish_reason": "stop"}], "usage": {"cost": cost}}
-
-
-def _tool_chunks(name, args, call_id="call_1", text=""):
-    raw = json.dumps(args)
-    if text:
-        yield {"choices": [{"delta": {"content": text}}]}
-    yield {
-        "choices": [
-            {"delta": {"tool_calls": [{"index": 0, "id": call_id, "function": {"name": name, "arguments": raw[:5]}}]}}
-        ]
-    }
-    yield {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": raw[5:]}}]}}]}
-    yield {"choices": [{"delta": {}, "finish_reason": "tool_calls"}], "usage": {"cost": 0.003}}
-
-
-def _events(resp) -> list[dict]:
-    return [json.loads(line[6:]) for line in resp.text.splitlines() if line.startswith("data: ")]
-
-
-@pytest.fixture()
-def db(tmp_path):
-    return MetadataDB(db_path=tmp_path / "data" / "metadata.db")
-
-
-@pytest.fixture()
-def chat(monkeypatch, db, provider_keys):
-
-    # Patch get_db wherever it was imported (chat is a package now: routes,
-    # helpers and catalogue each resolve their own get_db).
-    for name, mod in list(sys.modules.items()):
-        if name.startswith("web.") and getattr(mod, "get_db", None) is not None:
-            monkeypatch.setattr(mod, "get_db", lambda: db)
-    provider_keys["openrouter"] = "sk-test"
-    provider_keys["venice"] = None  # tests never reach the real Venice
-    monkeypatch.setattr(chat_mod.polling, "VIDEO_POLL_INTERVAL", 0)
-    monkeypatch.setattr(chat_mod.polling, "start_video_poller", lambda *a: None)
-    monkeypatch.setattr(chat_mod.generation, "_generate_title", lambda model, prompt: (None, 0.0))  # tests opt in
-    chat_mod.catalogue.clear_models()
-    return chat_mod
-
-
-@pytest.fixture()
-def client(chat):
-
-    return TestClient(api_mod.app, raise_server_exceptions=False)
-
-
-@pytest.fixture()
-def conv(client):
-    return client.post("/api/chat/conversations", json={}).json()
-
-
-SETTINGS = {"text_model": "t/model", "image_model": "i/model", "video_model": "v/model"}
 
 
 class TestModelCatalogue:
     """The /models catalogue lists each provider independently — no provider
-    gates the endpoint, so media models show with only a Pollo key."""
+    gates the endpoint, so media models show with only a Pollo key.
+    """
 
     def test_media_models_load_without_a_chat_provider(self, client, monkeypatch, provider_keys):
         # Only Pollo configured — no OpenRouter/Venice text provider.
@@ -129,7 +69,8 @@ class TestModelCatalogue:
 class TestConversations:
     def test_crud(self, client):
         c = client.post("/api/chat/conversations", json={"text_model": "a/b"}).json()
-        assert c["title"] == "New chat" and c["text_model"] == "a/b"
+        assert c["title"] == "New chat"
+        assert c["text_model"] == "a/b"
         assert [x["id"] for x in client.get("/api/chat/conversations").json()["conversations"]] == [c["id"]]
         r = client.patch(f"/api/chat/conversations/{c['id']}", json={"title": "  Renamed "})
         assert r.json()["title"] == "Renamed"
@@ -158,11 +99,14 @@ class TestConversations:
         ga = db.add_chat_message(c["id"], "assistant", parent_id=g.id, lane="gallery")
         nxt = db.add_chat_message(c["id"], "user", "go on")
         # The gallery exchange neither moves the chat's leaf nor becomes its parent
-        assert nxt.parent_id == u.id and g.parent_id is None and ga.parent_id == g.id
+        assert nxt.parent_id == u.id
+        assert g.parent_id is None
+        assert ga.parent_id == g.id
         assert db.get_chat_leaf_id(c["id"]) == nxt.id
         out = client.get(f"/api/chat/conversations/{c['id']}").json()["messages"]
         chat = [m["id"] for m in out if not m["lane"]]
-        assert chat == [u.id, nxt.id] and {m["id"] for m in out if m["lane"]} == {g.id, ga.id}
+        assert chat == [u.id, nxt.id]
+        assert {m["id"] for m in out if m["lane"]} == {g.id, ga.id}
         # No version arrows from sharing "no parent" with the chat's first turn
         assert next(m for m in out if m["id"] == u.id)["siblings"] == [u.id]
         # Deleting the gallery exchange leaves the chat alone
@@ -221,7 +165,8 @@ class TestMedia:
             f"/api/chat/conversations/{conv['id']}/attachments", files={"file": ("a.png", _png_bytes(), "image/png")}
         )
         name = r.json()["file"]
-        assert name.startswith("up_") and name.endswith(".png")
+        assert name.startswith("up_")
+        assert name.endswith(".png")
         assert client.get(f"/api/chat/media/{conv['id']}/{name}").content == _png_bytes()
 
     def test_rejects_non_image(self, client, conv):
@@ -230,7 +175,7 @@ class TestMedia:
         )
         assert r.status_code == 400
 
-    @pytest.mark.parametrize("conv_id,name", [("abc", "../x.png"), ("..", "metadata.db"), ("abc", ".hidden")])
+    @pytest.mark.parametrize(("conv_id", "name"), [("abc", "../x.png"), ("..", "metadata.db"), ("abc", ".hidden")])
     def test_path_traversal_blocked(self, chat, conv_id, name):
 
         with pytest.raises(HTTPException) as e:
@@ -238,7 +183,7 @@ class TestMedia:
         assert e.value.status_code == 400
 
     def test_an_image_already_in_the_chat_can_be_attached(self, client, conv, chat, db, monkeypatch):
-        """ "Make a video from this image" attaches a generated image by name — it becomes the first frame."""
+        """Attaching by name: "make a video from this image" uses it as the first frame."""
         (chat.conversation_dir(conv["id"]) / "img_old.png").write_bytes(_png_bytes())
         submitted = {}
         monkeypatch.setattr(
@@ -274,11 +219,14 @@ class TestTurns:
             f"/api/chat/conversations/{conv['id']}/messages", json={"content": "Say hello", "mode": "text", **SETTINGS}
         )
         ev = _events(r)
-        assert ev[0]["type"] == "start" and ev[0]["user_message"]["content"] == "Say hello"
+        assert ev[0]["type"] == "start"
+        assert ev[0]["user_message"]["content"] == "Say hello"
         assert "".join(e["text"] for e in ev if e["type"] == "delta") == "Hello!"
         assert {"type": "title", "title": "Say hello"} in ev
         done = ev[-1]["message"]
-        assert done["content"] == "Hello!" and done["status"] == "done" and done["cost"] == 0.001
+        assert done["content"] == "Hello!"
+        assert done["status"] == "done"
+        assert done["cost"] == 0.001
         assert seen["tools"] is None
         assert seen["messages"][0]["role"] == "system"
         assert seen["messages"][-1] == {"role": "user", "content": [{"type": "text", "text": "Say hello"}]}
@@ -321,7 +269,8 @@ class TestTurns:
             "create_instruction",
         ]
         assert len(calls) == 1  # reply written + image made → complete
-        assert img_args["model"] == "i/model" and img_args["prompt"] == "a cat"
+        assert img_args["model"] == "i/model"
+        assert img_args["prompt"] == "a cat"
         # The ratio is the composer's, not the model's: on "auto" with an image
         # model that has no auto value, nothing is sent (its natural shape)
         assert img_args["aspect_ratio"] is None
@@ -413,7 +362,8 @@ class TestTurns:
         # Only the original instruction exists; the model got an error result back
         assert len(db.list_instructions()) == 1
         result = json.loads(calls[1][-1]["content"])
-        assert not result["ok"] and "already an instruction" in result["error"]
+        assert not result["ok"]
+        assert "already an instruction" in result["error"]
 
     def test_failed_tool_gets_follow_up_round(self, client, conv, chat, monkeypatch):
         rounds = iter(
@@ -438,7 +388,8 @@ class TestTurns:
             client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "draw a cat", **SETTINGS})
         )
         assert len(calls) == 2
-        assert calls[1][-1]["role"] == "tool" and not json.loads(calls[1][-1]["content"])["ok"]
+        assert calls[1][-1]["role"] == "tool"
+        assert not json.loads(calls[1][-1]["content"])["ok"]
         done = ev[-1]["message"]
         assert done["status"] == "done"
         assert done["content"] == "Drawing it.\n\nSorry, the image model is down."
@@ -526,7 +477,9 @@ class TestTurns:
                 },
             )
         )
-        assert got["prompt"] == "a dog" and got["aspect_ratio"] == "1:1" and got["resolution"] == "2K"
+        assert got["prompt"] == "a dog"
+        assert got["aspect_ratio"] == "1:1"
+        assert got["resolution"] == "2K"
         assert len(ev[-1]["message"]["media"]) == 2
         assert ev[-1]["message"]["model"] == "i/model"
 
@@ -555,8 +508,10 @@ class TestTurns:
             )
         )
         item = ev[-1]["message"]["media"][0]
-        assert item["status"] == "pending" and item["job_id"] == "gen-vid-1"
-        assert item["params"]["duration"] == 5 and item["params"]["aspect_ratio"] is None  # snapped to model
+        assert item["status"] == "pending"
+        assert item["job_id"] == "gen-vid-1"
+        assert item["params"]["duration"] == 5
+        assert item["params"]["aspect_ratio"] is None
         conv_id, msg_id, media_id, job_id = started[0]
 
         # Now run the poller for real against mocked status/download
@@ -565,7 +520,8 @@ class TestTurns:
         monkeypatch.setattr(openrouter, "download_video", lambda j, dest, index=0: dest.write_bytes(b"mp4"))
         chat.polling._poll_video(conv_id, msg_id, media_id, job_id)
         msg = client.get(f"/api/chat/messages/{msg_id}").json()
-        assert msg["media"][0]["status"] == "done" and msg["media"][0]["file"].endswith(".mp4")
+        assert msg["media"][0]["status"] == "done"
+        assert msg["media"][0]["file"].endswith(".mp4")
         assert msg["cost"] == 0.5
 
     def test_video_failure_marks_item(self, chat, db, conv, monkeypatch):
@@ -628,7 +584,8 @@ class TestTurns:
 
     def test_retry_uses_the_selected_mode(self, client, conv, chat, monkeypatch):
         """A reply sent in Chat mode, retried with Auto selected, reruns in Auto
-        (tools offered) and the prompt's mode tag follows it."""
+        (tools offered) and the prompt's mode tag follows it.
+        """
         offered = []
 
         def stream(model, msgs, tools=None, **kw):
@@ -804,7 +761,8 @@ def test_gallery_lane_backfill_converts_only_pure_gallery_threads():
 
 def test_alembic_migration_creates_chat_tables(tmp_path):
     """0003 adds the chat tables to a pre-chat DB, and is a no-op when
-    create_all() already made them (the app creates tables on startup)."""
+    create_all() already made them (the app creates tables on startup).
+    """
 
     def cfg_for(path):
         cfg = Config(str(ROOT_DIR / "alembic.ini"))
@@ -901,7 +859,8 @@ class TestEditAndLibrary:
             )
         )
         edited = ev[0]["user_message"]
-        assert edited["id"] != first["id"] and edited["content"] == "first, but better"
+        assert edited["id"] != first["id"]
+        assert edited["content"] == "first, but better"
         assert edited["siblings"] == [first["id"], edited["id"]]
         assert [(m["role"], m["content"]) for m in self._messages(client, conv)] == [
             ("user", "first, but better"),
@@ -921,7 +880,8 @@ class TestEditAndLibrary:
             openrouter, "generate_image", lambda model, prompt, **kw: ([(_png_bytes(), "image/png")], None)
         )
         ev = self._send(client, conv, "a dog", mode="image")
-        assert ev[0]["user_message"]["mode"] == "image" and ev[-1]["message"]["mode"] == "image"
+        assert ev[0]["user_message"]["mode"] == "image"
+        assert ev[-1]["message"]["mode"] == "image"
         edited = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/edit",
@@ -1070,7 +1030,9 @@ class TestEditAndLibrary:
         monkeypatch.setattr(openrouter, "download_video", lambda j, dest, index=0: dest.write_bytes(b"mp4"))
         chat.polling._poll_video(conv["id"], msg.id, "v1", "gen-vid-1")
         item = db.get_chat_library_item("v1").item
-        assert item["status"] == "done" and item["file"].endswith(".mp4") and item["cost"] == 0.3
+        assert item["status"] == "done"
+        assert item["file"].endswith(".mp4")
+        assert item["cost"] == 0.3
 
     def test_startup_resumes_library_videos(self, chat, db, conv, monkeypatch):
         started = []
@@ -1173,14 +1135,16 @@ class TestModerationAndRegenerate:
         )
         assert len(calls) == 1  # no follow-up round, so no silent re-attempt
         done = ev[-1]["message"]
-        assert done["content"] == "Here goes." and done["status"] == "done"
+        assert done["content"] == "Here goes."
+        assert done["status"] == "done"
         item = done["media"][0]
-        assert item["status"] == "error" and item["moderated"] is True
+        assert item["status"] == "error"
+        assert item["moderated"] is True
         # The model's 9:16 is ignored — ratio is the composer's, left on auto here
         assert item["params"] == {"aspect_ratio": None, "resolution": None, "refs": []}
 
     @pytest.mark.parametrize(
-        "status,msg,expected",
+        ("status", "msg", "expected"),
         [
             (403, "Forbidden", True),
             (400, "[Seed] Request rejected: content policy violation", True),
@@ -1239,9 +1203,13 @@ class TestModerationAndRegenerate:
         )
         r = client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={})
         assert r.status_code == 200
-        assert got["model"] == "i/model" and got["prompt"] == "a lighthouse" and got["aspect_ratio"] == "16:9"
+        assert got["model"] == "i/model"
+        assert got["prompt"] == "a lighthouse"
+        assert got["aspect_ratio"] == "16:9"
         item = db.get_chat_message(msg.id).media[0]
-        assert item["status"] == "done" and item["file"].startswith("img_") and item["moderated"] is False
+        assert item["status"] == "done"
+        assert item["file"].startswith("img_")
+        assert item["moderated"] is False
         assert db.get_chat_message(msg.id).cost == 0.02
 
     def test_retry_with_different_model(self, client, conv, chat, db, monkeypatch):
@@ -1263,7 +1231,8 @@ class TestModerationAndRegenerate:
         monkeypatch.setattr(openrouter, "generate_image", self._blocked(chat))
         client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={})
         item = db.get_chat_message(msg.id).media[0]
-        assert item["status"] == "error" and item["moderated"] is True
+        assert item["status"] == "error"
+        assert item["moderated"] is True
 
     def test_retry_video_refits_params_for_new_model(self, client, conv, chat, db, monkeypatch):
         db.add_chat_message(conv["id"], "user", "waves")
@@ -1300,9 +1269,11 @@ class TestModerationAndRegenerate:
             lambda model, prompt, **kw: (got.update(model=model, **kw), {"id": "gen-vid-9"})[1],
         )
         client.post(f"/api/chat/messages/{msg.id}/media/v1/regenerate", json={"model": "v/new"})
-        assert got["model"] == "v/new" and got["duration"] == 5
+        assert got["model"] == "v/new"
+        assert got["duration"] == 5
         item = db.get_chat_message(msg.id).media[0]
-        assert item["status"] == "pending" and item["job_id"] == "gen-vid-9"
+        assert item["status"] == "pending"
+        assert item["job_id"] == "gen-vid-9"
         assert started == [(conv["id"], msg.id, "v1", "gen-vid-9")]
 
     def test_finished_item_is_rerolled_as_a_new_item_beside_it(self, client, conv, db, chat, monkeypatch):
@@ -1312,8 +1283,11 @@ class TestModerationAndRegenerate:
         r = client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={})
         assert r.status_code == 200
         old, new = db.get_chat_message(msg.id).media
-        assert old["file"] == "x.png" and old["status"] == "done"
-        assert new["id"] != "m1" and new["status"] == "pending" and not new.get("file")
+        assert old["file"] == "x.png"
+        assert old["status"] == "done"
+        assert new["id"] != "m1"
+        assert new["status"] == "pending"
+        assert not new.get("file")
         assert client.post(f"/api/chat/messages/{msg.id}/media/nope/regenerate", json={}).status_code == 404
 
 
@@ -1368,7 +1342,7 @@ class TestContext:
     def test_only_most_recent_images_as_pixels(self, client, conv, chat, db, monkeypatch):
         assert self._pixels_sent(client, conv, chat, db, monkeypatch) == chat.constants.DEFAULT_IMAGE_LIMIT == 6
 
-    @pytest.mark.parametrize("limit,expected", [(2, 2), (0, 0), (None, 8)])
+    @pytest.mark.parametrize(("limit", "expected"), [(2, 2), (0, 0), (None, 8)])
     def test_image_slider_sets_how_many(self, client, conv, chat, db, monkeypatch, limit, expected):
         assert self._pixels_sent(client, conv, chat, db, monkeypatch, image_limit=limit) == expected
 
@@ -1498,7 +1472,8 @@ class TestConsistencyReferences:
     def test_no_references_unless_the_model_asks(self, client, conv, chat, db, monkeypatch):
         self._prior_images(chat, db, conv, 1)
         got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "the same woman, now turned around"})
-        assert got.get("input_images") is None and item["params"]["refs"] == []
+        assert got.get("input_images") is None
+        assert item["params"]["refs"] == []
 
     def test_model_opts_in_and_prompt_is_passed_verbatim(self, client, conv, chat, db, monkeypatch):
         self._prior_images(chat, db, conv, 1)
@@ -1523,11 +1498,11 @@ class TestConsistencyReferences:
 
     def test_uses_only_the_most_recent_two(self, client, conv, chat, db, monkeypatch):
         self._prior_images(chat, db, conv, 3)
-        got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "scene 4", "keep_consistent": True})
+        _got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "scene 4", "keep_consistent": True})
         assert item["params"]["refs"] == ["g2.png", "g1.png"]
 
     def test_first_image_in_chat_has_no_refs(self, client, conv, chat, db, monkeypatch):
-        got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "Linh", "keep_consistent": True})
+        got, _item = self._run(client, conv, chat, monkeypatch, {"prompt": "Linh", "keep_consistent": True})
         assert got.get("input_images") is None
 
     def test_skipped_for_image_models_without_reference_support(self, client, conv, chat, db, monkeypatch):
@@ -1535,12 +1510,12 @@ class TestConsistencyReferences:
             {"text": [], "video": [], "image": [{"id": "i/model", "input_modalities": ["text"]}]}
         )
         self._prior_images(chat, db, conv, 1)
-        got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "next", "keep_consistent": True})
+        got, _item = self._run(client, conv, chat, monkeypatch, {"prompt": "next", "keep_consistent": True})
         assert got.get("input_images") is None
 
     def test_edit_source_comes_first(self, client, conv, chat, db, monkeypatch):
         self._prior_images(chat, db, conv, 2)
-        got, item = self._run(
+        _got, item = self._run(
             client,
             conv,
             chat,
@@ -1551,7 +1526,7 @@ class TestConsistencyReferences:
 
     def test_edit_alone_sends_just_the_source(self, client, conv, chat, db, monkeypatch):
         self._prior_images(chat, db, conv, 2)
-        got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "make it night", "source_image": "latest"})
+        _got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "make it night", "source_image": "latest"})
         assert item["params"]["refs"] == ["g1.png"]
 
     def _pin(self, client, db, conv, media_id, pinned=True):
@@ -1565,13 +1540,14 @@ class TestConsistencyReferences:
         out = self._pin(client, db, conv, "g0")
         assert out["media"][0]["pinned"] is True
         got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "next scene"})
-        assert item["params"]["refs"] == ["g0.png"] and len(got["input_images"]) == 1
+        assert item["params"]["refs"] == ["g0.png"]
+        assert len(got["input_images"]) == 1
 
     def test_order_is_edit_source_then_pins_then_recent_picks(self, client, conv, chat, db, monkeypatch):
         """Also the priority when a model takes fewer images (Venice edit models keep the first N)."""
         self._prior_images(chat, db, conv, 3)
         self._pin(client, db, conv, "g0")
-        got, item = self._run(
+        _got, item = self._run(
             client,
             conv,
             chat,
@@ -1585,7 +1561,7 @@ class TestConsistencyReferences:
         self._prior_images(chat, db, conv, 2)
         self._pin(client, db, conv, "g0")
         self._pin(client, db, conv, "g0", pinned=False)
-        got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "next"})
+        _got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "next"})
         assert item["params"]["refs"] == []
 
     def test_pinned_upload_is_a_reference_in_image_mode(self, client, conv, chat, db, monkeypatch):
@@ -1618,7 +1594,7 @@ class TestConsistencyReferences:
         )
         self._prior_images(chat, db, conv, 1)
         self._pin(client, db, conv, "g0")
-        got, item = self._run(client, conv, chat, monkeypatch, {"prompt": "next"})
+        got, _item = self._run(client, conv, chat, monkeypatch, {"prompt": "next"})
         assert got.get("input_images") is None
 
     def test_only_finished_images_can_be_pinned(self, client, conv, chat, db):
@@ -1686,7 +1662,8 @@ class TestModelDecides:
             )
         )
         assert len(calls) == 1
-        assert ev[-1]["message"]["content"] == "A story, and here's the photo." and ev[-1]["message"]["media"] == []
+        assert ev[-1]["message"]["content"] == "A story, and here's the photo."
+        assert ev[-1]["message"]["media"] == []
 
     def test_system_prompt_is_static(self, client, conv, chat, db, monkeypatch):
         for i in range(4):
@@ -1718,7 +1695,7 @@ class TestModelDecides:
 class TestConversationalImageModels:
     """Gemini-style image models get the conversation, not a lone prompt."""
 
-    CATALOGUE = {
+    CATALOGUE: ClassVar = {
         "text": [],
         "video": [],
         "image": [{"id": "i/model", "input_modalities": ["text", "image"], "conversational": True}],
@@ -1775,7 +1752,8 @@ class TestConversationalImageModels:
         )
         msgs = got["messages"]
         # The model's 3:4 pick is ignored; the composer (on auto) governs the ratio
-        assert got["model"] == "i/model" and got["aspect_ratio"] is None
+        assert got["model"] == "i/model"
+        assert got["aspect_ratio"] is None
         assert [m["role"] for m in msgs] == ["user", "assistant", "user", "assistant", "user"]
         assert msgs[0]["content"][0]["text"] == "write a story about Linh, with a photo"
         # the earlier generated image is in the context as pixels
@@ -1784,7 +1762,8 @@ class TestConversationalImageModels:
         assert msgs[4] == {"role": "user", "content": [{"type": "text", "text": "Linh turns around"}]}  # verbatim
         assert all(m["role"] != "system" for m in msgs)
         item = ev[-1]["message"]["media"][0]
-        assert item["status"] == "done" and item["params"]["context"] is True
+        assert item["status"] == "done"
+        assert item["params"]["context"] is True
 
     def test_image_mode_sends_conversation_ending_with_users_message(self, client, conv, chat, db, monkeypatch):
         self._setup(chat, db, conv)
@@ -1796,7 +1775,8 @@ class TestConversationalImageModels:
             )
         )
         last = got["messages"][-1]
-        assert last["role"] == "user" and last["content"][-1] == {"type": "text", "text": "Linh and Marcus high-five"}
+        assert last["role"] == "user"
+        assert last["content"][-1] == {"type": "text", "text": "Linh and Marcus high-five"}
         assert len(got["messages"]) == 3
 
     def test_memory_slider_applies_to_image_context(self, client, conv, chat, db, monkeypatch):
@@ -1901,8 +1881,10 @@ class TestOpenRouterChatImages:
             )[1],
         )
         images, cost = openrouter.generate_image_chat("g/img", [{"role": "user", "content": "hi"}], aspect_ratio="16:9")
-        assert sent["modalities"] == ["image", "text"] and sent["image_config"] == {"aspect_ratio": "16:9"}
-        assert images == [(_png_bytes(), "image/png")] and cost == 0.039
+        assert sent["modalities"] == ["image", "text"]
+        assert sent["image_config"] == {"aspect_ratio": "16:9"}
+        assert images == [(_png_bytes(), "image/png")]
+        assert cost == 0.039
 
     def test_no_image_reports_models_text(self, chat, monkeypatch):
         monkeypatch.setattr(
@@ -1934,7 +1916,8 @@ class TestOpenRouterChatImages:
         models = {m["id"]: m for m in openrouter.list_image_models()}
         assert models["google/gem-img"]["conversational"] is True
         assert models["seed/dream"]["conversational"] is False
-        assert models["openai/gpt-img"]["conversational"] is True and models["openai/gpt-img"]["name"] == "GPT Image"
+        assert models["openai/gpt-img"]["conversational"] is True
+        assert models["openai/gpt-img"]["name"] == "GPT Image"
 
 
 class TestFollowUpRounds:
@@ -1967,12 +1950,15 @@ class TestFollowUpRounds:
                 _text_chunks("Here is the story."),
             ],
         )
-        assert len(calls) == 2 and calls[0] and calls[1] is None  # tools withheld on the follow-up
-        assert done["content"] == "Here is the story." and len(done["media"]) == 1
+        assert len(calls) == 2
+        assert calls[0]
+        assert calls[1] is None
+        assert done["content"] == "Here is the story."
+        assert len(done["media"]) == 1
 
     def test_no_second_image_even_if_the_model_tries(self, client, conv, chat, monkeypatch):
         # With tools withheld, a model can't call generate_image again
-        calls, done = self._run(
+        _calls, done = self._run(
             client,
             conv,
             chat,
@@ -2011,7 +1997,8 @@ class TestFollowUpRounds:
                 f"/api/chat/conversations/{conv['id']}/messages", json={"content": "story and a picture", **SETTINGS}
             )
         )
-        assert len(calls) == 2 and calls[1]  # tools still offered
+        assert len(calls) == 2
+        assert calls[1]
         assert attempts == ["first", "second"]
         assert [m["status"] for m in ev[-1]["message"]["media"]] == ["error", "done"]
 
@@ -2064,7 +2051,8 @@ class TestCustomInstructions:
         client.delete(f"/api/chat/instructions/{a['id']}")
         assert client.get("/api/chat/instructions").json()["groups"][0]["snippet_ids"] == [b["id"]]
         gone = client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]
-        assert gone["instruction_ids"] == [] and gone["instruction_group_ids"] == [g["id"]]
+        assert gone["instruction_ids"] == []
+        assert gone["instruction_group_ids"] == [g["id"]]
 
     def test_global_defaults_apply_live_to_every_chat(self, client, chat):
         d = client.post("/api/chat/instructions", json={"name": "D", "content": "x"}).json()
@@ -2076,7 +2064,8 @@ class TestCustomInstructions:
         )
         made = client.post("/api/chat/conversations", json={}).json()
         # Nothing is copied in: the defaults apply on top of the chat's own (none here)
-        assert made["instruction_ids"] == [] and made["instruction_group_ids"] == []
+        assert made["instruction_ids"] == []
+        assert made["instruction_group_ids"] == []
         assert chat.generation.conversation_instructions(made["id"]) == "x\n\ny"  # D once, though in G too
         # Changing the defaults changes the chat
         client.put("/api/chat/settings", json={"default_instruction_ids": [e["id"]]})
@@ -2180,10 +2169,12 @@ class TestChatSpaces:
             "/api/chat/spaces",
             json={"name": "Novel", "default_instruction_ids": [s["id"]], "default_instruction_group_ids": [g["id"]]},
         ).json()
-        assert sp["name"] == "Novel" and sp["default_instruction_ids"] == [s["id"]]
+        assert sp["name"] == "Novel"
+        assert sp["default_instruction_ids"] == [s["id"]]
         assert [x["name"] for x in client.get("/api/chat/spaces").json()["spaces"]] == ["Novel"]
         upd = client.put(f"/api/chat/spaces/{sp['id']}", json={"name": "Renamed"}).json()
-        assert upd["name"] == "Renamed" and upd["default_instruction_ids"] == []
+        assert upd["name"] == "Renamed"
+        assert upd["default_instruction_ids"] == []
         assert client.delete(f"/api/chat/spaces/{sp['id']}").status_code == 200
         assert client.get("/api/chat/spaces").json()["spaces"] == []
         assert (
@@ -2201,7 +2192,8 @@ class TestChatSpaces:
             json={"name": "Novel", "default_instruction_ids": [shared["id"], spaceonly["id"]]},
         ).json()
         conv = client.post("/api/chat/conversations", json={"space_id": sp["id"]}).json()
-        assert conv["space_id"] == sp["id"] and conv["instruction_ids"] == []
+        assert conv["space_id"] == sp["id"]
+        assert conv["instruction_ids"] == []
         # Global first, then the space's own, each snippet once (shared de-duped)
         assert chat.generation.conversation_instructions(conv["id"]) == "x\n\nboth.\n\nBe warm."
         # Out of the space, only the global defaults apply
@@ -2255,11 +2247,12 @@ class TestChatSpaces:
 
 class TestPolloImageModels:
     """Pollo image models in chat. Pollo is fully mocked — nothing here can
-    reach the real API (which would bill credits)."""
+    reach the real API (which would bill credits).
+    """
 
-    POLLO = {**SETTINGS, "image_model": "pollo/seedream"}
+    POLLO: ClassVar = {**SETTINGS, "image_model": "pollo/seedream"}
 
-    @pytest.fixture()
+    @pytest.fixture
     def pollo(self, chat, monkeypatch, provider_keys):
         provider_keys["pollo"] = "pollo-test"
         monkeypatch.setattr(pollo_provider, "POLL_INTERVAL", 0)
@@ -2339,7 +2332,7 @@ class TestPolloImageModels:
 
     def test_listed_in_the_image_catalogue_when_key_is_set(self, chat, monkeypatch, pollo, provider_keys):
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
-            monkeypatch.setattr(openrouter, fn, lambda: [])
+            monkeypatch.setattr(openrouter, fn, list)
         models = {m["id"]: m for m in chat.catalogue.get_models(refresh=True)["image"]}
         assert models["pollo/seedream"]["name"] == "Pollo: Seedream 5.0 Lite"
         assert models["pollo/seedreampro"]["name"] == "Pollo: Seedream 5.0 Pro"
@@ -2358,8 +2351,10 @@ class TestPolloImageModels:
             pollo,
         )
         item = msg["media"][0]
-        assert item["status"] == "done" and item["file"].endswith(".jpg")
-        assert item["credits"] == 6 and not item.get("cost")
+        assert item["status"] == "done"
+        assert item["file"].endswith(".jpg")
+        assert item["credits"] == 6
+        assert not item.get("cost")
         assert msg["cost"] == pytest.approx(0.003)  # OpenRouter text only — credits aren't dollars
         key, kwargs = pollo["generators"][0]
         assert key == "seedream"
@@ -2409,7 +2404,8 @@ class TestPolloImageModels:
             pollo,
         )
         item = msg["media"][0]
-        assert item["status"] == "error" and item["moderated"] is True
+        assert item["status"] == "error"
+        assert item["moderated"] is True
         assert "Pollo" in item["error"]
 
         pollo["statuses"] = iter([[("succeed", None, "https://cdn/y.png", 3)]])
@@ -2418,7 +2414,8 @@ class TestPolloImageModels:
         )
         client.post(f"/api/chat/messages/{msg['id']}/media/{item['id']}/regenerate", json={})
         fixed = db.get_chat_message(msg["id"]).media[0]
-        assert fixed["status"] == "done" and fixed["credits"] == 3
+        assert fixed["status"] == "done"
+        assert fixed["credits"] == 3
 
     def test_polling_survives_transient_errors(self, chat, monkeypatch, pollo):
         pollo["statuses"] = iter(
@@ -2429,19 +2426,22 @@ class TestPolloImageModels:
             ]
         )
         images, credits, _sent = pollo_provider.generate_image("pollo/nanobanana2", "x")
-        assert len(images) == 1 and credits == 2
+        assert len(images) == 1
+        assert credits == 2
 
     # ── video ──
-    VIDEO = {**SETTINGS, "video_model": "pollo/seedance20fast"}
+    VIDEO: ClassVar = {**SETTINGS, "video_model": "pollo/seedance20fast"}
 
     def test_video_models_listed_without_deprecated_ones(self, chat, monkeypatch, pollo):
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
-            monkeypatch.setattr(openrouter, fn, lambda: [])
+            monkeypatch.setattr(openrouter, fn, list)
         models = {m["id"]: m for m in chat.catalogue.get_models(refresh=True)["video"]}
         fast = models["pollo/seedance20fast"]
         assert fast["name"] == "Pollo: Seedance 2.0 Fast"
-        assert fast["durations"] == list(range(4, 16)) and fast["resolutions"] == ["480p", "720p"]
-        assert fast["frame_images"] == ["first_frame"] and fast["generate_audio"] is True
+        assert fast["durations"] == list(range(4, 16))
+        assert fast["resolutions"] == ["480p", "720p"]
+        assert fast["frame_images"] == ["first_frame"]
+        assert fast["generate_audio"] is True
         assert "pollo/wan27" not in models  # marked deprecated on the Generate page
 
     def test_video_mode_submits_to_pollo_with_first_frame(self, client, conv, chat, monkeypatch, pollo):
@@ -2465,17 +2465,20 @@ class TestPolloImageModels:
             )
         )[-1]["message"]
         item = msg["media"][0]
-        assert item["status"] == "pending" and item["job_id"] == "pollo:task-1"
+        assert item["status"] == "pending"
+        assert item["job_id"] == "pollo:task-1"
         key, kwargs = pollo["generators"][0]
         assert key == "seedance20fast"
-        assert pollo["uploads"] == [up] and kwargs["image_url"] == f"https://tmp.example/{up}"
+        assert pollo["uploads"] == [up]
+        assert kwargs["image_url"] == f"https://tmp.example/{up}"
         assert (kwargs["prompt"], kwargs["length"], kwargs["generate_audio"]) == ("make it move", 15, False)
         assert kwargs["aspect_ratio"] == "9:16"  # picked in the composer, so it wins over the image's shape
 
     def test_auto_length_is_remembered_on_the_media_item(self, client, conv, chat, monkeypatch, pollo):
         """The composer resolves Auto to a number before sending, so the item
         records that it *was* Auto — otherwise reusing its settings would pin
-        whatever Auto worked out to."""
+        whatever Auto worked out to.
+        """
         monkeypatch.setattr(openrouter, "submit_video", lambda *a, **k: pytest.fail("should run on Pollo"))
         chat.catalogue.seed_models(
             {"video": [{"id": "pollo/seedance20fast", "durations": list(range(4, 16))}]}, stale=True
@@ -2499,25 +2502,28 @@ class TestPolloImageModels:
             )[-1]["message"]["media"][0]
 
         auto = send({"duration": 10, "duration_auto": True})
-        assert auto["params"]["duration"] == 10 and auto["params"]["duration_auto"] is True
+        assert auto["params"]["duration"] == 10
+        assert auto["params"]["duration_auto"] is True
         picked = send({"duration": 10})
-        assert picked["params"]["duration"] == 10 and picked["params"]["duration_auto"] is False
+        assert picked["params"]["duration"] == 10
+        assert picked["params"]["duration_auto"] is False
         # Either way Pollo is sent the resolved length, not the flag
         assert all("duration_auto" not in kwargs for _, kwargs in pollo["generators"])
 
     # ── audio ──
-    AUDIO = {**SETTINGS, "audio_model": "pollo/elevenv3"}
+    AUDIO: ClassVar = {**SETTINGS, "audio_model": "pollo/elevenv3"}
 
     def test_audio_models_listed_with_their_type(self, chat, monkeypatch, pollo):
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
-            monkeypatch.setattr(openrouter, fn, lambda: [])
+            monkeypatch.setattr(openrouter, fn, list)
         models = {m["id"]: m for m in chat.catalogue.get_models(refresh=True)["audio"]}
-        assert models["pollo/elevenv3"]["tags"] == ["tts"] and models["pollo/elevenv3"]["options"] == ["voice"]
+        assert models["pollo/elevenv3"]["tags"] == ["tts"]
+        assert models["pollo/elevenv3"]["options"] == ["voice"]
         assert models["pollo/sunov55"]["tags"] == ["music"]
 
     def test_audio_mode_submits_speech_with_the_picked_voice(self, client, conv, chat, monkeypatch, pollo):
         class Gen:
-            payload_attrs = {"prompt": "hello", "voiceId": "v1"}
+            payload_attrs: ClassVar = {"prompt": "hello", "voiceId": "v1"}
 
             def __init__(self, key, **kw):
                 pollo["generators"].append((key, kw))
@@ -2539,16 +2545,21 @@ class TestPolloImageModels:
             )
         )[-1]["message"]
         item = msg["media"][0]
-        assert item["kind"] == "audio" and item["status"] == "pending" and item["job_id"] == "pollo:task-1"
+        assert item["kind"] == "audio"
+        assert item["status"] == "pending"
+        assert item["job_id"] == "pollo:task-1"
         key, kwargs = pollo["generators"][0]
-        assert key == "elevenv3" and kwargs["prompt"] == "hello" and kwargs["voice"] == "v1"
+        assert key == "elevenv3"
+        assert kwargs["prompt"] == "hello"
+        assert kwargs["voice"] == "v1"
         # the picks are remembered with the conversation's composer settings
         settings = client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["settings"]
-        assert settings["audio_model"] == "pollo/elevenv3" and settings["audio_options"]["voice"] == "v1"
+        assert settings["audio_model"] == "pollo/elevenv3"
+        assert settings["audio_options"]["voice"] == "v1"
 
     def _fake_audio_generator(self, monkeypatch, chat, pollo):
         class Gen:
-            payload_attrs = {"prompt": "x"}
+            payload_attrs: ClassVar = {"prompt": "x"}
 
             def __init__(self, key, **kw):
                 pollo["generators"].append((key, kw))
@@ -2574,7 +2585,8 @@ class TestPolloImageModels:
                 json={"content": "say hello", "mode": "auto", **self.AUDIO, "audio_options": {"voice": "v1"}},
             )
         )[-1]["message"]
-        assert msg["media"][0]["kind"] == "audio" and msg["media"][0]["job_id"] == "pollo:task-1"
+        assert msg["media"][0]["kind"] == "audio"
+        assert msg["media"][0]["job_id"] == "pollo:task-1"
         assert pollo["generators"][0][1]["prompt"] == "Hello there"
 
     def test_audio_estimate_prices_by_the_text(self, client, chat, monkeypatch, pollo):
@@ -2590,7 +2602,8 @@ class TestPolloImageModels:
             json={"model": "pollo/elevenv3", "kind": "audio", "prompt": "hi", "audio_options": {"voice": "v1"}},
         )
         assert r.json() == {"estimate": {"credits": 3}}
-        assert seen["kind"] == "audio" and seen["args"][-2:] == ("hi", {"voice": "v1"})
+        assert seen["kind"] == "audio"
+        assert seen["args"][-2:] == ("hi", {"voice": "v1"})
 
     def test_a_tool_needs_no_prompt_but_an_image(self, client, conv, chat, monkeypatch, pollo):
         chat.catalogue.seed_models(
@@ -2637,7 +2650,8 @@ class TestPolloImageModels:
                     "content": "animate",
                     "attachments": [up],
                     "mode": "video",
-                    **{**SETTINGS, "video_model": model},
+                    **SETTINGS,
+                    "video_model": model,
                     **extra,
                 },
             )
@@ -2697,7 +2711,9 @@ class TestPolloImageModels:
         )  # re-read for the download
         chat.polling._poll_video(conv["id"], msg.id, "pv1", "pollo:task-9")
         item = db.get_chat_message(msg.id).media[0]
-        assert item["status"] == "done" and item["credits"] == 40 and not item.get("cost")
+        assert item["status"] == "done"
+        assert item["credits"] == 40
+        assert not item.get("cost")
         assert (chat.helpers.chat_root() / conv["id"] / item["file"]).read_bytes() == b"mp4-bytes"
 
     def test_poller_saves_a_pollo_audio_job_as_mp3(self, chat, db, conv, monkeypatch, pollo):
@@ -2709,7 +2725,9 @@ class TestPolloImageModels:
         pollo["statuses"] = iter([[("succeed", None, "https://cdn/a.mp3", 3)]] * 2)
         chat.polling._poll_video(conv["id"], msg.id, "pa1", "pollo:t-5")
         item = db.get_chat_message(msg.id).media[0]
-        assert item["status"] == "done" and item["file"].endswith(".mp3") and item["credits"] == 3
+        assert item["status"] == "done"
+        assert item["file"].endswith(".mp3")
+        assert item["credits"] == 3
 
     def test_failed_pollo_video_marks_the_item(self, chat, db, conv, monkeypatch, pollo):
         msg = db.add_chat_message(
@@ -2722,12 +2740,15 @@ class TestPolloImageModels:
         pollo["statuses"] = iter([[("failed", "Your prompt violates our content policy", None, None)]])
         chat.polling._poll_video(conv["id"], msg.id, "pv2", "pollo:task-8")
         item = db.get_chat_message(msg.id).media[0]
-        assert item["status"] == "error" and item["moderated"] is True and item["error"].startswith("Pollo:")
+        assert item["status"] == "error"
+        assert item["moderated"] is True
+        assert item["error"].startswith("Pollo:")
 
     def test_a_charged_failure_keeps_its_credits_and_shows_the_verdict(self, chat, db, conv, pollo):
         """Pollo bills a job that fails its own validation, so the credits have
         to land on the item (they're real money) and the stored response has to
-        be the verdict, not the "accepted" reply from submitting."""
+        be the verdict, not the "accepted" reply from submitting.
+        """
         msg = db.add_chat_message(
             conv["id"],
             "assistant",
@@ -2745,7 +2766,8 @@ class TestPolloImageModels:
         pollo["statuses"] = iter([[("failed", "InvalidParameter Invalid video_url.", None, 61)]])
         chat.polling._poll_video(conv["id"], msg.id, "pv3", "pollo:task-11")
         item = db.get_chat_message(msg.id).media[0]
-        assert item["status"] == "error" and item["credits"] == 61
+        assert item["status"] == "error"
+        assert item["credits"] == 61
         assert item["response"]["generations"][0]["failMsg"] == "InvalidParameter Invalid video_url."
         # and it's counted as spend, since it was charged
         rows = db.spend_rows([conv["id"]])
@@ -2753,7 +2775,7 @@ class TestPolloImageModels:
 
     def test_kling_and_qwen_models_offered_in_chat(self, chat, monkeypatch, pollo):
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
-            monkeypatch.setattr(openrouter, fn, lambda: [])
+            monkeypatch.setattr(openrouter, fn, list)
         data = chat.catalogue.get_models(refresh=True)
         images = {m["id"]: m for m in data["image"]}
         videos = {m["id"]: m for m in data["video"]}
@@ -2768,11 +2790,12 @@ class TestPolloImageModels:
         msg = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages",
-                json={"content": "a fox running", "mode": "video", **{**SETTINGS, "video_model": "pollo/klingv21"}},
+                json={"content": "a fox running", "mode": "video", **SETTINGS, "video_model": "pollo/klingv21"},
             )
         )[-1]["message"]
         item = msg["media"][0]
-        assert item["status"] == "error" and "needs a source image" in item["error"]
+        assert item["status"] == "error"
+        assert "needs a source image" in item["error"]
 
     def test_auto_mode_uses_composer_video_settings_and_records_what_was_sent(
         self, client, conv, chat, monkeypatch, pollo
@@ -2824,7 +2847,7 @@ class TestPolloImageModels:
         msg = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages",
-                json={"content": "a fox", "mode": "image", **{**SETTINGS, "image_model": "pollo/qwenimage3pro"}},
+                json={"content": "a fox", "mode": "image", **SETTINGS, "image_model": "pollo/qwenimage3pro"},
             )
         )[-1]["message"]
         assert "isn't available to your API key" in msg["media"][0]["error"]
@@ -2849,11 +2872,12 @@ class TestPolloImageModels:
         msg = _events(
             client.post(
                 f"/api/chat/conversations/{conv['id']}/messages",
-                json={"content": "a gym", "mode": "image", **{**SETTINGS, "image_model": "pollo/seedreampro"}},
+                json={"content": "a gym", "mode": "image", **SETTINGS, "image_model": "pollo/seedreampro"},
             )
         )[-1]["message"]
         item = msg["media"][0]
-        assert item["error"] == "Pollo: This model is not enabled for API access." and item["moderated"] is False
+        assert item["error"] == "Pollo: This model is not enabled for API access."
+        assert item["moderated"] is False
 
     def test_pollo_content_rejection_is_still_moderation(self, chat):
         is_mod = chat.generation.is_moderation_error
@@ -2862,7 +2886,7 @@ class TestPolloImageModels:
 
     def test_models_not_enabled_for_the_key_are_flagged_hidden(self, chat, monkeypatch, pollo):
         for fn in ("list_text_models", "list_image_models", "list_video_models"):
-            monkeypatch.setattr(openrouter, fn, lambda: [])
+            monkeypatch.setattr(openrouter, fn, list)
         images = {m["id"]: m for m in chat.catalogue.get_models(refresh=True)["image"]}
         hidden = {k for k, m in images.items() if m["hidden"]}
         assert hidden == {"pollo/qwenimageflash"}
@@ -2894,8 +2918,10 @@ class TestOpenRouterConnection:
             )
         )[-1]["message"]
         item = msg["media"][0]
-        assert item["status"] == "error" and item["moderated"] is False
-        assert "connection to OpenRouter dropped after" in item["error"] and "RemoteProtocolError" in item["error"]
+        assert item["status"] == "error"
+        assert item["moderated"] is False
+        assert "connection to OpenRouter dropped after" in item["error"]
+        assert "RemoteProtocolError" in item["error"]
 
 
 class TestOpenRouterImageStream:
@@ -2948,7 +2974,8 @@ class TestOpenRouterImageStream:
         )
         images, cost = openrouter.generate_image("x/img", "a fox")
         assert sent["stream"] is True
-        assert images == [(_png_bytes(), "image/png")] and cost == 0.03
+        assert images == [(_png_bytes(), "image/png")]
+        assert cost == 0.03
 
     def test_logs_the_request_and_the_card_keeps_it(self, client, conv, chat, monkeypatch):
 
@@ -2962,9 +2989,12 @@ class TestOpenRouterImageStream:
         )
         item = ev[-1]["message"]["media"][0]
         [entry] = [e for e in request_log.recent() if e["path"] == "/images"]
-        assert entry["provider"] == "openrouter" and entry["model"] == "i/model" and entry["status"] == 200
+        assert entry["provider"] == "openrouter"
+        assert entry["model"] == "i/model"
+        assert entry["status"] == 200
         assert "flagged" in entry["error"]
-        assert item["request"] == entry["request"] and item["request"]["prompt"] == "a fox"
+        assert item["request"] == entry["request"]
+        assert item["request"]["prompt"] == "a fox"
 
     def test_reference_images_are_cut_short_in_the_log(self, chat, monkeypatch):
 
@@ -2997,7 +3027,8 @@ class TestOpenRouterImageStream:
             lambda *a, **k: self._Stream([], content_type="application/json", body=body),
         )
         images, cost = openrouter.generate_image("x/img", "a fox")
-        assert len(images) == 1 and cost == 0.01
+        assert len(images) == 1
+        assert cost == 0.01
 
     def test_stream_without_an_image_raises(self, chat, monkeypatch):
         monkeypatch.setattr(openrouter._client, "stream", lambda *a, **k: self._Stream(["data: [DONE]"]))
@@ -3045,7 +3076,7 @@ class TestDeleteExchange:
         return u1, a1, u2, a2, u3, a3
 
     def test_removes_prompt_and_reply_and_rejoins_the_chat(self, client, conv, chat, db, monkeypatch):
-        u1, a1, u2, a2, u3, a3 = self._chat(db, conv)
+        _u1, _a1, u2, _a2, _u3, _a3 = self._chat(db, conv)
         r = client.delete(f"/api/chat/messages/{u2.id}")
         assert r.status_code == 200
         assert [m["content"] for m in r.json()["messages"]] == ["draw a fox", "Here!", "thanks", "Welcome"]
@@ -3057,14 +3088,16 @@ class TestDeleteExchange:
             lambda m, msgs, tools=None, session_id=None, **kw: (seen.update(msgs=msgs), _text_chunks("ok"))[1],
         )
         _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "more", **SETTINGS}))
-        assert "now a cat" not in json.dumps(seen["msgs"]) and "Meow" not in json.dumps(seen["msgs"])
+        assert "now a cat" not in json.dumps(seen["msgs"])
+        assert "Meow" not in json.dumps(seen["msgs"])
         # Its image is kept, in the library
         lib = client.get("/api/chat/library").json()["items"]
         cat = next(i for i in lib if i["id"] == "c1")
-        assert cat["attached"] is False and cat["file"] == "cat.png"
+        assert cat["attached"] is False
+        assert cat["file"] == "cat.png"
 
     def test_whole_turn_goes_and_only_the_shown_continuation_stays(self, client, conv, chat, db):
-        u1, a1, u2, a2, u3, a3 = self._chat(db, conv)
+        u1, a1, u2, _a2, u3, a3 = self._chat(db, conv)
         # Another reply version, an edited prompt version, each with follow-ups
         retry = db.add_chat_message(
             conv["id"],
@@ -3095,7 +3128,7 @@ class TestDeleteExchange:
         assert {"c1", "r1"} <= lib
 
     def test_shown_branch_decides_what_stays(self, client, conv, db):
-        u1, a1, u2, a2, u3, a3 = self._chat(db, conv)
+        _u1, a1, _u2, _a2, _u3, _a3 = self._chat(db, conv)
         edit = db.add_chat_message(conv["id"], "user", "now a dog", parent_id=a1.id)
         edit_reply = db.add_chat_message(conv["id"], "assistant", "Woof", parent_id=edit.id)
         edit_next = db.add_chat_message(conv["id"], "user", "walkies", parent_id=edit_reply.id)
@@ -3104,7 +3137,7 @@ class TestDeleteExchange:
         assert [m["content"] for m in msgs] == ["draw a fox", "Here!", "walkies"]
 
     def test_info_is_quiet_without_other_versions(self, client, conv, db):
-        u1, a1, u2, *_ = self._chat(db, conv)
+        _u1, _a1, u2, *_ = self._chat(db, conv)
         assert client.get(f"/api/chat/messages/{u2.id}/delete-info").json() == {
             "other_versions": 0,
             "other_messages": 0,
@@ -3134,7 +3167,7 @@ class TestDeleteExchange:
         assert client.get(f"/api/chat/messages/{u.id}/delete-info").json()["media"] == {}
 
     def test_deleting_the_last_exchange_shows_the_one_before(self, client, conv, db):
-        u1, a1, u2, a2, u3, a3 = self._chat(db, conv)
+        _u1, _a1, _u2, _a2, u3, _a3 = self._chat(db, conv)
         msgs = client.delete(f"/api/chat/messages/{u3.id}").json()["messages"]
         assert [m["content"] for m in msgs][-1] == "Meow"
 
@@ -3183,20 +3216,26 @@ class TestFork:
         return client.post(f"/api/chat/conversations/{conv['id']}/fork", json={"message_id": message_id})
 
     def test_new_chat_ends_at_the_prompt_and_its_reply(self, client, conv, chat, db):
-        u1, a1, u2, a2 = self._chat(chat, db, conv)
+        u1, _a1, _u2, _a2 = self._chat(chat, db, conv)
         client.patch(f"/api/chat/conversations/{conv['id']}", json={"title": "Animals", **SETTINGS})
         r = self._fork(client, conv, u1.id)
         assert r.status_code == 200
         new = r.json()
-        assert new["id"] != conv["id"] and new["title"] == "Animals (branch)"
+        assert new["id"] != conv["id"]
+        assert new["title"] == "Animals (branch)"
         assert (new["text_model"], new["image_model"]) == ("t/model", "i/model")
 
         msgs = client.get(f"/api/chat/conversations/{new['id']}").json()["messages"]
         assert [(m["role"], m["content"]) for m in msgs] == [("user", "draw a fox"), ("assistant", "Here!")]
-        assert msgs[0]["mode"] == "auto" and msgs[1]["cost"] == 0.02 and msgs[1]["model"] == "t/model"
-        assert msgs[1]["parent_id"] == msgs[0]["id"] and msgs[0]["parent_id"] is None
+        assert msgs[0]["mode"] == "auto"
+        assert msgs[1]["cost"] == 0.02
+        assert msgs[1]["model"] == "t/model"
+        assert msgs[1]["parent_id"] == msgs[0]["id"]
+        assert msgs[0]["parent_id"] is None
         img = msgs[1]["media"][0]
-        assert img["file"] == "fox.png" and img["pinned"] and img["id"] != "f1"
+        assert img["file"] == "fox.png"
+        assert img["pinned"]
+        assert img["id"] != "f1"
         assert client.get(f"/api/chat/media/{new['id']}/fox.png").status_code == 200
         # The original is untouched
         orig = client.get(f"/api/chat/conversations/{conv['id']}").json()["messages"]
@@ -3209,7 +3248,7 @@ class TestFork:
         assert client.get(f"/api/chat/media/{new['id']}/fox.png").status_code == 200
 
     def test_takes_the_shown_reply(self, client, conv, chat, db):
-        u1, a1, u2, a2 = self._chat(chat, db, conv)
+        _u1, _a1, u2, a2 = self._chat(chat, db, conv)
         retry = db.add_chat_message(conv["id"], "assistant", "Purr", parent_id=u2.id)
         db.set_chat_leaf(conv["id"], a2.id)
         new = self._fork(client, conv, u2.id).json()
@@ -3242,7 +3281,7 @@ class TestFork:
         assert item["status"] == "error"
 
     def test_only_messages_in_this_chat_and_not_while_replying(self, client, conv, chat, db):
-        u1, a1, *_ = self._chat(chat, db, conv)
+        u1, _a1, *_ = self._chat(chat, db, conv)
         other = client.post("/api/chat/conversations", json={}).json()
         assert self._fork(client, other, u1.id).status_code == 400
         db.add_chat_message(conv["id"], "assistant", "", status="streaming")
@@ -3279,7 +3318,8 @@ class TestFork:
 
         new = self._fork(client, conv, u.id).json()
         copy_id = next(i for i in new["character_ids"] if i != saved.id)
-        assert new["character_ids"] == [saved.id, copy_id] and copy_id != own.id
+        assert new["character_ids"] == [saved.id, copy_id]
+        assert copy_id != own.id
         copy = db.get_character(copy_id)
         assert (copy.name, copy.conversation_id, copy.images) == ("Bob", new["id"], ["img_bob.png"])
         assert (characters_mod.char_dir(copy_id) / "img_bob.png").is_file()
@@ -3291,7 +3331,8 @@ class TestFork:
 
         # Deleting the original takes its own characters, not the branch's
         client.delete(f"/api/chat/conversations/{conv['id']}")
-        assert db.get_character(own.id) is None and db.get_character(unused.id) is None
+        assert db.get_character(own.id) is None
+        assert db.get_character(unused.id) is None
         assert client.get(f"/api/chat/conversations/{new['id']}").json()["conversation"]["character_ids"] == [
             saved.id,
             copy_id,
@@ -3299,13 +3340,13 @@ class TestFork:
         assert (characters_mod.char_dir(copy_id) / "img_bob.png").is_file()
 
     def test_branching_from_a_reply_ends_with_that_reply(self, client, conv, chat, db):
-        u1, a1, u2, a2 = self._chat(chat, db, conv)
+        _u1, a1, _u2, _a2 = self._chat(chat, db, conv)
         new = self._fork(client, conv, a1.id).json()
         msgs = client.get(f"/api/chat/conversations/{new['id']}").json()["messages"]
         assert [m["content"] for m in msgs] == ["draw a fox", "Here!"]
 
     def test_branch_remembers_its_origin_and_the_original_lists_it(self, client, conv, chat, db):
-        u1, a1, u2, a2 = self._chat(chat, db, conv)
+        _u1, _a1, u2, _a2 = self._chat(chat, db, conv)
         client.patch(f"/api/chat/conversations/{conv['id']}", json={"title": "Animals"})
         new = self._fork(client, conv, u2.id).json()
         got = client.get(f"/api/chat/conversations/{new['id']}").json()["conversation"]
@@ -3315,7 +3356,8 @@ class TestFork:
         assert all(not m["forks"] for m in orig if m["id"] != u2.id)
         client.delete(f"/api/chat/conversations/{conv['id']}")
         got = client.get(f"/api/chat/conversations/{new['id']}").json()["conversation"]
-        assert got["forked_from"]["exists"] is False and got["forked_from"]["title"] is None
+        assert got["forked_from"]["exists"] is False
+        assert got["forked_from"]["title"] is None
 
     def test_branch_spend_says_what_came_with_it(self, client, conv, chat, db):
         u1, a1, *_ = self._chat(chat, db, conv)
@@ -3348,7 +3390,8 @@ class TestConversationList:
         for t in "ABC":
             client.post("/api/chat/conversations", json={"title": t})
         data = client.get("/api/chat/conversations").json()
-        assert len(data["conversations"]) == 2 and data["more"] is True
+        assert len(data["conversations"]) == 2
+        assert data["more"] is True
 
     def test_search_finds_titles_and_messages_on_any_branch(self, client, db):
         client.post("/api/chat/conversations", json={"title": "Fox story"})
@@ -3363,7 +3406,10 @@ class TestConversationList:
         by = {c["title"]: c for c in res}
         assert by["Fox story"]["snippet"] is None
         snip = by["Misc"]["snippet"]
-        assert "FOX appears" in snip and snip.startswith("…") and snip.endswith("…") and len(snip) <= 122
+        assert "FOX appears" in snip
+        assert snip.startswith("…")
+        assert snip.endswith("…")
+        assert len(snip) <= 122
 
     def test_search_treats_wildcards_literally(self, client):
         client.post("/api/chat/conversations", json={"title": "100% done"})
@@ -3389,7 +3435,9 @@ class TestRememberedSettings:
             )
         )
         got = client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["settings"]
-        assert got["mode"] == "text" and got["history_limit"] == 10 and got["image_limit"] == 2
+        assert got["mode"] == "text"
+        assert got["history_limit"] == 10
+        assert got["image_limit"] == 2
         assert got["image_options"]["aspect_ratio"] == "16:9"
         new = client.post(
             f"/api/chat/conversations/{conv['id']}/fork", json={"message_id": ev[0]["user_message"]["id"]}
@@ -3410,7 +3458,7 @@ class TestTitles:
         seen = {}
         monkeypatch.setattr(
             chat.generation,
-            "_generate_title",
+            "generate_title",
             lambda model, prompt: (seen.update(model=model, prompt=prompt), ("Winter Foxes", 0.0005))[1],
         )
         ev = self._send(client, conv)
@@ -3428,7 +3476,7 @@ class TestTitles:
         def boom(model, prompt):
             raise openrouter.OpenRouterError("nope")
 
-        monkeypatch.setattr(chat.generation, "_generate_title", boom)
+        monkeypatch.setattr(chat.generation, "generate_title", boom)
         ev = self._send(client, conv)
         assert {"type": "title", "title": "tell me about foxes in winter"} in ev
 
@@ -3437,7 +3485,7 @@ class TestTitles:
         monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
         seen = {}
         monkeypatch.setattr(
-            chat.generation, "_generate_title", lambda model, prompt: (seen.update(model=model), ("T", 0))[1]
+            chat.generation, "generate_title", lambda model, prompt: (seen.update(model=model), ("T", 0))[1]
         )
         self._send(client, conv)
         assert seen["model"] == "cheap/model"
@@ -3449,7 +3497,7 @@ class TestTitles:
             "stream_chat",
             lambda model, msgs, **kw: _text_chunks('<think>hmm</think>**Title:** "Winter Foxes."\nextra', cost=0.0002),
         )
-        assert chat_mod.generation._generate_title("t/model", "foxes") == ("Winter Foxes", 0.0002)
+        assert chat_mod.generation.generate_title("t/model", "foxes") == ("Winter Foxes", 0.0002)
 
     def test_clean_title_rejects_rambling(self, chat):
         assert chat.generation._clean_title("x" * 100) is None
@@ -3476,7 +3524,9 @@ class TestPolloRequestLog:
 
         assert pollo_provider._submit(Gen()) == "t-9"
         entry = request_log.recent()[0]
-        assert entry["provider"] == "pollo" and entry["model"] == "seedance-2-0" and entry["status"] == 200
+        assert entry["provider"] == "pollo"
+        assert entry["model"] == "seedance-2-0"
+        assert entry["status"] == 200
         assert entry["path"] == "/api/platform/generation/bytedance/seedance-2-0"
         assert entry["request"] == {"input": {"prompt": "waves", "image": "https://host/x.png"}}
 
@@ -3591,7 +3641,8 @@ class TestLargeChats:
         folder.mkdir(parents=True)
         Image.new("RGB", (1536, 2048), "red").save(folder / "img_big.png")
         resp = client.get(f"/api/chat/media/{conv['id']}/img_big.png/preview")
-        assert resp.status_code == 200 and resp.headers["content-type"] == "image/jpeg"
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "image/jpeg"
         assert min(Image.open(io.BytesIO(resp.content)).size) == 768
         assert client.get(f"/api/chat/media/{conv['id']}/nope.png/preview").status_code == 404
 
@@ -3638,13 +3689,15 @@ class TestActiveGenerations:
         r = client.post("/api/chat/generations/active", json={}).json()["items"]
         by = {i["media_id"]: i for i in r}
         assert set(by) == {"p1", "p2"}
-        assert by["p1"]["conversation_title"] == "A" and by["p2"]["kind"] == "video"
+        assert by["p1"]["conversation_title"] == "A"
+        assert by["p2"]["kind"] == "video"
 
         # Tracking the finished message resolves it to its done state.
         r = client.post("/api/chat/generations/active", json={"known": [done_msg.id]}).json()["items"]
         by = {i["media_id"]: i for i in r}
         assert set(by) == {"p1", "p2", "d1"}
-        assert by["d1"]["status"] == "done" and by["d1"]["file"] == "x.png"
+        assert by["d1"]["status"] == "done"
+        assert by["d1"]["file"] == "x.png"
 
     def test_reports_failure_and_ignores_non_generated(self, client, db):
         c = client.post("/api/chat/conversations", json={}).json()
@@ -3660,7 +3713,9 @@ class TestActiveGenerations:
         r = client.post("/api/chat/generations/active", json={"known": [m.id]}).json()["items"]
         by = {i["media_id"]: i for i in r}
         assert set(by) == {"e1"}  # the uploaded image isn't a generation
-        assert by["e1"]["status"] == "error" and by["e1"]["error"] == "boom" and by["e1"]["moderated"] is True
+        assert by["e1"]["status"] == "error"
+        assert by["e1"]["error"] == "boom"
+        assert by["e1"]["moderated"] is True
 
     def test_scoped_to_the_signed_in_user(self, client, db):
 
@@ -3708,7 +3763,8 @@ class TestEstimate:
         body = {"model": "pollo/seedance20fast", "kind": "video", "duration": 5, "resolution": "480p"}
         got = client.post("/api/chat/estimate", json=body).json()
         assert got == {"estimate": {"credits": 8, "full_credits": 10}}
-        assert seen["url"].endswith("/estimate") and seen["key"] == "pk-test"
+        assert seen["url"].endswith("/estimate")
+        assert seen["key"] == "pk-test"
         # a Ref model (legacy ref2video) has no estimate endpoint; other providers aren't priced here
         ref = client.post("/api/chat/estimate", json={**body, "model": "pollo/nonexistentref"}).json()
         assert ref == {"estimate": None}
@@ -3728,7 +3784,9 @@ class TestSpendBreakdown:
         )
         body = client.get("/api/chat/spend/breakdown").json()
         row = next(r for r in body["rows"] if r["model"] == "pollo/seedance25")
-        assert row["credits"] == 15 and row["count"] == 2 and row["usd"] == 0.9  # 15 cr x $0.06
+        assert row["credits"] == 15
+        assert row["count"] == 2
+        assert row["usd"] == 0.9
         assert body["total_usd"] >= 0.9
         assert client.get("/api/chat/spend/breakdown?days=7").status_code == 200
 
@@ -3745,7 +3803,8 @@ class TestTitleModel:
 
 class TestEditAndRewordInPlace:
     """Editing a picture on its card, and writing a reply's words again,
-    without re-running the turn that made them."""
+    without re-running the turn that made them.
+    """
 
     def _reply_with_image(self, db, conv, **extra):
         db.add_chat_message(conv["id"], "user", "draw a fox")
@@ -3817,8 +3876,10 @@ class TestEditAndRewordInPlace:
         assert media[0]["params"]["refs"] == ["img_old.png"]
         assert len(got["input_images"]) == 1
         assert len(media) == 1  # replaced, not added beside
-        assert media[0]["id"] == "m1" and media[0]["status"] == "done"
-        assert media[0]["file"] != "img_old.png" and media[0]["prompt"] == "give it a hat"
+        assert media[0]["id"] == "m1"
+        assert media[0]["status"] == "done"
+        assert media[0]["file"] != "img_old.png"
+        assert media[0]["prompt"] == "give it a hat"
 
     def test_the_replaced_picture_is_kept_as_a_version(self, client, conv, chat, db, monkeypatch):
         msg = self._reply(db, conv)
@@ -3834,7 +3895,6 @@ class TestEditAndRewordInPlace:
 
     def test_an_earlier_version_is_not_treated_as_an_orphan(self, client, conv, chat, db, monkeypatch):
         """Its file must stay referenced, or the media sweep would offer to delete it."""
-
         msg = self._reply(db, conv)
         self._inline(chat, monkeypatch)
         self._capture(monkeypatch, {})
@@ -3843,7 +3903,7 @@ class TestEditAndRewordInPlace:
             json={"prompt": "give it a hat", "edit": True, "replace": True},
         )
         item = db.get_chat_message(msg.id).media[0]
-        assert "img_old.png" in media_mod._referenced_files(item)
+        assert "img_old.png" in media_mod.referenced_files(item)
 
     def test_redo_re_rolls_the_prompt_without_the_picture(self, client, conv, chat, db, monkeypatch):
         msg = self._reply(db, conv)
@@ -3872,7 +3932,8 @@ class TestEditAndRewordInPlace:
         self._capture(monkeypatch, {})
         client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={})
         media = db.get_chat_message(msg.id).media
-        assert len(media) == 2 and media[0]["file"] == "img_old.png"
+        assert len(media) == 2
+        assert media[0]["file"] == "img_old.png"
 
     def test_reword_replaces_the_words_and_keeps_the_picture(self, client, conv, chat, db, monkeypatch):
         msg = self._reply(db, conv)
@@ -3883,7 +3944,8 @@ class TestEditAndRewordInPlace:
         _events(client.post(f"/api/chat/conversations/{conv['id']}/reword", json={"message_id": msg.id, **SETTINGS}))
         after = db.get_chat_message(msg.id)
         assert after.content == "A fox, as requested."
-        assert len(after.media) == 1 and after.media[0]["file"] == "img_old.png"
+        assert len(after.media) == 1
+        assert after.media[0]["file"] == "img_old.png"
 
     def test_reword_keeps_what_the_picture_cost(self, client, conv, chat, db, monkeypatch):
         msg = self._reply(db, conv)
@@ -3908,7 +3970,8 @@ class TestEditAndRewordInPlace:
 
 class TestRetryAFailedPicture:
     """A failed generation can be run again with a changed prompt, and leaves
-    no empty version behind."""
+    no empty version behind.
+    """
 
     def _failed(self, db, conv):
         db.add_chat_message(conv["id"], "user", "draw a fox")
@@ -3957,7 +4020,8 @@ class TestRetryAFailedPicture:
         assert r.status_code == 200
         assert got["prompt"] == "a fox, softer lighting"
         item = db.get_chat_message(msg.id).media[0]
-        assert item["status"] == "done" and item["prompt"] == "a fox, softer lighting"
+        assert item["status"] == "done"
+        assert item["prompt"] == "a fox, softer lighting"
 
     def test_it_leaves_no_empty_version(self, client, conv, chat, db, monkeypatch):
         """There was no picture, so there is nothing to flip back to."""
@@ -3981,8 +4045,8 @@ class TestRetryAFailedPicture:
 
 def test_a_webm_attachment_is_recorded_as_a_video(client, conv, chat, db):
     """Attachment kind comes from web.media_types now. Only ".mp4" counted
-    before, so a .webm or .mov clip was recorded as an image."""
-
+    before, so a .webm or .mov clip was recorded as an image.
+    """
     d = config.ROOT_DIR / "chat" / conv["id"]
     d.mkdir(parents=True, exist_ok=True)
     for name in ("upv_clip.webm", "upa_voice.ogg", "up_pic.png"):

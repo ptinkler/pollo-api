@@ -43,7 +43,8 @@ def ensure_schema(engine: sa.Engine, db_path: Path, fresh: bool) -> None:
     `PRAGMA locking_mode=EXCLUSIVE` for their lifetime (see _base.py), so
     while one is open Alembic's own connection can't write — it would block
     until SQLite's busy timeout and then fail. Disposing releases the lock;
-    the pool reconnects on the next query."""
+    the pool reconnects on the next query.
+    """
     try:
         # Ask before disposing: inspecting reconnects, which would retake the lock.
         versioned = sa.inspect(engine).has_table("alembic_version")
@@ -54,5 +55,5 @@ def ensure_schema(engine: sa.Engine, db_path: Path, fresh: bool) -> None:
             log.info("database has no Alembic version: adopting it at %s", at)
             command.stamp(cfg, at)
         command.upgrade(cfg, "head")
-    except Exception:  # noqa: BLE001 — a failed migration must not stop the server
+    except Exception:
         log.exception("could not bring the database up to date")

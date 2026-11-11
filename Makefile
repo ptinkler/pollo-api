@@ -1,4 +1,4 @@
-REGISTRY  := ghcr.io/ptinkler
+makREGISTRY  := ghcr.io/ptinkler
 IMAGE_APP := $(REGISTRY)/pollo-api
 IMAGE_NGX := $(REGISTRY)/pollo-nginx
 TAG       := latest

@@ -15,10 +15,9 @@ import requests
 
 from web.core.cloudflare import is_cloudflare_block
 from web.core.config import POLLO_API_TIMEOUT
-
-from .audio import AUDIO_MODELS, audio_model_url, audio_payload
-from .image import IMAGE_MODELS, image_model_url, image_payload, img_cfg
-from .video import VIDEO_MODELS, cfg, video_model_url, video_payload
+from web.providers.pollo_engine.audio import AUDIO_MODELS, audio_model_url, audio_payload
+from web.providers.pollo_engine.image import IMAGE_MODELS, image_model_url, image_payload, img_cfg
+from web.providers.pollo_engine.video import VIDEO_MODELS, cfg, video_model_url, video_payload
 
 # A video row's builder name -> the family a ModelSpec carries. They differ only
 # for the catch-all builder, whose family is the plain "video".
@@ -31,7 +30,8 @@ _VIDEO_ONLY_FAMILIES = ("extend", "edit", "upscale", "bgremove", "subtitle")
 class ModelSpec:
     """A model's static data + a factory for its runtime generator: the VALID_*
     /ACCEPTS_IMAGES/MAX_IMAGES the catalogue and validation read, and the
-    endpoint + family the payload builders dispatch on."""
+    endpoint + family the payload builders dispatch on.
+    """
 
     model_id: str
     kind: str  # "video" | "image" | "audio"
@@ -43,11 +43,11 @@ class ModelSpec:
     ACCEPTS_IMAGES: bool = True
     MAX_IMAGES: int = 0
 
-    def __call__(self, **kwargs) -> PolloGenerator:
+    def __call__(self, **kwargs: Any) -> PolloGenerator:
         return PolloGenerator(self, **kwargs)
 
 
-def _build_payload(spec: ModelSpec, prompt: str, image_url: str | None, **kw) -> dict[str, Any]:
+def _build_payload(spec: ModelSpec, prompt: str, image_url: str | None, **kw: Any) -> dict[str, Any]:
     if spec.kind == "audio":
         return audio_payload(spec.model_id, prompt=prompt, **kw)
     build = image_payload if spec.kind == "image" else video_payload
@@ -56,9 +56,11 @@ def _build_payload(spec: ModelSpec, prompt: str, image_url: str | None, **kw) ->
 
 class PolloGenerator:
     """Runtime generator for one request: resolves inputs, builds the payload via
-    the engine's family functions, and submits/prices it."""
+    the engine's family functions, and submits/prices it.
+    """
 
-    def __init__(self, spec: ModelSpec, **kwargs) -> None:
+    def __init__(self, spec: ModelSpec, **kwargs: Any) -> None:
+        """Bind this generator to one model's spec and the call's parameters."""
         self.spec = spec
         self.model_url = spec.model_url
         self.api_key = kwargs.get("api_key")
@@ -138,21 +140,21 @@ AUDIO_GENERATORS: dict[str, ModelSpec] = {
 }
 
 
-def audio_generator(model_id: str, **kwargs) -> PolloGenerator:
+def audio_generator(model_id: str, **kwargs: Any) -> PolloGenerator:
     try:
         return AUDIO_GENERATORS[model_id](**kwargs)
     except KeyError:
         raise ValueError(f"Unsupported audio model: {model_id}. Available: {', '.join(AUDIO_GENERATORS)}") from None
 
 
-def video_generator(model_id: str, **kwargs) -> PolloGenerator:
+def video_generator(model_id: str, **kwargs: Any) -> PolloGenerator:
     try:
         return VIDEO_GENERATORS[model_id](**kwargs)
     except KeyError:
         raise ValueError(f"Unsupported model: {model_id}. Available: {', '.join(VIDEO_GENERATORS)}") from None
 
 
-def image_generator(model_id: str, **kwargs) -> PolloGenerator:
+def image_generator(model_id: str, **kwargs: Any) -> PolloGenerator:
     try:
         return IMAGE_GENERATORS[model_id](**kwargs)
     except KeyError:

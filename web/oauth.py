@@ -32,7 +32,8 @@ def _env(provider: str, field: str) -> str:
 
 def register_providers() -> None:
     """Register every provider that has credentials configured. Idempotent-ish:
-    call once at startup."""
+    call once at startup.
+    """
     if _env("google", "CLIENT_ID"):
         oauth.register(
             name="google",
@@ -72,7 +73,8 @@ def configured_providers() -> list[str]:
 
 async def normalize_profile(provider: str, client, token) -> dict:
     """Provider's user info as {provider, sub, email, name, avatar}. Raises
-    ValueError when a required field (a stable id) is missing."""
+    ValueError when a required field (a stable id) is missing.
+    """
     if provider in ("google", "microsoft"):
         info = token.get("userinfo") or await client.userinfo(token=token)
         email = (info.get("email") or info.get("preferred_username") or "").lower() or None

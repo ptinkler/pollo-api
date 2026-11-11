@@ -35,7 +35,7 @@ def test_golden_covers_every_registered_model():
     assert set(GOLDEN["audio"]) == set(eng.AUDIO_MODELS)
 
 
-@pytest.mark.parametrize("kind,model_id", _PARAMS)
+@pytest.mark.parametrize(("kind", "model_id"), _PARAMS)
 def test_engine_payload_matches_golden(kind, model_id):
     build, model_url = _FN[kind]
     data = GOLDEN[kind][model_id]
@@ -43,7 +43,7 @@ def test_engine_payload_matches_golden(kind, model_id):
     for c in data["cases"]:
         try:
             got = {"ok": build(model_id, **c["kw"])}
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             got = {"error": type(exc).__name__}
         expected = {"ok": c["ok"]} if "ok" in c else {"error": c["error"]}
         assert got == expected, f"mismatch: {model_id} {c['kw']}\n got={got}\n want={expected}"

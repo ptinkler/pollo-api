@@ -1,5 +1,4 @@
-"""
-Chat mode — a Gemini/Grok-style multimodal chat backed by OpenRouter.
+"""Chat mode — a Gemini/Grok-style multimodal chat backed by OpenRouter.
 
 A conversation has three model slots: a text model that drives the chat, an
 image model and a video model. In "auto" mode the text model is given
@@ -34,21 +33,24 @@ This package is pure wiring. The pieces live in their own modules:
 """
 
 # Importing the route modules registers their endpoints on the shared router.
-from . import routes, routes_turns  # noqa: F401 — imported for the route-registration side effect
-from .constants import CHAT_PREVIEW_SIZE, IMAGE_EXTS
-from .deps import router
-from .helpers import conversation_dir  # noqa: F401 — re-exported; see __all__
-from .models import ConversationCreate
-from .polling import startup_resume_chat
-from .routes import api_create_conversation
+from web.chat import routes, routes_turns
+from web.chat.constants import CHAT_PREVIEW_SIZE, IMAGE_EXTS
+from web.chat.deps import router
+from web.chat.helpers import conversation_dir
+from web.chat.models import ConversationCreate
+from web.chat.polling import startup_resume_chat
+from web.chat.routes import api_create_conversation
 
 # The package's public surface (used by web.api and web.chatgpt_import).
 __all__ = [
-    "router",
-    "startup_resume_chat",
-    "ConversationCreate",
-    "IMAGE_EXTS",
     "CHAT_PREVIEW_SIZE",
-    "conversation_dir",
+    "IMAGE_EXTS",
+    "ConversationCreate",
     "api_create_conversation",
+    "conversation_dir",
+    "router",
+    # imported for their route-registration side effect
+    "routes",
+    "routes_turns",
+    "startup_resume_chat",
 ]
