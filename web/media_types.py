@@ -38,7 +38,7 @@ AUDIO_SUFFIXES = frozenset(AUDIO_EXTS.values())
 
 
 def kind_of(name: str | Path) -> str | None:
-    """ "image" | "video" | "audio" for a filename, or None if it is none of them."""
+    """The kind a filename belongs to: image, video, audio, or None."""
     suffix = Path(name).suffix.lower()
     if suffix in VIDEO_SUFFIXES:
         return "video"

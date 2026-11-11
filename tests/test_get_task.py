@@ -46,7 +46,7 @@ class TestGetTaskStatus:
             results = get_task_status("task123", "api-key-123")
         assert results[0][3] == 15
 
-    def test_result_key_with_videoUrl(self):
+    def test_result_key_with_video_url_field(self):
         """API response with 'result' key and 'videoUrl' field."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200

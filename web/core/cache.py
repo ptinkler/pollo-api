@@ -30,6 +30,7 @@ class TTLCache:
     __slots__ = ("_entries", "_lock", "_maxsize", "_ttl")
 
     def __init__(self, ttl: float, maxsize: int = 512) -> None:
+        """Build a cache whose entries expire after `ttl` seconds."""
         self._ttl = ttl
         self._maxsize = maxsize
         self._lock = threading.Lock()
@@ -60,5 +61,6 @@ class TTLCache:
             self._entries.clear()
 
     def __len__(self) -> int:
+        """The number of entries held, expired ones included."""
         with self._lock:
             return len(self._entries)
