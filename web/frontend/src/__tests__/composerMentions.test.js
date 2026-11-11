@@ -4,7 +4,7 @@
  * clicking one inserts a [@name] mention, and the [@name] text round-trips
  * through the contenteditable as inline pills.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 import StudioComposer from '../components/studio/StudioComposer.vue'
@@ -24,11 +24,52 @@ const atts = [
 ]
 
 describe('StudioComposer mentions', () => {
+  it('focuses the prompt when clicking empty space in the composer bar', async () => {
+    const w = make(atts)
+    const focus = vi.spyOn(w.find('.ed').element, 'focus')
+    await w.find('.cbox').trigger('click')
+    expect(focus).toHaveBeenCalled()
+  })
+
   it('labels refs by type and order in the @ picker', async () => {
     const w = make(atts)
     await w.find('.clip.at').trigger('click')
     const labels = w.findAll('.atmenu button').map(b => b.text().replace(/[🎞🔊]/gu, '').trim())
     expect(labels).toEqual(['Video 1', 'Image 1', 'Image 2'])
+  })
+
+  it('opens the reference picker when typing @, then inserts the selected pill', async () => {
+    const w = make(atts)
+    await w.find('.ed').trigger('keydown', { key: '@' })
+    expect(w.find('.atmenu').exists()).toBe(true)
+
+    await w.findAll('.atmenu button')[0].trigger('click')
+    expect(w.find('.ed .pill').attributes('data-name')).toBe('video1')
+    expect(w.emitted('update:draft').at(-1)[0]).toContain('[@video1]')
+  })
+
+  it('uses a placeholder that does not require typing reference syntax', () => {
+    const w = make(atts)
+    expect(w.find('.ed').attributes('data-placeholder')).toContain('Type @')
+    expect(w.find('.ed').attributes('data-placeholder')).not.toMatch(/\[@|\]/)
+    expect(w.find('.ed').attributes('data-empty')).toBe('true')
+  })
+
+  it('keeps mode buttons on the bottom action row and tracks empty prompt state', async () => {
+    const w = mount(StudioComposer, {
+      props: {
+        mode: 'image',
+        modes: [
+          { id: 'image', label: 'Image' },
+          { id: 'video', label: 'Video' },
+        ],
+      },
+    })
+    expect(w.find('.cbar .modes').exists()).toBe(true)
+    expect(w.find('.cbar').element.previousElementSibling).toBe(w.find('.ed').element)
+
+    await w.setProps({ draft: 'A prompt' })
+    expect(w.find('.ed').attributes('data-empty')).toBe('false')
   })
 
   it('inserts a [@name] mention when a picker item is clicked', async () => {

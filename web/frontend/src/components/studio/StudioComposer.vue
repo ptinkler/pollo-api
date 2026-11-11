@@ -33,7 +33,13 @@ const drag = ref(false)
 const ed = ref(null) // the contenteditable prompt
 const aud = ref(null) // hidden audio-clip file input (audio mode)
 const atMenu = ref(false) // the @-mention picker
-const onEsc = e => e.key === 'Escape' && (atMenu.value = false)
+const mentionRange = ref(null)
+const onEsc = e => {
+  if (e.key === 'Escape') {
+    atMenu.value = false
+    mentionRange.value = null
+  }
+}
 onMounted(() => document.addEventListener('keydown', onEsc))
 onBeforeUnmount(() => document.removeEventListener('keydown', onEsc))
 // Audio mode with a voice-clone model: the only attachment is the reference clip
@@ -41,9 +47,9 @@ const audioClip = computed(() => props.mode === 'audio' && props.audioInput)
 const mediaMode = computed(() => props.mode === 'image' || props.mode === 'video')
 const refsActive = computed(() => !!props.refMode && props.mode === 'video')
 const placeholder = computed(() =>
-  refsActive.value
-    ? 'Add instructions, e.g. replace the person in [@video1] with [@image1]'
-    : 'Message, or describe an image / video…',
+  refsActive.value && refItems.value.length
+    ? 'Describe what to change… Type @ to add a reference'
+    : 'Describe what you want to create…',
 )
 function removeUnused() {
   props.attachments.filter(a => props.unused.has(a.key)).forEach(a => emit('remove', a))
@@ -164,14 +170,27 @@ function placeCaretEnd() {
   sel.addRange(range)
 }
 
+function saveMentionRange() {
+  const sel = window.getSelection()
+  if (sel?.rangeCount && ed.value?.contains(sel.anchorNode)) mentionRange.value = sel.getRangeAt(0).cloneRange()
+}
+
 function insertNode(node, trailingSpace = false) {
   const el = ed.value
-  el.focus()
   const sel = window.getSelection()
   let range
-  if (sel.rangeCount && el.contains(sel.anchorNode)) {
+  const savedRange = mentionRange.value
+  if (savedRange && el.contains(savedRange.commonAncestorContainer)) {
+    el.focus()
+    sel.removeAllRanges()
+    sel.addRange(savedRange)
+    mentionRange.value = null
+    range = sel.getRangeAt(0)
+  } else if (sel.rangeCount && el.contains(sel.anchorNode)) {
+    el.focus()
     range = sel.getRangeAt(0)
   } else {
+    el.focus()
     range = document.createRange()
     range.selectNodeContents(el)
     range.collapse(false)
@@ -194,6 +213,15 @@ function insertNode(node, trailingSpace = false) {
 function insertMention(refItem) {
   atMenu.value = false
   insertNode(makePill(refItem), true)
+}
+function toggleMentionMenu() {
+  if (atMenu.value) {
+    atMenu.value = false
+    mentionRange.value = null
+  } else {
+    saveMentionRange()
+    atMenu.value = true
+  }
 }
 
 // Re-render only on external draft changes (enhance, clear, resend) — not our
@@ -225,7 +253,11 @@ function onVideo(e) {
 }
 
 function onKey(e) {
-  if (e.key === 'Enter' && !e.shiftKey) {
+  if (e.key === '@' && refsActive.value && refItems.value.length) {
+    e.preventDefault()
+    saveMentionRange()
+    atMenu.value = true
+  } else if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     emit('send')
   } else if (e.key === 'Enter' && e.shiftKey) {
@@ -280,7 +312,7 @@ function onDrop(e) {
 
 <template>
   <div class="compose" @dragover.prevent="drag = true" @dragleave.prevent="drag = false" @drop.prevent="onDrop">
-    <div class="cbox" :class="{ drag }">
+    <div class="cbox" :class="{ drag }" @click.self="ed?.focus()">
       <div v-if="attachments.length || mediaMode || audioClip" class="atts">
         <div v-if="mediaMode || audioClip" class="plus">
           <button
@@ -335,24 +367,13 @@ function onDrop(e) {
         <button class="clearall" title="Remove every attached image and video" @click="emit('clear')">Clear all</button>
       </div>
 
-      <div class="modes">
-        <button
-          v-for="md in modes"
-          :key="md.id"
-          class="pillbtn"
-          :class="{ on: mode === md.id }"
-          @click="emit('update:mode', md.id)"
-        >
-          {{ md.label }}
-        </button>
-      </div>
-
       <div
         ref="ed"
         class="ed"
         contenteditable="true"
         role="textbox"
         :data-placeholder="placeholder"
+        :data-empty="!draft"
         @input="syncDraft"
         @keydown="onKey"
         @paste="onPaste"
@@ -361,8 +382,26 @@ function onDrop(e) {
       ></div>
 
       <div class="cbar">
+        <div class="modes">
+          <button
+            v-for="md in modes"
+            :key="md.id"
+            class="pillbtn"
+            :class="{ on: mode === md.id }"
+            @click="emit('update:mode', md.id)"
+          >
+            {{ md.label }}
+          </button>
+        </div>
         <div v-if="refsActive && refItems.length" class="atwrap">
-          <button class="clip at" title="Mention a reference image or video" @click="atMenu = !atMenu">@</button>
+          <button
+            class="clip at"
+            title="Mention a reference image or video"
+            @mousedown.prevent
+            @click="toggleMentionMenu"
+          >
+            @
+          </button>
           <div v-if="atMenu" class="atmenu" @mouseleave="atMenu = false">
             <button v-for="r in refItems" :key="r.key" @click="insertMention(r)">
               <img v-if="r.type === 'image'" :src="r.preview" alt="" />
@@ -573,21 +612,31 @@ function onDrop(e) {
 .modes {
   display: flex;
   gap: 6px;
-  padding-bottom: 8px;
+  flex: 0 0 auto;
 }
 .ed {
   width: 100%;
-  color: var(--sfg);
-  outline: none;
+  min-width: 0;
   min-height: 22px;
+  color: var(--sfg);
   max-height: 45vh;
   overflow-y: auto;
+  padding: 5px 7px;
+  border: 1px solid var(--sborder2);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--shover) 28%, var(--sbg));
   font: inherit;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+  cursor: text;
 }
-.ed:empty::before {
+.compose .ed:focus-visible {
+  outline: none;
+  border-color: var(--sfaint);
+  box-shadow: none;
+}
+.ed[data-empty='true']::before {
   content: attr(data-placeholder);
   color: var(--sfaint);
   pointer-events: none;
