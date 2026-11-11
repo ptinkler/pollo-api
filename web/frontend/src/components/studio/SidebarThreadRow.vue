@@ -35,26 +35,50 @@ const threadIcon = t => (t.kind === 'gallery' ? '#s-image' : '#s-chat')
     @input="emit('update:renameText', $event.target.value)"
     @keydown.enter.prevent="emit('commit-rename')"
     @keydown.esc="emit('cancel-rename')"
-    @blur="emit('commit-rename')"
+    @blur="emit('cancel-rename')"
   />
   <a v-else class="nitem" :href="`/${thread.id}`" @click.prevent="emit('open')">
     <svg class="ic"><use :href="threadIcon(thread)" /></svg><span class="lbl">{{ thread.title || 'Untitled' }}</span>
   </a>
   <div class="nactions">
-    <button
-      class="nact"
-      :class="{ on: alwaysPinned || pinned }"
-      :title="alwaysPinned ? 'Unpin' : 'Pin'"
-      @click.stop="emit('pin')"
-    >
-      <svg class="ic sm"><use href="#s-pin" /></svg>
-    </button>
-    <button class="nact" title="Rename" @click.stop="emit('start-rename')">
-      <svg class="ic sm"><use href="#s-pencil" /></svg>
-    </button>
-    <button class="nact" title="Delete" @click.stop="emit('delete')">
-      <svg class="ic sm"><use href="#s-trash" /></svg>
-    </button>
+    <template v-if="renaming">
+      <button
+        class="nact"
+        title="Confirm rename"
+        aria-label="Confirm rename"
+        @mousedown.prevent
+        @click="emit('commit-rename')"
+      >
+        <svg class="ic sm"><use href="#s-check" /></svg>
+      </button>
+      <button
+        class="nact"
+        title="Cancel rename"
+        aria-label="Cancel rename"
+        @mousedown.prevent
+        @click="emit('cancel-rename')"
+      >
+        <svg class="ic sm"><use href="#s-close" /></svg>
+      </button>
+    </template>
+    <template v-else>
+      <button class="nact" title="Rename" @click.stop="emit('start-rename')">
+        <svg class="ic sm"><use href="#s-pencil" /></svg>
+      </button>
+      <button
+        class="nact"
+        :class="{ on: alwaysPinned || pinned }"
+        :title="alwaysPinned || pinned ? 'Unpin' : 'Pin'"
+        :aria-label="alwaysPinned || pinned ? 'Unpin chat' : 'Pin chat'"
+        :aria-pressed="alwaysPinned || pinned"
+        @click.stop="emit('pin')"
+      >
+        <svg class="ic sm"><use href="#s-pin" /></svg>
+      </button>
+      <button class="nact danger" title="Delete" aria-label="Delete chat" @click.stop="emit('delete')">
+        <svg class="ic sm"><use href="#s-trash" /></svg>
+      </button>
+    </template>
   </div>
 </template>
 
@@ -93,33 +117,5 @@ const threadIcon = t => (t.kind === 'gallery' ? '#s-image' : '#s-chat')
   color: var(--sfg);
   outline: none;
   font: inherit;
-}
-.nactions {
-  display: none;
-  align-items: center;
-  gap: 1px;
-  padding-right: 5px;
-}
-/* .nrow lives in StudioSidebar (it owns the row wrapper and its hover) */
-:global(.nrow:hover) .nactions {
-  display: flex;
-}
-.nact {
-  width: 25px;
-  height: 25px;
-  display: grid;
-  place-items: center;
-  border-radius: 6px;
-  color: var(--sfaint);
-  background: none;
-  border: none;
-  cursor: pointer;
-}
-.nact:hover {
-  background: var(--sborder);
-  color: var(--sfg);
-}
-.nact.on {
-  color: var(--saccent);
 }
 </style>

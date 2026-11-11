@@ -10,10 +10,10 @@ import { mount } from '@vue/test-utils'
 import StudioSidebar from '../components/studio/StudioSidebar.vue'
 import StudioBalances from '../components/studio/StudioBalances.vue'
 
-const sidebar = () =>
+const sidebar = (threads = [{ id: 't1', title: 'A thread', kind: 'chat' }]) =>
   mount(StudioSidebar, {
     props: {
-      threads: [{ id: 't1', title: 'A thread', kind: 'chat' }],
+      threads,
       spaces: [{ id: 3, name: 'Novel' }],
       activeId: null,
       collapsed: false,
@@ -41,11 +41,70 @@ describe('sidebar navigation is linkable', () => {
   })
 
   it('a space row links to that space', () => {
-    expect(sidebar().find('a.fmain').attributes('href')).toBe('/space/3')
+    const w = sidebar()
+    expect(w.find('a.fmain').attributes('href')).toBe('/space/3')
+    expect(w.findAll('.folder .nact').map(button => button.attributes('title'))).toEqual([
+      'Rename',
+      'Space defaults',
+      'Delete',
+    ])
   })
 
   it('a thread row links to that thread', () => {
     expect(sidebar().find('a.nitem').attributes('href')).toBe('/t1')
+  })
+
+  it('lets a chat be pinned and unpinned from its row actions', async () => {
+    const thread = { id: 't1', title: 'A thread', kind: 'chat' }
+    const w = sidebar([thread])
+
+    expect(w.findAll('.nrow .nact').map(button => button.attributes('title'))).toEqual(['Rename', 'Pin', 'Delete'])
+    expect(w.find('button[aria-label="Pin chat"]').exists()).toBe(true)
+    expect(w.find('button[aria-label="Delete chat"]').exists()).toBe(true)
+    await w.find('button[aria-label="Pin chat"]').trigger('click')
+    expect(w.emitted('pin')).toEqual([[thread]])
+    await w.find('button[aria-label="Delete chat"]').trigger('click')
+    expect(w.emitted('delete')).toEqual([[thread]])
+
+    const pinned = sidebar([{ ...thread, pinned: true }])
+    const unpin = pinned.find('button[aria-label="Unpin chat"]')
+    expect(unpin.attributes('aria-pressed')).toBe('true')
+  })
+
+  it('shows explicit confirm and cancel actions while renaming a chat', async () => {
+    const w = sidebar()
+    await w.find('.nrow button[title="Rename"]').trigger('click')
+
+    await w.find('input.nrename').setValue('Renamed')
+    await w.find('button[aria-label="Confirm rename"]').trigger('click')
+    expect(w.emitted('rename')).toEqual([[{ id: 't1', title: 'A thread', kind: 'chat' }, 'Renamed']])
+  })
+
+  it('collapses the Spaces and Recent sections', async () => {
+    const w = sidebar()
+    expect(w.find('a.fmain').exists()).toBe(true)
+    expect(w.find('a.nitem').exists()).toBe(true)
+
+    await w
+      .findAll('.section-toggle')
+      .find(button => button.text().includes('Spaces'))
+      .trigger('click')
+    expect(w.find('a.fmain').isVisible()).toBe(false)
+    expect(w.find('a.nitem').exists()).toBe(true)
+
+    await w
+      .findAll('.section-toggle')
+      .find(button => button.text().includes('Recent'))
+      .trigger('click')
+    expect(w.find('a.nitem').isVisible()).toBe(false)
+  })
+
+  it('collapses the Pinned section', async () => {
+    const w = sidebar([{ id: 't1', title: 'A thread', kind: 'chat', pinned: true }])
+    expect(w.find('button[aria-label="Unpin chat"]').exists()).toBe(true)
+
+    await w.find('.section-toggle').trigger('click')
+    expect(w.find('button[aria-label="Unpin chat"]').isVisible()).toBe(false)
   })
 
   it('still navigates in-app, without a full page load', async () => {
