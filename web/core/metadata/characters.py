@@ -1,7 +1,6 @@
 """Reusable characters (name, description, reference images)."""
 
 from datetime import datetime
-from typing import Any
 
 from sqlalchemy import func
 
@@ -37,7 +36,7 @@ class CharacterMixin:
                 session.expunge(c)
             return chars
 
-    def update_character(self, character_id: int, **fields: Any) -> Character | None:
+    def update_character(self, character_id: int, **fields: object) -> Character | None:
         """Set name / description / images (list of filenames) / conversation_id."""
         with self._session() as session:
             char = session.get(Character, character_id)

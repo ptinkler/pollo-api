@@ -276,7 +276,7 @@ class _Merge:
         self.updates: dict[int, dict] = {}
         self.parent: dict[str, Any] = {"parent_id": None}
 
-    def _add(self, import_id: str, **row: Any) -> None:
+    def _add(self, import_id: str, **row: object) -> None:
         self.rows.append({**self.parent, "import_id": import_id, **row})
         self.parent = {"parent_import_id": import_id}
 
@@ -369,7 +369,7 @@ def _import_conversation(export: _Export, data: dict, conv: ChatConversation | N
     return "updated" if changed else "unchanged"
 
 
-def run_import(path: Path, progress: dict[str, Any] | None = None) -> dict[str, Any]:
+def run_import(path: Path, progress: dict[str, object] | None = None) -> dict[str, Any]:
     """Import the export at `path`.
 
     Returns (and keeps `progress` up to
@@ -489,7 +489,7 @@ def api_start_import(data: StartImport) -> dict[str, Any]:
     return dict(job)
 
 
-def _run_job(path: Path, job: dict[str, Any]) -> None:
+def _run_job(path: Path, job: dict[str, object]) -> None:
     try:
         run_import(path, job)
         job["state"] = "done"

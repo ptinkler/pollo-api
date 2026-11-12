@@ -17,7 +17,7 @@ from web.core.metadata.models import ChatConversation, ChatLibraryItem, ChatMess
 _APPEND = object()
 
 
-def _media_row(conv_id: str, at: datetime, item: dict[str, Any]) -> dict[str, Any]:
+def _media_row(conv_id: str, at: datetime, item: dict[str, object]) -> dict[str, Any]:
     return {
         "conversation_id": conv_id,
         "at": at,
@@ -36,10 +36,10 @@ class MessageMixin:
         conversation_id: str,
         role: str,
         content: str = "",
-        media: list[dict[str, Any]] | None = None,
+        media: list[dict[str, object]] | None = None,
         model: str | None = None,
         status: str = "done",
-        parent_id: Any = _APPEND,
+        parent_id: object = _APPEND,
         mode: str | None = None,
         lane: str | None = None,
     ) -> ChatMessage:
@@ -76,7 +76,7 @@ class MessageMixin:
             session.expunge(msg)
             return msg
 
-    def add_chat_branch(self, conversation_id: str, rows: list[dict[str, Any]]) -> None:
+    def add_chat_branch(self, conversation_id: str, rows: list[dict[str, object]]) -> None:
         """Add a message branch in one transaction and show it.
 
         The first row starts the chat. Each row contains ``ChatMessage`` fields
@@ -141,7 +141,10 @@ class MessageMixin:
             return [r[0] for r in rows]
 
     def update_chat_message(
-        self, message_id: int, media: list[dict[str, Any]] | None = None, **fields: Any
+        self,
+        message_id: int,
+        media: list[dict[str, object]] | None = None,
+        **fields: object,
     ) -> ChatMessage | None:
         """Update a message's fields and optional media, or return ``None``."""
         with self._session() as session:
@@ -158,7 +161,7 @@ class MessageMixin:
             session.expunge(msg)
             return msg
 
-    def update_chat_media_item(self, message_id: int, media_id: str, **fields: Any) -> ChatMessage | None:
+    def update_chat_media_item(self, message_id: int, media_id: str, **fields: object) -> ChatMessage | None:
         """Atomically merge `fields` into one media item.
 
         Looks in the message first, then the library (the message may have
@@ -196,7 +199,7 @@ class MessageMixin:
             lib = session.query(ChatLibraryItem).filter(ChatLibraryItem.media_id == media_id).first()
             return lib.item if lib else None
 
-    def append_chat_media_item(self, message_id: int, item: dict[str, Any]) -> ChatMessage | None:
+    def append_chat_media_item(self, message_id: int, item: dict[str, object]) -> ChatMessage | None:
         """Atomically append one media item to a message."""
         with self._session() as session:
             msg = session.get(ChatMessage, message_id)

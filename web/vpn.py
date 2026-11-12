@@ -9,7 +9,6 @@ Docs: https://github.com/qdm12/gluetun-wiki/blob/main/setup/advanced/control-ser
 import logging
 import os
 import time
-from typing import Any
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException
@@ -62,7 +61,7 @@ def _gluetun_put(path: str, body: dict[str, object], timeout: int = 5) -> reques
     return requests.put(f"{GLUETUN_API}{path}", json=body, headers=_GLUETUN_HEADERS, timeout=timeout)
 
 
-def _gluetun_json(path: str, if_not_ok: Any, if_unreachable: Any, timeout: int = 3) -> Any:
+def _gluetun_json(path: str, if_not_ok: object, if_unreachable: object, timeout: int = 3) -> object:
     """A Gluetun GET's JSON, or a stand-in when it fails or can't be reached."""
     try:
         r = _gluetun_get(path, timeout=timeout)

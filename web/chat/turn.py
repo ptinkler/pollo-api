@@ -71,7 +71,7 @@ class Turn:
         conv_id: str,
         settings: TurnSettings,
         message_id: int,
-        emit: Callable[[dict[str, Any]], None],
+        emit: Callable[[dict[str, object]], None],
         cancel: threading.Event,
         initial_cost: float = 0.0,
     ) -> None:
@@ -595,7 +595,7 @@ class Turn:
         self.db.append_chat_media_item(self.message_id, item)
         self.emit({"type": "media", "message_id": self.message_id, "item": dict(item)})
 
-    def _update_media(self, item: dict, **fields: Any) -> None:
+    def _update_media(self, item: dict, **fields: object) -> None:
         item.update(fields)
         self.db.update_chat_media_item(self.message_id, item["id"], **fields)
         self.emit({"type": "media", "message_id": self.message_id, "item": dict(item)})

@@ -49,7 +49,7 @@ def log_path() -> Path:
     return base / uid / "requests.jsonl" if uid else base / "requests.jsonl"
 
 
-def redact(value: Any) -> Any:
+def redact(value: object) -> object:
     """Return a log-safe representation of a request body.
 
     Data URLs and long base64 strings are represented by type and size;
@@ -67,7 +67,7 @@ def redact(value: Any) -> Any:
     return value
 
 
-def response_of(resp: Any) -> Any:
+def response_of(resp: object) -> object:
     """Return a log-safe representation of a fully read HTTP response.
 
     JSON, text, and binary responses are represented by their contents or
@@ -119,7 +119,7 @@ def record(
     error: str | None = None,
     flags: dict | None = None,
     model: str | None = None,
-    response: Any = None,
+    response: object = None,
 ) -> dict:
     """Append and return a provider-call log entry.
 
@@ -152,7 +152,7 @@ def record(
     return entry
 
 
-def _jsonable(value: Any) -> Any:
+def _jsonable(value: object) -> object:
     """Convert indexed chat tool calls to a JSON-friendly list."""
     if isinstance(value, dict) and isinstance(value.get("tool_calls"), dict):
         return {**value, "tool_calls": list(value["tool_calls"].values()) or None}
@@ -178,14 +178,14 @@ def recent(limit: int = 100) -> list[dict]:
 
 
 @contextlib.contextmanager
-def logged(provider: str, method: str, path: str, body: Any, model: str | None = None) -> Iterator[dict]:
-    """Record one provider call made inside the block. Yields a dict the.
+def logged(provider: str, method: str, path: str, body: object, model: str | None = None) -> Iterator[dict]:
+    """Record one provider call made inside the block.
 
-    caller fills in: "status" (HTTP status), "flags" (headers worth keeping)
-    and "response" (see response_of / chat_reply) — set it before raising on
-    an error response, so the log shows what the provider said. An exception
-    leaving the block is recorded as the error and gets the entry as its
-    `log_entry` attribute.
+    Yields a dict the caller fills in with ``status`` (HTTP status), ``flags``
+    (headers worth keeping), and ``response`` (see ``response_of`` /
+    ``chat_reply``). Set these before raising on an error response so the log
+    shows what the provider said. An exception leaving the block is recorded
+    as the error and gets the entry as its ``log_entry`` attribute.
     """
     shown = redact(body)
     outcome: dict[str, Any] = {"status": None, "flags": None, "response": None}

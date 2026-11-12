@@ -83,11 +83,11 @@ def audio_model_url(model_id: str) -> str:
     return f"{POLLO_GENERATION_BASE}/{c['PROVIDER']}/{c['MODEL']}/{c['endpoint']}"
 
 
-def _clamp(value: Any, lo: float, hi: float) -> float:
+def _clamp(value: object, lo: float, hi: float) -> float:
     return max(lo, min(hi, float(value)))
 
 
-def _speech_payload(c: dict[str, Any], prompt: str, **kw: Any) -> dict[str, Any]:
+def _speech_payload(c: dict[str, object], prompt: str, **kw: object) -> dict[str, Any]:
     attrs: dict[str, Any] = {"prompt": prompt}
     if c["NEEDS_VOICE"]:
         if not kw.get("voice"):
@@ -108,7 +108,7 @@ def _speech_payload(c: dict[str, Any], prompt: str, **kw: Any) -> dict[str, Any]
     return {"input": attrs}
 
 
-def _music_payload(c: dict[str, Any], prompt: str, **kw: Any) -> dict[str, Any]:
+def _music_payload(c: dict[str, object], prompt: str, **kw: object) -> dict[str, Any]:
     """Suno: a song description, or (with style + title together) lyrics."""
     style, title = (kw.get("style") or "").strip(), (kw.get("title") or "").strip()
     if bool(style) != bool(title):
@@ -127,7 +127,7 @@ def _music_payload(c: dict[str, Any], prompt: str, **kw: Any) -> dict[str, Any]:
     return {"input": attrs}
 
 
-def audio_payload(model_id: str, *, prompt: str, **kw: Any) -> dict[str, Any]:
+def audio_payload(model_id: str, *, prompt: str, **kw: object) -> dict[str, Any]:
     """Build and validate a speech or music generation request body."""
     c = cfg(model_id)
     prompt = (prompt or "").strip()

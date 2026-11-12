@@ -41,22 +41,6 @@ select = [
     "W",        # pycodestyle warnings
 ]
 
-# Deliberately NOT enabled:
-#   BLE  — this app catches Exception on purpose in the places that must never
-#          die: the streaming-turn guard, the background pollers, thumbnailing,
-#          VPN probes. A narrowed tuple there is a latent bug (a missed subclass
-#          leaves a message stuck in "streaming" or kills a poller), so the broad
-#          catch is the correct design and each site says why in a comment.
-ignore = [
-    "RUF001",   # Ambiguous-unicode: en-dashes and ellipses are deliberate
-    "RUF002",
-    "RUF003",
-    "ANN401",   # Allow typing.Any dynamically if explicitly requested
-    "D100",     # Don't force docstrings on every single module file
-    "D104",     # Don't force docstrings in __init__.py files
-
-]
-
 [tool.ruff.lint.mccabe]
 # Target is 7. Held at 10 while the 36 functions that score 8-10 are broken
 # up one at a time — complexity is never silenced with `noqa`, it gets fixed.

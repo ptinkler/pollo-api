@@ -9,7 +9,6 @@ contexts are not user-facing.
 """
 
 from contextvars import ContextVar, Token
-from typing import Any
 
 from sqlalchemy import event
 from sqlalchemy.orm import Session, with_loader_criteria
@@ -57,7 +56,7 @@ def current_tenant() -> str | None:
 
 
 @event.listens_for(Session, "do_orm_execute")
-def _scope_selects_to_tenant(execute_state: Any) -> None:
+def _scope_selects_to_tenant(execute_state: object) -> None:
     uid = _tenant.get()
     if uid is None or not execute_state.is_select:
         return
@@ -68,7 +67,7 @@ def _scope_selects_to_tenant(execute_state: Any) -> None:
 
 
 @event.listens_for(Session, "before_flush")
-def _stamp_new_rows_with_tenant(session: Session, flush_context: Any, instances: Any) -> None:
+def _stamp_new_rows_with_tenant(session: Session, flush_context: object, instances: object) -> None:
     uid = _tenant.get()
     if uid is None:
         return

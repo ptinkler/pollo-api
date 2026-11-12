@@ -44,12 +44,12 @@ class ModelSpec:
     ACCEPTS_IMAGES: bool = True
     MAX_IMAGES: int = 0
 
-    def __call__(self, **kwargs: Any) -> PolloGenerator:
+    def __call__(self, **kwargs: object) -> PolloGenerator:
         """Create a runtime generator for this model."""
         return PolloGenerator(self, **kwargs)
 
 
-def _build_payload(spec: ModelSpec, prompt: str, image_url: str | None, **kw: Any) -> dict[str, Any]:
+def _build_payload(spec: ModelSpec, prompt: str, image_url: str | None, **kw: object) -> dict[str, Any]:
     if spec.kind == "audio":
         return audio_payload(spec.model_id, prompt=prompt, **kw)
     build = image_payload if spec.kind == "image" else video_payload
@@ -63,7 +63,7 @@ class PolloGenerator:
     submits or estimates the request.
     """
 
-    def __init__(self, spec: ModelSpec, **kwargs: Any) -> None:
+    def __init__(self, spec: ModelSpec, **kwargs: object) -> None:
         """Bind this generator to one model's spec and the call's parameters."""
         self.spec = spec
         self.model_url = spec.model_url
@@ -146,7 +146,7 @@ AUDIO_GENERATORS: dict[str, ModelSpec] = {
 }
 
 
-def audio_generator(model_id: str, **kwargs: Any) -> PolloGenerator:
+def audio_generator(model_id: str, **kwargs: object) -> PolloGenerator:
     """Create a generator for a supported audio model."""
     try:
         return AUDIO_GENERATORS[model_id](**kwargs)
@@ -154,7 +154,7 @@ def audio_generator(model_id: str, **kwargs: Any) -> PolloGenerator:
         raise ValueError(f"Unsupported audio model: {model_id}. Available: {', '.join(AUDIO_GENERATORS)}") from None
 
 
-def video_generator(model_id: str, **kwargs: Any) -> PolloGenerator:
+def video_generator(model_id: str, **kwargs: object) -> PolloGenerator:
     """Create a generator for a supported video model."""
     try:
         return VIDEO_GENERATORS[model_id](**kwargs)
@@ -162,7 +162,7 @@ def video_generator(model_id: str, **kwargs: Any) -> PolloGenerator:
         raise ValueError(f"Unsupported model: {model_id}. Available: {', '.join(VIDEO_GENERATORS)}") from None
 
 
-def image_generator(model_id: str, **kwargs: Any) -> PolloGenerator:
+def image_generator(model_id: str, **kwargs: object) -> PolloGenerator:
     """Create a generator for a supported image model."""
     try:
         return IMAGE_GENERATORS[model_id](**kwargs)

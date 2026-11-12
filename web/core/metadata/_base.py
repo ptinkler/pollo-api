@@ -43,7 +43,7 @@ class _DBBase:
         )
 
         @event.listens_for(self.engine, "connect")
-        def _set_sqlite_pragma(dbapi_conn: Any, connection_record: Any) -> None:
+        def _set_sqlite_pragma(dbapi_conn: object, connection_record: object) -> None:
             cursor = dbapi_conn.cursor()
             cursor.execute("PRAGMA journal_mode=DELETE")
             cursor.execute("PRAGMA synchronous=NORMAL")
@@ -72,7 +72,7 @@ class _DBBase:
     # ── small helpers the domain mixins share. Each opens a session, does the
     #    one thing, and detaches what it returns so callers hold plain objects.
 
-    def _list(self, model: Any, order_by: Any = None) -> list[Any]:
+    def _list(self, model: object, order_by: object = None) -> list[Any]:
         with self._session() as session:
             query = session.query(model)
             items = (query.order_by(order_by) if order_by is not None else query).all()
@@ -80,14 +80,14 @@ class _DBBase:
                 session.expunge(item)
             return items
 
-    def _get(self, model: Any, pk: Any) -> Any | None:
+    def _get(self, model: object, pk: object) -> object | None:
         with self._session() as session:
             item = session.get(model, pk)
             if item:
                 session.expunge(item)
             return item
 
-    def _save(self, model: Any, pk: Any, **fields: Any) -> Any | None:
+    def _save(self, model: object, pk: object, **fields: object) -> object | None:
         """Create (pk None) or update one row; None if the pk isn't there."""
         with self._session() as session:
             if pk is None:
@@ -106,7 +106,7 @@ class _DBBase:
             return item
 
     @staticmethod
-    def _detach_id(session: Session, model: Any, json_column: Any, list_attr: str, target_id: int) -> None:
+    def _detach_id(session: Session, model: object, json_column: object, list_attr: str, target_id: int) -> None:
         """Remove an id from a JSON-backed list on matching rows.
 
         The SQL ``LIKE`` narrows the rows; membership is checked exactly

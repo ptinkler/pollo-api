@@ -65,11 +65,11 @@ class JsonIds:
         """Set whether writes drop repeated items."""
         self.unique = unique
 
-    def __set_name__(self, owner: type[Any], name: str) -> None:
+    def __set_name__(self, owner: type[object], name: str) -> None:
         """Record the backing column's name, which is the attribute's plus `_json`."""
         self.column = f"{name}_json"
 
-    def __get__(self, obj: Any, owner: type[Any] | None = None) -> Any:
+    def __get__(self, obj: object, owner: type[object] | None = None) -> object:
         """Decode the backing column, or [] when it is empty or unreadable."""
         if obj is None:
             return self
@@ -79,7 +79,7 @@ class JsonIds:
         except json.JSONDecodeError:
             return []
 
-    def __set__(self, obj: Any, value: Any) -> None:
+    def __set__(self, obj: object, value: object) -> None:
         """Encode `value` into the backing column as JSON."""
         items = list(value or [])
         setattr(obj, self.column, json.dumps(list(dict.fromkeys(items)) if self.unique else items))
@@ -241,7 +241,7 @@ class ChatConversation(Base):
             return None
 
     @settings.setter
-    def settings(self, value: dict[str, Any] | None) -> None:
+    def settings(self, value: dict[str, object] | None) -> None:
         """Encode composer settings, clearing the column for an empty value."""
         self.settings_json = json.dumps(value) if value else None
 

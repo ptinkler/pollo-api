@@ -41,7 +41,6 @@ import sys
 import urllib.request
 from datetime import date
 from pathlib import Path
-from typing import Any
 
 from scripts.probe_pollo_models import _probe_estimate
 from web.providers.pollo_engine.video import VIDEO_MODELS
@@ -175,7 +174,7 @@ ENGINE_FILE = os.path.join(_REPO, "web", "providers", "pollo_engine", "v1_video.
 _ENABLEMENT_HIDE = re.compile(r"enabled|403|404|unavailable|access", re.IGNORECASE)
 
 
-def py_literal(v: Any) -> str:
+def py_literal(v: object) -> str:
     """A Python literal using double quotes and True/False (ruff-style)."""
     if isinstance(v, bool):
         return "True" if v else "False"

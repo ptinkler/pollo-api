@@ -41,12 +41,12 @@ def conversation_dir(conv_id: str) -> Path:
     return d
 
 
-def new_media(kind: str, source: str, **fields: Any) -> dict[str, Any]:
+def new_media(kind: str, source: str, **fields: object) -> dict[str, Any]:
     """Build a pending media item with a stable ID and optional fields."""
     return {"id": uuid.uuid4().hex[:8], "kind": kind, "source": source, "status": "pending", "file": None, **fields}
 
 
-def saved_media(kind: str, source: str, file: str, **fields: Any) -> dict[str, Any]:
+def saved_media(kind: str, source: str, file: str, **fields: object) -> dict[str, Any]:
     """A media item whose file is already on disk."""
     return {**new_media(kind, source, **fields), "status": "done", "file": file}
 
@@ -71,7 +71,7 @@ def branch_to(messages: list[ChatMessage], leaf_id: int | None) -> list[ChatMess
 
 
 def message_out(msg: ChatMessage) -> dict[str, Any]:
-    """A message for the UI, with its siblings for the ‹ 1/2 › branch arrows."""
+    """A message for the UI, with its siblings for the < 1/2 > branch arrows."""
     return {**msg.to_dict(), "siblings": get_db().get_chat_sibling_ids(msg.conversation_id, msg.parent_id, msg.lane)}
 
 

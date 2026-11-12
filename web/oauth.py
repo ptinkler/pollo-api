@@ -15,7 +15,6 @@ The redirect/callback URI registered with each provider must be
 from __future__ import annotations
 
 import os
-from typing import Any
 
 from authlib.integrations.starlette_client import OAuth
 
@@ -73,7 +72,7 @@ def configured_providers() -> list[str]:
     return [p for p in ("google", "microsoft", "x") if _env(p, "CLIENT_ID")]
 
 
-async def normalize_profile(provider: str, client: Any, token: dict[str, Any]) -> dict[str, str | None]:
+async def normalize_profile(provider: str, client: object, token: dict[str, object]) -> dict[str, str | None]:
     """Normalize a provider's user-info response.
 
     The returned keys are ``provider``, ``sub``, ``email``, ``name``, and

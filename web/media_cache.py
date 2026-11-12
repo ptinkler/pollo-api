@@ -23,7 +23,6 @@ import sqlite3
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 from web.core import config
 
@@ -41,7 +40,7 @@ def db_path() -> Path:
     return config.ROOT_DIR / "cache" / "media-cache.sqlite"
 
 
-def _with_db(work: Callable[[sqlite3.Connection], Any], default: Any = None) -> Any:
+def _with_db(work: Callable[[sqlite3.Connection], object], default: object = None) -> object:
     """Run `work` against the cache, or return `default` if it can't be used.
 
     The connection is opened per call: these happen once per process, once per

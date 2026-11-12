@@ -4,7 +4,6 @@ API Docs: https://docs.pollo.ai/task/get-task-status?playground=open
 """
 
 import logging
-from typing import Any
 
 import requests
 
@@ -64,7 +63,7 @@ def _error_message(response: requests.Response) -> str:
     return f"HTTP {response.status_code}"
 
 
-def _credit(value: Any) -> int | None:
+def _credit(value: object) -> int | None:
     """A credit count from the API (a string or an int), None if missing or unreadable."""
     try:
         return int(value) if value is not None else None

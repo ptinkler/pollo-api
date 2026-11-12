@@ -710,7 +710,7 @@ def video_model_url(model_id: str) -> str:
     return f"{POLLO_GENERATION_BASE}/{c['PROVIDER']}/{c['MODEL']}/{c['endpoint']}"
 
 
-def _normalize_refs(refs: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+def _normalize_refs(refs: list[dict[str, object]] | None) -> list[dict[str, Any]] | None:
     if not refs:
         return None
     out: list[dict[str, Any]] = []
@@ -729,13 +729,13 @@ def _normalize_refs(refs: list[dict[str, Any]] | None) -> list[dict[str, Any]] |
     return out or None
 
 
-def _resolve_resolution(c: dict[str, Any], **kw: Any) -> str:
+def _resolve_resolution(c: dict[str, object], **kw: object) -> str:
     if c.get("FORCE_RESOLUTION"):
         return c["FORCE_RESOLUTION"]
     return kw.get("resolution") or c["DEFAULT_RESOLUTION"]
 
 
-def _resolve_length(c: dict[str, Any], **kw: Any) -> int:
+def _resolve_length(c: dict[str, object], **kw: object) -> int:
     length_str = str(kw.get("length") or c["DEFAULT_LENGTH"])
     if kw.get("refs") and c["REF_VALID_LENGTHS"]:
         length = int(length_str) if length_str.isdigit() else c["DEFAULT_LENGTH"]
@@ -743,13 +743,13 @@ def _resolve_length(c: dict[str, Any], **kw: Any) -> int:
     return valid_length(length_str, c["VALID_LENGTHS"], c["DEFAULT_LENGTH"])
 
 
-def _resolve_aspect_ratio(c: dict[str, Any], **kw: Any) -> str:
+def _resolve_aspect_ratio(c: dict[str, object], **kw: object) -> str:
     # the explicit kwarg, then a model default ("adaptive" on a few), else the
     # base "portrait" → 9:16.
     return kw.get("aspect_ratio") or c.get("DEFAULT_RATIO") or parse_aspect_ratio("portrait")
 
 
-def _resolve_mode(c: dict[str, Any], resolution: str, mode: str | None) -> str | None:
+def _resolve_mode(c: dict[str, object], resolution: str, mode: str | None) -> str | None:
     if not c["HAS_MODE"]:
         return None
     if c.get("MODE_PRO_RESOLUTIONS"):
@@ -757,7 +757,7 @@ def _resolve_mode(c: dict[str, Any], resolution: str, mode: str | None) -> str |
     return mode or c.get("MODE_DEFAULT")
 
 
-def _process_inputs(c: dict[str, Any], image_url: str | None, **kw: Any) -> dict[str, Any]:
+def _process_inputs(c: dict[str, object], image_url: str | None, **kw: object) -> dict[str, Any]:
     """Resolve request inputs against a model's configuration.
 
     Use the caller's value or the model default; unsupported fields stay None.
@@ -783,7 +783,11 @@ def _process_inputs(c: dict[str, Any], image_url: str | None, **kw: Any) -> dict
 
 
 def _generic_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **_: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **_: object,
 ) -> dict[str, Any]:
     refs, is_text_only = s["refs"], s["is_text_only"]
     attrs: dict[str, Any] = {"prompt": prompt}
@@ -815,7 +819,11 @@ def _generic_payload(
 
 
 def _kling_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **_: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **_: object,
 ) -> dict[str, Any]:
     if s["is_text_only"] and not c["TEXT_TO_VIDEO"]:
         raise ValueError(f"{c['MODEL']} needs a source image (it has no text-to-video mode)")
@@ -836,7 +844,11 @@ def _kling_payload(
 
 
 def _extend_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **kw: object,
 ) -> dict[str, Any]:
     video_url = kw.get("video_url")
     if not video_url:
@@ -854,7 +866,11 @@ def _extend_payload(
 
 
 def _edit_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **kw: object,
 ) -> dict[str, Any]:
     video_url = kw.get("video_url")
     if not video_url:
@@ -868,7 +884,11 @@ def _edit_payload(
 
 
 def _upscale_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **kw: object,
 ) -> dict[str, Any]:
     """Build a video-upscale body containing the source, scale, and mode.
 
@@ -884,7 +904,11 @@ def _upscale_payload(
 
 
 def _bgremove_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **kw: object,
 ) -> dict[str, Any]:
     """Video background removal: {video, outputFormat} (webm / mov, both transparent)."""
     if not kw.get("video_url"):
@@ -894,7 +918,11 @@ def _bgremove_payload(
 
 
 def _subtitle_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **kw: object,
 ) -> dict[str, Any]:
     """Subtitle removal: {video, language, tier}; unknown values fall back to the defaults."""
     if not kw.get("video_url"):
@@ -905,7 +933,11 @@ def _subtitle_payload(
 
 
 def _faceswap_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **kw: object,
 ) -> dict[str, Any]:
     """Face swap: the source video plus a face image."""
     if not kw.get("video_url"):
@@ -916,7 +948,11 @@ def _faceswap_payload(
 
 
 def _lipsync_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **kw: object,
 ) -> dict[str, Any]:
     """Build a lip-sync body from a reference image and audio track.
 
@@ -938,7 +974,11 @@ def _lipsync_payload(
 
 
 def _motion_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **kw: object,
 ) -> dict[str, Any]:
     """Build a motion-transfer body from a reference image and source video.
 
@@ -969,7 +1009,7 @@ _BUILDERS = {
 }
 
 
-def video_payload(model_id: str, *, prompt: str, image_url: str | None, **kw: Any) -> dict[str, Any]:
+def video_payload(model_id: str, *, prompt: str, image_url: str | None, **kw: object) -> dict[str, Any]:
     """Build the video API body for any model, dispatching on its family."""
     c = cfg(model_id)
     build = _BUILDERS.get(c["builder"])

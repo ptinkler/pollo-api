@@ -163,7 +163,7 @@ def _request(
     timeout: httpx.Timeout = DEFAULT_TIMEOUT,
     waiting_for: str = "response",
     log: bool = False,
-    **kw: Any,
+    **kw: object,
 ) -> httpx.Response:
     """One Venice call. `log`: record it in the request log (web/request_log.py)."""
     if not log:
@@ -183,7 +183,7 @@ def _send(
     timeout: httpx.Timeout,
     waiting_for: str,
     check: bool = True,
-    **kw: Any,
+    **kw: object,
 ) -> httpx.Response:
     start = time.monotonic()
     try:
@@ -214,7 +214,7 @@ def _fetch_models(kind: str) -> list[dict]:
     ]
 
 
-def _usd(price: float | int | str | dict[str, Any] | None) -> float | None:
+def _usd(price: float | int | str | dict[str, object] | None) -> float | None:
     if isinstance(price, dict):
         price = price.get("usd")
     try:
@@ -377,7 +377,7 @@ def _build_catalogue() -> dict[str, Any]:
 def _by_price(models: list[dict]) -> list[dict]:
     """Uncensored first (as the user asked), then cheapest first; unpriced last."""
 
-    def key(m: dict[str, Any]) -> tuple[bool, bool, int | float, str]:
+    def key(m: dict[str, object]) -> tuple[bool, bool, int | float, str]:
         usd = (m.get("price") or {}).get("usd")
         return (not m.get("uncensored"), usd is None, usd or 0, m["name"].lower())
 
@@ -429,7 +429,7 @@ def _price_videos(video: list[dict]) -> None:
         res = min(c.get("resolutions") or [], key=_res_rank, default=None)
         jobs.append((m, model, duration, res))
 
-    def quote(job: tuple[dict[str, Any], str, int | None, str | None]) -> float | None:
+    def quote(job: tuple[dict[str, object], str, int | None, str | None]) -> float | None:
         _, model, duration, res = job
         key = (model, duration, res)
         cached = _quotes.get(key, MISS)
@@ -638,7 +638,7 @@ def _stream_error(message: str, status: int | None) -> VeniceError:
 def _chat_cost(
     model_id: str,
     usage: dict,
-    top_level_cost: float | int | str | dict[str, Any] | None = None,
+    top_level_cost: float | int | str | dict[str, object] | None = None,
 ) -> float | None:
     cost = _usd(usage.get("cost")) if usage.get("cost") is not None else _usd(top_level_cost)
     if cost is not None:

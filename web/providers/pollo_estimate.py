@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import requests
 
@@ -84,7 +84,7 @@ def _ask(url: str, payload: dict, api_key: str | None) -> tuple[dict | None, boo
     return _credits(body.get("data", body) if isinstance(body, dict) else None), True
 
 
-def _credits(data: Any) -> dict | None:
+def _credits(data: object) -> dict | None:
     """Extract discounted and undiscounted credit costs from an estimate.
 
     ``discountCost`` is used when available; ``totalCost`` is an older name
@@ -100,7 +100,7 @@ def _credits(data: Any) -> dict | None:
     return {"credits": credits, "full_credits": full if full is not None else credits}
 
 
-def _number(value: Any) -> int | float | None:
+def _number(value: object) -> int | float | None:
     try:
         n = float(value)
     except (TypeError, ValueError):

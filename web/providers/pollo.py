@@ -200,7 +200,7 @@ def list_voices(page: int = 1, page_size: int = 50, **filters: str) -> dict[str,
     return {"voices": voices, "total": body.get("total", len(voices))}
 
 
-def submit_audio(model_id: str, prompt: str, source_audio: Path | None = None, **opts: Any) -> dict:
+def submit_audio(model_id: str, prompt: str, source_audio: Path | None = None, **opts: object) -> dict:
     """Start a Pollo speech or music job.
 
     Returns the job id and settings actually sent, like ``submit_video``.
@@ -476,7 +476,7 @@ def estimate_cost(
     generate_audio: bool | None = None,
     n_images: int = 0,
     prompt: str = "",
-    audio: dict[str, Any] | None = None,
+    audio: dict[str, object] | None = None,
 ) -> dict | None:
     """Return Pollo's credit estimate, or ``None`` when it cannot be priced.
 
@@ -604,7 +604,7 @@ def _payload(generator: PolloGenerator) -> dict[str, Any] | None:
         return None
 
 
-def _submit_logged(generator: PolloGenerator, outcome: dict[str, Any]) -> str:
+def _submit_logged(generator: PolloGenerator, outcome: dict[str, object]) -> str:
     try:
         resp = generator.send_request()
     except (ConnectionError, ValueError) as e:

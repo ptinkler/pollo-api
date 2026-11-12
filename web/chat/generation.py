@@ -89,7 +89,8 @@ def _clean_title(text: str) -> str | None:
     text = _THINK.sub("", text)
     line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
     line = re.sub(r"^(?:\*\*)?title(?:\*\*)?\s*:\s*", "", line, flags=re.IGNORECASE)
-    line = line.strip(" \t\"'`*#_“”‘’").rstrip(".").strip()
+    # Model-generated titles may wrap text in curly quotes; remove them too.
+    line = line.strip(" \t\"'`*#_“”‘’").rstrip(".").strip()  # noqa: RUF001 - accepted title punctuation
     if not line or len(line) > 80:
         return None
     return line
