@@ -17,6 +17,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Add a lane to chat messages."""
     existing = {c["name"] for c in sa.inspect(op.get_bind()).get_columns("chat_messages")}
     if "lane" not in existing:
         with op.batch_alter_table("chat_messages") as batch_op:
@@ -24,5 +25,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove the lane from chat messages."""
     with op.batch_alter_table("chat_messages") as batch_op:
         batch_op.drop_column("lane")

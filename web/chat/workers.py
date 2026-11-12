@@ -1,4 +1,5 @@
-"""Background-worker helpers: run a thread inside the request's context (tenant
+"""Background-worker helpers: run a thread inside the request's context (tenant.
+
 + keys), and bind a conversation owner's provider keys for work that outlives
 the request (pollers, retries, startup resume).
 """
@@ -7,27 +8,27 @@ import contextlib
 import contextvars
 import functools
 import threading
-from typing import Any
+from collections.abc import Callable, Iterator
+from typing import Concatenate
 
 from web import keyctx, user_keys
 from web.core.metadata import get_db
 
 
-def ctx_thread(target, *args: Any, name: str | None = None) -> "threading.Thread":
-    """A daemon thread that runs `target(*args)` inside a copy of the CURRENT
-    context, so it inherits the request's tenant + provider keys (plain threads
-    don't). Started from a request handler or another context-bearing thread.
+def ctx_thread(target: Callable[[], None], *, name: str | None = None) -> threading.Thread:
+    """Create a daemon thread that inherits the current request context.
+
+    The copied context carries tenant and provider-key values into the worker.
     """
     ctx = contextvars.copy_context()
-    return threading.Thread(target=lambda: ctx.run(target, *args), daemon=True, name=name)
+    return threading.Thread(target=lambda: ctx.run(target), daemon=True, name=name)
 
 
 @contextlib.contextmanager
-def _owner_keys(conv_id: str):
-    """Bind the conversation owner's provider keys for a background worker that
-    runs outside the request (pollers, retries, startup resume). Keys live only
-    in the DB per user, so without this the worker would have no key. It binds
-    keys only — the worker acts on a specific id, so it needs no tenant scope.
+def _owner_keys(conv_id: str) -> Iterator[None]:
+    """Bind the conversation owner's provider keys for background work.
+
+    The conversation ID scopes operations, so no tenant context is needed.
     """
     conv = get_db().get_conversation(conv_id)
     owner = get_db().get_user(conv.user_id) if conv and getattr(conv, "user_id", None) else None
@@ -38,13 +39,16 @@ def _owner_keys(conv_id: str):
         keyctx.reset_keys(token)
 
 
-def with_owner_keys(fn):
-    """Decorator for background workers whose first arg is conv_id: run them
-    with the conversation owner's provider keys bound.
+def with_owner_keys[**P, R](
+    fn: Callable[Concatenate[str, P], R],
+) -> Callable[Concatenate[str, P], R]:
+    """Decorate a worker to bind its conversation owner's provider keys.
+
+    The wrapped worker must accept its conversation ID as the first argument.
     """
 
     @functools.wraps(fn)
-    def wrapper(conv_id, *args: Any, **kwargs: Any):
+    def wrapper(conv_id: str, *args: P.args, **kwargs: P.kwargs) -> R:
         with _owner_keys(conv_id):
             return fn(conv_id, *args, **kwargs)
 

@@ -6,7 +6,10 @@ from web.core.get_task import get_credit_balance, get_task_status
 
 
 class TestGetTaskStatus:
+    """Tests for get task status."""
+
     def test_success_response(self):
+        """Test that success response."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
@@ -18,6 +21,7 @@ class TestGetTaskStatus:
         assert results[0] == ("succeed", None, "https://video.com/out.mp4", None)
 
     def test_success_with_credit(self):
+        """Test that success with credit."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
@@ -63,6 +67,7 @@ class TestGetTaskStatus:
         assert results[0] == ("succeed", None, "https://cdn.pollo.ai/video.mp4", 21)
 
     def test_error_response(self):
+        """Test that error response."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
@@ -74,6 +79,7 @@ class TestGetTaskStatus:
         assert results[0][1] == "Something broke"
 
     def test_processing_status(self):
+        """Test that processing status."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
@@ -84,6 +90,7 @@ class TestGetTaskStatus:
         assert results[0] == ("processing", None, None, None)
 
     def test_no_generations(self):
+        """Test that no generations."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"data": {"generations": []}}
@@ -92,6 +99,7 @@ class TestGetTaskStatus:
         assert results == [("error", "No generations found.", None, None)]
 
     def test_api_error_status_code(self):
+        """Test that api error status code."""
         mock_resp = MagicMock()
         mock_resp.status_code = 400
         mock_resp.json.return_value = {"data": {"issues": [{"message": "Bad request"}]}}
@@ -101,6 +109,7 @@ class TestGetTaskStatus:
         assert results[0][1] == "Bad request"
 
     def test_api_error_no_issues(self):
+        """Test that api error no issues."""
         mock_resp = MagicMock()
         mock_resp.status_code = 400
         mock_resp.json.return_value = {"data": {"issues": []}}
@@ -110,6 +119,7 @@ class TestGetTaskStatus:
         assert results == [("error", "HTTP 400", None, None)]
 
     def test_multiple_generations(self):
+        """Test that multiple generations."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
@@ -125,6 +135,7 @@ class TestGetTaskStatus:
         assert len(results) == 2
 
     def test_cloudflare_block_returns_cloudflare_blocked_status(self):
+        """Test that cloudflare block returns cloudflare blocked status."""
         mock_resp = MagicMock()
         mock_resp.status_code = 403
         mock_resp.text = "<html><title>Just a moment...</title>cloudflare</html>"
@@ -137,6 +148,7 @@ class TestGetTaskStatus:
         assert "Cloudflare" in results[0][1]
 
     def test_headers_include_api_key(self):
+        """Test that headers include api key."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"data": {"generations": [{"status": "succeed", "failMsg": None, "url": "x"}]}}
@@ -151,7 +163,10 @@ class TestGetTaskStatus:
 
 
 class TestGetCreditBalance:
+    """Tests for get credit balance."""
+
     def test_success(self):
+        """Test that success."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"availableCredits": 500, "totalCredits": 1000}
@@ -160,6 +175,7 @@ class TestGetCreditBalance:
         assert result == {"availableCredits": 500, "totalCredits": 1000}
 
     def test_failure(self):
+        """Test that failure."""
         mock_resp = MagicMock()
         mock_resp.status_code = 401
         with patch("web.core.get_task.requests.get", return_value=mock_resp):
@@ -167,6 +183,7 @@ class TestGetCreditBalance:
         assert result is None
 
     def test_network_error(self):
+        """Test that network error."""
         with patch("web.core.get_task.requests.get", side_effect=Exception("timeout")):
             result = get_credit_balance("api-key-123")
         assert result is None

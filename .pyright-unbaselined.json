@@ -1,0 +1,10 @@
+{
+  "include": ["web", "tests", "scripts", "alembic/versions"],
+  "typeCheckingMode": "strict",
+  "reportExplicitAny": "error",
+  "reportAny": "error",
+  "reportUnknownVariableType": "error",
+  "reportUnknownMemberType": "error",
+  "reportUnusedFunction": "none",
+  "pythonVersion": "3.13"
+}

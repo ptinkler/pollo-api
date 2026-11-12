@@ -29,16 +29,21 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import requests
 
 # Run from the repo root so `web` imports resolve.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from web.providers.pollo_engine import VIDEO_GENERATORS
 from web.providers.pollo_engine import video_generator as get_video_generator
 from web.providers.pollo_estimate import PLACEHOLDERS
 from web.providers.pollo_models import MODEL_INFO
+
+if TYPE_CHECKING:
+    from web.providers.pollo_engine.registry import PolloGenerator
 
 TIMEOUT = 20
 
@@ -53,9 +58,10 @@ def _models(family: str | None, all_video: bool) -> list[str]:
     return keys
 
 
-def _build(key: str, api_key: str):
-    """A video generator for `key` with placeholder media, like the composer's
-    estimate path does (web/providers/pollo.py estimate_cost).
+def _build(key: str, api_key: str) -> PolloGenerator:
+    """Build a video generator for a key using placeholder media.
+
+    This follows the composer's estimate path in ``web/providers/pollo.py``.
     """
     info = MODEL_INFO.get(key, {})
     cls = VIDEO_GENERATORS[key]
@@ -72,13 +78,13 @@ def _build(key: str, api_key: str):
 
 
 def _classify(status: int, text: str) -> tuple[str, str]:
-    """(verdict, note) from a probe response. IMPORTANT: a placeholder probe is
-    only conclusive two ways — a price/taskId (ENABLED) or an enablement refusal
-    (DISABLED). Media-input models (motion / edit / faceswap / extend) fetch the
-    media FIRST, so a fake URL yields a 400 "can't read the video" BEFORE the
-    enablement check — the 403 is never reached. Those are UNKNOWN here; only a
-    real submit with valid media settles them (e.g. Wan Animate Mix reads as
-    reachable but actually 403s on a real generation).
+    """Classify a probe response as a verdict and note.
+
+    A placeholder probe is conclusive only when it returns a price or task ID
+    (ENABLED), or an enablement refusal (DISABLED). Media-input models (motion,
+    edit, faceswap, extend) fetch media before checking enablement, so a fake
+    URL may return a 400 before reaching the 403 check. Those are UNKNOWN here;
+    only a real submit with valid media settles them.
     """
     low = text.lower()
     if status == 401:
@@ -96,7 +102,7 @@ def _probe_estimate(key: str, api_key: str) -> tuple[str, str]:
     try:
         gen = _build(key, api_key)
         payload = gen.get_payload()
-    except Exception as e:  # a model whose probe body we can't build
+    except Exception as e:  # noqa: BLE001 — probe reports model-specific body construction errors
         return "N/A", f"can't build a probe request: {e}"
     url = getattr(gen, "estimate_url", None)
     if not url:
@@ -114,14 +120,15 @@ def _probe_estimate(key: str, api_key: str) -> tuple[str, str]:
 
 
 def _probe_live(key: str, api_key: str) -> tuple[str, str]:
-    """Really submit (SPENDS CREDITS on enabled models). Uses real placeholder
-    URLs — Pollo will reject the fake media on some models even when enabled,
-    which still proves the model itself isn't 403-gated.
+    """Submit a live probe that may spend credits on enabled models.
+
+    Pollo may reject placeholder URLs even when the model is enabled, which
+    still proves the model itself is not gated by a 403 response.
     """
     gen = _build(key, api_key)
     try:
         resp = gen.send_request()
-    except Exception as e:  # report whatever the generator raised
+    except Exception as e:  # noqa: BLE001 — display provider-specific probe failure
         return "ERR", str(e)[:140]
     try:
         body = resp.json()
@@ -136,6 +143,7 @@ def _probe_live(key: str, api_key: str) -> tuple[str, str]:
 
 
 def main() -> int:
+    """Probe the selected Pollo video models and report their availability."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--key", default=os.getenv("POLLO_API_KEY"), help="Pollo API key (or set POLLO_API_KEY)")
     ap.add_argument("--family", default="motion", help="model type to probe (default: motion/recast)")

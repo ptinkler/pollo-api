@@ -1,6 +1,12 @@
-"""The system/title prompts and the generate_* / create_* tool schemas the
+"""The system/title prompts and the generate_* / create_* tool schemas the.
+
 chat model is given, plus the helper that adds the `characters` argument.
 """
+
+from collections.abc import Mapping
+from typing import cast
+
+from web.types import JsonValue
 
 TITLE_PROMPT = """Write a short title, 2 to 6 words, for a chat that starts with the message below. \
 Reply with the title alone: no quotes, no "Title:", no full stop.
@@ -156,28 +162,32 @@ TOOLS_VIDEO = {
 }
 
 
-def with_character_arg(tool: dict, names: list[str]) -> dict:
+def with_character_arg(tool: Mapping[str, JsonValue], names: list[str]) -> dict[str, JsonValue]:
     """A generate_* tool with a `characters` argument listing the usable characters."""
     if not names:
-        return tool
-    fn = tool["function"]
-    params = fn["parameters"]
-    return {
-        **tool,
-        "function": {
-            **fn,
-            "parameters": {
-                **params,
-                "properties": {
-                    **params["properties"],
-                    "characters": {
-                        "type": "array",
-                        "items": {"type": "string", "enum": names},
-                        "description": "The user's characters who appear in it. Their descriptions and reference "
-                        "images are sent to the model automatically, so the prompt needn't "
-                        "describe their looks.",
+        return dict(tool)
+    fn = cast("Mapping[str, JsonValue]", tool["function"])
+    params = cast("Mapping[str, JsonValue]", fn["parameters"])
+    properties = cast("Mapping[str, JsonValue]", params["properties"])
+    return cast(
+        "dict[str, JsonValue]",
+        {
+            **tool,
+            "function": {
+                **fn,
+                "parameters": {
+                    **params,
+                    "properties": {
+                        **properties,
+                        "characters": {
+                            "type": "array",
+                            "items": {"type": "string", "enum": names},
+                            "description": "The user's characters who appear in it. Their descriptions and reference "
+                            "images are sent to the model automatically, so the prompt needn't "
+                            "describe their looks.",
+                        },
                     },
                 },
             },
         },
-    }
+    )

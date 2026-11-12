@@ -9,9 +9,11 @@ before any web.* module, so everything here is a plain top-level import.
 import logging
 import threading
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from http.cookies import SimpleCookie
 from pathlib import Path
+from typing import Annotated
 
 import uvicorn
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Request
@@ -20,6 +22,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from web import characters, keyctx, media, user_keys, vpn
 from web.auth import USER_COOKIE, set_user_cookie, user_secret
@@ -46,7 +49,7 @@ WEB_DIR = Path(__file__).parent.resolve()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001 — ASGI lifespan signature
     """Lifespan context manager for startup/shutdown events."""
     # Startup: announce the auth posture so a misconfigured deploy is obvious
     admins = admin_emails()
@@ -107,17 +110,19 @@ app.add_middleware(
 
 
 class UserContextMiddleware:
-    """Bind the signed-in user's provider keys AND tenant for the whole request,
-    the streamed response body included. A pure ASGI middleware (not
+    """Bind the signed-in user's provider keys AND tenant for the whole request,.
+
+    The streamed response body is included. A pure ASGI middleware (not
     BaseHTTPMiddleware) is required: its context survives into the response
-    streaming, where chat turns run and would otherwise see no keys/tenant.
+    streaming, where chat turns run and would otherwise see no keys or tenant.
     """
 
-    def __init__(self, app) -> None:
+    def __init__(self, app: ASGIApp) -> None:
         """Wrap the ASGI app this middleware sits in front of."""
         self.app = app
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Bind user keys and tenant data while handling an API request."""
         if scope["type"] != "http" or not scope.get("path", "").startswith("/api"):
             return await self.app(scope, receive, send)
 
@@ -125,7 +130,7 @@ class UserContextMiddleware:
         jar = SimpleCookie()
         jar.load(headers.get("cookie", ""))
 
-        def cookie(name):
+        def cookie(name: str) -> str | None:
             return jar[name].value if name in jar else None
 
         user = resolve_current_user(cookie("user_session"))
@@ -144,6 +149,8 @@ app.add_middleware(UserContextMiddleware)
 
 
 class LoginRequest(BaseModel):
+    """Credentials submitted to the local email-and-password login endpoint."""
+
     email: str
     password: str
 
@@ -156,9 +163,10 @@ _login_lock = threading.Lock()
 
 
 def _client_ip(request: Request) -> str:
-    """The real client IP. Behind the reverse proxy, request.client is the
-    proxy, so prefer the IP nginx stamps (X-Real-IP; it overwrites any client
-    value), then the first X-Forwarded-For hop, then the socket peer.
+    """The real client IP. Behind the reverse proxy, request.client is the.
+
+    The proxy is preferred via nginx's X-Real-IP header, then the first
+    X-Forwarded-For hop, then the socket peer.
     """
     real = request.headers.get("x-real-ip", "").strip()
     if real:
@@ -178,9 +186,10 @@ def _record_attempt(key: str, now: float) -> bool:
 
 
 def _login_rate_limited(request: Request, email: str) -> bool:
-    """Record this login attempt and report whether the client IP OR the target
-    account is over the limit. Keying on the email too means spoofing the
-    X-Forwarded-For / X-Real-IP headers can't lift the per-account cap.
+    """Record this login attempt and report whether the client IP OR the target.
+
+    The email key also prevents spoofed forwarding headers from lifting the
+    per-account cap.
     """
     now = time.time()
     with _login_lock:
@@ -194,7 +203,8 @@ def _login_rate_limited(request: Request, email: str) -> bool:
 
 
 @app.post("/api/auth/login")
-async def api_auth_login(data: LoginRequest, response: Response, request: Request):
+async def api_auth_login(data: LoginRequest, response: Response, request: Request) -> dict[str, str | bool | None]:
+    """Authenticate a local user and set the signed-in session cookie."""
     email = data.email.strip().lower()
     if _login_rate_limited(request, email):
         raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
@@ -209,15 +219,19 @@ async def api_auth_login(data: LoginRequest, response: Response, request: Reques
 
 
 @app.post("/api/auth/logout")
-async def api_auth_logout(response: Response):
+async def api_auth_logout(response: Response) -> dict[str, bool]:
+    """Clear the signed-in user cookie."""
     response.delete_cookie(key=USER_COOKIE, samesite="lax")
     return {"ok": True}
 
 
 @app.get("/api/auth/status")
-async def api_auth_status(user_session: str | None = Cookie(None)):
-    """Who (if anyone) is signed in. Admin accounts are created via the CLI
-    (web.provision_admin), never through the app.
+async def api_auth_status(
+    user_session: Annotated[str | None, Cookie()] = None,
+) -> dict[str, bool | dict[str, str | bool | None] | None]:
+    """Return whether a user is signed in and their public account details.
+
+    Admin accounts are created via the CLI (web.provision_admin), never through the app.
     """
     user = resolve_current_user(user_session)
     return {
@@ -235,7 +249,7 @@ IMMUTABLE_CACHE = {"Cache-Control": "public, max-age=31536000, immutable"}
 
 
 @app.get("/api/usage/balance")
-def api_usage_balance(_api_key: str = Depends(require_user)):
+def api_usage_balance(_api_key: Annotated[str, Depends(require_user)]) -> dict[str, int]:
     """Fetch current credit balance from the Pollo API."""
     api_key = keyctx.provider_key("pollo")
     if not api_key:
@@ -281,7 +295,7 @@ if STATIC_DIR.is_dir():
     app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="static-assets")
 
     @app.get("/{path:path}")
-    def serve_frontend(path: str):
+    def serve_frontend(path: str) -> FileResponse:
         """Catch-all: serve the Vue SPA index.html for any non-API route."""
         return FileResponse(_static_file(path))
 

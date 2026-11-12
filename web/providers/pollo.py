@@ -15,8 +15,9 @@ its media item rather than adding to the OpenRouter `cost`.
 """
 
 import time
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 import requests
@@ -38,12 +39,16 @@ from web.providers.pollo_engine import (
 from web.providers.pollo_engine import audio_generator as get_audio_generator
 from web.providers.pollo_engine import image_generator as get_image_generator
 from web.providers.pollo_engine import video_generator as get_video_generator
+from web.providers.pollo_engine.registry import PolloGenerator
 from web.providers.pollo_models import MODEL_INFO
+from web.types import JsonValue
 
 
 class PolloError(OpenRouterError):
-    """A Pollo failure. Subclasses OpenRouterError so chat handles it the
-    same way — except moderation detection: Pollo answers 403 for "This model
+    """A Pollo request or generation failure.
+
+    It subclasses OpenRouterError so chat handles it the same way, except
+    moderation detection: Pollo answers 403 for "This model
     is not enabled for API access", which isn't a content block.
     """
 
@@ -58,6 +63,7 @@ DOWNLOAD_TIMEOUT = 120
 
 
 def is_configured() -> bool:
+    """Return whether a Pollo API key is configured."""
     return bool(keyctx.provider_key("pollo"))
 
 
@@ -65,7 +71,9 @@ NAME = "pollo"
 
 
 def list_models(kind: str, refresh: bool = False) -> list[dict]:
-    """Uniform provider interface. Pollo has no text models; image/video lists
+    """List Pollo models for the uniform provider interface.
+
+    Pollo has no text models; image, video and audio lists
     are already key-gated (empty without a Pollo key).
     """
     if kind == "image":
@@ -78,10 +86,12 @@ def list_models(kind: str, refresh: bool = False) -> list[dict]:
 
 
 def is_pollo(model_id: str | None) -> bool:
+    """Return whether ``model_id`` belongs to Pollo."""
     return bool(model_id and model_id.startswith(PREFIX))
 
 
 def is_pollo_job(job_id: str | None) -> bool:
+    """Return whether ``job_id`` belongs to Pollo."""
     return bool(job_id and job_id.startswith(JOB_PREFIX))
 
 
@@ -192,9 +202,12 @@ def list_voices(page: int = 1, page_size: int = 50, **filters: str) -> dict[str,
     return {"voices": voices, "total": body.get("total", len(voices))}
 
 
-def submit_audio(model_id: str, prompt: str, source_audio: Path | None = None, **opts: Any) -> dict:
-    """Start a speech / music job. Returns {"id": "pollo:<task>", "params": the
-    settings actually sent}, like submit_video.
+def submit_audio(
+    model_id: str, prompt: str, source_audio: Path | None = None, **opts: JsonValue
+) -> dict[str, JsonValue]:
+    """Start a Pollo speech or music job.
+
+    Returns the job id and settings actually sent, like ``submit_video``.
     """
     key = _generator_key(model_id, AUDIO_GENERATORS)
     if MODEL_INFO.get(key, {}).get("audio_input"):
@@ -219,8 +232,9 @@ def _generator_key(model_id: str, generators: dict) -> str:
 
 
 def _upload(path: Path, what: str = "image") -> str:
-    """Put a local file on the user's configured public host — Pollo only takes
-    URLs. The host and retention come from their upload preferences.
+    """Upload a local file to the user's configured public host.
+
+    Pollo only accepts URLs; the host and retention follow upload preferences.
     """
     try:
         return image_hosts.upload_file(path)
@@ -229,9 +243,10 @@ def _upload(path: Path, what: str = "image") -> str:
 
 
 def _upload_ref_item(item: dict) -> dict:
-    """Upload one reference element (image / video / audio) and return it as a
-    Pollo ref: {url, name, type}. The upload URL is cached and reused across
-    retries (web/image_hosts.py), so re-rendering doesn't re-upload.
+    """Upload one image, video, or audio reference and shape it for Pollo.
+
+    The result has ``url``, ``name`` (when supplied), and ``type``. Upload
+    URLs are cached and reused across retries.
     """
     typ = item.get("type") or "image"
     path = item["path"]
@@ -252,9 +267,10 @@ def _submit_ref_video_job(
     duration: int | None,
     generate_audio: bool | None,
 ) -> dict:
-    """Reference-to-video: a named list of image/video/audio refs the prompt
-    mentions as [@name] (Kling 4.0 / Flash / 3.0 Omni, MiniMax H3…). The engine
-    routes to the refs branch whenever `refs` is present (_generic_payload).
+    """Submit a reference-to-video job using named image, video, or audio refs.
+
+    The prompt can mention refs as ``[@name]``; the engine selects its refs
+    payload branch whenever ``refs`` is present.
     """
     refs = [_upload_ref_item(ri) for ri in ref_items]
     # Some models (Kling 3.0 Omni) can't generate a soundtrack when a video ref
@@ -283,10 +299,10 @@ def generate_image(
     resolution: str | None = None,
     ref_paths: list[Path] | None = None,
 ) -> tuple[list[tuple[bytes, str]], int | None, dict]:
-    """Generate on Pollo and wait for the result. Returns ([(bytes, media
-    type)], credits, the settings actually sent — see _sent_params).
-    Reference images are uploaded to a temporary public host first (Pollo
-    only takes URLs), the same way the Generate page sends local images.
+    """Generate images on Pollo and wait for the results.
+
+    Returns image bytes and media types, credits, and the settings actually
+    sent. Reference images are uploaded first because Pollo accepts only URLs.
     """
     generators = IMAGE_GENERATORS
     key = _generator_key(model_id, generators)
@@ -344,10 +360,10 @@ def _submit_source_video_job(
     generate_audio: bool | None,
     mode: str | None,
 ) -> dict | None:
-    """Submit a job for a family that works on a source video — Motion
-    (video + reference image + mode), Extend (video, adds duration) or Video Edit
-    (video + instruction prompt) or Upscale (video + scale/mode). Returns the job dict, or None if `typ` isn't one
-    of those (so the caller falls through to the image/text path).
+    """Submit a source-video job for a supported model family.
+
+    Returns its job dict, or ``None`` when ``typ`` is not a source-video family
+    so the caller can continue through the image/text path.
     """
     if typ not in (*_IMAGE_AND_VIDEO, *_VIDEO_ONLY):
         return None
@@ -388,11 +404,10 @@ def submit_video(
     mode: str | None = None,
     ref_items: list[dict] | None = None,
 ) -> dict:
-    """Start a Pollo video job. Returns {"id": "pollo:<taskId>", "params": the
-    settings actually sent}, shaped like openrouter.submit_video's result.
-    A first frame is uploaded to a temporary public host first (Pollo only takes URLs).
-    `ref_items` (named image/video/audio refs — {path, name, type}) routes a
-    ref_mode model to its reference-to-video branch, superseding first_frame.
+    """Start a Pollo video job and return its id and sent settings.
+
+    A first frame is uploaded first because Pollo accepts only URLs. Named
+    ``ref_items`` route reference-mode models to their refs branch instead.
     """
     key = _generator_key(model_id, VIDEO_GENERATORS)
     typ = MODEL_INFO.get(key, {}).get("type")
@@ -465,11 +480,11 @@ def estimate_cost(
     generate_audio: bool | None = None,
     n_images: int = 0,
     prompt: str = "",
-    audio: dict[str, Any] | None = None,
+    audio: Mapping[str, object] | None = None,
 ) -> dict | None:
-    """Pollo's own price for a request ({"credits", "full_credits"}), or None if
-    it can't say (a ref2video model has no estimate endpoint; errors). Free, and
-    nothing is uploaded: stand-in URLs are priced the same as real ones.
+    """Return Pollo's credit estimate, or ``None`` when it cannot be priced.
+
+    Estimates are free and use stand-in media URLs, so no files are uploaded.
     """
     try:
         if kind == "audio":
@@ -509,31 +524,36 @@ def estimate_cost(
                 generate_audio=generate_audio,
             )
         return pollo_estimate.estimate(generator)
-    except Exception:  # an estimate is a nicety; never fail the composer over it
+    except Exception:  # noqa: BLE001 — estimates must not block the composer
         return None
 
 
-def _job(generator, params: dict | None = None) -> dict:
-    """Submit and describe the job: its id, and the settings actually sent.
-    `params` overrides the video/image view of them (audio reports its own).
+def _job(generator: PolloGenerator, params: dict[str, JsonValue] | None = None) -> dict[str, JsonValue]:
+    """Submit a job and describe its id and sent settings.
+
+    ``params`` overrides the video/image view of them (audio reports its own).
     """
     return {"id": JOB_PREFIX + _submit(generator), "params": params or _sent_params(generator)}
 
 
-def _sent_params(generator) -> dict[str, Any]:
-    """What the generator actually sent, in chat's param names — so the UI
-    shows the real settings, including defaults the generator filled in. A
-    None means the field wasn't sent (e.g. no aspectRatio when animating an
+def _sent_params(generator: PolloGenerator) -> dict[str, JsonValue]:
+    """Return sent settings in chat's parameter names for display in the UI.
+
+    The settings include any defaults filled in by the generator. A ``None``
+    means a field was not sent (e.g. no aspectRatio when animating an
     image: the image sets it). Kling's quality tier ("mode") shows as the
     resolution, the way it's picked.
     """
     attrs = generator.payload_attrs or {}
-    return {
-        "aspect_ratio": attrs.get("aspectRatio"),
-        "resolution": attrs.get("resolution") or attrs.get("mode"),
-        "duration": attrs.get("duration") or attrs.get("length"),
-        "generate_audio": attrs.get("generateAudio"),
-    }
+    return cast(
+        "dict[str, JsonValue]",
+        {
+            "aspect_ratio": attrs.get("aspectRatio"),
+            "resolution": attrs.get("resolution") or attrs.get("mode"),
+            "duration": attrs.get("duration") or attrs.get("length"),
+            "generate_audio": attrs.get("generateAudio"),
+        },
+    )
 
 
 def _ratio_for_image(path: Path, ratios: list[str]) -> str | None:
@@ -550,9 +570,9 @@ def _ratio_for_image(path: Path, ratios: list[str]) -> str | None:
 
 
 def get_video(job_id: str) -> dict:
-    """The job in openrouter.get_video's shape: status completed | failed |
-    in_progress, plus "error", and "credits" once done. Transient poll
-    failures raise, so the poller's error budget handles them.
+    """Return Pollo job status and result metadata in OpenRouter's shape.
+
+    Transient poll failures raise, so the poller's error budget handles them.
     """
     task = _task_state(job_id[len(JOB_PREFIX) :])
     if task["status"] == "transient":
@@ -561,6 +581,7 @@ def get_video(job_id: str) -> dict:
 
 
 def download_video(job_id: str, dest: Path, index: int = 0) -> None:
+    """Download a completed Pollo video job to ``dest``."""
     task = get_video(job_id)
     if task["status"] != "completed":
         raise PolloError(f"Pollo video isn't ready ({task['status']})")
@@ -568,29 +589,29 @@ def download_video(job_id: str, dest: Path, index: int = 0) -> None:
     try:
         with requests.get(task["urls"][index], stream=True, timeout=DOWNLOAD_TIMEOUT) as resp:
             resp.raise_for_status()
-            with open(tmp, "wb") as f:
+            with tmp.open("wb") as f:
                 f.writelines(resp.iter_content(chunk_size=1 << 16))
     except requests.RequestException as e:
         raise PolloError(f"Couldn't download the Pollo video: {e}") from e
     tmp.replace(dest)
 
 
-def _submit(generator) -> str:
+def _submit(generator: PolloGenerator) -> str:
     path = urlsplit(getattr(generator, "model_url", None) or "").path
     model = path.rstrip("/").rsplit("/", 1)[-1] or None
     with request_log.logged("pollo", "POST", path, _payload(generator), model=model) as outcome:
         return _submit_logged(generator, outcome)
 
 
-def _payload(generator) -> Any:
+def _payload(generator: PolloGenerator) -> dict[str, Any] | None:
     """What the generator will send (None if it refuses to build one)."""
     try:
         return generator.get_payload()
-    except Exception:  # send_request reports the real problem
+    except Exception:  # noqa: BLE001 — send_request reports the real problem
         return None
 
 
-def _submit_logged(generator, outcome: dict) -> str:
+def _submit_logged(generator: PolloGenerator, outcome: request_log.LogOutcome) -> str:
     try:
         resp = generator.send_request()
     except (ConnectionError, ValueError) as e:
@@ -620,13 +641,14 @@ def _submit_logged(generator, outcome: dict) -> str:
 
 
 def _task_state(task_id: str) -> dict:
-    """One status check: {"status": completed | failed | in_progress |
-    transient, "error", "urls", "credits"}. "transient" = Cloudflare/network/
-    HTTP trouble worth retrying, not a verdict on the generation.
+    """Check a Pollo task's state and any result metadata.
+
+    A ``transient`` status means retryable Cloudflare, network, or HTTP trouble,
+    not a verdict on the generation.
     """
     try:
         results = get_task_status(task_id, keyctx.provider_key("pollo"))
-    except Exception as e:  # network/VPN hiccups
+    except Exception as e:  # noqa: BLE001 — retry network/VPN hiccups
         return {"status": "transient", "error": f"Pollo: {e}"}
     status, fail_msg = results[0][0], results[0][1]
     if status == "cloudflare_blocked" or (status == "error" and (fail_msg or "").startswith("HTTP ")):

@@ -18,8 +18,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    pass
+    """Initialize the baseline schema."""
 
 
 def downgrade() -> None:
-    pass
+    """Leave the baseline schema unchanged."""

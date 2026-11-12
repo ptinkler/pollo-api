@@ -47,6 +47,7 @@ def _set_favourite_from_pinned(items: list) -> bool:
 
 
 def upgrade() -> None:
+    """Add thread kinds and media favourites."""
     bind = op.get_bind()
     insp = sa.inspect(bind)
 
@@ -92,6 +93,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove thread kinds and media favourites."""
     bind = op.get_bind()
     with op.batch_alter_table("chat_conversations") as batch_op:
         batch_op.drop_column("kind")

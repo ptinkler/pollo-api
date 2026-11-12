@@ -1,4 +1,5 @@
-"""Reference-to-video (refs branch): the named refs list a ref_mode model gets,
+"""Reference-to-video (refs branch): the named refs list a ref_mode model gets,.
+
 how attachments map to [@name] handles with per-type caps, and the submit path
 that uploads each ref and routes to Pollo's reference-to-video branch.
 """
@@ -27,6 +28,7 @@ class TestRefItems:
         return Turn._ref_items(stub, ref_mode)
 
     def test_names_by_type_and_order(self):
+        """Test that names by type and order."""
         rm = {"types": ["image", "video", "audio"], "max": 15}
         items = self._items(rm, _user(("video", "v1.mp4"), ("image", "a.png"), ("image", "b.png")))
         assert items == [
@@ -37,6 +39,7 @@ class TestRefItems:
 
     def test_per_type_cap_drops_overflow(self):
         # Kling 3.0 Omni: at most 1 video, 4 images.
+        """Test that per type cap drops overflow."""
         rm = {"types": ["image", "video"], "max": 7, "limits": {"image": 4, "video": 1}}
         items = self._items(rm, _user(("video", "v1.mp4"), ("video", "v2.mp4"), ("image", "a.png")))
         names = [i["name"] for i in items]
@@ -46,18 +49,23 @@ class TestRefItems:
 
     def test_disallowed_type_excluded(self):
         # Flash takes no audio refs.
+        """Test that disallowed type excluded."""
         rm = {"types": ["image", "video"], "max": 15}
         items = self._items(rm, _user(("audio", "a.mp3"), ("image", "i.png")))
         assert [i["type"] for i in items] == ["image"]
 
     def test_total_max_caps_list(self):
+        """Test that total max caps list."""
         rm = {"types": ["image"], "max": 2}
         items = self._items(rm, _user(("image", "a.png"), ("image", "b.png"), ("image", "c.png")))
         assert len(items) == 2
 
 
 class TestSubmitRefBranch:
+    """Tests for submit ref branch."""
+
     def test_ref_items_route_to_refs_branch(self, monkeypatch, provider_keys):
+        """Test that ref items route to refs branch."""
         provider_keys["pollo"] = "K"
         monkeypatch.setattr(
             pollo,
@@ -89,6 +97,7 @@ class TestSubmitRefBranch:
 
     def test_empty_ref_items_use_normal_branch(self, monkeypatch, provider_keys):
         # No refs -> falls through to the plain image/text path (first_frame).
+        """Test that empty ref items use normal branch."""
         provider_keys["pollo"] = "K"
         monkeypatch.setattr(pollo, "_submit", lambda gen: gen.get_payload() and "task2")
         job = pollo.submit_video("pollo/klingv4", "a fox runs", duration=5, ref_items=[])
@@ -96,6 +105,7 @@ class TestSubmitRefBranch:
 
 
 def test_list_video_models_surfaces_ref_mode(provider_keys):
+    """Test that list video models surfaces ref mode."""
     provider_keys["pollo"] = "K"
     by_id = {m["id"]: m for m in pollo.list_video_models()}
     assert by_id["pollo/klingv4"]["ref_mode"]["limits"] == {"image": 10, "video": 5, "audio": 3}

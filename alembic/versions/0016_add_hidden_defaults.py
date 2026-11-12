@@ -20,6 +20,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Add hidden defaults to conversations."""
     # MetadataDB() adds this column on startup too, so skip it if it's there
     existing = {c["name"] for c in sa.inspect(op.get_bind()).get_columns("chat_conversations")}
     if "hidden_defaults_json" not in existing:
@@ -28,5 +29,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove hidden defaults from conversations."""
     with op.batch_alter_table("chat_conversations") as batch_op:
         batch_op.drop_column("hidden_defaults_json")

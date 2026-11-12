@@ -1,14 +1,15 @@
-"""HTTP routes for running turns and acting on generated media: the SSE
-message/retry/edit endpoints (streamed from a Turn worker), the cancel hook,
-and the pin / favourite / regenerate media endpoints. They register on the
-shared router; the turn engine itself lives in turn.py / generation.py.
+"""HTTP routes for running turns and managing generated media.
+
+Turn, retry, and edit responses stream events from a worker; the engine lives
+in `turn.py` and generation helpers live in `generation.py`.
 """
 
 import json
 import queue
 import threading
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
+from typing import Any
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
@@ -47,8 +48,10 @@ from web.chat.models import EditMessage, EnhancePrompt, EstimateRequest, RetryMe
 from web.chat.turn import Turn
 from web.chat.workers import ctx_thread, with_owner_keys
 from web.core.metadata import get_db, iso
+from web.core.metadata.models import ChatMessage
 from web.media_types import kind_of
 from web.providers import openrouter, pollo
+from web.types import JsonValue
 from web.uploads import safe_filename
 
 # Live turns' cancel flags, keyed by the assistant message id (set by the
@@ -57,8 +60,10 @@ _cancel_events: dict[int, threading.Event] = {}
 
 
 @router.post("/enhance-prompt")
-def api_enhance_prompt(data: EnhancePrompt):
-    """Rewrite a prompt with the chat model. Only ever called by the user's
+def api_enhance_prompt(data: EnhancePrompt) -> dict[str, str | float]:
+    """Rewrite a prompt with the chat model.
+
+    Only ever called by the user's
     Enhance button — generations themselves always use the prompt as written.
     """
     try:
@@ -69,9 +74,10 @@ def api_enhance_prompt(data: EnhancePrompt):
 
 
 @router.post("/estimate")
-def api_estimate(data: EstimateRequest):
-    """What Pollo says a generation would cost (credits), for the composer's
-    price hint. {"estimate": null} for other providers or when Pollo can't say.
+def api_estimate(data: EstimateRequest) -> dict[str, Any]:
+    """Estimate a Pollo generation's credit cost for the composer.
+
+    Returns a null estimate for other providers or when Pollo cannot price it.
     """
     if not pollo.is_pollo(data.model):
         return {"estimate": None}
@@ -94,7 +100,7 @@ def api_estimate(data: EstimateRequest):
 
 
 @router.get("/audio/voices")
-def api_audio_voices(page: int = 1, page_size: int = 50, language: str = "", gender: str = ""):
+def api_audio_voices(page: int = 1, page_size: int = 50, language: str = "", gender: str = "") -> dict[str, Any]:
     """Pollo's official TTS voices, for the speech models' voice picker."""
     if not pollo.is_configured():
         raise HTTPException(503, "No Pollo API key set — add one in Settings → Keys")
@@ -105,7 +111,8 @@ def api_audio_voices(page: int = 1, page_size: int = 50, language: str = "", gen
 
 
 @router.post("/messages/{message_id}/cancel")
-def api_cancel_message(message_id: int):
+def api_cancel_message(message_id: int) -> dict[str, bool]:
+    """Request cancellation of a running assistant message."""
     ev = _cancel_events.get(message_id)
     if ev:
         ev.set()
@@ -120,7 +127,8 @@ def _prompt_optional(settings: TurnSettings) -> bool:
 
 
 @router.post("/conversations/{conv_id}/messages")
-def api_send_message(conv_id: str, data: SendMessage):
+def api_send_message(conv_id: str, data: SendMessage) -> StreamingResponse:
+    """Create a user message and stream its assistant turn."""
     require_text_provider(data.mode)
     conv = require_conv(conv_id)
     content = data.content.strip()
@@ -143,9 +151,10 @@ def api_send_message(conv_id: str, data: SendMessage):
 
 
 @router.post("/conversations/{conv_id}/retry")
-def api_retry(conv_id: str, data: RetryMessage):
-    """Generate another version of an assistant reply, as a new branch
-    beside it. The old reply and everything after it stay on their branch.
+def api_retry(conv_id: str, data: RetryMessage) -> StreamingResponse:
+    """Generate another version of an assistant reply, as a new branch beside it.
+
+    The old reply and everything after it stay on their branch.
     """
     require_text_provider(data.mode)
     conv = require_conv(conv_id)
@@ -161,9 +170,10 @@ def api_retry(conv_id: str, data: RetryMessage):
 
 
 @router.post("/conversations/{conv_id}/edit")
-def api_edit(conv_id: str, data: EditMessage):
-    """Resend a user message with new text, as a new branch beside it (same
-    attachments), and stream a fresh reply. The original prompt and
+def api_edit(conv_id: str, data: EditMessage) -> StreamingResponse:
+    """Resend a user message with new text, as a new branch beside it (same attachments), and stream a fresh reply.
+
+    The original prompt and
     everything after it stay on their branch.
     """
     require_text_provider(data.mode)
@@ -184,12 +194,12 @@ def api_edit(conv_id: str, data: EditMessage):
     return _start_turn(conv_id, data, user_msg, parent_id=user_msg.id, lane=msg.lane)
 
 
-def _sse(event: dict) -> str:
+def _sse(event: dict[str, Any]) -> str:
     return f"data: {json.dumps(event)}\n\n"
 
 
 def _start_turn(
-    conv_id: str, settings: TurnSettings, user_msg, parent_id: int | None, lane: str | None = None
+    conv_id: str, settings: TurnSettings, user_msg: ChatMessage | None, parent_id: int | None, lane: str | None = None
 ) -> StreamingResponse:
     model = {"image": settings.image_model, "video": settings.video_model, "audio": settings.audio_model}.get(
         settings.mode, settings.text_model
@@ -209,11 +219,13 @@ def _stream_turn(
     conv_id: str,
     settings: TurnSettings,
     assistant_id: int,
-    start: dict,
+    start: dict[str, Any],
     initial_cost: float = 0.0,
     restore: str | None = None,
 ) -> StreamingResponse:
-    """Run a Turn against `assistant_id` and stream its events as SSE. Used
+    """Run a Turn against `assistant_id` and stream its events as SSE.
+
+    Used
     both for a brand-new reply and for generating an existing one again.
 
     `restore` is the text the message had before: if the run comes back with
@@ -263,11 +275,13 @@ def _stream_turn(
 
 
 class RewordMessage(TurnSettings):
+    """Turn settings and assistant message ID for regenerating only its text."""
+
     message_id: int  # the assistant reply whose words to generate again
 
 
 @router.post("/conversations/{conv_id}/reword")
-def api_reword(conv_id: str, data: RewordMessage):
+def api_reword(conv_id: str, data: RewordMessage) -> StreamingResponse:
     """Write this reply's words again, keeping the pictures it already made.
 
     Unlike Retry, which starts a whole new turn on a new branch (new words AND
@@ -291,7 +305,7 @@ def api_reword(conv_id: str, data: RewordMessage):
     # Only the words are generated again, whatever mode the composer is in.
     settings = data.model_copy(update={"mode": "text"})
     # Its pictures keep their cost; the words it had are replaced by new ones.
-    media_cost = sum(float(i.get("cost") or 0) for i in msg.media)
+    media_cost = sum(float(cost) for item in msg.media if isinstance((cost := item.get("cost")), (int, float, str)))
     previous = msg.content
     db.update_chat_message(data.message_id, content="", status="streaming", error=None)
     start = {"type": "start", "user_message": None, "assistant_message": message_out(msg), "replaces": msg.id}
@@ -300,12 +314,15 @@ def api_reword(conv_id: str, data: RewordMessage):
 
 
 class PinMedia(BaseModel):
+    """Requested pin state for an image."""
+
     pinned: bool
 
 
 @router.post("/messages/{message_id}/media/{media_id}/pin")
-def api_pin_media(message_id: int, media_id: str, data: PinMedia):
-    """Pin an image as a reference: it's sent with every image generated
+def api_pin_media(message_id: int, media_id: str, data: PinMedia) -> dict[str, Any]:
+    """Pin an image as a reference: it's sent with every image generated.
+
     later on this branch of the chat, until unpinned.
     """
     db = get_db()
@@ -317,12 +334,16 @@ def api_pin_media(message_id: int, media_id: str, data: PinMedia):
 
 
 class FavouriteMedia(BaseModel):
+    """Requested favourite state for a media item."""
+
     favourite: bool
 
 
 @router.post("/messages/{message_id}/media/{media_id}/favourite")
-def api_favourite_media(message_id: int, media_id: str, data: FavouriteMedia):
-    """Star/un-star a generation. Unlike pinning (which re-sends an image as a
+def api_favourite_media(message_id: int, media_id: str, data: FavouriteMedia) -> dict[str, Any]:
+    """Star/un-star a generation.
+
+    Unlike pinning (which re-sends an image as a
     reference with every new generation), a favourite is just a bookmark: it
     surfaces the item in the cross-thread Favourites gallery. Works for images
     and videos.
@@ -336,6 +357,8 @@ def api_favourite_media(message_id: int, media_id: str, data: FavouriteMedia):
 
 
 class RegenerateMedia(BaseModel):
+    """Optional model, prompt, and replacement behavior for a media retry."""
+
     model: str | None = None  # None = same model as the failed attempt
     prompt: str | None = None  # None = the prompt it was made with
     # Edit: send the image itself back as the reference, so the model changes
@@ -353,10 +376,10 @@ def _as_version(item: dict) -> dict:
 
 
 @router.post("/messages/{message_id}/media/{media_id}/regenerate")
-def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia):
-    """Retry a failed image/video in place (or re-roll a finished one as an
-    extra item beside it), optionally on a different model.
-    Runs in the background; the UI polls the message like a rendering video.
+def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia) -> dict[str, Any]:
+    """Retry or re-roll a generated image or video.
+
+    The retry runs in the background while the UI polls the message.
     """
     db = get_db()
     msg = db.get_chat_message(message_id)
@@ -432,12 +455,14 @@ def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia):
 
 
 class ActiveQuery(BaseModel):
+    """Message IDs whose generation state the client still tracks."""
+
     # Message ids the client is already tracking, so finished/failed ones get
     # their final status back even though they've dropped out of the pending set.
     known: list[int] = []
 
 
-def _gen_descriptor(msg, item: dict, title: str) -> dict:
+def _gen_descriptor(msg: ChatMessage, item: dict[str, Any], title: str) -> dict[str, Any]:
     return {
         "media_id": item["id"],
         "message_id": msg.id,
@@ -455,11 +480,11 @@ def _gen_descriptor(msg, item: dict, title: str) -> dict:
 
 
 @router.post("/generations/active")
-def api_active_generations(data: ActiveQuery):
-    """The signed-in user's in-flight (and tracked) generations across every
-    thread — the data behind the always-visible generation queue. Returns every
-    currently-pending generated image/video, plus the current state of any
-    `known` message the client is still tracking (so completions resolve).
+def api_active_generations(data: ActiveQuery) -> dict[str, list[dict[str, Any]]]:
+    """List pending generations and the final states of tracked messages.
+
+    Results cover all of the signed-in user's conversations. `known` IDs let
+    the client resolve completions that have left the pending set.
     """
     db = get_db()
     msgs: dict[int, object] = {m.id: m for m in db.get_chat_messages_with_pending_media()}
@@ -484,30 +509,40 @@ def api_active_generations(data: ActiveQuery):
 
 
 @with_owner_keys
-def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) -> None:
+def _regenerate_worker(conv_id: str, message_id: int, item: Mapping[str, JsonValue], model: str) -> None:
     db = get_db()
-    media_id = item["id"]
-    params = dict(item.get("params") or {})
+    media_id = item.get("id")
+    prompt = item.get("prompt")
+    kind = item.get("kind")
+    if not isinstance(media_id, str) or not isinstance(prompt, str) or not isinstance(kind, str):
+        raise TypeError("Invalid media item for regeneration")  # noqa: TRY003
+    raw_params = item.get("params")
+    params: dict[str, JsonValue] = dict(raw_params) if isinstance(raw_params, Mapping) else {}
     try:
-        if item["kind"] == "image":
+        if kind == "image":
             context = None
             if is_conversational(model):
                 msg = db.get_chat_message(message_id)
                 history = branch_to(db.get_chat_messages(conv_id), message_id)[:-1]
-                direct = params.get("direct", False)
+                direct = params.get("direct") is True
+                history_limit = params.get("history_limit")
+                refs = params.get("refs")
+                image_limit = params.get("image_limit")
                 context = image_context(
                     conv_id,
                     history,
-                    params.get("history_limit"),
+                    history_limit if isinstance(history_limit, int) and not isinstance(history_limit, bool) else None,
                     msg.content if msg else "",
-                    None if direct else item["prompt"],
-                    params.get("refs") or [],
+                    None if direct else prompt,
+                    [ref for ref in refs if isinstance(ref, str)] if isinstance(refs, list) else [],
                     conversation_instructions(conv_id),
                     param_characters(params),
-                    params.get("image_limit", DEFAULT_IMAGE_LIMIT),
+                    image_limit
+                    if isinstance(image_limit, int) and not isinstance(image_limit, bool)
+                    else DEFAULT_IMAGE_LIMIT,
                 )
             params["context"] = context is not None
-            names, cost, credits, sent = run_image_generation(conv_id, model, item["prompt"], params, context)
+            names, cost, credits, sent = run_image_generation(conv_id, model, prompt, params, context)
             sent, exchange = take_log(sent)
             db.update_chat_media_item(
                 message_id,
@@ -521,11 +556,11 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
             )
             for extra in names[1:]:
                 db.append_chat_media_item(
-                    message_id, saved_media("image", "generated", extra, prompt=item["prompt"], model=model)
+                    message_id, saved_media("image", "generated", extra, prompt=prompt, model=model)
                 )
             add_message_cost(message_id, cost)
-        elif item["kind"] == "audio":
-            job = submit_audio_generation(conv_id, model, item["prompt"], params)
+        elif kind == "audio":
+            job = submit_audio_generation(conv_id, model, prompt, params)
             db.update_chat_media_item(
                 message_id,
                 media_id,
@@ -536,10 +571,16 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
             polling.start_video_poller(conv_id, message_id, media_id, job["id"])
         else:
             # A different model may support different durations/ratios
+            duration = params.get("duration")
+            aspect_ratio = params.get("aspect_ratio")
+            resolution = params.get("resolution")
             params["duration"], params["aspect_ratio"], params["resolution"] = fit_video_params(
-                model, params.get("duration"), params.get("aspect_ratio"), params.get("resolution")
+                model,
+                duration if isinstance(duration, int) and not isinstance(duration, bool) else None,
+                aspect_ratio if isinstance(aspect_ratio, str) else None,
+                resolution if isinstance(resolution, str) else None,
             )
-            job = submit_video_generation(conv_id, model, item["prompt"], params)
+            job = submit_video_generation(conv_id, model, prompt, params)
             db.update_chat_media_item(
                 message_id,
                 media_id,
@@ -550,7 +591,7 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
             polling.start_video_poller(conv_id, message_id, media_id, job["id"])
     except openrouter.OpenRouterError as e:
         db.update_chat_media_item(message_id, media_id, **failure_fields(e))
-    except Exception as e:  # never leave the card stuck on "pending"
+    except Exception as e:  # noqa: BLE001 — never leave the card stuck on "pending"
         db.update_chat_media_item(
             message_id, media_id, status="error", error=f"{type(e).__name__}: {e}", moderated=False
         )

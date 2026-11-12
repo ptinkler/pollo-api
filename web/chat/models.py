@@ -6,6 +6,8 @@ from web.chat.constants import DEFAULT_IMAGE_LIMIT
 
 
 class ConversationCreate(BaseModel):
+    """Fields for creating a chat and its attached settings."""
+
     title: str | None = None
     kind: str | None = None  # "chat" (default) or "gallery" — the thread's landing view
     text_model: str | None = None
@@ -21,6 +23,8 @@ class ConversationCreate(BaseModel):
 
 
 class ConversationUpdate(BaseModel):
+    """Fields that can be changed on an existing chat."""
+
     title: str | None = None
     text_model: str | None = None
     image_model: str | None = None
@@ -39,31 +43,43 @@ class ConversationUpdate(BaseModel):
 
 
 class InstructionIn(BaseModel):
+    """Name and text for an instruction snippet."""
+
     name: str = Field(min_length=1, max_length=255)
     content: str = Field(default="", max_length=20000)
 
 
 class InstructionGroupIn(BaseModel):
+    """Name and ordered instruction snippets for a group."""
+
     name: str = Field(min_length=1, max_length=255)
     snippet_ids: list[int] = []
 
 
 # Global defaults and a space's defaults share this shape (three id-lists)
 class DefaultsIn(BaseModel):
+    """Default character, instruction, and group IDs for a settings bucket."""
+
     default_character_ids: list[int] = []
     default_instruction_ids: list[int] = []
     default_instruction_group_ids: list[int] = []
 
 
 class TitleModelIn(BaseModel):
+    """Optional model used to generate new chat titles."""
+
     title_model: str | None = None  # None / empty = use the chat's own model
 
 
 class SpaceIn(DefaultsIn):
+    """Name and defaults for a chat space."""
+
     name: str = Field(min_length=1, max_length=255)
 
 
 class TurnOptions(BaseModel):
+    """Optional generation settings shared by image and video modes."""
+
     aspect_ratio: str | None = None
     resolution: str | None = None
     duration: int | None = None
@@ -71,7 +87,9 @@ class TurnOptions(BaseModel):
 
 
 class VideoTurnOptions(TurnOptions):
-    """Video options carry one extra: whether the length was left on Auto. The
+    """Video options carry one extra: whether the length was left on Auto.
+
+    The
     duration still arrives resolved (the source clip's length, or the model's
     default), so without this flag "reuse these settings" couldn't tell a
     hand-picked 30s from an auto 30s.
@@ -103,6 +121,8 @@ class RefChoices(BaseModel):
 
 
 class TurnSettings(BaseModel):
+    """Model, history, and media-generation settings for a chat turn."""
+
     mode: str = "auto"  # auto | text | image | video | audio
     history_limit: int | None = Field(default=None, ge=1)  # past messages sent to the chat model; None = all
     image_limit: int | None = Field(default=DEFAULT_IMAGE_LIMIT, ge=0)  # chat images per request; None = all
@@ -119,6 +139,8 @@ class TurnSettings(BaseModel):
 
 
 class EstimateRequest(BaseModel):
+    """Inputs used to estimate the cost of a media generation."""
+
     model: str
     kind: str  # image | video | audio
     duration: int | None = None
@@ -131,29 +153,41 @@ class EstimateRequest(BaseModel):
 
 
 class SendMessage(TurnSettings):
+    """Turn settings and content for a new user message."""
+
     content: str = ""
     attachments: list[str] = []  # filenames returned by the attachments endpoint
     lane: str | None = None  # 'gallery' = a standalone exchange beside the chat
 
 
 class RetryMessage(TurnSettings):
+    """Turn settings and assistant message ID to retry."""
+
     message_id: int  # the assistant message to regenerate
 
 
 class EditMessage(TurnSettings):
+    """Turn settings and replacement content for a user message."""
+
     message_id: int  # the user message to rewrite and resend
     content: str
 
 
 class SwitchBranch(BaseModel):
+    """Message whose newest descendant should become the shown branch."""
+
     message_id: int  # show the branch this message is on (its newest version)
 
 
 class ForkConversation(BaseModel):
+    """Message at which to create a branched conversation."""
+
     message_id: int  # a prompt (the new chat ends with it and its reply) or a reply
 
 
 class EnhancePrompt(BaseModel):
+    """Prompt, model, and media kind for prompt enhancement."""
+
     prompt: str = Field(min_length=1, max_length=8000)
     model: str  # the chat model that rewrites it
     kind: str = "image"  # "image" or "video"

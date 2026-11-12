@@ -13,13 +13,14 @@ import contextlib
 import json
 import os
 import secrets
+from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from web.core import config
-from web.core.metadata import current_tenant, get_db
+from web.core.metadata import User, current_tenant, get_db
 from web.net_guard import UnsafeURLError, get_public
 from web.public_media import selfhost_url
 from web.users import require_user
@@ -38,9 +39,10 @@ def _public_base_default() -> str:
     return (os.getenv("UPLOAD_SELFHOST_BASE") or os.getenv("PUBLIC_BASE_URL") or "").strip().rstrip("/")
 
 
-def default_prefs() -> dict:
-    """The instance-wide default, from the environment. Litterbox first keeps
-    today's behavior (handles large video, up to ~1GB), tmpfiles as backup.
+def default_prefs() -> dict[str, object]:
+    """Return the instance-wide upload defaults from the environment.
+
+    Litterbox remains the primary host for large videos, with tmpfiles as backup.
     """
     primary = os.getenv("UPLOAD_PRIMARY", "litterbox").strip()
     backup = os.getenv("UPLOAD_BACKUP", "tmpfiles").strip()
@@ -56,9 +58,10 @@ def default_prefs() -> dict:
     }
 
 
-def _sanitize(raw: dict, base: dict) -> dict:
-    """Merge a stored/partial prefs dict over the defaults, dropping anything
-    invalid so a bad stored blob can never break uploads.
+def _sanitize(raw: dict[str, object], base: dict[str, object]) -> dict[str, object]:
+    """Merge valid stored preferences over the supplied defaults.
+
+    Invalid values are dropped so a malformed stored blob cannot break uploads.
     """
     out = dict(base)
     if raw.get("primary") in HOSTS:
@@ -75,7 +78,7 @@ def _sanitize(raw: dict, base: dict) -> dict:
     return out
 
 
-def resolve_prefs(user) -> dict:
+def resolve_prefs(user: User) -> dict[str, object]:
     """The effective prefs for a user: their stored choices over the default."""
     base = default_prefs()
     blob = getattr(user, "upload_prefs_json", None)
@@ -88,9 +91,10 @@ def resolve_prefs(user) -> dict:
     return _sanitize(raw, base) if isinstance(raw, dict) else base
 
 
-def current_upload_prefs() -> dict:
-    """Prefs for whoever's request is running (resolved at upload time via the
-    bound tenant). Falls back to the instance default when unauthenticated.
+def current_upload_prefs() -> dict[str, object]:
+    """Return upload preferences for the current request.
+
+    Resolve them through the bound tenant, or use instance defaults anonymously.
     """
     uid = current_tenant()
     if uid:
@@ -101,13 +105,15 @@ def current_upload_prefs() -> dict:
 
 
 class UploadPrefsUpdate(BaseModel):
+    """Optional upload-host preferences submitted by a user."""
+
     primary: str | None = None
     backup: str | None = None
     expiry_minutes: int | None = None
     selfhost_base: str | None = None
 
 
-def _meta() -> dict:
+def _meta() -> dict[str, object]:
     return {
         "hosts": list(HOSTS),
         "expiry_options": list(EXPIRY_OPTIONS),
@@ -118,26 +124,30 @@ def _meta() -> dict:
 
 
 @router.get("")
-async def get_upload_prefs(user=Depends(require_user)):
+async def get_upload_prefs(user: Annotated[User, Depends(require_user)]) -> dict[str, object]:
+    """Return the user's upload preferences and available choices."""
     return {"prefs": resolve_prefs(user), **_meta()}
 
 
 @router.put("")
-async def set_upload_prefs(data: UploadPrefsUpdate, user=Depends(require_user)):
+async def set_upload_prefs(data: UploadPrefsUpdate, user: Annotated[User, Depends(require_user)]) -> dict[str, object]:
+    """Save the user's upload preferences."""
     merged = _sanitize({k: v for k, v in data.model_dump().items() if v is not None}, resolve_prefs(user))
     get_db().set_user_upload_prefs(user.id, json.dumps(merged))
     return {"prefs": merged, **_meta()}
 
 
 class SelfhostTest(BaseModel):
+    """Optional self-host base URL to check."""
+
     selfhost_base: str | None = None
 
 
 @router.post("/test-selfhost")
-async def check_selfhost(data: SelfhostTest, user=Depends(require_user)):
-    """Confirm a self-host base URL is reachable from the outside the way Pollo
-    would reach it: stage a tiny file, sign a link at that base, fetch it back
-    through the public-URL guard, and check the bytes come through.
+async def check_selfhost(data: SelfhostTest, user: Annotated[User, Depends(require_user)]) -> dict[str, bool | str]:
+    """Check that the configured self-host URL can serve media externally.
+
+    Stage a small file, fetch its signed public URL and verify the returned bytes.
     """
     base = (data.selfhost_base or resolve_prefs(user).get("selfhost_base") or "").strip()
     token = secrets.token_hex(8)
@@ -153,7 +163,6 @@ async def check_selfhost(data: SelfhostTest, user=Depends(require_user)):
             return {"ok": False, "detail": f"The URL returned HTTP {resp.status_code} — check the base URL and proxy."}
         if resp.text.strip() != token:
             return {"ok": False, "detail": "The URL was reachable but served the wrong content (proxy/caching?)."}
-        return {"ok": True, "detail": f"Reachable — Pollo can fetch source media from {base}."}
     except ValueError as e:
         return {"ok": False, "detail": str(e)}
     except UnsafeURLError as e:
@@ -164,3 +173,4 @@ async def check_selfhost(data: SelfhostTest, user=Depends(require_user)):
         test_file.unlink(missing_ok=True)
         with contextlib.suppress(OSError):
             test_dir.rmdir()  # remove the staging dir when empty
+    return {"ok": True, "detail": f"Reachable — Pollo can fetch source media from {base}."}

@@ -154,13 +154,15 @@ class FakeVenice:
             )
         handler = self.routes.get(path)
         if handler is None:
-            raise AssertionError(f"unexpected Venice call {method} {path}")
+            raise AssertionError(f"unexpected Venice call {method} {path}")  # noqa: TRY003
         return handler(kw) if callable(handler) else handler
 
     def request(self, method, url, **kw):
+        """Document the request test helper."""
         return self._answer(method, url, kw)
 
     def stream(self, method, url, **kw):
+        """Document the stream test helper."""
         resp = self._answer(method, url, kw)
 
         @contextlib.contextmanager
@@ -172,7 +174,7 @@ class FakeVenice:
 
 @pytest.fixture
 def venice(chat, monkeypatch, tmp_path, provider_keys):
-
+    """Provide the venice fixture."""
     provider_keys["venice"] = "v-test"
     fake = FakeVenice()
     # Catalogue builds price each video model; tests that queue videos set their own quote
@@ -188,7 +190,10 @@ def _calls(fake, path):
 
 
 class TestCatalogue:
+    """Tests for catalogue."""
+
     def test_lists_text_models_with_prices_and_tools(self, venice):
+        """Test that lists text models with prices and tools."""
         v, _ = venice
         unc, m = v.list_models("text")  # uncensored first
         assert m["id"] == "venice/llama-big"
@@ -201,6 +206,7 @@ class TestCatalogue:
         assert m["completion_price"] == pytest.approx(4e-6)
 
     def test_image_models_pair_with_their_edit_twins(self, venice):
+        """Test that image models pair with their edit twins."""
         v, _ = venice
         by_id = {m["id"]: m for m in v.list_models("image")}
         assert by_id["venice/seedream-v5-pro"]["input_modalities"] == ["text", "image"]
@@ -215,6 +221,7 @@ class TestCatalogue:
         assert not any(k.startswith("_") for m in by_id.values() for k in m)  # internals stay server-side
 
     def test_video_models_pair_text_and_image_variants(self, venice):
+        """Test that video models pair text and image variants."""
         v, _ = venice
         by_id = {m["id"]: m for m in v.list_models("video")}
         assert set(by_id) == {
@@ -246,6 +253,7 @@ class TestCatalogue:
         assert wan["uncensored"] is None
 
     def test_chat_catalogue_includes_venice_alongside_openrouter(self, client, chat, venice, monkeypatch):
+        """Test that chat catalogue includes venice alongside openrouter."""
         monkeypatch.setattr(openrouter, "list_text_models", lambda: [{"id": "or/text", "name": "OR"}])
         monkeypatch.setattr(openrouter, "list_image_models", list)
         monkeypatch.setattr(openrouter, "list_video_models", list)
@@ -254,6 +262,7 @@ class TestCatalogue:
         assert any(m["id"] == "venice/seedream-v5-pro" for m in data["image"])
 
     def test_not_listed_without_a_key(self, venice, provider_keys):
+        """Test that not listed without a key."""
         v, fake = venice
         provider_keys["venice"] = None
         assert v.list_models("image") == []
@@ -261,6 +270,8 @@ class TestCatalogue:
 
 
 class TestPriceOrder:
+    """Tests for price order."""
+
     def test_privacy_level(self, venice, monkeypatch):
         """A pair is only as private as its less private half."""
         v, _ = venice
@@ -284,6 +295,7 @@ class TestPriceOrder:
         assert got["mixed"] == "anonymized"
 
     def test_uncensored_first_then_cheapest(self, venice, monkeypatch):
+        """Test that uncensored first then cheapest."""
         v, _ = venice
         monkeypatch.setitem(
             MODELS,
@@ -315,6 +327,7 @@ class TestPriceOrder:
         assert models[3]["price"] == {"usd": 0.07, "basis": "1K"}
 
     def test_tiered_image_is_billed_at_the_resolution_used(self, venice, monkeypatch):
+        """Test that tiered image is billed at the resolution used."""
         v, fake = venice
         monkeypatch.setitem(
             MODELS,
@@ -335,6 +348,7 @@ class TestPriceOrder:
         assert v.generate_image("venice/tiered", "x")[1] == 0.07
 
     def test_videos_priced_at_5s_lowest_resolution_and_sorted(self, venice):
+        """Test that videos priced at 5s lowest resolution and sorted."""
         v, fake = venice
         by_id = {m["id"][7:]: m for m in v.list_models("video")}
         assert by_id["wan-3-0-text-to-video"]["price"] == {"usd": 0.65, "basis": "5s · 720p"}
@@ -346,6 +360,7 @@ class TestPriceOrder:
         assert ids.index("wan-3-0-reference-to-video") < ids.index("wan-3-0-text-to-video")  # 0.30 < 0.65
 
     def test_quotes_are_cached_across_catalogue_refreshes(self, venice):
+        """Test that quotes are cached across catalogue refreshes."""
         v, fake = venice
         v.list_models("video")
         n = len(_calls(fake, "/video/quote"))
@@ -354,7 +369,10 @@ class TestPriceOrder:
 
 
 class TestImages:
+    """Tests for images."""
+
     def test_text_to_image_sends_safe_mode_off(self, venice, tmp_path):
+        """Test that text to image sends safe mode off."""
         v, fake = venice
         fake.routes["/image/generate"] = httpx.Response(200, json={"images": [base64.b64encode(_png_bytes()).decode()]})
         images, cost, sent = v.generate_image("venice/seedream-v5-pro", "a fox", aspect_ratio="16:9", resolution="4K")
@@ -369,6 +387,7 @@ class TestImages:
         assert sent == {"aspect_ratio": "16:9", "resolution": None}
 
     def test_references_go_to_the_edit_twin_capped_at_its_limit(self, venice, tmp_path):
+        """Test that references go to the edit twin capped at its limit."""
         v, fake = venice
         refs = []
         for i in range(3):
@@ -387,17 +406,20 @@ class TestImages:
         assert sent["refs_used"] == 2
 
     def test_edit_only_model_needs_a_reference(self, venice):
+        """Test that edit only model needs a reference."""
         v, _ = venice
         with pytest.raises(v.VeniceError, match="only edits images"):
             v.generate_image("venice/firered-image-edit", "a fox")
 
     def test_errors_carry_venices_message(self, venice):
+        """Test that errors carry venices message."""
         v, fake = venice
         fake.routes["/image/generate"] = httpx.Response(400, json={"error": "Prompt too long"})
         with pytest.raises(v.VeniceError, match="Venice: Prompt too long"):
             v.generate_image("venice/lustify-v8", "x" * 10)
 
     def test_chat_image_mode_runs_on_venice(self, client, conv, chat, venice, monkeypatch):
+        """Test that chat image mode runs on venice."""
         _v, fake = venice
         fake.routes["/image/generate"] = httpx.Response(200, json={"images": [base64.b64encode(_png_bytes()).decode()]})
         monkeypatch.setattr(openrouter, "generate_image", lambda *a, **k: pytest.fail("not OpenRouter"))
@@ -412,6 +434,7 @@ class TestImages:
         assert item["cost"] == 0.05
 
     def test_content_violation_flag_is_a_moderation_block(self, venice):
+        """Test that content violation flag is a moderation block."""
         v, fake = venice
         fake.routes["/image/generate"] = httpx.Response(
             200,
@@ -439,6 +462,7 @@ class TestImages:
         assert "black image" in item["error"]
 
     def test_dark_but_not_black_image_is_kept(self, client, conv, chat, venice):
+        """Test that dark but not black image is kept."""
         _v, fake = venice
         night = base64.b64encode(_png_bytes(color=(20, 20, 30))).decode()
         fake.routes["/image/generate"] = httpx.Response(200, json={"images": [night]})
@@ -456,7 +480,7 @@ class TestImages:
         assert ev[-1]["message"]["media"][0]["status"] == "done"
 
     def test_requests_are_logged_with_images_cut_short(self, venice, tmp_path):
-
+        """Test that requests are logged with images cut short."""
         v, fake = venice
         ref = tmp_path / "r.png"
         ref.write_bytes(_png_bytes())
@@ -470,16 +494,21 @@ class TestImages:
         assert entry["path"] == "/image/multi-edit"
         assert entry["model"] == "seedream-v5-pro-edit"
         assert entry["status"] == 422
-        assert "content policy" in entry["error"]
-        assert entry["request"]["prompt"] == "a fox"
-        assert entry["request"]["safe_mode"] is False
-        assert entry["request"]["images"] == ["data:image/png;base64,… (0 KB)"]
-        assert entry["response"] == {
-            "error": "Your prompt violates the content policy of Venice.ai or the model provider"
-        }
+        error = entry["error"]
+        assert isinstance(error, str)
+        assert "content policy" in error
+        request = entry["request"]
+        assert isinstance(request, dict)
+        assert request["prompt"] == "a fox"
+        assert request["safe_mode"] is False
+        assert request["images"] == ["data:image/png;base64,… (0 KB)"]
+        response = entry["response"]
+        assert isinstance(response, dict)
+        assert response == {"error": "Your prompt violates the content policy of Venice.ai or the model provider"}
         assert e.value.log_entry == entry
 
     def test_failed_card_keeps_the_request_and_the_log_is_readable(self, client, conv, chat, venice):
+        """Test that failed card keeps the request and the log is readable."""
         _v, fake = venice
         fake.routes["/image/generate"] = httpx.Response(422, json={"error": "Your prompt violates the content policy"})
         ev = _events(
@@ -498,6 +527,7 @@ class TestImages:
         assert log[0]["status"] == 422
 
     def test_done_card_keeps_the_request_outside_params(self, client, conv, chat, venice):
+        """Test that done card keeps the request outside params."""
         _v, fake = venice
         big = base64.b64encode(_png_bytes() + b"\0" * 4096).decode()
         fake.routes["/image/generate"] = httpx.Response(200, json={"id": "gen-1", "images": [big]})
@@ -515,12 +545,15 @@ class TestImages:
 
 
 class TestVideo:
+    """Tests for video."""
+
     def _frame(self, tmp_path):
         p = tmp_path / "frame.png"
         p.write_bytes(_png_bytes())
         return p
 
     def test_text_to_video_snaps_duration_and_quotes(self, venice):
+        """Test that text to video snaps duration and quotes."""
         v, fake = venice
         fake.routes["/video/quote"] = httpx.Response(200, json={"quote": 0.42})
         fake.routes["/video/queue"] = httpx.Response(200, json={"model": "wan-3-0-text-to-video", "queue_id": "q1"})
@@ -545,6 +578,7 @@ class TestVideo:
         assert job["params"] == {"duration": 5, "aspect_ratio": "16:9", "resolution": "1080p", "generate_audio": False}
 
     def test_first_frame_switches_to_the_image_to_video_twin(self, venice, tmp_path):
+        """Test that first frame switches to the image to video twin."""
         v, fake = venice
         fake.routes["/video/quote"] = httpx.Response(500, json={"error": "quote down"})  # optional
         fake.routes["/video/queue"] = httpx.Response(200, json={"queue_id": "q2"})
@@ -565,11 +599,13 @@ class TestVideo:
         assert job["id"] == "venice:wan-3-0-image-to-video:q2"
 
     def test_image_only_model_needs_a_frame(self, venice):
+        """Test that image only model needs a frame."""
         v, _ = venice
         with pytest.raises(v.VeniceError, match="needs an image"):
             v.submit_video("venice/ovi-image-to-video", "waves")
 
     def test_poll_then_download(self, venice, tmp_path):
+        """Test that poll then download."""
         v, fake = venice
         fake.routes["/video/quote"] = httpx.Response(200, json={"quote": 0.3})
         fake.routes["/video/queue"] = httpx.Response(200, json={"queue_id": "q3"})
@@ -584,6 +620,7 @@ class TestVideo:
         assert dest.read_bytes() == b"MP4DATA"
 
     def test_failed_job_and_transient_errors(self, venice):
+        """Test that failed job and transient errors."""
         v, fake = venice
         fake.routes["/video/retrieve"] = httpx.Response(400, json={"error": "Content policy violation"})
         assert v.get_video("venice:m:q") == {"status": "failed", "error": "Venice: Content policy violation"}
@@ -593,11 +630,14 @@ class TestVideo:
 
 
 class TestText:
+    """Tests for text."""
+
     def _sse(self, *chunks):
         lines = "".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n"
         return httpx.Response(200, content=lines.encode(), headers={"content-type": "text/event-stream"})
 
     def test_streams_without_venices_system_prompt_and_prices_usage(self, venice):
+        """Test that streams without venices system prompt and prices usage."""
         v, fake = venice
         fake.routes["/chat/completions"] = self._sse(
             {"choices": [{"delta": {"content": "Hi"}}]},
@@ -619,7 +659,7 @@ class TestText:
         assert chunks[1]["usage"]["cost"] == pytest.approx(1000 * 1e-6 + 500 * 4e-6)
 
     def test_chat_reply_is_logged_with_its_text_and_tool_calls(self, venice):
-
+        """Test that chat reply is logged with its text and tool calls."""
         v, fake = venice
         call = {"index": 0, "function": {"name": "generate_image", "arguments": '{"prompt": "a fox"}'}}
         fake.routes["/chat/completions"] = self._sse(
@@ -630,11 +670,14 @@ class TestText:
         entry = request_log.recent()[0]
         assert entry["path"] == "/chat/completions"
         assert entry["status"] == 200
-        assert entry["response"]["content"] == "Here you go"
-        assert entry["response"]["tool_calls"] == [{"name": "generate_image", "arguments": '{"prompt": "a fox"}'}]
-        assert entry["response"]["finish_reason"] == "tool_calls"
+        response = entry["response"]
+        assert isinstance(response, dict)
+        assert response["content"] == "Here you go"
+        assert response["tool_calls"] == [{"name": "generate_image", "arguments": '{"prompt": "a fox"}'}]
+        assert response["finish_reason"] == "tool_calls"
 
     def test_reported_cost_object_wins(self, venice):
+        """Test that reported cost object wins."""
         v, fake = venice
         fake.routes["/chat/completions"] = self._sse(
             {"choices": [], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "cost": {"usd": 0.0123, "diem": 0}}}
@@ -643,6 +686,7 @@ class TestText:
         assert chunk["usage"]["cost"] == 0.0123
 
     def test_chat_turn_uses_venice_for_a_venice_text_model(self, client, conv, chat, venice, monkeypatch):
+        """Test that chat turn uses venice for a venice text model."""
         _v, fake = venice
         fake.routes["/chat/completions"] = self._sse({"choices": [{"delta": {"content": "From Venice"}}]})
         monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: pytest.fail("not OpenRouter"))
@@ -655,7 +699,8 @@ class TestText:
         assert ev[-1]["message"]["content"] == "From Venice"
 
     def test_no_images_for_a_model_without_vision_before_the_model_list_loads(self, client, conv, chat, venice):
-        """After a restart (or a failed model list) the app still knows from
+        """After a restart (or a failed model list) the app still knows from.
+
         Venice's own catalogue that the model can't see images.
         """
         _v, fake = venice
@@ -683,6 +728,7 @@ class TestText:
 
 
 def test_balance_reads_usd_from_the_rate_limits_body(client, venice):
+    """Test that balance reads usd from the rate limits body."""
     _v, fake = venice
     # Inference keys can't read /billing/balance; the USD figure is in the
     # rate-limits body under balances.USD (not a response header).
@@ -693,6 +739,7 @@ def test_balance_reads_usd_from_the_rate_limits_body(client, venice):
 
 
 def test_balance_includes_the_plans_bundled_credits(client, venice):
+    """Test that balance includes the plans bundled credits."""
     _v, fake = venice
     fake.routes["/api_keys/rate_limits"] = httpx.Response(
         200, json={"data": {"balances": {"USD": 0.76, "DIEM": 0, "BUNDLED_CREDITS": 4.7635423}}}
@@ -701,6 +748,7 @@ def test_balance_includes_the_plans_bundled_credits(client, venice):
 
 
 def test_balance_falls_back_to_the_response_header_when_rate_limits_unreadable(client, venice):
+    """Test that balance falls back to the response header when rate limits unreadable."""
     _v, fake = venice
     # If the endpoint errors, fall back to the balance a prior response's header
     # reported (_note_balance runs on the error response too).
@@ -728,6 +776,7 @@ class TestVideoFamiliesInChat:
     def test_reference_model_gets_attached_pinned_and_character_images(
         self, client, conv, chat, db, venice, monkeypatch
     ):
+        """Test that reference model gets attached pinned and character images."""
         _v, fake = venice
         self._load_catalogue(client, chat, monkeypatch)
         self._queue(fake)
@@ -770,6 +819,7 @@ class TestVideoFamiliesInChat:
         assert item["params"]["refs_used"] == 3
 
     def test_first_and_last_frame_from_two_attachments(self, client, conv, chat, venice, monkeypatch):
+        """Test that first and last frame from two attachments."""
         _v, fake = venice
         self._load_catalogue(client, chat, monkeypatch)
         self._queue(fake)
@@ -798,6 +848,7 @@ class TestVideoFamiliesInChat:
         assert ev[-1]["message"]["media"][0]["params"]["last_frame"] == ups[1]
 
     def test_video_to_video_uses_the_latest_chat_video(self, client, conv, chat, db, venice, monkeypatch):
+        """Test that video to video uses the latest chat video."""
         _v, fake = venice
         self._load_catalogue(client, chat, monkeypatch)
         self._queue(fake)
@@ -835,6 +886,7 @@ class TestVideoFamiliesInChat:
         assert ev[-1]["message"]["media"][0]["params"]["source_video"] == "vid_old.mp4"
 
     def test_upscale_maps_the_resolution_pick_to_a_factor(self, venice, tmp_path):
+        """Test that upscale maps the resolution pick to a factor."""
         v, fake = venice
         self._queue(fake)
         src = tmp_path / "in.mp4"
@@ -846,6 +898,7 @@ class TestVideoFamiliesInChat:
         assert job["params"]["resolution"] == "4x"
 
     def test_missing_inputs_explain_what_is_needed(self, venice, tmp_path):
+        """Test that missing inputs explain what is needed."""
         v, _ = venice
         with pytest.raises(v.VeniceError, match="reference images"):
             v.submit_video("venice/wan-3-0-reference-to-video", "x")

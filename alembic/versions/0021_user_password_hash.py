@@ -20,6 +20,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Add password hashes to users."""
     insp = sa.inspect(op.get_bind())
     cols = {c["name"] for c in insp.get_columns("users")}
     if "password_hash" not in cols:
@@ -28,5 +29,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove password hashes from users."""
     with op.batch_alter_table("users") as batch_op:
         batch_op.drop_column("password_hash")

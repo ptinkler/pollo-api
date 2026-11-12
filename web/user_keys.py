@@ -12,6 +12,7 @@ import base64
 import hashlib
 import json
 import os
+from typing import Annotated
 
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends
@@ -19,7 +20,7 @@ from pydantic import BaseModel
 
 from web import caches
 from web.auth import user_secret
-from web.core.metadata import get_db
+from web.core.metadata import User, get_db
 from web.dev_login import store_keys_plaintext
 from web.users import require_user
 
@@ -34,7 +35,7 @@ def _fernet() -> Fernet:
     return Fernet(base64.urlsafe_b64encode(material))
 
 
-def _encrypt(keys: dict) -> str:
+def _encrypt(keys: dict[str, str]) -> str:
     # In dev (DEV_LOGIN, fresh DB) store plaintext JSON — no secret to set,
     # nothing to lose. A Fernet token is never valid JSON, so reads tell the
     # two apart. See web/dev_login.py.
@@ -43,7 +44,7 @@ def _encrypt(keys: dict) -> str:
     return _fernet().encrypt(json.dumps(keys).encode()).decode()
 
 
-def _decrypt(blob: str | None) -> dict:
+def _decrypt(blob: str | None) -> dict[str, str]:
     if not blob:
         return {}
     try:  # plaintext JSON (dev / no-encryption)
@@ -58,12 +59,12 @@ def _decrypt(blob: str | None) -> dict:
         return {}  # secret rotated or corrupt: treat as unset
 
 
-def get_user_keys(user) -> dict:
+def get_user_keys(user: User) -> dict[str, str]:
     """The user's decrypted {provider: key} (server-side use only)."""
     return _decrypt(getattr(user, "api_keys_json", None))
 
 
-def _masked(user) -> dict:
+def _masked(user: User) -> dict[str, dict[str, str | bool]]:
     keys = get_user_keys(user)
     out = {}
     for p in KEY_PROVIDERS:
@@ -74,17 +75,23 @@ def _masked(user) -> dict:
 
 
 class KeysUpdate(BaseModel):
+    """Provider keys to set, clear or leave unchanged."""
+
     # {provider: "newkey"} to set, {provider: null/""} to clear; omit to keep
     keys: dict[str, str | None]
 
 
 @router.get("")
-async def get_keys(user=Depends(require_user)):
+async def get_keys(user: Annotated[User, Depends(require_user)]) -> dict[str, dict[str, dict[str, str | bool]]]:
+    """Return whether each provider key is set and its masked hint."""
     return {"keys": _masked(user)}
 
 
 @router.put("")
-async def set_keys(data: KeysUpdate, user=Depends(require_user)):
+async def set_keys(
+    data: KeysUpdate, user: Annotated[User, Depends(require_user)]
+) -> dict[str, dict[str, dict[str, str | bool]]]:
+    """Update the signed-in user's provider keys."""
     current = get_user_keys(user)
     for provider, value in data.keys.items():
         if provider not in KEY_PROVIDERS:

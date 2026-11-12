@@ -1,48 +1,86 @@
-"""Chat messages: the branch tree, media items on a message, spend totals,
-truncation and whole-turn (exchange) deletion.
+"""Manage chat messages and their media.
+
+Operations cover branch trees, spend totals, truncation, and whole-turn
+deletion.
 """
 
 import json
 from datetime import datetime
-from typing import Any
+from typing import TypedDict, cast
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from web.core.metadata._base import DBBase
 from web.core.metadata.models import ChatConversation, ChatLibraryItem, ChatMessage
+from web.types import JsonValue
+
+
+class SpendRow(TypedDict):
+    """Represent one item in a chat's spend breakdown."""
+
+    conversation_id: str
+    at: datetime
+    model: str | None
+    kind: str
+    usd: float
+    credits: int
+
+
+class _ChatExchangePlan(TypedDict):
+    prompt: ChatMessage
+    msgs: dict[int, ChatMessage]
+    doomed: list[int]
+    kept_next: list[int]
+    other_versions: int
+    other_messages: int
+
+
+def _number(value: JsonValue) -> float:
+    return float(value) if isinstance(value, int | float) else 0.0
+
 
 # add_chat_message's default parent: continue the branch being shown
-_APPEND = object()
+class _AppendParent:
+    """Sentinel for appending to the currently shown branch."""
 
 
-def _media_row(conv_id: str, at, item: dict[str, Any]) -> dict[str, Any]:
+_APPEND = _AppendParent()
+
+
+def _media_row(conv_id: str, at: datetime, item: dict[str, JsonValue]) -> SpendRow:
+    model = item.get("model")
+    kind = item.get("kind")
     return {
         "conversation_id": conv_id,
         "at": at,
-        "model": item.get("model"),
-        "kind": item.get("kind") or "image",
-        "usd": item.get("cost") or 0,
-        "credits": item.get("credits") or 0,
+        "model": model if isinstance(model, str) else None,
+        "kind": kind if isinstance(kind, str) else "image",
+        "usd": _number(item.get("cost")),
+        "credits": int(_number(item.get("credits"))),
     }
 
 
-class MessageMixin:
+class MessageMixin(DBBase):
+    """Provide message, branch, and chat-media operations."""
+
     def add_chat_message(
         self,
         conversation_id: str,
         role: str,
         content: str = "",
-        media: list[dict[str, Any]] | None = None,
+        media: list[dict[str, JsonValue]] | None = None,
         model: str | None = None,
         status: str = "done",
-        parent_id: Any = _APPEND,
+        parent_id: int | _AppendParent | None = _APPEND,
         mode: str | None = None,
         lane: str | None = None,
     ) -> ChatMessage:
-        """Add a message and make it the shown branch's last message. By
-        default it continues the shown branch; pass `parent_id` (None for a
-        first message) to start a new branch beside an existing message.
-        A `lane` message starts its own standalone exchange: it never joins
+        """Add a message and make it the shown branch's last message.
+
+        By default it continues the shown branch; pass ``parent_id`` (``None``
+        for a first message) to start a new branch beside an existing message.
+        A ``lane`` message starts its own standalone exchange and never joins
         or moves the shown branch.
         """
         with self._session() as session:
@@ -63,7 +101,7 @@ class MessageMixin:
             session.add(msg)
             session.flush()
             if conv:
-                conv.updated_at = datetime.now()
+                conv.updated_at = datetime.now().astimezone().replace(tzinfo=None)
                 if not lane:
                     conv.current_leaf_id = msg.id
             session.commit()
@@ -71,11 +109,11 @@ class MessageMixin:
             session.expunge(msg)
             return msg
 
-    def add_chat_branch(self, conversation_id: str, rows: list[dict[str, Any]]) -> None:
-        """Add messages one after another (the first starts the chat) in one
-        transaction, and show the branch they make. `rows`: ChatMessage
-        fields, `media` as a list. One commit, not one per message: a long
-        chat's copy is slow on a NAS otherwise.
+    def add_chat_branch(self, conversation_id: str, rows: list[dict[str, object]]) -> None:
+        """Add a message branch in one transaction and show it.
+
+        The first row starts the chat. Each row contains ``ChatMessage`` fields
+        with ``media`` as a list; batching avoids one commit per message.
         """
         with self._session() as session:
             conv = session.get(ChatConversation, conversation_id)
@@ -89,7 +127,7 @@ class MessageMixin:
                 parent_id = msg.id
             if conv and parent_id is not None:
                 conv.current_leaf_id = parent_id
-                conv.updated_at = datetime.now()
+                conv.updated_at = datetime.now().astimezone().replace(tzinfo=None)
             session.commit()
 
     @staticmethod
@@ -97,13 +135,15 @@ class MessageMixin:
         """The shown branch's last message, falling back to the newest one."""
         if conv.current_leaf_id and session.get(ChatMessage, conv.current_leaf_id):
             return conv.current_leaf_id
-        return (
+        return cast(
+            "int | None",
             session.query(func.max(ChatMessage.id))
             .filter(ChatMessage.conversation_id == conv.id, ChatMessage.lane.is_(None))
-            .scalar()
+            .scalar(),
         )
 
     def get_chat_leaf_id(self, conversation_id: str) -> int | None:
+        """Return the shown branch's last message id, if available."""
         with self._session() as session:
             conv = session.get(ChatConversation, conversation_id)
             return self._chat_leaf_id(session, conv) if conv else None
@@ -117,8 +157,9 @@ class MessageMixin:
             session.commit()
 
     def get_chat_sibling_ids(self, conversation_id: str, parent_id: int | None, lane: str | None = None) -> list[int]:
-        """Ids of every version of a turn (messages sharing a parent in the
-        same lane), oldest first.
+        """Return ids for versions of a turn, oldest first.
+
+        Versions share a parent and lane.
         """
         with self._session() as session:
             rows = (
@@ -134,8 +175,12 @@ class MessageMixin:
             return [r[0] for r in rows]
 
     def update_chat_message(
-        self, message_id: int, media: list[dict[str, Any]] | None = None, **fields: Any
+        self,
+        message_id: int,
+        media: list[dict[str, JsonValue]] | None = None,
+        **fields: JsonValue,
     ) -> ChatMessage | None:
+        """Update a message's fields and optional media, or return ``None``."""
         with self._session() as session:
             msg = session.get(ChatMessage, message_id)
             if not msg:
@@ -150,7 +195,7 @@ class MessageMixin:
             session.expunge(msg)
             return msg
 
-    def update_chat_media_item(self, message_id: int, media_id: str, **fields: Any) -> ChatMessage | None:
+    def update_chat_media_item(self, message_id: int, media_id: str, **fields: JsonValue) -> ChatMessage | None:
         """Atomically merge `fields` into one media item.
 
         Looks in the message first, then the library (the message may have
@@ -177,7 +222,7 @@ class MessageMixin:
                 session.commit()
             return None
 
-    def find_chat_media_item(self, message_id: int, media_id: str) -> dict[str, Any] | None:
+    def find_chat_media_item(self, message_id: int, media_id: str) -> dict[str, JsonValue] | None:
         """The media item's current state, wherever it lives (message or library)."""
         with self._session() as session:
             msg = session.get(ChatMessage, message_id)
@@ -188,7 +233,7 @@ class MessageMixin:
             lib = session.query(ChatLibraryItem).filter(ChatLibraryItem.media_id == media_id).first()
             return lib.item if lib else None
 
-    def append_chat_media_item(self, message_id: int, item: dict[str, Any]) -> ChatMessage | None:
+    def append_chat_media_item(self, message_id: int, item: dict[str, JsonValue]) -> ChatMessage | None:
         """Atomically append one media item to a message."""
         with self._session() as session:
             msg = session.get(ChatMessage, message_id)
@@ -201,6 +246,7 @@ class MessageMixin:
             return msg
 
     def get_chat_messages_by_status(self, status: str) -> list[ChatMessage]:
+        """Return messages with the requested status."""
         with self._session() as session:
             msgs = session.query(ChatMessage).filter(ChatMessage.status == status).all()
             for m in msgs:
@@ -208,6 +254,7 @@ class MessageMixin:
             return msgs
 
     def get_chat_message(self, message_id: int) -> ChatMessage | None:
+        """Return a message by id, or ``None`` if it does not exist."""
         with self._session() as session:
             msg = session.get(ChatMessage, message_id)
             if msg:
@@ -215,66 +262,60 @@ class MessageMixin:
             return msg
 
     def get_chat_spend(self, conversation_id: str) -> tuple[float, int]:
-        """What a chat has cost on every branch: dollars (OpenRouter/Venice —
-        a reply's cost includes its media) and Pollo credits (per media item).
-        Media detached into the library still counts; its message is gone.
+        """Return a chat's total dollars and Pollo credits across all branches.
+
+        A reply's dollar cost includes its media, and detached library media
+        remains included even after its message is gone.
         """
         with self._session() as session:
             usd, credits = 0.0, 0
-            for cost, media_json in session.query(ChatMessage.cost, ChatMessage.media_json).filter(
-                ChatMessage.conversation_id == conversation_id
-            ):
-                usd += cost or 0
-                for item in json.loads(media_json) if media_json else []:
-                    credits += item.get("credits") or 0
+            for msg in session.query(ChatMessage).filter(ChatMessage.conversation_id == conversation_id):
+                usd += msg.cost or 0
+                for item in msg.media:
+                    credits += int(_number(item.get("credits")))
             for lib in session.query(ChatLibraryItem).filter(ChatLibraryItem.conversation_id == conversation_id):
-                usd += lib.item.get("cost") or 0
-                credits += lib.item.get("credits") or 0
+                usd += _number(lib.item.get("cost"))
+                credits += int(_number(lib.item.get("credits")))
             return round(usd, 6), int(credits)
 
-    def spend_rows(self, conversation_ids: list[str]) -> list[dict[str, Any]]:
-        """One row per charge across the given chats, for the usage breakdown:
-        {conversation_id, at, model, kind, usd, credits}. A Pollo media item is
-        one row (credits); a message's dollar cost (OpenRouter/Venice, media
-        included) is one row. Media detached into the library still counts.
+    def spend_rows(self, conversation_ids: list[str]) -> list[SpendRow]:
+        """Return one usage-breakdown row per charge across the given chats.
+
+        Rows have ``conversation_id``, ``at``, ``model``, ``kind``, ``usd``,
+        and ``credits`` keys. Each Pollo media item contributes one row; a
+        message's dollar cost contributes one row. Detached library media
+        remains included.
         """
-        rows: list[dict[str, Any]] = []
+        rows: list[SpendRow] = []
         if not conversation_ids:
             return rows
         with self._session() as session:
-            msgs = session.query(
-                ChatMessage.conversation_id,
-                ChatMessage.created_at,
-                ChatMessage.model,
-                ChatMessage.cost,
-                ChatMessage.media_json,
-            ).filter(ChatMessage.conversation_id.in_(conversation_ids))
-            for conv_id, at, model, cost, media_json in msgs:
-                if cost:
+            msgs = session.query(ChatMessage).filter(ChatMessage.conversation_id.in_(conversation_ids))
+            for msg in msgs:
+                if msg.cost:
                     rows.append(
                         {
-                            "conversation_id": conv_id,
-                            "at": at,
-                            "model": model,
+                            "conversation_id": msg.conversation_id,
+                            "at": msg.created_at,
+                            "model": msg.model,
                             "kind": "chat",
-                            "usd": cost,
+                            "usd": msg.cost,
                             "credits": 0,
                         }
                     )
                 rows.extend(
-                    _media_row(conv_id, at, item)
-                    for item in (json.loads(media_json) if media_json else [])
-                    if item.get("credits")
+                    _media_row(msg.conversation_id, msg.created_at, item) for item in msg.media if item.get("credits")
                 )
             libs = session.query(ChatLibraryItem).filter(ChatLibraryItem.conversation_id.in_(conversation_ids))
             rows.extend(
                 _media_row(lib.conversation_id, lib.created_at, lib.item)
                 for lib in libs
-                if lib.item.get("credits") or lib.item.get("cost")
+                if _number(lib.item.get("credits")) or _number(lib.item.get("cost"))
             )
         return rows
 
     def get_chat_messages(self, conversation_id: str) -> list[ChatMessage]:
+        """Return a conversation's messages ordered by id."""
         with self._session() as session:
             msgs = (
                 session.query(ChatMessage)
@@ -286,11 +327,12 @@ class MessageMixin:
                 session.expunge(m)
             return msgs
 
-    def truncate_chat(self, conversation_id: str, after_id: int) -> list[dict[str, Any]]:
-        """Delete every message with id > after_id, moving their generated
-        media into the library first. (Edit/retry used this before chats had
-        branches; library items from then remain.) Uploaded
-        attachments are the user's own inputs and aren't kept.
+    def truncate_chat(self, conversation_id: str, after_id: int) -> list[dict[str, JsonValue]]:
+        """Delete messages after ``after_id`` and preserve generated media.
+
+        Their generated media is moved to the library first. Uploaded
+        attachments are user inputs and are not retained; earlier library
+        items from before chat branches were introduced remain.
 
         Returns the detached media items.
         """
@@ -303,7 +345,7 @@ class MessageMixin:
                 )
                 .all()
             )
-            detached = []
+            detached: list[dict[str, JsonValue]] = []
             for msg in msgs:
                 for item in msg.media:
                     if item.get("source") == "upload" or not (item.get("file") or item.get("job_id")):
@@ -321,7 +363,9 @@ class MessageMixin:
             session.commit()
             return detached
 
-    def _chat_exchange_plan(self, session: Session, conversation_id: str, user_message_id: int) -> dict | None:
+    def _chat_exchange_plan(
+        self, session: Session, conversation_id: str, user_message_id: int
+    ) -> _ChatExchangePlan | None:
         """What deleting a prompt's turn removes and keeps (see delete_chat_exchange)."""
         prompt = session.get(ChatMessage, user_message_id)
         if not prompt or prompt.conversation_id != conversation_id or prompt.role != "user":
@@ -349,7 +393,8 @@ class MessageMixin:
         replies = [r for v in versions for r in children.get(v, [])]
         # The shown branch's reply in this turn: what follows it is kept
         conv = session.get(ChatConversation, conversation_id)
-        path, node = set(), self._chat_leaf_id(session, conv) if conv else None
+        path: set[int] = set()
+        node = self._chat_leaf_id(session, conv) if conv else None
         while node is not None and node in msgs and node not in path:
             path.add(node)
             node = msgs[node].parent_id
@@ -373,11 +418,14 @@ class MessageMixin:
             "other_messages": len([d for d in doomed if d not in turn]),
         }
 
-    def chat_exchange_delete_info(self, conversation_id: str, user_message_id: int) -> dict | None:
-        """How much deleting this prompt's turn removes, for the confirmation:
-        the other versions/messages that go with it, and the generated files it
-        holds, per kind — the ones the "also delete its media" box decides on
-        (a turn that generated nothing, or only failed, has none).
+    def chat_exchange_delete_info(
+        self, conversation_id: str, user_message_id: int
+    ) -> dict[str, int | dict[str, int]] | None:
+        """Summarize what deleting a prompt's turn would remove.
+
+        The result counts other messages and generated media by kind for the
+        confirmation dialog. Turns without successful generated files have no
+        media to report.
         """
         with self._session() as session:
             plan = self._chat_exchange_plan(session, conversation_id, user_message_id)
@@ -388,7 +436,9 @@ class MessageMixin:
                 for item in plan["msgs"][mid].media or []:
                     if item.get("source") == "upload" or not item.get("file"):
                         continue
-                    kind = item.get("kind") or "file"
+                    kind = item.get("kind")
+                    if not isinstance(kind, str):
+                        kind = "file"
                     media[kind] = media.get(kind, 0) + 1
             return {
                 "other_versions": plan["other_versions"],
@@ -396,13 +446,13 @@ class MessageMixin:
                 "media": media,
             }
 
-    def delete_chat_exchange(self, conversation_id: str, user_message_id: int) -> list[dict[str, Any]]:
-        """Delete a prompt's whole turn — every version of the prompt and every
-        reply to them — moving generated media into the library. What follows
-        the shown branch's reply is kept, re-attached to the message before
-        the prompt, so the chat reads on as if the turn never happened. What
-        grew from the turn's other versions has nothing left to follow, so
-        it's deleted too (its media also goes to the library).
+    def delete_chat_exchange(self, conversation_id: str, user_message_id: int) -> list[dict[str, JsonValue]]:
+        """Delete a prompt's whole turn and preserve generated media.
+
+        Every prompt version and its replies are deleted, with generated media
+        moved to the library. What follows the shown branch's reply is kept and
+        re-attached to the message before the prompt. Content from other
+        versions is deleted along with its media.
 
         Returns the detached media items.
         """
@@ -413,7 +463,7 @@ class MessageMixin:
             prompt, msgs = plan["prompt"], plan["msgs"]
             for mid in plan["kept_next"]:
                 msgs[mid].parent_id = prompt.parent_id
-            detached = []
+            detached: list[dict[str, JsonValue]] = []
             for mid in plan["doomed"]:
                 msg = msgs[mid]
                 for item in msg.media:
@@ -436,6 +486,7 @@ class MessageMixin:
             return detached
 
     def get_chat_messages_with_media(self) -> list[ChatMessage]:
+        """Return messages that have media attached, newest first."""
         with self._session() as session:
             msgs = (
                 session.query(ChatMessage)
@@ -448,6 +499,7 @@ class MessageMixin:
             return msgs
 
     def get_chat_messages_with_pending_media(self) -> list[ChatMessage]:
+        """Return messages whose media JSON contains a pending item."""
         with self._session() as session:
             msgs = session.query(ChatMessage).filter(ChatMessage.media_json.contains('"status": "pending"')).all()
             for m in msgs:
@@ -455,6 +507,7 @@ class MessageMixin:
             return msgs
 
     def get_chat_messages_by_ids(self, ids: list[int]) -> list[ChatMessage]:
+        """Return messages matching the provided ids."""
         if not ids:
             return []
         with self._session() as session:

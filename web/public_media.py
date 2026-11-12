@@ -1,4 +1,6 @@
-"""Self-hosted source media: serve a local upload at a signed, expiring,
+"""Serve self-hosted source media through signed, expiring URLs.
+
+Providers can fetch local uploads from this instance instead of a temp host.
 unauthenticated URL so a provider that only takes a URL (Pollo) can fetch it
 from *this* instance instead of a third-party temp host (catbox/tmpfiles).
 
@@ -34,9 +36,9 @@ def _unb64(s: str) -> bytes:
 
 
 def _media_roots() -> list[Path]:
-    """Directories a self-host link may serve from — every source a Pollo upload
-    can draw from: chat uploads/outputs, character reference images, and the
-    per-user library. Resolved so a signed-but-crafted path can't escape.
+    """Return resolved roots that a self-hosted media link may serve.
+
+    These cover chat files, character images and the per-user library.
     """
     return [(config.ROOT_DIR / d).resolve() for d in ("chat", "characters", "library")]
 
@@ -77,12 +79,13 @@ def _resolve_token(token: str) -> Path | None:
 
 
 def selfhost_url(filepath: Path, base_url: str, ttl_seconds: int) -> str:
-    """Public URL for a provider to fetch *filepath* from this instance.
-    Raises ValueError if no reachable base URL is configured.
+    """Build a signed URL for a provider to fetch a local file.
+
+    Raise ``ValueError`` if no reachable base URL is configured.
     """
     base = (base_url or "").strip().rstrip("/")
     if not base.startswith(("http://", "https://")):
-        raise ValueError(
+        raise ValueError(  # noqa: TRY003
             "Self-host upload needs a public base URL — set it in Settings → Media uploads "
             "(or PUBLIC_BASE_URL). It must be the https address this instance is reachable at."
         )
@@ -90,10 +93,10 @@ def selfhost_url(filepath: Path, base_url: str, ttl_seconds: int) -> str:
 
 
 @router.get("/{token}")
-def serve_public_media(token: str):
-    """Stream a signed, unexpired media file. Public (no login): providers can't
-    present our cookie. 404 on a bad/expired/out-of-bounds token so the route
-    leaks nothing about what does or doesn't exist.
+def serve_public_media(token: str) -> FileResponse:
+    """Stream a signed media file without requiring login.
+
+    Invalid, expired or out-of-bounds tokens return 404 without leaking file information.
     """
     path = _resolve_token(token)
     if path is None:

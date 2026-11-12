@@ -28,6 +28,9 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.engine import Connection
+
+type _JsonValue = str | int | float | bool | list[_JsonValue] | dict[str, _JsonValue] | None
 
 revision: str = "0027"
 down_revision: str | Sequence[str] | None = "0026"
@@ -53,8 +56,9 @@ _JSON_COLUMNS = [
 _JSON_KEYS = ("model", "audio_model", "text_model", "image_model", "video_model")
 
 
-def _renamed(value, to_v1: bool):
+def _renamed(value: _JsonValue, to_v1: bool) -> _JsonValue:
     """One model id, with the v1 suffix stripped (or put back on a downgrade).
+
     Anything that isn't a suffixed Pollo id is returned unchanged.
     """
     if not isinstance(value, str) or not value.startswith(PREFIX):
@@ -65,7 +69,7 @@ def _renamed(value, to_v1: bool):
     return f"{PREFIX}{key[: -len(SUFFIX)]}" if key.endswith(SUFFIX) else value
 
 
-def _walk(data, to_v1: bool) -> bool:
+def _walk(data: _JsonValue, to_v1: bool) -> bool:
     """Rewrite every model id in a decoded JSON value; True if anything changed."""
     changed = False
     if isinstance(data, list):
@@ -83,8 +87,9 @@ def _walk(data, to_v1: bool) -> bool:
     return changed
 
 
-def rewrite(bind, to_v1: bool = False) -> int:
+def rewrite(bind: Connection, to_v1: bool = False) -> int:
     """Rewrite every stored Pollo model id; returns how many rows changed.
+
     Takes the bind so it can be tested without an Alembic context.
     """
     changed_rows = 0
@@ -123,8 +128,10 @@ def rewrite(bind, to_v1: bool = False) -> int:
 
 
 def upgrade() -> None:
+    """Remove the v1 suffix from stored Pollo model IDs."""
     rewrite(op.get_bind(), to_v1=False)
 
 
 def downgrade() -> None:
+    """Restore the v1 suffix to stored Pollo model IDs."""
     rewrite(op.get_bind(), to_v1=True)

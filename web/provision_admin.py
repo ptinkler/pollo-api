@@ -20,6 +20,7 @@ from web.passwords import hash_password
 
 
 def main() -> None:
+    """Create or promote an admin account from the command-line options."""
     ap = argparse.ArgumentParser(description="Create or promote the admin account.")
     ap.add_argument("--email", required=True, help="the owner's email (match your login address)")
     ap.add_argument("--name", default="Admin")
@@ -32,7 +33,7 @@ def main() -> None:
     if args.set_password:
         pw = args.password or getpass.getpass("New admin password: ")
         if len(pw) < 10:
-            raise SystemExit("Password must be at least 10 characters.")
+            raise SystemExit("Password must be at least 10 characters.")  # noqa: TRY003
         admin = db.create_local_admin(args.email, hash_password(pw), name=args.name)
     else:
         admin = db.ensure_admin(args.email, args.name)

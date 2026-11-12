@@ -1,4 +1,6 @@
-"""VPN control — status, restart and server country, through Gluetun's
+"""Control VPN status and settings through Gluetun's API.
+
+The routes expose status, restart and server-country controls.
 control server.
 
 Docs: https://github.com/qdm12/gluetun-wiki/blob/main/setup/advanced/control-server.md
@@ -7,12 +9,13 @@ Docs: https://github.com/qdm12/gluetun-wiki/blob/main/setup/advanced/control-ser
 import logging
 import os
 import time
-from typing import Any
+from typing import cast
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from web.types import JsonValue
 from web.users import require_admin
 
 log = logging.getLogger(__name__)
@@ -47,24 +50,32 @@ ALLOWED_VPN_COUNTRIES = [
 
 
 class VpnCountryRequest(BaseModel):
+    """Country requested for the VPN server."""
+
     country: str
 
 
-def _gluetun_get(path: str, timeout: int = 3):
+def _gluetun_get(path: str, timeout: int = 3) -> requests.Response:
     return requests.get(f"{GLUETUN_API}{path}", headers=_GLUETUN_HEADERS, timeout=timeout)
 
 
-def _gluetun_put(path: str, body: dict, timeout: int = 5):
+def _gluetun_put(path: str, body: dict[str, JsonValue], timeout: int = 5) -> requests.Response:
     return requests.put(f"{GLUETUN_API}{path}", json=body, headers=_GLUETUN_HEADERS, timeout=timeout)
 
 
-def _gluetun_json(path: str, if_not_ok: Any, if_unreachable: Any, timeout: int = 3) -> Any:
+def _gluetun_json(
+    path: str,
+    if_not_ok: dict[str, JsonValue],
+    if_unreachable: dict[str, JsonValue],
+    timeout: int = 3,
+) -> dict[str, JsonValue]:
     """A Gluetun GET's JSON, or a stand-in when it fails or can't be reached."""
     try:
         r = _gluetun_get(path, timeout=timeout)
-    except Exception:  # any connection failure means unreachable
+    except Exception:  # noqa: BLE001 — any connection failure means unreachable
         return if_unreachable
-    return r.json() if r.ok else if_not_ok
+    data = r.json()
+    return cast("dict[str, JsonValue]", data) if r.ok and isinstance(data, dict) else if_not_ok
 
 
 def _egress_ip() -> str | None:
@@ -84,7 +95,7 @@ def _egress_ip() -> str | None:
 
 
 @router.get("/status")
-def vpn_status(_admin=Depends(require_admin)):
+def vpn_status(_admin=Depends(require_admin)) -> dict[str, JsonValue]:
     """Current VPN status, public IP, and server country from Gluetun."""
     # Gluetun's /v1/publicip/ip returns the tunnel's exit IP under "public_ip"
     # (older builds used "ip"); normalise to {ip, country} for the UI.
@@ -104,7 +115,7 @@ def vpn_status(_admin=Depends(require_admin)):
 
 
 @router.post("/restart")
-def vpn_restart(_admin=Depends(require_admin)):
+def vpn_restart(_admin=Depends(require_admin)) -> dict[str, bool | str]:
     """Restart the VPN tunnel by cycling Gluetun's status off then on."""
     try:
         _gluetun_put("/v1/vpn/status", {"status": "stopped"})
@@ -118,7 +129,7 @@ def vpn_restart(_admin=Depends(require_admin)):
 
 
 @router.put("/country")
-def vpn_change_country(data: VpnCountryRequest, _admin=Depends(require_admin)):
+def vpn_change_country(data: VpnCountryRequest, _admin=Depends(require_admin)) -> dict[str, bool | str]:
     """Change VPN server country. Body: {"country": "United Kingdom"}."""
     country = data.country.strip()
     if not country:
@@ -135,6 +146,6 @@ def vpn_change_country(data: VpnCountryRequest, _admin=Depends(require_admin)):
 
 
 @router.get("/countries")
-def vpn_countries(_admin=Depends(require_admin)):
+def vpn_countries(_admin=Depends(require_admin)) -> dict[str, list[str]]:
     """The allowed VPN server countries."""
     return {"countries": ALLOWED_VPN_COUNTRIES}

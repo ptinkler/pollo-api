@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from web.core.config import POLLO_GENERATION_BASE
+
+if TYPE_CHECKING:
+    from web.types import JsonValue
 
 _AUDIO_DEFAULTS: dict[str, Any] = {
     "MAX_PROMPT": 3000,
@@ -73,19 +76,21 @@ AUDIO_MODELS: dict[str, dict[str, Any]] = {
 
 
 def cfg(model_id: str) -> dict[str, Any]:
+    """Return the defaults and model-specific settings for an audio model."""
     return {**_AUDIO_DEFAULTS, **AUDIO_MODELS[model_id]}
 
 
 def audio_model_url(model_id: str) -> str:
+    """Return the generation endpoint for an audio model."""
     c = cfg(model_id)
     return f"{POLLO_GENERATION_BASE}/{c['PROVIDER']}/{c['MODEL']}/{c['endpoint']}"
 
 
-def _clamp(value: Any, lo: float, hi: float) -> float:
+def _clamp(value: JsonValue, lo: float, hi: float) -> float:
     return max(lo, min(hi, float(value)))
 
 
-def _speech_payload(c: dict[str, Any], prompt: str, **kw: Any) -> dict[str, Any]:
+def _speech_payload(c: dict[str, object], prompt: str, **kw: JsonValue) -> dict[str, Any]:
     attrs: dict[str, Any] = {"prompt": prompt}
     if c["NEEDS_VOICE"]:
         if not kw.get("voice"):
@@ -106,7 +111,7 @@ def _speech_payload(c: dict[str, Any], prompt: str, **kw: Any) -> dict[str, Any]
     return {"input": attrs}
 
 
-def _music_payload(c: dict[str, Any], prompt: str, **kw: Any) -> dict[str, Any]:
+def _music_payload(c: dict[str, object], prompt: str, **kw: JsonValue) -> dict[str, Any]:
     """Suno: a song description, or (with style + title together) lyrics."""
     style, title = (kw.get("style") or "").strip(), (kw.get("title") or "").strip()
     if bool(style) != bool(title):
@@ -125,7 +130,8 @@ def _music_payload(c: dict[str, Any], prompt: str, **kw: Any) -> dict[str, Any]:
     return {"input": attrs}
 
 
-def audio_payload(model_id: str, *, prompt: str, **kw: Any) -> dict[str, Any]:
+def audio_payload(model_id: str, *, prompt: str, **kw: JsonValue) -> dict[str, Any]:
+    """Build and validate a speech or music generation request body."""
     c = cfg(model_id)
     prompt = (prompt or "").strip()
     if not prompt:

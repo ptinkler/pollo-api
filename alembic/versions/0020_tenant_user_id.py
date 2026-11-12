@@ -16,6 +16,7 @@ from datetime import datetime
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.engine import Connection
 
 revision: str = "0020"
 down_revision: str | Sequence[str] | None = "0019"
@@ -39,7 +40,7 @@ TENANT_TABLES = [
 ]
 
 
-def _admin_id(conn) -> str:
+def _admin_id(conn: Connection) -> str:
     # The admin is keyed on email (ADMIN_EMAILS), so the backfill lands on the
     # same account the owner later signs into with Google or the access key.
     email = next((e.strip() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()), "admin@local")
@@ -52,12 +53,13 @@ def _admin_id(conn) -> str:
             "INSERT INTO users (id, email, name, provider, provider_sub, is_admin, created_at) "
             "VALUES (:id, :email, 'Admin', 'local', 'admin', 1, :now)"
         ),
-        {"id": admin_id, "email": email, "now": datetime.now()},
+        {"id": admin_id, "email": email, "now": datetime.now().astimezone().replace(tzinfo=None)},
     )
     return admin_id
 
 
 def upgrade() -> None:
+    """Add tenant user IDs and backfill existing rows."""
     bind = op.get_bind()
     insp = sa.inspect(bind)
     admin_id = _admin_id(bind)
@@ -74,6 +76,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove tenant user IDs."""
     insp = sa.inspect(op.get_bind())
     for table in TENANT_TABLES:
         if not insp.has_table(table):

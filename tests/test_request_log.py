@@ -5,11 +5,17 @@ from web.core import metadata
 
 
 def _prompts():
-    return [e["request"]["prompt"] for e in request_log.recent()]
+    prompts: list[str] = []
+    for entry in request_log.recent():
+        request = entry.get("request")
+        if isinstance(request, dict) and isinstance((prompt := request.get("prompt")), str):
+            prompts.append(prompt)
+    return prompts
 
 
 def test_log_is_per_tenant():
-    """Two users' provider calls go to separate per-tenant logs, so the
+    """Two users' provider calls go to separate per-tenant logs, so the.
+
     Request log never shows one user another user's prompts/content.
     """
     token = metadata.set_tenant("user-a")

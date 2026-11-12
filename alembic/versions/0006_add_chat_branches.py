@@ -20,6 +20,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Add chat branch tracking fields."""
     # MetadataDB() adds (and backfills) these columns on startup too, so each
     # step is skipped if it already happened.
     insp = sa.inspect(op.get_bind())
@@ -41,6 +42,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove chat branch tracking fields."""
     with op.batch_alter_table("chat_conversations") as batch_op:
         batch_op.drop_column("current_leaf_id")
     with op.batch_alter_table("chat_messages") as batch_op:

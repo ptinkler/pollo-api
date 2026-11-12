@@ -33,6 +33,7 @@ def _ids(raw: str | None) -> list:
 
 
 def upgrade() -> None:
+    """Apply default instructions to existing conversations."""
     bind = op.get_bind()
     cols = ", ".join(f"default_{k}_ids_json" for k in KINDS)
     glob = bind.execute(sa.text(f"SELECT {cols} FROM chat_settings WHERE id = 1")).first()
@@ -55,4 +56,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    pass  # the copies can't be told apart from what was attached by hand
+    """Keep applied defaults because their original sources are indistinguishable."""
+    # the copies can't be told apart from what was attached by hand

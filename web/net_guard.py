@@ -33,28 +33,47 @@ def _is_public_ip(ip: str) -> bool:
 
 
 def assert_public_url(url: str) -> None:
-    """Raise UnsafeURLError unless *url* is http(s) and every address its host
-    resolves to is public.
+    """Require an HTTP(S) URL whose resolved addresses are all public.
+
+    Raises:
+        UnsafeURLError: If the scheme, host, or any resolved address is unsafe.
     """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        raise UnsafeURLError(f"Unsupported URL scheme: {parsed.scheme!r}")
+        raise UnsafeURLError(f"Unsupported URL scheme: {parsed.scheme!r}")  # noqa: TRY003
     host = parsed.hostname
     if not host:
-        raise UnsafeURLError("URL has no host")
+        raise UnsafeURLError("URL has no host")  # noqa: TRY003
     try:
         infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80))
     except socket.gaierror as exc:
-        raise UnsafeURLError(f"Cannot resolve host {host!r}: {exc}") from exc
+        raise UnsafeURLError(f"Cannot resolve host {host!r}: {exc}") from exc  # noqa: TRY003
     for info in infos:
         ip = info[4][0]
         if not _is_public_ip(ip):
-            raise UnsafeURLError(f"Host {host!r} resolves to non-public address {ip}")
+            raise UnsafeURLError(f"Host {host!r} resolves to non-public address {ip}")  # noqa: TRY003
 
 
-def get_public(client: httpx.Client, url: str, *, timeout, max_redirects: int = 3) -> httpx.Response:
-    """GET *url* with SSRF checks, following redirects manually so each hop's
-    target is validated too (httpx's own redirect handling would skip that).
+def get_public(
+    client: httpx.Client,
+    url: str,
+    *,
+    timeout: float | httpx.Timeout | None,
+    max_redirects: int = 3,
+) -> httpx.Response:
+    """GET a public URL and validate each redirect target.
+
+    Args:
+        client: HTTPX client used to make the request.
+        url: Initial URL to fetch.
+        timeout: HTTPX timeout configuration.
+        max_redirects: Maximum number of redirects to follow.
+
+    Returns:
+        The final HTTP response.
+
+    Raises:
+        UnsafeURLError: If a URL is unsafe or the redirect limit is exceeded.
     """
     for _ in range(max_redirects + 1):
         assert_public_url(url)
@@ -63,4 +82,4 @@ def get_public(client: httpx.Client, url: str, *, timeout, max_redirects: int = 
             url = str(resp.next_request.url) if resp.next_request else resp.headers["location"]
             continue
         return resp
-    raise UnsafeURLError("Too many redirects")
+    raise UnsafeURLError("Too many redirects")  # noqa: TRY003

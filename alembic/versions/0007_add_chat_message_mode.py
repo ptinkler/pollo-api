@@ -20,6 +20,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Add a mode to chat messages."""
     # MetadataDB() adds this column on startup too, so skip it if it's there
     if "mode" not in {c["name"] for c in sa.inspect(op.get_bind()).get_columns("chat_messages")}:
         with op.batch_alter_table("chat_messages") as batch_op:
@@ -27,5 +28,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove the mode from chat messages."""
     with op.batch_alter_table("chat_messages") as batch_op:
         batch_op.drop_column("mode")

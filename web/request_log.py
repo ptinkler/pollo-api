@@ -24,13 +24,14 @@ import contextlib
 import json
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator, Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Protocol, TypedDict, cast
 
 from web.core import config
 from web.core.metadata import current_tenant
+from web.types import ChatChunk, JsonValue
 
 MAX_BYTES = 5 * 1024 * 1024
 _lock = threading.Lock()
@@ -38,7 +39,46 @@ _last = threading.local()  # the latest logged call on this thread (each chat tu
 MAX_TEXT = 4000  # a non-JSON response body is kept up to this many characters
 
 
+class _ToolReply(TypedDict):
+    name: str
+    arguments: str
+
+
+class _ChatReply(TypedDict):
+    content: str
+    tool_calls: dict[int, _ToolReply]
+    finish_reason: str | None
+    usage: JsonValue
+
+
+class LogOutcome(TypedDict):
+    """Fields a provider fills while a request is being logged."""
+
+    status: int | None
+    flags: dict[str, str] | None
+    response: JsonValue
+
+
+class _RequestExchange(TypedDict):
+    request: JsonValue
+    response: JsonValue
+
+
+class _Response(Protocol):
+    @property
+    def headers(self) -> Mapping[str, str]: ...
+
+    @property
+    def text(self) -> str: ...
+
+    @property
+    def content(self) -> bytes: ...
+
+    def json(self) -> object: ...
+
+
 def log_path() -> Path:
+    """Return the request-log path for the current tenant, if any."""
     # Read config at call time so tests can redirect ROOT_DIR. Per-tenant
     # (<data>/logs/<user_id>/) so one user's provider calls never surface in
     # another's Request log; calls made outside a request (startup) fall back
@@ -48,9 +88,11 @@ def log_path() -> Path:
     return base / uid / "requests.jsonl" if uid else base / "requests.jsonl"
 
 
-def redact(value: Any) -> Any:
-    """A request body as it can be shown and logged: images (data URLs) cut
-    down to their type and size, everything else exactly as sent.
+def redact(value: JsonValue) -> JsonValue:
+    """Return a log-safe representation of a request body.
+
+    Data URLs and long base64 strings are represented by type and size;
+    other values are preserved.
     """
     if isinstance(value, dict):
         return {k: redact(v) for k, v in value.items()}
@@ -64,14 +106,17 @@ def redact(value: Any) -> Any:
     return value
 
 
-def response_of(resp: Any) -> Any:
-    """What an HTTP response (httpx or requests, already read) said, for the
-    log: its JSON (images cut short), its text, or a file's type and size.
+def response_of(resp: _Response) -> JsonValue:
+    """Return a log-safe representation of a fully read HTTP response.
+
+    JSON, text, and binary responses are represented by their contents or
+    their content type and size, respectively.
     """
-    content_type = ((getattr(resp, "headers", None) or {}).get("content-type") or "").split(";")[0].strip()
+    headers = getattr(resp, "headers", {})
+    content_type = (headers.get("content-type") or "").split(";")[0].strip()
     if "json" in content_type or not content_type:
         with contextlib.suppress(Exception):
-            return redact(resp.json())
+            return redact(cast("JsonValue", resp.json()))
     if content_type.startswith("text/") or not content_type:
         with contextlib.suppress(Exception):
             text = resp.text
@@ -80,25 +125,29 @@ def response_of(resp: Any) -> Any:
     return {"content_type": content_type, "bytes": len(resp.content)}
 
 
-def chat_reply(chunks: Iterator[dict], outcome: dict) -> Iterator[dict]:
-    """Pass a streamed chat reply's chunks through, building its response for
-    the log as they go (so a reply cut short still shows how far it got):
-    the text, the tool calls, why it finished, and the usage.
+def chat_reply(chunks: Iterator[ChatChunk], outcome: LogOutcome) -> Iterator[ChatChunk]:
+    """Pass through chat chunks while assembling their logged reply.
+
+    The accumulated response includes text, tool calls, finish reason, and
+    usage, including partial data when the stream ends early.
     """
-    reply: dict[str, Any] = {"content": "", "tool_calls": {}, "finish_reason": None, "usage": None}
-    outcome["response"] = reply
+    reply: _ChatReply = {"content": "", "tool_calls": {}, "finish_reason": None, "usage": None}
+    outcome["response"] = cast("JsonValue", reply)
     for chunk in chunks:
         for choice in chunk.get("choices") or []:
             delta = choice.get("delta") or {}
-            reply["content"] += delta.get("content") or ""
+            content = delta.get("content")
+            reply["content"] += content if isinstance(content, str) else ""
             for call in delta.get("tool_calls") or []:
                 slot = reply["tool_calls"].setdefault(call.get("index", 0), {"name": "", "arguments": ""})
                 fn = call.get("function") or {}
-                slot["name"] += fn.get("name") or ""
-                slot["arguments"] += fn.get("arguments") or ""
+                name, arguments = fn.get("name"), fn.get("arguments")
+                slot["name"] += name if isinstance(name, str) else ""
+                slot["arguments"] += arguments if isinstance(arguments, str) else ""
             reply["finish_reason"] = choice.get("finish_reason") or reply["finish_reason"]
-        if chunk.get("usage"):
-            reply["usage"] = chunk["usage"]
+        usage = chunk.get("usage")
+        if usage:
+            reply["usage"] = cast("JsonValue", usage)
         yield chunk
 
 
@@ -106,24 +155,30 @@ def record(
     provider: str,
     method: str,
     path: str,
-    request: dict | None,
+    request: JsonValue,
     *,
     status: int | None = None,
     seconds: float | None = None,
     error: str | None = None,
-    flags: dict | None = None,
+    flags: dict[str, str] | None = None,
     model: str | None = None,
-    response: Any = None,
-) -> dict:
-    """Append one entry and return it. `request` and `response` should
-    already be redacted. Never raises: a full disk mustn't fail a generation.
+    response: JsonValue = None,
+) -> dict[str, JsonValue]:
+    """Append and return a provider-call log entry.
+
+    ``request`` and ``response`` should already be redacted. Logging failures
+    are ignored so a full disk cannot fail a generation.
     """
-    entry = {
-        "at": datetime.now().isoformat(timespec="seconds"),
+    request_model = None
+    if isinstance(request, dict):
+        candidate = request.get("model") or request.get("modelId")
+        request_model = candidate if isinstance(candidate, str) else None
+    entry: dict[str, JsonValue] = {
+        "at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "provider": provider,
         "method": method,
         "path": path,
-        "model": model or (request or {}).get("model") or (request or {}).get("modelId"),
+        "model": model or request_model,
         "status": status,
         "seconds": None if seconds is None else round(seconds, 1),
         "error": error,
@@ -144,24 +199,26 @@ def record(
     return entry
 
 
-def _jsonable(value: Any) -> Any:
-    """Chat replies collect tool calls by index (int keys): list them instead."""
-    if isinstance(value, dict) and isinstance(value.get("tool_calls"), dict):
-        return {**value, "tool_calls": list(value["tool_calls"].values()) or None}
+def _jsonable(value: JsonValue) -> JsonValue:
+    """Convert indexed chat tool calls to a JSON-friendly list."""
+    if isinstance(value, dict):
+        calls = value.get("tool_calls")
+        if isinstance(calls, dict):
+            return {**value, "tool_calls": list(calls.values()) or None}
     return value
 
 
-def recent(limit: int = 100) -> list[dict]:
+def recent(limit: int = 100) -> list[dict[str, JsonValue]]:
     """The latest entries, newest first."""
     p = log_path()
     if not p.is_file():
         return []
     with _lock:
         lines = p.read_text(encoding="utf-8").splitlines()
-    out = []
+    out: list[dict[str, JsonValue]] = []
     for line in reversed(lines):
         try:
-            out.append(json.loads(line))
+            out.append(cast("dict[str, JsonValue]", json.loads(line)))
         except ValueError:
             continue
         if len(out) >= limit:
@@ -170,20 +227,21 @@ def recent(limit: int = 100) -> list[dict]:
 
 
 @contextlib.contextmanager
-def logged(provider: str, method: str, path: str, body: Any, model: str | None = None) -> Iterator[dict]:
-    """Record one provider call made inside the block. Yields a dict the
-    caller fills in: "status" (HTTP status), "flags" (headers worth keeping)
-    and "response" (see response_of / chat_reply) — set it before raising on
-    an error response, so the log shows what the provider said. An exception
-    leaving the block is recorded as the error and gets the entry as its
-    `log_entry` attribute.
+def logged(provider: str, method: str, path: str, body: JsonValue, model: str | None = None) -> Generator[LogOutcome]:
+    """Record one provider call made inside the block.
+
+    Yields a dict the caller fills in with ``status`` (HTTP status), ``flags``
+    (headers worth keeping), and ``response`` (see ``response_of`` /
+    ``chat_reply``). Set these before raising on an error response so the log
+    shows what the provider said. An exception leaving the block is recorded
+    as the error and gets the entry as its ``log_entry`` attribute.
     """
     shown = redact(body)
-    outcome: dict[str, Any] = {"status": None, "flags": None, "response": None}
-    _last.entry = {"request": shown, "response": None}
+    outcome: LogOutcome = {"status": None, "flags": None, "response": None}
+    _last.entry = _RequestExchange(request=shown, response=None)
     start = time.monotonic()
 
-    def done(error: str | None = None, status: int | None = None) -> dict:
+    def done(error: str | None = None, status: int | None = None) -> dict[str, JsonValue]:
         entry = record(
             provider,
             method,
@@ -207,14 +265,14 @@ def logged(provider: str, method: str, path: str, body: Any, model: str | None =
     except Exception as e:
         entry = done(str(e), getattr(e, "status", None))
         with contextlib.suppress(AttributeError):
-            e.log_entry = entry
+            e.__dict__["log_entry"] = entry
         raise
     done()
 
 
-def take_last() -> dict | None:
+def take_last() -> dict[str, JsonValue] | None:
     """The latest logged call on this thread, as {"request", "response"} (then forgets it)."""
-    entry = getattr(_last, "entry", None)
+    entry = cast("_RequestExchange | None", getattr(_last, "entry", None))
     _last.entry = None
     return {"request": entry["request"], "response": entry.get("response")} if entry else None
 

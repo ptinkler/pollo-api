@@ -37,6 +37,7 @@ def _unb64(text: str) -> bytes:
 
 
 def user_secret() -> bytes:
+    """Return the signing key derived from the configured session secret."""
     explicit = os.getenv("SESSION_SECRET", "").strip()
     if explicit:
         return hashlib.sha256(b"pollo-user-v1\x00" + explicit.encode()).digest()
@@ -70,8 +71,9 @@ def cookie_secure(request: Request) -> bool:
 
 
 def set_user_cookie(response: Response, request: Request, user_id: str) -> None:
-    """Sign this user in on `response`. The one place the login cookie is set —
-    password login, OAuth and dev login all come through here.
+    """Set the signed-in user's session cookie on the response.
+
+    Password login, OAuth, and development login all set the cookie here.
     """
     response.set_cookie(
         key=USER_COOKIE,
@@ -84,8 +86,9 @@ def set_user_cookie(response: Response, request: Request, user_id: str) -> None:
 
 
 def resolve_user_session(token: str | None) -> str | None:
-    """The user id a user-session cookie authenticates, or None (bad signature
-    or expired). User ids are uuid hex, so they carry no '.' of their own.
+    """Return the authenticated user ID, or None for an invalid session.
+
+    Session IDs are UUID hex strings and therefore contain no periods.
     """
     if not token:
         return None

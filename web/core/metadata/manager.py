@@ -1,10 +1,10 @@
-"""The database manager, composed from the domain mixins, plus the global
-singleton accessor.
+"""Compose the metadata database from domain mixins.
+
+This module also provides the process-wide database singleton accessor.
 """
 
 import threading
 
-from web.core.metadata._base import _DBBase
 from web.core.metadata.characters import CharacterMixin
 from web.core.metadata.conversations import ConversationMixin
 from web.core.metadata.imports import ImportMixin
@@ -15,7 +15,6 @@ from web.core.metadata.users import UserMixin
 
 
 class MetadataDB(
-    _DBBase,
     UserMixin,
     ConversationMixin,
     InstructionMixin,
@@ -24,8 +23,10 @@ class MetadataDB(
     ImportMixin,
     LibraryMixin,
 ):
-    """SQLAlchemy-based database manager. The engine, schema catch-up and the
-    locked session live on _DBBase; each domain's methods come from a mixin.
+    """Manage metadata through a SQLAlchemy engine.
+
+    The engine, schema catch-up, and locked session live on ``DBBase``; domain
+    methods come from the mixins.
     """
 
 

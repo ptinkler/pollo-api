@@ -37,7 +37,8 @@ def test_a_new_database_is_stamped_at_head(tmp_path):
 
 
 def test_an_unversioned_database_is_adopted_not_replayed(tmp_path):
-    """Replaying from 0001 fails on a populated database (0002 re-adds a
+    """Replaying from 0001 fails on a populated database (0002 re-adds a.
+
     column), so one without a version row is adopted at ADOPT_AT instead.
     """
     path = tmp_path / "old.db"
@@ -57,7 +58,8 @@ def test_an_unversioned_database_is_adopted_not_replayed(tmp_path):
 
 
 def test_adopting_still_runs_the_migrations_after_it(tmp_path):
-    """The point of adopting at ADOPT_AT rather than head: anything newer
+    """The point of adopting at ADOPT_AT rather than head: anything newer.
+
     must still run. 0027 rewrites stored Pollo model ids.
     """
     path = tmp_path / "old.db"

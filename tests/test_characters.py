@@ -20,7 +20,10 @@ def _make(client, name="Linh", description="Short black hair, red scarf", images
 
 
 class TestManagement:
+    """Tests for management."""
+
     def test_crud(self, client):
+        """Test that crud."""
         c = _make(client, images=2)
         assert c["name"] == "Linh"
         assert len(c["images"]) == 2
@@ -39,17 +42,19 @@ class TestManagement:
         assert client.get(f"/api/characters/{c['id']}").status_code == 404
 
     def test_unknown_image_in_reorder_is_rejected(self, client):
+        """Test that unknown image in reorder is rejected."""
         c = _make(client)
         assert client.patch(f"/api/characters/{c['id']}", json={"images": ["nope.png"]}).status_code == 400
 
     def test_image_limit(self, client, monkeypatch):
-
+        """Test that image limit."""
         monkeypatch.setattr(characters_mod, "MAX_IMAGES", 1)
         c = _make(client)
         r = client.post(f"/api/characters/{c['id']}/images", files={"file": ("a.png", _png_bytes(), "image/png")})
         assert r.status_code == 400
 
     def test_copy_image_from_chat(self, client, conv, chat):
+        """Test that copy image from chat."""
         (chat.conversation_dir(conv["id"]) / "g.png").write_bytes(_png_bytes())
         c = _make(client, images=0)
         r = client.post(
@@ -62,6 +67,7 @@ class TestManagement:
         assert bad.status_code == 400
 
     def test_adhoc_characters_belong_to_their_chat(self, client, conv, db):
+        """Test that adhoc characters belong to their chat."""
         other = client.post("/api/chat/conversations", json={}).json()
         saved = _make(client, name="Saved", images=0)
         adhoc = _make(client, name="Adhoc", images=0, conversation_id=conv["id"])
@@ -78,6 +84,7 @@ class TestManagement:
         assert saved["adhoc"] is False
 
     def test_promote(self, client, conv):
+        """Test that promote."""
         adhoc = _make(client, images=0, conversation_id=conv["id"])
         r = client.post(f"/api/characters/{adhoc['id']}/promote").json()
         assert r["adhoc"] is False
@@ -87,11 +94,13 @@ class TestManagement:
         assert client.get(f"/api/characters/{adhoc['id']}").status_code == 200
 
     def test_deleting_a_chat_deletes_its_adhoc_characters(self, client, conv):
+        """Test that deleting a chat deletes its adhoc characters."""
         adhoc = _make(client, conversation_id=conv["id"])
         client.delete(f"/api/chat/conversations/{conv['id']}")
         assert client.get(f"/api/characters/{adhoc['id']}").status_code == 404
 
     def test_attach_to_chat(self, client, conv):
+        """Test that attach to chat."""
         c = _make(client, images=0)
         r = client.patch(f"/api/chat/conversations/{conv['id']}", json={"character_ids": [c["id"]]})
         assert r.json()["character_ids"] == [c["id"]]
@@ -102,6 +111,8 @@ class TestManagement:
 
 
 class TestInChat:
+    """Tests for in chat."""
+
     def _attach(self, client, conv, *chars):
         client.patch(f"/api/chat/conversations/{conv['id']}", json={"character_ids": [c["id"] for c in chars]})
 
@@ -115,6 +126,7 @@ class TestInChat:
         return got
 
     def test_chat_model_is_told_and_tool_lists_names(self, client, conv, chat, monkeypatch):
+        """Test that chat model is told and tool lists names."""
         linh = _make(client)
         self._attach(client, conv, linh)
         seen = {}
@@ -131,6 +143,7 @@ class TestInChat:
         assert image_tool["function"]["parameters"]["properties"]["characters"]["items"]["enum"] == ["Linh"]
 
     def test_named_character_sends_description_and_images(self, client, conv, chat, monkeypatch):
+        """Test that named character sends description and images."""
         linh, bao = _make(client, images=2), _make(client, name="Bao", description="Tall", images=1)
         self._attach(client, conv, linh, bao)
         replies = iter(
@@ -160,6 +173,7 @@ class TestInChat:
         return client.get(f"/api/chat/conversations/{conv['id']}").json()["conversation"]["character_ids"]
 
     def test_short_name_means_the_attached_character_in_auto_mode(self, client, conv, chat, monkeypatch):
+        """Test that short name means the attached character in auto mode."""
         _chloe, muscle = self._overlapping_names(client, conv)
         # The model calls her by the short name, in the argument and its prompt
         replies = iter(
@@ -182,6 +196,7 @@ class TestInChat:
         assert self._attached_ids(client, conv) == [muscle["id"]]
 
     def test_short_name_is_ignored_when_ambiguous(self, client, conv, chat, monkeypatch):
+        """Test that short name is ignored when ambiguous."""
         a, b = _make(client, name="Chloe Muscle"), _make(client, name="Chloe Slim")
         self._attach(client, conv, a, b)
         replies = iter(
@@ -193,6 +208,7 @@ class TestInChat:
         assert "characters" not in ev[-1]["message"]["media"][0]["params"]
 
     def test_full_name_in_prompt_does_not_also_match_the_shorter_one(self, client, conv, chat, monkeypatch):
+        """Test that full name in prompt does not also match the shorter one."""
         chloe, muscle = _make(client, name="Chloe"), _make(client, name="Chloe Muscle")
         self._attach(client, conv, chloe, muscle)
         replies = iter([_tool_chunks("generate_image", {"prompt": "Chloe Muscle at the gym"}), _text_chunks("Done.")])
@@ -202,6 +218,7 @@ class TestInChat:
         assert ev[-1]["message"]["media"][0]["params"]["characters"] == [muscle["id"]]
 
     def test_image_mode_uses_every_attached_character(self, client, conv, chat, monkeypatch):
+        """Test that image mode uses every attached character."""
         linh, bao = _make(client), _make(client, name="Bao", images=1)
         self._attach(client, conv, linh, bao)
         got = self._capture(chat, monkeypatch)
@@ -241,6 +258,7 @@ class TestInChat:
         assert ev[-1]["message"]["media"][0]["params"]["refs"] == [f"char:{linh['id']}/{linh['images'][0]}", "g.png"]
 
     def test_character_refs_are_shared_round_robin(self, chat, client):
+        """Test that character refs are shared round robin."""
         a, b = _make(client, name="A", images=3), _make(client, name="B", images=3)
 
         refs = characters_mod.reference_refs(characters_mod.load([a["id"], b["id"]]), 3)
@@ -251,6 +269,7 @@ class TestInChat:
         ]
 
     def test_video_mode_does_not_use_characters(self, client, conv, chat, monkeypatch):
+        """Test that video mode does not use characters."""
         linh = _make(client)
         self._attach(client, conv, linh)
         sent = {}
@@ -266,6 +285,7 @@ class TestInChat:
         assert sent["prompt"] == "Linh dancing"
 
     def test_image_model_without_references_does_not_use_characters(self, client, conv, chat, db, monkeypatch):
+        """Test that image model without references does not use characters."""
         chat.catalogue.seed_models(
             {"text": [], "video": [], "image": [{"id": "i/model", "input_modalities": ["text"]}]}
         )
@@ -283,6 +303,7 @@ class TestInChat:
         assert db.get_conversation(conv["id"]).character_ids == [linh["id"]]
 
     def test_chat_model_without_tools_is_not_told_in_auto(self, client, conv, chat, monkeypatch):
+        """Test that chat model without tools is not told in auto."""
         chat.catalogue.seed_models(
             {
                 "image": [],
@@ -301,6 +322,7 @@ class TestInChat:
         assert not any("Linh" in str(m["content"]) for m in seen["m"] if m["role"] == "system")
 
     def test_chat_mode_tells_the_chat_model(self, client, conv, chat, monkeypatch):
+        """Test that chat mode tells the chat model."""
         self._attach(client, conv, _make(client))
         seen = {}
         monkeypatch.setattr(
@@ -329,6 +351,7 @@ class TestUseByName:
         return got
 
     def test_model_is_not_told_about_unattached_characters(self, client, conv, chat, monkeypatch):
+        """Test that model is not told about unattached characters."""
         _make(client, name="Linh")
         seen = {}
 
@@ -342,6 +365,7 @@ class TestUseByName:
         assert "Linh" not in json.dumps(seen["tools"])
 
     def test_naming_an_unattached_character_neither_uses_nor_attaches_it(self, client, conv, chat, db, monkeypatch):
+        """Test that naming an unattached character neither uses nor attaches it."""
         _make(client)
         replies = iter(
             [
@@ -362,6 +386,7 @@ class TestUseByName:
         assert db.get_conversation(conv["id"]).character_ids == []
 
     def test_image_mode_ignores_unattached_names(self, client, conv, chat, db, monkeypatch):
+        """Test that image mode ignores unattached names."""
         _make(client)
         self._capture(chat, monkeypatch)
         ev = _events(
@@ -374,6 +399,7 @@ class TestUseByName:
         assert db.get_conversation(conv["id"]).character_ids == []
 
     def test_name_in_the_prompt_counts_when_the_model_forgets_the_argument(self, client, conv, chat, monkeypatch):
+        """Test that name in the prompt counts when the model forgets the argument."""
         linh = _make(client)
         client.patch(f"/api/chat/conversations/{conv['id']}", json={"character_ids": [linh["id"]]})
         replies = iter([_tool_chunks("generate_image", {"prompt": "Linh reading in a café"}), _text_chunks("Done.")])
@@ -383,6 +409,7 @@ class TestUseByName:
         assert ev[-1]["message"]["media"][0]["params"]["characters"] == [linh["id"]]
 
     def test_create_character_from_the_latest_image_then_draw_them(self, client, conv, chat, db, monkeypatch):
+        """Test that create character from the latest image then draw them."""
         (chat.conversation_dir(conv["id"]) / "g.png").write_bytes(_png_bytes())
         db.add_chat_message(conv["id"], "user", "draw a girl")
         db.add_chat_message(
@@ -431,6 +458,7 @@ class TestUseByName:
         assert ev[-1]["message"]["media"][0]["params"]["refs"] == [f"char:{mai.id}/{mai.images[0]}"]
 
     def test_create_character_needs_an_image_and_a_new_name(self, client, conv, chat, monkeypatch):
+        """Test that create character needs an image and a new name."""
         _make(client, name="Linh")
         replies = iter(
             [
@@ -455,6 +483,7 @@ class TestReferenceCaps:
     """Chat images are capped by the image slider (default 6); character images never are."""
 
     def test_every_character_image_is_sent_beyond_the_chat_cap(self, client, conv, chat, db, monkeypatch):
+        """Test that every character image is sent beyond the chat cap."""
         linh, bao = _make(client, images=5), _make(client, name="Bao", images=4)
         client.patch(f"/api/chat/conversations/{conv['id']}", json={"character_ids": [linh["id"], bao["id"]]})
         # 8 pinned chat images: only the slider's number of them go
@@ -497,6 +526,7 @@ class TestReferenceCaps:
         assert len(got["input_images"]) == 9 + chat.constants.DEFAULT_IMAGE_LIMIT
 
     def test_slider_raises_the_chat_image_cap(self, client, conv, chat, db, monkeypatch):
+        """Test that slider raises the chat image cap."""
         db.add_chat_message(conv["id"], "user", "pics")
         for i in range(8):
             (chat.conversation_dir(conv["id"]) / f"p{i}.png").write_bytes(_png_bytes())
@@ -586,6 +616,7 @@ class TestReferenceCaps:
         assert params["refs_dropped"] == [ref(a, 2), ref(b, 2)]
 
     def test_composer_picks_switch_references_on_and_off(self, client, conv, chat, db, monkeypatch):
+        """Test that composer picks switch references on and off."""
         a = _make(client, name="A", images=3)
         client.patch(f"/api/chat/conversations/{conv['id']}", json={"character_ids": [a["id"]]})
         self._pins(chat, db, conv, 2)

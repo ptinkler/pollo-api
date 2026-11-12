@@ -1,4 +1,5 @@
-"""Building the model request and running generation: the chat-title helper,
+"""Building the model request and running generation: the chat-title helper,.
+
 conversation/history shaping, reference planning, moderation handling, and the
 image/video submit primitives shared by turns and media retries.
 """
@@ -6,8 +7,9 @@ image/video submit primitives shared by turns and media retries.
 import json
 import re
 import uuid
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from web import characters, providers, request_log
 from web.chat.catalogue import auto_ratio, model_info
@@ -16,12 +18,14 @@ from web.chat.helpers import conversation_dir, effective_ids
 from web.chat.models import RefChoices
 from web.chat.tools import AUDIO_TOOL_RESULT, IMAGE_TOOL_RESULT, TITLE_PROMPT, VIDEO_TOOL_RESULT
 from web.core.metadata import get_db
-from web.providers import openrouter, pollo, provider_for
+from web.core.metadata.models import Character, ChatMessage
+from web.providers import openrouter, pollo, stream_chat
+from web.types import JsonValue, VideoJob
 from web.uploads import file_to_data_url, is_blank_image
 
 # Chat APIs don't accept images inside assistant messages, so images the
 # model generated ride along with the next user message, after this label
-CARRIED_LABEL = {
+CARRIED_LABEL: dict[str, JsonValue] = {
     "type": "text",
     "text": "[The images you generated in your previous reply, attached so you can see them]",
 }
@@ -32,17 +36,21 @@ _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
 def _ask(model: str, prompt: str, max_seconds: float) -> tuple[str, float]:
-    """One short, non-streamed-to-the-UI completion: (the whole reply, its cost
-    in USD). For the asides a turn makes on its own — naming a chat, rewriting
+    """One short, non-streamed-to-the-UI completion: (the whole reply, its cost in USD).
+
+    For the asides a turn makes on its own — naming a chat, rewriting
     a prompt — not for the chat itself, which streams (see Turn._stream_round).
     """
     text, cost = "", 0.0
-    for chunk in provider_for(model).stream_chat(model, [{"role": "user", "content": prompt}], max_seconds=max_seconds):
+    messages: list[dict[str, JsonValue]] = [{"role": "user", "content": prompt}]
+    for chunk in stream_chat(model, messages, max_seconds=max_seconds):
         usage = chunk.get("usage")
-        if usage and usage.get("cost"):
-            cost += float(usage["cost"])
+        chunk_cost = usage.get("cost") if usage else None
+        if isinstance(chunk_cost, int | float | str) and not isinstance(chunk_cost, bool):
+            cost += float(chunk_cost)
         for choice in chunk.get("choices") or []:
-            text += (choice.get("delta") or {}).get("content") or ""
+            content = (choice.get("delta") or {}).get("content")
+            text += content if isinstance(content, str) else ""
     return text, cost
 
 
@@ -62,30 +70,37 @@ ENHANCE_PROMPT = (
 
 
 def enhance_prompt(model: str, prompt: str, kind: str) -> tuple[str, float]:
-    """(the prompt rewritten by the chat model, its cost in USD). Raises
-    ValueError when the model returns nothing usable.
+    """Rewrite a media prompt and return its cost.
+
+    Returns:
+        The rewritten prompt and its cost in USD.
+
+    Raises:
+        ValueError: If the model returns no usable prompt.
     """
     text, cost = _ask(model, ENHANCE_PROMPT.format(kind=kind, prompt=prompt[:4000]), ENHANCE_SECONDS)
     text = _THINK.sub("", text).strip().strip("\"'`").strip()
     if not text:
-        raise ValueError("The model returned no prompt")
+        raise ValueError("The model returned no prompt")  # noqa: TRY003
     return text, cost
 
 
 def _clean_title(text: str) -> str | None:
-    """The model's reply as a title: its first line, without a "Title:" label,
-    quotes, markdown or a full stop. None if nothing usable is left.
+    """Normalize a model reply into a short chat title.
+
+    Return None if no usable title remains after cleanup.
     """
     text = _THINK.sub("", text)
     line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
     line = re.sub(r"^(?:\*\*)?title(?:\*\*)?\s*:\s*", "", line, flags=re.IGNORECASE)
-    line = line.strip(" \t\"'`*#_“”‘’").rstrip(".").strip()
+    # Model-generated titles may wrap text in curly quotes; remove them too.
+    line = line.strip(" \t\"'`*#_“”‘’").rstrip(".").strip()  # noqa: RUF001 - accepted title punctuation
     if not line or len(line) > 80:
         return None
     return line
 
 
-def characters_note(attached: list) -> str:
+def characters_note(attached: list[Character]) -> str:
     """What the chat model is told about the attached characters ('' when there are none)."""
     if not attached:
         return ""
@@ -100,14 +115,15 @@ def characters_note(attached: list) -> str:
 
 def plan_refs(
     chat_refs: list[str],
-    chars: list,
+    chars: list[Character],
     image_limit: int | None,
     after: int | None = None,
     max_refs: int | None = None,
     choices: RefChoices | None = None,
 ) -> tuple[list[str], list[str]]:
-    """The reference images to send, and those left out because the model
-    takes fewer (`max_refs`, None = unknown). Chat images are capped at
+    """The reference images to send, and those left out because the model takes fewer (`max_refs`, None = unknown).
+
+    Chat images are capped at
     `image_limit` (None = all); character images aren't.
 
     They're sent in priority order, so a model that trims the list itself
@@ -116,7 +132,8 @@ def plan_refs(
     character's main image, the other chat images (pins, recent), then the
     characters' other images. Images the user switched off never go.
     """
-    on, off = (choices.on, set(choices.off)) if choices else ([], set())
+    on: list[str] = choices.on if choices else []
+    off: set[str] = set(choices.off) if choices else set()
     kept = [r for r in dedupe(chat_refs) if r not in off]
     lead = kept if after is None else [r for r in dedupe(chat_refs[:after]) if r not in off]
     chat_refs = kept[:image_limit]
@@ -130,9 +147,12 @@ def plan_refs(
     return ordered[:max_refs], ordered[max_refs:]
 
 
-def param_characters(params: dict) -> list:
+def param_characters(params: Mapping[str, JsonValue]) -> list[Character]:
     """The characters a media item was made with (deleted ones drop out)."""
-    return characters.load(params.get("characters"), get_db())
+    ids = params.get("characters")
+    if not isinstance(ids, list) or not all(isinstance(item, int) and not isinstance(item, bool) for item in ids):
+        return []
+    return characters.load(cast("list[int]", ids), get_db())
 
 
 def _ref_file(conv_id: str, ref: str) -> Path:
@@ -140,8 +160,9 @@ def _ref_file(conv_id: str, ref: str) -> Path:
     return characters.ref_path(ref) or conversation_dir(conv_id) / ref
 
 
-def _history_window(history: list, limit: int | None) -> list:
-    """The last `limit` messages (None = all), starting on a user message so
+def _history_window(history: list[ChatMessage], limit: int | None) -> list[ChatMessage]:
+    """The last `limit` messages (None = all), starting on a user message so.
+
     the model never sees a reply without the prompt that caused it.
     """
     if not limit or len(history) <= limit:
@@ -154,15 +175,15 @@ def _history_window(history: list, limit: int | None) -> list:
 
 def conversation(
     conv_id: str,
-    history: list,
+    history: list[ChatMessage],
     history_limit: int | None,
     vision: bool,
     as_tool_calls: bool = False,
     image_limit: int | None = DEFAULT_IMAGE_LIMIT,
-) -> list[dict]:
-    """The chat history as OpenRouter messages (no system prompt): the last
-    `history_limit` messages, with the `image_limit` most recent images as
-    pixels (None = all).
+) -> list[dict[str, JsonValue]]:
+    """Convert chat history into OpenRouter messages.
+
+    Include recent images as pixels according to `image_limit` (None = all).
     Shared by the chat model and conversational image models.
 
     `as_tool_calls` (only when tools are offered — providers reject tool
@@ -171,11 +192,13 @@ def conversation(
     """
     history = _history_window(history, history_limit)
     pixels = _pixels_for(conversation_dir(conv_id), _pixel_files(history, image_limit if vision else 0))
-    messages: list[dict] = []
-    carried: list[dict] = []
+    messages: list[dict[str, JsonValue]] = []
+    carried: list[dict[str, JsonValue]] = []
     for msg in history:
         if msg.role == "user":
-            parts = ([CARRIED_LABEL, *carried] if carried else []) + _user_parts(msg, pixels)
+            parts: list[dict[str, JsonValue]] = ([CARRIED_LABEL, *carried] if carried else []) + _user_parts(
+                msg, pixels
+            )
             carried = []
             if parts:
                 messages.append({"role": "user", "content": parts})
@@ -187,38 +210,41 @@ def conversation(
     return messages
 
 
-def _pixel_files(history: list, budget: int | None) -> set[str]:
-    """The most recent `budget` images (None = all) — uploaded or generated —
+def _pixel_files(history: list[ChatMessage], budget: int | None) -> set[str]:
+    """The most recent `budget` images (None = all) — uploaded or generated —.
+
     which go over as pixels so the model can see what's in them; older ones
     are described by a note instead.
     """
-    images = [
-        item["file"]
-        for msg in reversed(history)
-        for item in reversed(msg.media)
-        if item["kind"] == "image" and item.get("file") and item.get("status", "done") == "done"
-    ]
+    images: list[str] = []
+    for msg in reversed(history):
+        for item in reversed(msg.media):
+            file = item.get("file")
+            if item.get("kind") == "image" and isinstance(file, str) and item.get("status", "done") == "done":
+                images.append(file)
     return set(images if budget is None else images[:budget])
 
 
-def _pixels_for(conv_dir: Path, files: set[str]):
+def _pixels_for(conv_dir: Path, files: set[str]) -> Callable[[dict[str, JsonValue]], dict[str, JsonValue] | None]:
     """A function giving an image item's pixels as a message part (None if it doesn't go as pixels)."""
 
-    def pixels(item: dict) -> dict | None:
+    def pixels(item: dict[str, JsonValue]) -> dict[str, JsonValue] | None:
         f = item.get("file")
-        if f in files and (conv_dir / f).is_file():
+        if isinstance(f, str) and f in files and (conv_dir / f).is_file():
             return {"type": "image_url", "image_url": {"url": file_to_data_url(conv_dir / f)}}
         return None
 
     return pixels
 
 
-def _user_parts(msg, pixels) -> list[dict]:
-    parts = [{"type": "text", "text": msg.content}] if msg.content else []
+def _user_parts(
+    msg: ChatMessage, pixels: Callable[[dict[str, JsonValue]], dict[str, JsonValue] | None]
+) -> list[dict[str, JsonValue]]:
+    parts: list[dict[str, JsonValue]] = [{"type": "text", "text": msg.content}] if msg.content else []
     return parts + [pixels(item) or {"type": "text", "text": "[user attached an image]"} for item in msg.media]
 
 
-def _assistant_messages(msg, as_tool_calls: bool) -> list[dict]:
+def _assistant_messages(msg: ChatMessage, as_tool_calls: bool) -> list[dict[str, JsonValue]]:
     """A reply as messages: with its media as the tool calls that made it, or as notes in the text."""
     generated = [i for i in msg.media if i.get("source") == "generated" and i.get("prompt")]
     if as_tool_calls and generated:
@@ -241,19 +267,19 @@ def _assistant_messages(msg, as_tool_calls: bool) -> list[dict]:
 
 def image_context(
     conv_id: str,
-    history: list,
+    history: list[ChatMessage],
     history_limit: int | None,
     reply_text: str,
     prompt: str | None,
     refs: list[str],
     instructions: str | None = None,
-    chars: list | None = None,
+    chars: list[Character] | None = None,
     image_limit: int | None = DEFAULT_IMAGE_LIMIT,
-) -> list[dict]:
-    """What a conversational image model is sent: the conversation, then —
-    when the chat model called the tool — its reply so far and its prompt,
-    verbatim, with any reference images it asked for. In Image mode
-    (prompt=None) the user's own message is already the last one.
+) -> list[dict[str, JsonValue]]:
+    """Build the conversation context sent to an image model.
+
+    For tool calls, append the chat reply, prompt, and requested references.
+    In Image mode (`prompt=None`), the user's message is already last.
     """
     messages = conversation(conv_id, history, history_limit, vision=True, image_limit=image_limit)
     system = [s for s in (instructions, characters.describe(chars or [])) if s]
@@ -262,26 +288,37 @@ def image_context(
         if reply_text.strip():
             messages.append({"role": "assistant", "content": reply_text.strip()})
         paths = [_ref_file(conv_id, f) for f in refs]
-        parts: list[dict] = [{"type": "text", "text": prompt}]
-        parts += [{"type": "image_url", "image_url": {"url": file_to_data_url(p)}} for p in paths if p.is_file()]
+        parts: list[dict[str, JsonValue]] = [{"type": "text", "text": prompt}]
+        for path in paths:
+            if path.is_file():
+                image_url: dict[str, JsonValue] = {"url": file_to_data_url(path)}
+                parts.append({"type": "image_url", "image_url": image_url})
         messages.append({"role": "user", "content": parts})
     elif chars:
         # Image mode: the user's message is last; their characters' images go with it
         paths = [_ref_file(conv_id, f) for f in refs if f.startswith(characters.REF_PREFIX)]
         if paths and messages and messages[-1]["role"] == "user":
-            messages[-1] = {
-                **messages[-1],
-                "content": messages[-1]["content"]
-                + [{"type": "image_url", "image_url": {"url": file_to_data_url(p)}} for p in paths if p.is_file()],
-            }
+            content = messages[-1]["content"]
+            if isinstance(content, list):
+                messages[-1] = {
+                    **messages[-1],
+                    "content": [
+                        *content,
+                        *[
+                            {"type": "image_url", "image_url": {"url": file_to_data_url(p)}}
+                            for p in paths
+                            if p.is_file()
+                        ],
+                    ],
+                }
     return messages
 
 
 def conversation_instructions(conv_id: str) -> str | None:
-    """The instructions a chat uses — its defaults' and its own — flattened for
-    the model (user's text, verbatim): every snippet from the groups (in group
-    order), then the single snippets — each sent once — joined by blank lines.
-    None when nothing with content is attached.
+    """Return the chat's active instructions as text for the model.
+
+    Group snippets precede individual snippets; each is included once.
+    Return None when no attached instruction has content.
     """
     db = get_db()
     conv = db.get_conversation(conv_id)
@@ -304,28 +341,35 @@ def conversation_instructions(conv_id: str) -> str | None:
 
 
 def is_conversational(image_model: str | None) -> bool:
+    """Return whether the selected image model accepts conversation context."""
     info = model_info("image", image_model)
     return bool(info and info.get("conversational"))
 
 
 def dedupe(files: list[str]) -> list[str]:
+    """Remove duplicate filenames while preserving their original order."""
     return list(dict.fromkeys(files))
 
 
-def _history_tool_call(item: dict) -> dict:
-    params = item.get("params") or {}
-    args: dict[str, Any] = {"prompt": item["prompt"]}
+def _json_object(value: JsonValue) -> Mapping[str, JsonValue]:
+    return cast("Mapping[str, JsonValue]", value) if isinstance(value, Mapping) else {}
+
+
+def _history_tool_call(item: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    params = _json_object(item.get("params"))
+    prompt = item.get("prompt")
+    args: dict[str, JsonValue] = {"prompt": prompt if isinstance(prompt, str) else ""}
     if params.get("aspect_ratio"):
         args["aspect_ratio"] = params["aspect_ratio"]
     # Replay the reference choices too, so the history doesn't read as a
     # run of reference-free calls that the model then imitates
-    if item["kind"] == "image":
-        args.update(params.get("ref_args") or {})
+    if item.get("kind") == "image":
+        args.update(_json_object(params.get("ref_args")))
     return {
-        "id": f"call_{item['id']}",
+        "id": f"call_{item.get('id', '')}",
         "type": "function",
         "function": {
-            "name": f"generate_{item['kind']}",
+            "name": f"generate_{item.get('kind', 'video')}",
             "arguments": json.dumps(args),
         },
     }
@@ -334,21 +378,30 @@ def _history_tool_call(item: dict) -> dict:
 _TOOL_RESULTS = {"image": IMAGE_TOOL_RESULT, "audio": AUDIO_TOOL_RESULT}
 
 
-def _history_tool_result(item: dict) -> dict:
+def _history_tool_result(item: dict[str, JsonValue]) -> dict[str, JsonValue]:
     if item.get("status") == "error":
         return {"ok": False, "error": item.get("error") or "failed"}
-    result: dict[str, Any] = {"ok": True, "result": _TOOL_RESULTS.get(item["kind"], VIDEO_TOOL_RESULT)}
-    refs = (item.get("params") or {}).get("refs") or []
-    if item["kind"] == "image" and refs:
+    kind = item.get("kind")
+    result: dict[str, JsonValue] = {
+        "ok": True,
+        "result": _TOOL_RESULTS.get(kind, VIDEO_TOOL_RESULT) if isinstance(kind, str) else VIDEO_TOOL_RESULT,
+    }
+    params = item.get("params")
+    refs = params.get("refs") if isinstance(params, Mapping) else None
+    if kind == "image" and isinstance(refs, list):
         result["reference_images"] = len(refs)
     return result
 
 
-def _media_note(item: dict) -> str:
-    kind = item["kind"]
+def _media_note(item: dict[str, JsonValue]) -> str:
+    kind = item.get("kind")
+    kind = kind if isinstance(kind, str) else "file"
     if item.get("source") == "upload":
         return f"[user attached a {kind}]"
-    state = {"done": f"generated {kind}", "pending": f"{kind} rendering", "error": f"{kind} failed"}[item["status"]]
+    states = {"done": f"generated {kind}", "pending": f"{kind} rendering", "error": f"{kind} failed"}
+    status = item.get("status")
+    state = states.get(status) if isinstance(status, str) else None
+    state = state or f"generated {kind}"
     return f"[{state}: {item.get('prompt') or ''}]"
 
 
@@ -360,37 +413,43 @@ MODERATION = re.compile(
 
 
 def is_moderation_error(e: openrouter.OpenRouterError) -> bool:
-    """OpenRouter's own moderation returns 403; providers phrase their
-    content-policy refusals in many ways, so also match on the message.
-    Pollo's 403 means "model not enabled for API access", so for Pollo only
-    the message counts.
+    """Identify provider errors that represent a content moderation refusal.
+
+    OpenRouter moderation returns 403. Pollo uses 403 for disabled models, so
+    its error message must match the moderation terms instead.
     """
     if isinstance(e, pollo.PolloError):
         return bool(MODERATION.search(str(e)))
     return e.status == 403 or bool(MODERATION.search(str(e)))
 
 
-def failure_fields(e: openrouter.OpenRouterError) -> dict[str, Any]:
-    """A failed media item's fields. Called right after the generation call,
+def failure_fields(e: openrouter.OpenRouterError) -> dict[str, JsonValue]:
+    """A failed media item's fields.
+
+    Called right after the generation call,
     on its thread: what it sent and got back comes from the error, or — when
     the call itself worked but the result didn't (a Pollo task that failed, a
     black image) — from the request log.
     """
-    fields = {"status": "error", "error": str(e), "moderated": is_moderation_error(e)}
-    return {**fields, **exchange_fields(getattr(e, "log_entry", None) or request_log.take_last())}
+    fields: dict[str, JsonValue] = {"status": "error", "error": str(e), "moderated": is_moderation_error(e)}
+    raw_entry = cast("object", getattr(e, "log_entry", None))
+    entry = cast("Mapping[str, JsonValue]", raw_entry) if isinstance(raw_entry, Mapping) else request_log.take_last()
+    return {**fields, **exchange_fields(entry)}
 
 
-def exchange_fields(entry: dict | None) -> dict[str, Any]:
-    """A request-log entry as media item fields: the body sent to the provider
+def exchange_fields(entry: Mapping[str, JsonValue] | None) -> dict[str, JsonValue]:
+    """A request-log entry as media item fields: the body sent to the provider.
+
     and what it answered, for the UI's "Request" view.
     """
     return {"request": entry.get("request"), "response": entry.get("response")} if entry else {}
 
 
-def take_log(result: dict) -> tuple[dict, dict[str, Any]]:
+def take_log(result: dict[str, JsonValue]) -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
     """(a generation's settings/job, minus its request-log entry; that entry as media item fields)."""
     result = dict(result)
-    return result, exchange_fields(result.pop("log", None))
+    entry = result.pop("log", None)
+    return result, exchange_fields(entry if isinstance(entry, Mapping) else None)
 
 
 BLACK_IMAGE_ERROR = (
@@ -401,26 +460,34 @@ BLACK_IMAGE_ERROR = (
 
 
 def run_image_generation(
-    conv_id: str, model: str, prompt: str, params: dict[str, Any], context: list[dict] | None = None
-) -> tuple[list[str], float | None, int | None, dict[str, Any]]:
-    """Generate and save images; returns (filenames, dollar cost, Pollo credits,
-    the params actually sent — Pollo and Venice, defaults included — for display).
-    With `context` (conversational models) the model gets the conversation;
-    otherwise the Images API — or Pollo, or Venice — gets the prompt plus any reference images.
+    conv_id: str,
+    model: str,
+    prompt: str,
+    params: dict[str, JsonValue],
+    context: list[dict[str, JsonValue]] | None = None,
+) -> tuple[list[str], float | None, int | None, dict[str, JsonValue]]:
+    """Generate images and return saved files, cost, credits, and sent parameters.
+
+    Conversational models receive `context`; other providers receive the prompt
+    and any reference images.
     """
     conv_dir = conversation_dir(conv_id)
-    refs = [p for p in (_ref_file(conv_id, f) for f in params.get("refs") or []) if p.is_file()]
+    ref_values = params.get("refs")
+    ref_names = [ref for ref in ref_values if isinstance(ref, str)] if isinstance(ref_values, list) else []
+    refs = [p for p in (_ref_file(conv_id, ref) for ref in ref_names) if p.is_file()]
     if context is None:
         prompt = characters.with_characters(prompt, param_characters(params))
     request_log.forget_last()
     # An unset ratio ("Ratio: auto") becomes the model's own auto value when it
     # has one, so it stays automatic instead of falling back to 16:9.
-    aspect_ratio = params.get("aspect_ratio") or auto_ratio("image", model)
+    ratio = params.get("aspect_ratio")
+    aspect_ratio = ratio if isinstance(ratio, str) else auto_ratio("image", model)
+    resolution = params.get("resolution")
     images, cost, credits, sent = providers.generate_image(
         model,
         prompt,
         aspect_ratio=aspect_ratio,
-        resolution=params.get("resolution"),
+        resolution=resolution if isinstance(resolution, str) else None,
         ref_paths=refs,
         context=context,
         session_id=conv_id,
@@ -436,15 +503,17 @@ def run_image_generation(
     return names, cost, credits, {**sent, "log": request_log.take_last()}
 
 
-def submit_video_generation(conv_id: str, model: str, prompt: str, params: dict[str, Any]) -> dict:
-    """Start a video job on the model's provider. Returns the job plus
+def submit_video_generation(conv_id: str, model: str, prompt: str, params: dict[str, Any]) -> VideoJob:
+    """Start a video job on the model's provider.
+
+    Returns the job plus
     "log": what was sent and answered (from the request log).
     """
     request_log.forget_last()
     return {**_submit_video(conv_id, model, prompt, params), "log": request_log.take_last()}
 
 
-def _submit_video(conv_id: str, model: str, prompt: str, params: dict[str, Any]) -> dict:
+def _submit_video(conv_id: str, model: str, prompt: str, params: dict[str, Any]) -> VideoJob:
     frame = _ref_file(conv_id, params["first_frame"]) if params.get("first_frame") else None
     prompt = characters.with_characters(prompt, param_characters(params))
     # An unset ratio uses the model's own auto value when it has one (matching

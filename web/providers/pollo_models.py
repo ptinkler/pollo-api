@@ -1,7 +1,7 @@
-"""How Pollo's models are presented: labels, types and which options each one
-takes. A model's lengths, ratios and resolutions are NOT here — they live
-with its endpoint in web/providers/pollo_engine/ (one table per kind), which
-is the single source for them.
+"""Labels, types, and options supported by Pollo models.
+
+Lengths, ratios, and resolutions live with the model endpoints in
+``web/providers/pollo_engine/``, the single source for those values.
 """
 
 # "hidden": the reason a model is left out of the model pickers unless

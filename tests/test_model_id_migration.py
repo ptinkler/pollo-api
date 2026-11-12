@@ -25,6 +25,7 @@ def _migration():
 
 @pytest.fixture
 def bind():
+    """Provide the bind fixture."""
     eng = sa.create_engine("sqlite://")
     with eng.begin() as c:
         c.execute(
@@ -40,6 +41,7 @@ def bind():
 
 
 def test_rewrites_every_stored_id(bind):
+    """Test that rewrites every stored id."""
     mod = _migration()
     bind.execute(
         sa.text(
@@ -91,6 +93,7 @@ def test_rewrites_every_stored_id(bind):
 
 
 def test_is_idempotent_and_reversible(bind):
+    """Test that is idempotent and reversible."""
     mod = _migration()
     bind.execute(sa.text("INSERT INTO chat_conversations VALUES ('c', NULL, 'pollo/seedreamv1', NULL, NULL)"))
     assert mod.rewrite(bind) == 1
@@ -101,6 +104,7 @@ def test_is_idempotent_and_reversible(bind):
 
 
 def test_leaves_unreadable_json_alone(bind):
+    """Test that leaves unreadable json alone."""
     mod = _migration()
     bind.execute(sa.text("INSERT INTO chat_messages VALUES (1, NULL, 'pollo/ not json {')"))
     assert mod.rewrite(bind) == 0

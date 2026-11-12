@@ -19,6 +19,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Create the chat tables."""
     # MetadataDB() runs create_all() on startup, so the tables may already
     # exist if the app ran before this migration — skip them in that case.
     existing = set(sa.inspect(op.get_bind()).get_table_names())
@@ -59,6 +60,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop the chat tables."""
     op.drop_index("ix_chat_messages_conversation_id", table_name="chat_messages")
     op.drop_table("chat_messages")
     op.drop_index("ix_chat_conversations_updated_at", table_name="chat_conversations")

@@ -1,28 +1,36 @@
-"""The database manager's shared infrastructure: engine setup, the SQLite
-pragmas, the locked session context manager, the small list/get/save helpers
-the domain mixins share, and the one cross-domain helper (_detach_id).
+"""Provide infrastructure shared by the metadata database mixins.
 
-The schema itself is Alembic's — see web/core/metadata/schema.py.
+This module configures the engine and SQLite pragmas, provides the locked
+session context manager and shared list/get/save helpers, and detaches ids from
+JSON-backed lists. Alembic owns the schema; see ``schema.py``.
 """
 
+import sqlite3
 import threading
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TypeVar, cast
 
 import sqlalchemy as sa
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import InstrumentedAttribute, Session
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.sql.elements import ColumnElement
 
 from web.core.config import DB_PATH
 from web.core.metadata.models import Base
+from web.types import JsonValue
+
+ModelT = TypeVar("ModelT", bound=Base)
+OrderByT = TypeVar("OrderByT")
 
 
-class _DBBase:
-    """Engine, schema catch-up and the locked session context the domain mixins
-    (users, conversations, …) build on.
+class DBBase:
+    """Provide the engine and locked sessions used by domain mixins.
+
+    Also handles fresh-database initialization and shared ORM helpers.
     """
 
     def __init__(self, db_path: Path | None = None) -> None:
@@ -41,7 +49,7 @@ class _DBBase:
         )
 
         @event.listens_for(self.engine, "connect")
-        def _set_sqlite_pragma(dbapi_conn, connection_record) -> None:
+        def _set_sqlite_pragma(dbapi_conn: sqlite3.Connection, _connection_record: sa.pool.ConnectionPoolEntry) -> None:
             cursor = dbapi_conn.cursor()
             cursor.execute("PRAGMA journal_mode=DELETE")
             cursor.execute("PRAGMA synchronous=NORMAL")
@@ -57,7 +65,7 @@ class _DBBase:
         self._fresh = fresh
 
     @contextmanager
-    def _session(self):
+    def _session(self) -> Generator[Session]:
         """Yield a Session while holding the thread lock.
 
         Because StaticPool shares one raw connection across threads, we
@@ -70,7 +78,11 @@ class _DBBase:
     # ── small helpers the domain mixins share. Each opens a session, does the
     #    one thing, and detaches what it returns so callers hold plain objects.
 
-    def _list(self, model, order_by=None) -> list:
+    def _list(
+        self,
+        model: type[ModelT],
+        order_by: ColumnElement[OrderByT] | InstrumentedAttribute[OrderByT] | None = None,
+    ) -> list[ModelT]:
         with self._session() as session:
             query = session.query(model)
             items = (query.order_by(order_by) if order_by is not None else query).all()
@@ -78,14 +90,14 @@ class _DBBase:
                 session.expunge(item)
             return items
 
-    def _get(self, model, pk):
+    def _get(self, model: type[ModelT], pk: int | str) -> ModelT | None:
         with self._session() as session:
             item = session.get(model, pk)
             if item:
                 session.expunge(item)
             return item
 
-    def _save(self, model, pk, **fields: Any):
+    def _save(self, model: type[ModelT], pk: int | str | None, **fields: JsonValue) -> ModelT | None:
         """Create (pk None) or update one row; None if the pk isn't there."""
         with self._session() as session:
             if pk is None:
@@ -97,18 +109,26 @@ class _DBBase:
                     return None
                 for key, value in fields.items():
                     setattr(item, key, value)
-                item.updated_at = datetime.now()
+                setattr(item, "updated_at", datetime.now().astimezone().replace(tzinfo=None))  # noqa: B010
             session.commit()
             session.refresh(item)
             session.expunge(item)
             return item
 
     @staticmethod
-    def _detach_id(session, model, json_column, list_attr: str, target_id: int) -> None:
-        """Remove target_id from the JSON id-list (`list_attr`) of every row
-        whose `json_column` text mentions it (exact check after the LIKE).
+    def _detach_id(
+        session: Session,
+        model: type[ModelT],
+        json_column: InstrumentedAttribute[OrderByT],
+        list_attr: str,
+        target_id: int,
+    ) -> None:
+        """Remove an id from a JSON-backed list on matching rows.
+
+        The SQL ``LIKE`` narrows the rows; membership is checked exactly
+        before the id is removed.
         """
         for row in session.query(model).filter(json_column.like(f"%{target_id}%")).all():
-            ids = getattr(row, list_attr)
+            ids = cast("list[int]", getattr(row, list_attr))
             if target_id in ids:
                 setattr(row, list_attr, [i for i in ids if i != target_id])

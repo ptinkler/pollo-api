@@ -1,20 +1,24 @@
-"""Credit estimates from Pollo itself: every generation endpoint has an
-".../estimate" twin (docs.pollo.ai/openapi.json, 2026-10-18) that takes the
-same body as the generation request and returns its price without starting
-a task. The Generate page asks while the form
-changes, so answers are cached; the media URLs are placeholders (prices
-depend on the settings, not on which image goes in), so nothing is
-uploaded for an estimate. Checked 2026-10-18: they don't cost credits.
+"""Credit estimates from Pollo's generation endpoints.
+
+The ``.../estimate`` endpoints take the generation body and return a price
+without starting a task. Form estimates are cached and use placeholder media
+URLs because the price depends on settings, not file contents.
 """
+
+from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING
 
 import requests
 
 from web.core.cache import MISS, TTLCache
 from web.core.cloudflare import is_cloudflare_block
+
+if TYPE_CHECKING:
+    from web.providers.pollo_engine.registry import PolloGenerator
+    from web.types import JsonValue
 
 log = logging.getLogger(__name__)
 
@@ -35,10 +39,10 @@ TIMEOUT = 15
 _cache = TTLCache(CACHE_SECONDS, maxsize=1024)
 
 
-def estimate(generator) -> dict | None:
-    """{"credits": what it would cost, "full_credits": before any discount}
-    for the generator's request, or None if Pollo can't say (no estimate
-    endpoint for it, an error, or not reachable).
+def estimate(generator: PolloGenerator) -> dict | None:
+    """Return the request's estimated and undiscounted credit costs, if known.
+
+    Returns ``None`` if Pollo has no estimate endpoint or cannot be reached.
     """
     url = getattr(generator, "estimate_url", None)
     if not url:
@@ -58,12 +62,14 @@ def estimate(generator) -> dict | None:
 
 
 def clear_cache() -> None:
+    """Clear cached estimate responses."""
     _cache.clear()
 
 
 def _ask(url: str, payload: dict, api_key: str | None) -> tuple[dict | None, bool]:
-    """(the estimate or None, whether the answer can be cached — a refusal
-    can, a server hiccup or a Cloudflare block can't).
+    """Return the estimate and whether it can be cached.
+
+    Refusals can be cached; server hiccups and Cloudflare blocks cannot.
     """
     headers = {"x-api-key": api_key or "", "Content-Type": "application/json"}
     resp = requests.post(url, json=payload, headers=headers, timeout=TIMEOUT)
@@ -79,10 +85,11 @@ def _ask(url: str, payload: dict, api_key: str | None) -> tuple[dict | None, boo
     return _credits(body.get("data", body) if isinstance(body, dict) else None), True
 
 
-def _credits(data: Any) -> dict | None:
-    """The price out of an estimate answer: `cost`, or `discountCost` when
-    the account gets a discount. `totalCost` is accepted as an older spelling
-    of the undiscounted price.
+def _credits(data: JsonValue) -> dict | None:
+    """Extract discounted and undiscounted credit costs from an estimate.
+
+    ``discountCost`` is used when available; ``totalCost`` is an older name
+    for the undiscounted price.
     """
     if not isinstance(data, dict):
         return None
@@ -94,7 +101,7 @@ def _credits(data: Any) -> dict | None:
     return {"credits": credits, "full_credits": full if full is not None else credits}
 
 
-def _number(value: Any) -> int | float | None:
+def _number(value: JsonValue) -> int | float | None:
     try:
         n = float(value)
     except (TypeError, ValueError):

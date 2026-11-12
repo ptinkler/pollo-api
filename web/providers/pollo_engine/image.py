@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from web.core.config import POLLO_GENERATION_BASE
 from web.providers.pollo_engine._shared import parse_aspect_ratio
+
+if TYPE_CHECKING:
+    from web.types import JsonValue
 
 _V1_IMAGE_DEFAULTS: dict[str, Any] = {
     "VALID_RATIOS": (),
@@ -205,15 +208,17 @@ IMAGE_MODELS: dict[str, dict[str, Any]] = {
 
 
 def img_cfg(model_id: str) -> dict[str, Any]:
+    """Return defaults and model-specific settings for an image model."""
     return {**_V1_IMAGE_DEFAULTS, **IMAGE_MODELS[model_id]}
 
 
 def image_model_url(model_id: str) -> str:
+    """Return the generation endpoint for an image model."""
     c = img_cfg(model_id)
     return c.get("V1_URL") or f"{POLLO_GENERATION_BASE}/{c['PROVIDER']}/{c['MODEL']}/image"
 
 
-def _tool_payload(c: dict[str, Any], image_url: str | None, **kw: Any) -> dict[str, Any]:
+def _tool_payload(c: dict[str, object], image_url: str | None, **kw: JsonValue) -> dict[str, Any]:
     """An image tool: {image} (+ upscale's integer scale from "2x"-style values)."""
     image = image_url or next(iter(kw.get("images") or []), None)
     if not image:
@@ -225,8 +230,8 @@ def _tool_payload(c: dict[str, Any], image_url: str | None, **kw: Any) -> dict[s
     return {"input": attrs}
 
 
-def image_payload(model_id: str, *, prompt: str, image_url: str | None, **kw: Any) -> dict[str, Any]:
-    """Build the image API body."""
+def image_payload(model_id: str, *, prompt: str, image_url: str | None, **kw: JsonValue) -> dict[str, Any]:
+    """Build the image API request body."""
     c = img_cfg(model_id)
     if c.get("TOOL"):
         return _tool_payload(c, image_url, **kw)

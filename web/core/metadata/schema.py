@@ -36,11 +36,11 @@ def _config(db_path: Path) -> Config:
 
 
 def ensure_schema(engine: sa.Engine, db_path: Path, fresh: bool) -> None:
-    """Stamp an unversioned database, then upgrade to head. Never raises: a
-    server that can't migrate should still start and say so.
+    """Bring an unversioned database up to the current Alembic revision.
 
-    The engine is disposed first. Our connections hold
-    `PRAGMA locking_mode=EXCLUSIVE` for their lifetime (see _base.py), so
+    Failures are logged rather than raised so a server can still start. The
+    engine is disposed first because its connections hold
+    ``PRAGMA locking_mode=EXCLUSIVE`` (see ``_base.py``), so
     while one is open Alembic's own connection can't write — it would block
     until SQLite's busy timeout and then fail. Disposing releases the lock;
     the pool reconnects on the next query.

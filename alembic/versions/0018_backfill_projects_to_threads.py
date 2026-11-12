@@ -27,6 +27,7 @@ IMPORT_SOURCE = "migrated-project"
 
 
 def upgrade() -> None:
+    """Backfill projects into threads."""
     bind = op.get_bind()
     insp = sa.inspect(bind)
     # Columns later migrations expect (0020 adds user_id, 0022 adds kind); both
@@ -40,6 +41,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove threads created by the project backfill."""
     # Remove any threads the original backfill created (by raw SQL, since the
     # ORM models are gone).
     bind = op.get_bind()

@@ -14,13 +14,17 @@ anything another user must not see belongs under a per-tenant key.
 import threading
 import time
 from collections import OrderedDict
-from typing import Any
+
 
 # Tells a cached None apart from a miss, for callers that cache "no answer".
-MISS: Any = object()
+class _Missing:
+    """Sentinel returned for cache misses that differ from a cached None."""
 
 
-class TTLCache:
+MISS = _Missing()
+
+
+class TTLCache[K, V]:
     """A bounded, expiring, thread-safe mapping.
 
     `get` returns `default` for an entry that is missing or past its time;
@@ -34,9 +38,10 @@ class TTLCache:
         self._ttl = ttl
         self._maxsize = maxsize
         self._lock = threading.Lock()
-        self._entries: OrderedDict[Any, tuple[float, Any]] = OrderedDict()
+        self._entries: OrderedDict[K, tuple[float, V]] = OrderedDict()
 
-    def get(self, key: Any, default: Any = None) -> Any:
+    def get(self, key: K, default: V | None = None) -> V | None:
+        """Return a live value for ``key``, or ``default`` on a miss."""
         with self._lock:
             entry = self._entries.get(key)
             if entry is None:
@@ -46,7 +51,8 @@ class TTLCache:
                 return default
             return entry[1]
 
-    def put(self, key: Any, value: Any) -> None:
+    def put(self, key: K, value: V) -> None:
+        """Store ``value`` under ``key``, evicting expired or oldest entries."""
         with self._lock:
             now = time.monotonic()
             self._entries[key] = (now, value)
@@ -57,6 +63,7 @@ class TTLCache:
                 self._entries.popitem(last=False)
 
     def clear(self) -> None:
+        """Remove all entries from the cache."""
         with self._lock:
             self._entries.clear()
 

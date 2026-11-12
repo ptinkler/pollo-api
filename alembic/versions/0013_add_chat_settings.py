@@ -24,6 +24,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Create chat settings."""
     bind = op.get_bind()
     insp = sa.inspect(bind)
     if "chat_settings" not in insp.get_table_names():
@@ -51,9 +52,10 @@ def upgrade() -> None:
     placeholders = ", ".join(["1", ":updated_at", *(f":{k}" for k in values)])
     bind.execute(
         sa.text(f"INSERT INTO chat_settings ({cols}) VALUES ({placeholders})"),
-        {"updated_at": datetime.now(), **values},
+        {"updated_at": datetime.now().astimezone().replace(tzinfo=None), **values},
     )
 
 
 def downgrade() -> None:
+    """Drop chat settings."""
     op.drop_table("chat_settings")

@@ -19,6 +19,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Create generation favourites."""
     # MetadataDB() creates tables on startup too, so skip it if it's there
     if "generation_favourites" in sa.inspect(op.get_bind()).get_table_names():
         return
@@ -34,6 +35,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop generation favourites."""
     op.drop_index("ix_generation_favourites_job_id", table_name="generation_favourites")
     op.drop_index("ix_generation_favourites_filename", table_name="generation_favourites")
     op.drop_table("generation_favourites")

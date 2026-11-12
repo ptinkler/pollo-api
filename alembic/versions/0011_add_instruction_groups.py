@@ -28,6 +28,7 @@ COLUMNS = [
 
 
 def upgrade() -> None:
+    """Create chat instruction groups."""
     # MetadataDB() creates this table / adds these columns on startup too, so
     # each step is skipped if it already happened.
     insp = sa.inspect(op.get_bind())
@@ -55,6 +56,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop chat instruction groups."""
     with op.batch_alter_table("chat_conversations") as batch_op:
         for col in reversed(COLUMNS):
             batch_op.drop_column(col.name)

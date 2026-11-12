@@ -1,10 +1,16 @@
-"""Shared primitives for the Pollo engine family builders: terminal statuses,
-input-parsing helpers, and aspect-ratio maths.
+"""Shared primitives for the Pollo engine family builders.
+
+Includes terminal statuses, input-parsing helpers, and aspect-ratio maths.
 """
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PIL import Image
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # Terminal task statuses from the Pollo API (used by the poller in pollo.py).
 SUCCESS_STATUSES = ("succeed", "success", "succeeded", "complete", "completed")
@@ -31,7 +37,7 @@ def valid_length(length_str: str, valid: tuple, default: int) -> int:
     return length
 
 
-def _image_dimensions(image_path) -> tuple[int, int]:
+def _image_dimensions(image_path: str | Path) -> tuple[int, int]:
     return Image.open(image_path).size
 
 
@@ -45,7 +51,11 @@ def closest_aspect_ratio(width: int, height: int, ratios: tuple[str, ...]) -> st
     return _closest_ratio(width, height, ratios)
 
 
-def _aspect_from_image(image_path, valid_ratios: tuple, skip_nonnumeric: bool) -> str | None:
+def _aspect_from_image(
+    image_path: str | Path | None,
+    valid_ratios: tuple[str, ...],
+    skip_nonnumeric: bool,
+) -> str | None:
     ratios = tuple(r for r in valid_ratios if ":" in r) if skip_nonnumeric else valid_ratios
     if not ratios or not image_path:
         return None

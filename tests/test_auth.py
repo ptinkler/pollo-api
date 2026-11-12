@@ -11,21 +11,24 @@ from web.passwords import hash_password
 
 @pytest.fixture
 def db(tmp_path):
+    """Provide the db fixture."""
     (tmp_path / "data").mkdir(parents=True, exist_ok=True)
     return MetadataDB(db_path=tmp_path / "data" / "metadata.db")
 
 
 @pytest.fixture
 def client(db, monkeypatch):
-
+    """Provide the client fixture."""
     monkeypatch.setattr(api_mod, "get_db", lambda: db)
     monkeypatch.setenv("ADMIN_EMAILS", "admin@x.com")
     return TestClient(api_mod.app, raise_server_exceptions=False)
 
 
 class TestHashing:
-    def test_roundtrip_and_pepper(self, monkeypatch):
+    """Tests for hashing."""
 
+    def test_roundtrip_and_pepper(self, monkeypatch):
+        """Test that roundtrip and pepper."""
         monkeypatch.setenv("PASSWORD_PEPPER", "pepper-one")
         h = passwords.hash_password("correct horse battery")
         assert h != "correct horse battery"  # not plaintext
@@ -37,7 +40,7 @@ class TestHashing:
         assert not passwords.verify_password(h, "correct horse battery")
 
     def test_unique_salt(self, monkeypatch):
-
+        """Test that unique salt."""
         monkeypatch.setenv("PASSWORD_PEPPER", "p")
         assert passwords.hash_password("samepassword") != passwords.hash_password("samepassword")
 
@@ -46,11 +49,13 @@ class TestKeys:
     """The signed-in user manages their own provider keys (no env)."""
 
     def test_get_keys(self, client):
+        """Test that get keys."""
         r = client.get("/api/keys")
         assert r.status_code == 200
         assert set(r.json()["keys"]) == {"pollo", "venice", "openrouter"}
 
     def test_put_keys(self, client, db, monkeypatch):
+        """Test that put keys."""
         monkeypatch.setenv("KEYS_SECRET", "test-secret")
         monkeypatch.setattr("web.user_keys.get_db", lambda: db)
         r = client.put("/api/keys", json={"keys": {"pollo": "sk-test-key"}})
@@ -58,20 +63,23 @@ class TestKeys:
 
 
 class TestLogin:
-    """Admins are created via the CLI (web.provision_admin), not the app — there
+    """Admins are created via the CLI (web.provision_admin), not the app — there.
+
     is no register endpoint. Login verifies against that CLI-set password.
     """
 
     def test_no_register_endpoint(self, client):
+        """Test that no register endpoint."""
         r = client.post("/api/auth/register", json={"email": "admin@x.com", "password": "longenough1"})
         assert r.status_code in (404, 405)  # no such route — admins are CLI-only
 
     def test_unknown_user(self, client):
+        """Test that unknown user."""
         r = client.post("/api/auth/login", json={"email": "ghost@x.com", "password": "whatever123"})
         assert r.status_code == 401
 
     def test_cli_created_admin_can_log_in(self, client, db):
-
+        """Test that cli created admin can log in."""
         db.create_local_admin("admin@x.com", hash_password("longenough1"), name="Admin")
         assert client.post("/api/auth/login", json={"email": "admin@x.com", "password": "nope"}).status_code == 401
         ok = client.post("/api/auth/login", json={"email": "admin@x.com", "password": "longenough1"})

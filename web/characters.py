@@ -1,4 +1,6 @@
-"""Characters — reusable people/creatures/mascots: a name, a description and a
+"""Reusable characters for chats and image generation.
+
+Characters have a name, description and reference images.
 few reference images.
 
 Attached to a chat (ChatConversation.character_ids), a character's description
@@ -17,13 +19,15 @@ import re
 import shutil
 import uuid
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from web.core import config
-from web.core.metadata import get_db
+from web.core.metadata import Character, MetadataDB, get_db
+from web.types import JsonValue
 from web.uploads import image_media_type, read_image_upload, safe_filename
 from web.users import require_user
 
@@ -34,11 +38,13 @@ REF_PREFIX = "char:"
 
 
 def char_dir(character_id: int) -> Path:
+    """Return the directory holding a character's reference images."""
     # Read config at call time so tests can redirect ROOT_DIR
     return config.ROOT_DIR / "characters" / str(character_id)
 
 
 def image_ref(character_id: int, file: str) -> str:
+    """Build the stored reference identifier for a character image."""
     return f"{REF_PREFIX}{character_id}/{file}"
 
 
@@ -52,14 +58,14 @@ def ref_path(ref: str) -> Path | None:
     return char_dir(int(cid)) / file
 
 
-def load(ids: list[int] | None, db=None) -> list:
+def load(ids: list[int] | None, db: MetadataDB | None = None) -> list[Character]:
     """The characters with these ids, in that order (missing ones skipped)."""
     db = db or get_db()
     chars = [db.get_character(i) for i in dict.fromkeys(ids or [])]
     return [c for c in chars if c]
 
 
-def require(ids: list[int] | None, db=None) -> list:
+def require(ids: list[int] | None, db: MetadataDB | None = None) -> list[Character]:
     """Like load(), but 400 if any id doesn't exist."""
     chars = load(ids, db)
     if len(chars) != len(set(ids or [])):
@@ -67,7 +73,7 @@ def require(ids: list[int] | None, db=None) -> list:
     return chars
 
 
-def available(conv_id: str | None, db=None) -> list:
+def available(conv_id: str | None, db: MetadataDB | None = None) -> list[Character]:
     """The characters a chat can use: every saved one plus its own ad-hoc ones."""
     db = db or get_db()
     return [c for c in db.list_characters() if c.conversation_id is None or c.conversation_id == conv_id]
@@ -78,15 +84,15 @@ def _has_name(text: str, name: str) -> bool:
     return bool(name) and re.search(rf"(?<!\w){re.escape(name)}(?!\w)", text, re.IGNORECASE) is not None
 
 
-def _part_of(char, other) -> bool:
+def _part_of(char: Character, other: Character) -> bool:
     """Whether char's name is a shorter whole-word part of other's ("Chloe" in "Chloe Muscle")."""
     return other.id != char.id and len(other.name.strip()) > len(char.name.strip()) and _has_name(other.name, char.name)
 
 
-def _short_name(char, chars: list) -> str | None:
-    """A multi-word name's first word ("Chloe" for "Chloe Muscle"), when it
-    picks out this character alone: no other character is called that or
-    shares the first word.
+def _short_name(char: Character, chars: list[Character]) -> str | None:
+    """Return a multi-word name's first word when it uniquely identifies the character.
+
+    For example, return "Chloe" for "Chloe Muscle" if no other character shares that first name.
     """
     words = char.name.split()
     if len(words) < 2:
@@ -97,11 +103,10 @@ def _short_name(char, chars: list) -> str | None:
     return words[0]
 
 
-def mentioned(chars: list, text: str, prefer: list = ()) -> list:
-    """The characters named in the text as a whole word (any case), by full
-    name or by an unambiguous short name. A name that's part of a longer
-    matched name, or of a `prefer` character's name, means that character:
-    "Chloe" in a picture of "Chloe Muscle" is her, not another "Chloe".
+def mentioned(chars: list[Character], text: str, prefer: list[Character] = ()) -> list[Character]:
+    """Find characters named in text as a whole word, ignoring case.
+
+    Match full names or unambiguous short names, preferring longer or explicit names.
     """
     found = [c for c in chars if _has_name(text, c.name)]
     covering = found + list(prefer)
@@ -112,9 +117,10 @@ def mentioned(chars: list, text: str, prefer: list = ()) -> list:
     return found + short
 
 
-def named(chars: list, names) -> list:
-    """The characters these names (from the chat model) refer to, by full
-    name or unambiguous short name.
+def named(chars: list[Character], names: list[str] | None) -> list[Character]:
+    """Resolve model-provided names to known characters.
+
+    Names may match a full character name or an unambiguous short name.
     """
     out = []
     for n in names or []:
@@ -127,7 +133,13 @@ def named(chars: list, names) -> list:
     return out
 
 
-def create_from_files(name: str, description: str, files: list[Path], conversation_id: str | None, db=None):
+def create_from_files(
+    name: str,
+    description: str,
+    files: list[Path],
+    conversation_id: str | None,
+    db: MetadataDB | None = None,
+) -> Character:
     """A new character with copies of these image files (ad hoc in `conversation_id` if set)."""
     db = db or get_db()
     char = db.create_character(name, description, conversation_id)
@@ -141,9 +153,10 @@ def create_from_files(name: str, description: str, files: list[Path], conversati
     return db.update_character(char.id, images=names)
 
 
-def copy_to_conversation(char, conversation_id: str, db=None):
-    """A copy of a character, ad hoc in another chat (a branch of the one it
-    was made in), its images kept under the same file names.
+def copy_to_conversation(char: Character, conversation_id: str, db: MetadataDB | None = None) -> Character:
+    """Copy a character into another chat as an ad-hoc character.
+
+    The copied images keep their existing file names.
     """
     db = db or get_db()
     copy = db.create_character(char.name, char.description, conversation_id)
@@ -155,7 +168,7 @@ def copy_to_conversation(char, conversation_id: str, db=None):
     return db.update_character(copy.id, images=files)
 
 
-def describe(chars: list) -> str:
+def describe(chars: list[Character]) -> str:
     """The characters as a prompt block ('' for none)."""
     if not chars:
         return ""
@@ -166,17 +179,21 @@ def describe(chars: list) -> str:
     )
 
 
-def with_characters(prompt: str, chars: list) -> str:
+def with_characters(prompt: str, chars: list[Character]) -> str:
     """The prompt with the characters' descriptions appended."""
     block = describe(chars)
     return f"{prompt}\n\n{block}" if block else prompt
 
 
-def reference_refs(chars: list, limit: int | None = None, per_character: int | None = None, skip=()) -> list[str]:
-    """The characters' "char:" image refs (up to `limit`, None = all; up to
-    `per_character` of each, None = all; never those in `skip`): each
-    character's first image, then their second, and so on — so every
-    character gets in before any gets two.
+def reference_refs(
+    chars: list[Character],
+    limit: int | None = None,
+    per_character: int | None = None,
+    skip: set[str] | frozenset[str] | tuple[str, ...] = (),
+) -> list[str]:
+    """Return character image references up to the requested limits.
+
+    Images are interleaved by character so each gets one before any gets two.
     """
     refs: list[str] = []
     files = {
@@ -192,7 +209,7 @@ def reference_refs(chars: list, limit: int | None = None, per_character: int | N
     return refs
 
 
-def delete_for_conversation(conv_id: str, db=None) -> None:
+def delete_for_conversation(conv_id: str, db: MetadataDB | None = None) -> None:
     """Delete a chat's ad-hoc characters and their files (the chat is being deleted)."""
     db = db or get_db()
     for c in db.list_characters():
@@ -200,7 +217,7 @@ def delete_for_conversation(conv_id: str, db=None) -> None:
             _delete(c.id, db)
 
 
-def _delete(character_id: int, db) -> None:
+def _delete(character_id: int, db: MetadataDB) -> None:
     db.delete_character(character_id)
     shutil.rmtree(char_dir(character_id), ignore_errors=True)
     for conv in db.list_conversations(limit=None):
@@ -209,23 +226,29 @@ def _delete(character_id: int, db) -> None:
 
 
 class CharacterIn(BaseModel):
+    """Character details accepted when creating a character."""
+
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(default="", max_length=4000)
     conversation_id: str | None = None  # set = ad hoc in that chat (and attached to it)
 
 
 class CharacterUpdate(BaseModel):
+    """Optional character fields to update."""
+
     name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = Field(default=None, max_length=4000)
     images: list[str] | None = None  # reorder (first = main) or drop images
 
 
 class CopyFromChat(BaseModel):
+    """Reference to an image stored in a chat."""
+
     conversation_id: str
     file: str
 
 
-def _require_char(character_id: int):
+def _require_char(character_id: int) -> Character:
     char = get_db().get_character(character_id)
     if not char:
         raise HTTPException(404, "Character not found")
@@ -233,9 +256,12 @@ def _require_char(character_id: int):
 
 
 @router.get("")
-def api_list_characters(conversation_id: str | None = None, include_adhoc: bool = False):
-    """Saved characters, plus the ad-hoc ones of `conversation_id` (a chat
-    shows its own), or every ad-hoc one too with include_adhoc (management page).
+def api_list_characters(
+    conversation_id: str | None = None, include_adhoc: bool = False
+) -> dict[str, list[dict[str, JsonValue]]]:
+    """List saved characters and relevant ad-hoc characters.
+
+    Set ``include_adhoc`` to include all chats' ad-hoc characters for management.
     """
     db = get_db()
     titles = {}
@@ -250,7 +276,8 @@ def api_list_characters(conversation_id: str | None = None, include_adhoc: bool 
 
 
 @router.post("")
-def api_create_character(data: CharacterIn):
+def api_create_character(data: CharacterIn) -> dict[str, JsonValue]:
+    """Create a saved character or attach an ad-hoc one to a chat."""
     db = get_db()
     conv = None
     if data.conversation_id:
@@ -264,12 +291,14 @@ def api_create_character(data: CharacterIn):
 
 
 @router.get("/{character_id}")
-def api_get_character(character_id: int):
+def api_get_character(character_id: int) -> dict[str, JsonValue]:
+    """Return one character by ID."""
     return _require_char(character_id).to_dict()
 
 
 @router.patch("/{character_id}")
-def api_update_character(character_id: int, data: CharacterUpdate):
+def api_update_character(character_id: int, data: CharacterUpdate) -> dict[str, JsonValue]:
+    """Update a character's name, description or reference images."""
     char = _require_char(character_id)
     fields = data.model_dump(exclude_unset=True, exclude_none=True)
     if "name" in fields:
@@ -287,9 +316,10 @@ def api_update_character(character_id: int, data: CharacterUpdate):
 
 
 @router.delete("/{character_id}")
-def api_delete_character(character_id: int):
-    """Delete a character and its images. Chats/generations that used it keep
-    working; it's just no longer sent.
+def api_delete_character(character_id: int) -> dict[str, int]:
+    """Delete a character and its stored images.
+
+    Existing chats and generations continue working without sending the character.
     """
     _require_char(character_id)
     _delete(character_id, get_db())
@@ -297,13 +327,13 @@ def api_delete_character(character_id: int):
 
 
 @router.post("/{character_id}/promote")
-def api_promote_character(character_id: int):
+def api_promote_character(character_id: int) -> dict[str, JsonValue]:
     """Turn an ad-hoc chat character into a saved one, attachable anywhere."""
     _require_char(character_id)
     return get_db().update_character(character_id, conversation_id=None).to_dict()
 
 
-def _add_image(char, content: bytes, ext: str) -> dict:
+def _add_image(char: Character, content: bytes, ext: str) -> dict[str, JsonValue]:
     if len(char.images) >= MAX_IMAGES:
         raise HTTPException(400, f"A character can have up to {MAX_IMAGES} images")
     name = f"img_{uuid.uuid4().hex[:12]}{ext}"
@@ -313,7 +343,7 @@ def _add_image(char, content: bytes, ext: str) -> dict:
     return get_db().update_character(char.id, images=[*char.images, name]).to_dict()
 
 
-def add_image_from_file(char, source: Path) -> dict:
+def add_image_from_file(char: Character, source: Path) -> dict[str, JsonValue]:
     """Copy an image file into the character (used by the media library too)."""
     if not source.is_file() or not image_media_type(source):
         raise HTTPException(404, "Image not found")
@@ -321,14 +351,15 @@ def add_image_from_file(char, source: Path) -> dict:
 
 
 @router.post("/{character_id}/images")
-async def api_upload_character_image(character_id: int, file: UploadFile = File(...)):
+async def api_upload_character_image(character_id: int, file: Annotated[UploadFile, File(...)]) -> dict[str, JsonValue]:
+    """Upload a reference image to a character."""
     char = _require_char(character_id)
     content, ext = await read_image_upload(file)
     return _add_image(char, content, ext)
 
 
 @router.post("/{character_id}/images/from-chat")
-def api_character_image_from_chat(character_id: int, data: CopyFromChat):
+def api_character_image_from_chat(character_id: int, data: CopyFromChat) -> dict[str, JsonValue]:
     """Copy an image from a chat (uploaded or generated) into the character."""
     char = _require_char(character_id)
     return add_image_from_file(
@@ -337,7 +368,8 @@ def api_character_image_from_chat(character_id: int, data: CopyFromChat):
 
 
 @router.get("/{character_id}/images/{filename}")
-def api_character_image(character_id: int, filename: str):
+def api_character_image(character_id: int, filename: str) -> FileResponse:
+    """Serve a character reference image."""
     path = char_dir(character_id) / safe_filename(filename)  # rejects traversal (400)
     if not get_db().get_character(character_id):  # tenant-scoped: another user's id → not found
         raise HTTPException(404, "Not found")

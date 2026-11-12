@@ -20,6 +20,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Create the chat library table."""
     # MetadataDB() runs create_all() on startup, so skip if it already exists
     if "chat_library_items" in sa.inspect(op.get_bind()).get_table_names():
         return
@@ -39,6 +40,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop the chat library table."""
     op.drop_index("ix_chat_library_items_conversation_id", table_name="chat_library_items")
     op.drop_index("ix_chat_library_items_media_id", table_name="chat_library_items")
     op.drop_table("chat_library_items")

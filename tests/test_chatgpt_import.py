@@ -102,7 +102,7 @@ def _export(path, conversations, library, files=("file_up1", "file_gen1")):
 
 @pytest.fixture
 def imp(chat, db, monkeypatch):
-
+    """Provide the imp fixture."""
     monkeypatch.setattr(imp_mod, "get_db", lambda: db)
     imp_mod._jobs.clear()  # per-tenant import progress, reset between tests
     return imp_mod
@@ -110,6 +110,7 @@ def imp(chat, db, monkeypatch):
 
 @pytest.fixture
 def story_zip(tmp_path):
+    """Provide the story zip fixture."""
     return _export(tmp_path / "export1.zip", [conversation("c1", "Rain", _story_messages(), T0 + 200)], STORY_LIBRARY)
 
 
@@ -129,7 +130,10 @@ def _imported(client):
 
 
 class TestFirstImport:
+    """Tests for first import."""
+
     def test_turns_become_a_prompt_and_one_reply(self, imp, client, story_zip):
+        """Test that turns become a prompt and one reply."""
         stats = imp.run_import(story_zip)
         assert stats["new"] == 1
         assert stats["images"] == 2
@@ -145,6 +149,7 @@ class TestFirstImport:
         assert msgs[3]["model"] == "chatgpt/gpt-4o"
 
     def test_uploads_on_their_prompt_and_generated_images_on_its_reply(self, imp, client, story_zip, tmp_path):
+        """Test that uploads on their prompt and generated images on its reply."""
         imp.run_import(story_zip)
         conv = _imported(client)[0]
         msgs = _shown(client, conv["id"])
@@ -161,6 +166,7 @@ class TestFirstImport:
         assert msgs[3]["media"] == []
 
     def test_a_missing_upload_is_noted(self, imp, client, tmp_path):
+        """Test that a missing upload is noted."""
         path = _export(
             tmp_path / "e.zip", [conversation("c1", "Rain", _story_messages(), T0 + 200)], STORY_LIBRARY, files=()
         )
@@ -170,12 +176,16 @@ class TestFirstImport:
         assert up["error"] == imp.MISSING
 
     def test_keeps_chatgpt_dates(self, imp, client, story_zip):
+        """Test that keeps chatgpt dates."""
         imp.run_import(story_zip)
         conv = _imported(client)[0]
-        assert conv["updated_at"].startswith(datetime.fromtimestamp(T0 + 200).isoformat()[:19])
-        assert _shown(client, conv["id"])[2]["created_at"].startswith(datetime.fromtimestamp(T0 + 100).isoformat()[:19])
+        assert conv["updated_at"].startswith(datetime.fromtimestamp(T0 + 200).astimezone().isoformat()[:19])
+        assert _shown(client, conv["id"])[2]["created_at"].startswith(
+            datetime.fromtimestamp(T0 + 100).astimezone().isoformat()[:19]
+        )
 
     def test_older_exports_with_image_tool_messages(self, imp, client, tmp_path):
+        """Test that older exports with image tool messages."""
         messages = [
             _msg("u1", "user", ["draw a cat"], T0),
             _msg("t1", "tool", [_pointer("file_gen1")], T0 + 10, "multimodal_text"),
@@ -187,6 +197,7 @@ class TestFirstImport:
         assert msgs[1]["media"][0]["source"] == "generated"
 
     def test_not_an_export(self, imp, tmp_path):
+        """Test that not an export."""
         path = tmp_path / "other.zip"
         with zipfile.ZipFile(path, "w") as zf:
             zf.writestr("readme.txt", "hi")
@@ -195,7 +206,10 @@ class TestFirstImport:
 
 
 class TestImportingAgain:
+    """Tests for importing again."""
+
     def test_unchanged_chats_are_skipped(self, imp, client, story_zip):
+        """Test that unchanged chats are skipped."""
         imp.run_import(story_zip)
         stats = imp.run_import(story_zip)
         assert stats["unchanged"] == 1
@@ -204,6 +218,7 @@ class TestImportingAgain:
         assert len(_imported(client)) == 1
 
     def test_new_turns_are_added(self, imp, client, story_zip, tmp_path):
+        """Test that new turns are added."""
         imp.run_import(story_zip)
         messages = [
             *_story_messages(),
@@ -233,6 +248,7 @@ class TestImportingAgain:
     def test_a_chat_carried_on_here_gets_chatgpt_turns_as_a_branch(
         self, imp, client, chat, story_zip, tmp_path, monkeypatch
     ):
+        """Test that a chat carried on here gets chatgpt turns as a branch."""
         imp.run_import(story_zip)
         conv = _imported(client)[0]
         monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: _text_chunks("Sure."))
@@ -251,6 +267,7 @@ class TestImportingAgain:
         assert _shown(client, conv["id"])[-1]["content"] == "from chatgpt"
 
     def test_deleted_chats_stay_deleted(self, imp, client, story_zip):
+        """Test that deleted chats stay deleted."""
         imp.run_import(story_zip)
         client.delete(f"/api/chat/conversations/{_imported(client)[0]['id']}")
         stats = imp.run_import(story_zip)
@@ -259,7 +276,10 @@ class TestImportingAgain:
 
 
 class TestSpace:
+    """Tests for space."""
+
     def test_imported_chats_go_in_a_chatgpt_space(self, imp, client, story_zip):
+        """Test that imported chats go in a chatgpt space."""
         stats = imp.run_import(story_zip)
         space = _space(client)
         assert space
@@ -269,18 +289,21 @@ class TestSpace:
         assert [sp["name"] for sp in client.get("/api/chat/spaces").json()["spaces"]] == ["ChatGPT"]  # just the one
 
     def test_no_space_until_there_is_something_to_import(self, imp, client, story_zip):
+        """Test that no space until there is something to import."""
         imp.run_import(story_zip)
         client.delete(f"/api/chat/spaces/{_space(client)['id']}")
         imp.run_import(story_zip)  # nothing new
         assert _space(client) is None
 
     def test_imported_chats_use_the_defaults(self, imp, client, chat, story_zip):
+        """Test that imported chats use the defaults."""
         snippet = client.post("/api/chat/instructions", json={"name": "Style", "content": "Be brief."}).json()
         client.put("/api/chat/settings", json={"default_instruction_ids": [snippet["id"]]})
         imp.run_import(story_zip)
         assert chat.generation.conversation_instructions(_imported(client)[0]["id"]) == "Be brief."
 
     def test_a_chat_moved_out_keeps_getting_imports_where_it_is(self, imp, client, story_zip, tmp_path):
+        """Test that a chat moved out keeps getting imports where it is."""
         imp.run_import(story_zip)
         conv = _imported(client)[0]
         client.patch(f"/api/chat/conversations/{conv['id']}", json={"space_id": None})
@@ -292,13 +315,17 @@ class TestSpace:
         assert moved["space_id"] is None
 
     def test_search_finds_imported_chats(self, imp, client, story_zip):
+        """Test that search finds imported chats."""
         imp.run_import(story_zip)
         found = client.get("/api/chat/conversations?q=rained").json()["conversations"]
         assert [c["title"] for c in found] == ["Rain"]
 
 
 class TestRoutes:
+    """Tests for routes."""
+
     def test_lists_exports_and_runs_an_import(self, imp, client, story_zip, tmp_path):
+        """Test that lists exports and runs an import."""
         (tmp_path / "imports" / "test-user").mkdir(parents=True)
         story_zip.rename(tmp_path / "imports" / "test-user" / "export1.zip")
         data = client.get("/api/chat/import/chatgpt").json()
@@ -315,11 +342,13 @@ class TestRoutes:
         assert len(_imported(client)) == 1
 
     def test_only_exports_in_the_imports_folder(self, imp, client):
+        """Test that only exports in the imports folder."""
         assert client.post("/api/chat/import/chatgpt", json={"file": "nope.zip"}).status_code == 404
         assert client.post("/api/chat/import/chatgpt", json={"file": "../x.zip"}).status_code == 400
 
     def test_another_users_export_is_not_importable(self, imp, client, story_zip, tmp_path):
-        """The imports folder is per-tenant, so a user can't list or import an
+        """The imports folder is per-tenant, so a user can't list or import an.
+
         export another user uploaded (even knowing its filename).
         """
         (tmp_path / "imports" / "other-user").mkdir(parents=True)
@@ -329,8 +358,11 @@ class TestRoutes:
 
 
 class TestUpload:
+    """Tests for upload."""
+
     @pytest.fixture
     def small_chunks(self, imp, monkeypatch):
+        """Provide the small chunks fixture."""
         monkeypatch.setattr(imp, "UPLOAD_CHUNK", 1000)
 
     def _start(self, client, raw, name="export1.zip"):
@@ -350,6 +382,7 @@ class TestUpload:
         return resp
 
     def test_chunks_become_an_export_in_the_imports_folder(self, small_chunks, client, story_zip, tmp_path):
+        """Test that chunks become an export in the imports folder."""
         raw = story_zip.read_bytes()
         assert len(raw) > 2000  # several chunks
         resp = self._upload(client, raw)
@@ -360,6 +393,7 @@ class TestUpload:
         assert sorted(p.name for p in (tmp_path / "imports" / "test-user").iterdir()) == ["export1.zip"]
 
     def test_a_resent_chunk_replaces_itself(self, small_chunks, client, story_zip, tmp_path):
+        """Test that a resent chunk replaces itself."""
         raw = story_zip.read_bytes()
         up = self._start(client, raw)
         assert self._send(client, up["id"], 0, raw[:1000]).json() == {"received": 1000}
@@ -371,11 +405,13 @@ class TestUpload:
         assert (tmp_path / "imports" / "test-user" / "export1.zip").read_bytes() == raw
 
     def test_the_same_name_twice_is_kept_apart(self, small_chunks, client, story_zip):
+        """Test that the same name twice is kept apart."""
         raw = story_zip.read_bytes()
         self._upload(client, raw)
         assert self._upload(client, raw).json()["file"] == "export1 (2).zip"
 
     def test_only_chatgpt_exports(self, small_chunks, client, tmp_path):
+        """Test that only chatgpt exports."""
         assert client.post("/api/chat/import/chatgpt/uploads", json={"name": "x.txt", "size": 5}).status_code == 400
         assert self._upload(client, b"not a zip").status_code == 400
         other = tmp_path / "other.zip"
@@ -385,11 +421,13 @@ class TestUpload:
         assert list((tmp_path / "imports" / "test-user").iterdir()) == []
 
     def test_chunks_past_the_end_or_too_big(self, small_chunks, client):
+        """Test that chunks past the end or too big."""
         up = self._start(client, b"x" * 1500)
         assert self._send(client, up["id"], 1000, b"x" * 600).status_code == 400
         assert self._send(client, up["id"], 0, b"x" * 1001).status_code == 400
 
     def test_cancel_and_unknown_uploads(self, small_chunks, client, tmp_path):
+        """Test that cancel and unknown uploads."""
         up = self._start(client, b"x" * 1500)
         client.delete(f"/api/chat/import/chatgpt/uploads/{up['id']}")
         assert list((tmp_path / "imports" / "test-user").iterdir()) == []

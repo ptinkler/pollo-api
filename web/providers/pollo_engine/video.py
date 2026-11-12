@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from web.core.config import POLLO_GENERATION_BASE
 from web.providers.pollo_engine._shared import parse_aspect_ratio, valid_length
+
+if TYPE_CHECKING:
+    from web.types import JsonValue
 
 # Config rows (introspected from the generator classes). Fields omitted here
 # take the base defaults below.
@@ -694,6 +697,7 @@ VIDEO_MODELS: dict[str, dict[str, Any]] = {
 
 
 def cfg(model_id: str) -> dict[str, Any]:
+    """Return default and model-specific settings for a video model."""
     row = VIDEO_MODELS[model_id]
     base = {**_V1_VIDEO_DEFAULTS}
     if row.get("builder") == "kling":
@@ -702,13 +706,14 @@ def cfg(model_id: str) -> dict[str, Any]:
 
 
 def video_model_url(model_id: str) -> str:
+    """Return the generation endpoint for a video model."""
     c = cfg(model_id)
     if c.get("V1_URL"):
         return c["V1_URL"]
     return f"{POLLO_GENERATION_BASE}/{c['PROVIDER']}/{c['MODEL']}/{c['endpoint']}"
 
 
-def _normalize_refs(refs: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+def _normalize_refs(refs: list[dict[str, object]] | None) -> list[dict[str, Any]] | None:
     if not refs:
         return None
     out: list[dict[str, Any]] = []
@@ -727,13 +732,13 @@ def _normalize_refs(refs: list[dict[str, Any]] | None) -> list[dict[str, Any]] |
     return out or None
 
 
-def _resolve_resolution(c: dict[str, Any], **kw: Any) -> str:
+def _resolve_resolution(c: dict[str, object], **kw: JsonValue) -> str:
     if c.get("FORCE_RESOLUTION"):
         return c["FORCE_RESOLUTION"]
     return kw.get("resolution") or c["DEFAULT_RESOLUTION"]
 
 
-def _resolve_length(c: dict[str, Any], **kw: Any) -> int:
+def _resolve_length(c: dict[str, object], **kw: JsonValue) -> int:
     length_str = str(kw.get("length") or c["DEFAULT_LENGTH"])
     if kw.get("refs") and c["REF_VALID_LENGTHS"]:
         length = int(length_str) if length_str.isdigit() else c["DEFAULT_LENGTH"]
@@ -741,13 +746,13 @@ def _resolve_length(c: dict[str, Any], **kw: Any) -> int:
     return valid_length(length_str, c["VALID_LENGTHS"], c["DEFAULT_LENGTH"])
 
 
-def _resolve_aspect_ratio(c: dict[str, Any], **kw: Any) -> str:
+def _resolve_aspect_ratio(c: dict[str, object], **kw: JsonValue) -> str:
     # the explicit kwarg, then a model default ("adaptive" on a few), else the
     # base "portrait" → 9:16.
     return kw.get("aspect_ratio") or c.get("DEFAULT_RATIO") or parse_aspect_ratio("portrait")
 
 
-def _resolve_mode(c: dict[str, Any], resolution: str, mode: str | None) -> str | None:
+def _resolve_mode(c: dict[str, object], resolution: str, mode: str | None) -> str | None:
     if not c["HAS_MODE"]:
         return None
     if c.get("MODE_PRO_RESOLUTIONS"):
@@ -755,9 +760,10 @@ def _resolve_mode(c: dict[str, Any], resolution: str, mode: str | None) -> str |
     return mode or c.get("MODE_DEFAULT")
 
 
-def _process_inputs(c: dict[str, Any], image_url: str | None, **kw: Any) -> dict[str, Any]:
-    """Resolve the request inputs against a model's config: the caller's value,
-    else the model's default. A field the model doesn't offer stays None.
+def _process_inputs(c: dict[str, object], image_url: str | None, **kw: JsonValue) -> dict[str, Any]:
+    """Resolve request inputs against a model's configuration.
+
+    Use the caller's value or the model default; unsupported fields stay None.
     """
     refs = _normalize_refs(kw.get("refs")) if c["HAS_REFS"] else None
     resolution = _resolve_resolution(c, **kw)
@@ -780,7 +786,11 @@ def _process_inputs(c: dict[str, Any], image_url: str | None, **kw: Any) -> dict
 
 
 def _generic_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **_: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **_: JsonValue,
 ) -> dict[str, Any]:
     refs, is_text_only = s["refs"], s["is_text_only"]
     attrs: dict[str, Any] = {"prompt": prompt}
@@ -812,7 +822,11 @@ def _generic_payload(
 
 
 def _kling_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **_: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **_: JsonValue,
 ) -> dict[str, Any]:
     if s["is_text_only"] and not c["TEXT_TO_VIDEO"]:
         raise ValueError(f"{c['MODEL']} needs a source image (it has no text-to-video mode)")
@@ -833,7 +847,11 @@ def _kling_payload(
 
 
 def _extend_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **kw: JsonValue,
 ) -> dict[str, Any]:
     video_url = kw.get("video_url")
     if not video_url:
@@ -851,7 +869,11 @@ def _extend_payload(
 
 
 def _edit_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **kw: JsonValue,
 ) -> dict[str, Any]:
     video_url = kw.get("video_url")
     if not video_url:
@@ -865,10 +887,15 @@ def _edit_payload(
 
 
 def _upscale_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **kw: JsonValue,
 ) -> dict[str, Any]:
-    """Video upscale: {video, scale, mode}. An unknown scale / mode (e.g. left over
-    from another model's picker) falls back to the model's default.
+    """Build a video-upscale body containing the source, scale, and mode.
+
+    Unknown scale or mode values fall back to the model defaults.
     """
     video_url = kw.get("video_url")
     if not video_url:
@@ -880,7 +907,11 @@ def _upscale_payload(
 
 
 def _bgremove_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **kw: JsonValue,
 ) -> dict[str, Any]:
     """Video background removal: {video, outputFormat} (webm / mov, both transparent)."""
     if not kw.get("video_url"):
@@ -890,7 +921,11 @@ def _bgremove_payload(
 
 
 def _subtitle_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **kw: JsonValue,
 ) -> dict[str, Any]:
     """Subtitle removal: {video, language, tier}; unknown values fall back to the defaults."""
     if not kw.get("video_url"):
@@ -901,7 +936,11 @@ def _subtitle_payload(
 
 
 def _faceswap_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **kw: JsonValue,
 ) -> dict[str, Any]:
     """Face swap: the source video plus a face image."""
     if not kw.get("video_url"):
@@ -912,10 +951,15 @@ def _faceswap_payload(
 
 
 def _lipsync_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **kw: JsonValue,
 ) -> dict[str, Any]:
-    """Lip sync: a reference image driven by an audio track — {image, audio}
-    (+prompt where given / required, +resolution where the model offers one).
+    """Build a lip-sync body from a reference image and audio track.
+
+    Include a prompt when supplied or required, and resolution when supported.
     """
     audio_url = kw.get("audio_url")
     if not image_url:
@@ -933,11 +977,15 @@ def _lipsync_payload(
 
 
 def _motion_payload(
-    c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw: Any
+    c: dict[str, object],
+    prompt: str,
+    image_url: str | None,
+    s: dict[str, object],
+    **kw: JsonValue,
 ) -> dict[str, Any]:
-    """Motion / act models (Wan Animate, Kling Motion…) share this shape: a reference image animated by a
-    source video. `mode` (std/pro) is sent only when the model offers one — a
-    few (action-imitation, runway-act-two) take just image + video.
+    """Build a motion-transfer body from a reference image and source video.
+
+    ``mode`` is sent only when the model supports it.
     """
     video_url = kw.get("video_url")
     if not video_url:
@@ -964,7 +1012,7 @@ _BUILDERS = {
 }
 
 
-def video_payload(model_id: str, *, prompt: str, image_url: str | None, **kw: Any) -> dict[str, Any]:
+def video_payload(model_id: str, *, prompt: str, image_url: str | None, **kw: JsonValue) -> dict[str, Any]:
     """Build the video API body for any model, dispatching on its family."""
     c = cfg(model_id)
     build = _BUILDERS.get(c["builder"])

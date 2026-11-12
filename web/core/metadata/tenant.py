@@ -8,12 +8,16 @@ tenant is unset (startup, migrations, system tasks) there is no filter — those
 contexts are not user-facing.
 """
 
-from contextvars import ContextVar
+from collections.abc import Iterable, Sequence
+from contextvars import ContextVar, Token
+from typing import cast
 
 from sqlalchemy import event
-from sqlalchemy.orm import Session, with_loader_criteria
+from sqlalchemy.orm import ORMExecuteState, Session, with_loader_criteria
+from sqlalchemy.orm.unitofwork import UOWTransaction
 
 from web.core.metadata.models import (
+    Base,
     Character,
     ChatConversation,
     ChatImportSkip,
@@ -40,21 +44,23 @@ TENANT_MODELS = (
 _tenant: ContextVar[str | None] = ContextVar("tenant_user_id", default=None)
 
 
-def set_tenant(user_id: str | None):
+def set_tenant(user_id: str | None) -> Token[str | None]:
     """Bind the current tenant (user id); returns a token for reset_tenant."""
     return _tenant.set(user_id)
 
 
-def reset_tenant(token) -> None:
+def reset_tenant(token: Token[str | None]) -> None:
+    """Restore the tenant context using a token from ``set_tenant``."""
     _tenant.reset(token)
 
 
 def current_tenant() -> str | None:
+    """Return the tenant id bound to the current context, if any."""
     return _tenant.get()
 
 
 @event.listens_for(Session, "do_orm_execute")
-def _scope_selects_to_tenant(execute_state) -> None:
+def _scope_selects_to_tenant(execute_state: ORMExecuteState) -> None:
     uid = _tenant.get()
     if uid is None or not execute_state.is_select:
         return
@@ -65,10 +71,12 @@ def _scope_selects_to_tenant(execute_state) -> None:
 
 
 @event.listens_for(Session, "before_flush")
-def _stamp_new_rows_with_tenant(session, flush_context, instances) -> None:
+def _stamp_new_rows_with_tenant(
+    session: Session, _flush_context: UOWTransaction, _instances: Sequence[Base] | None
+) -> None:
     uid = _tenant.get()
     if uid is None:
         return
-    for obj in session.new:
+    for obj in cast("Iterable[Base]", session.new):
         if isinstance(obj, TENANT_MODELS) and getattr(obj, "user_id", None) is None:
             obj.user_id = uid
