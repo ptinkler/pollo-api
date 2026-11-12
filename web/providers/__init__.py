@@ -7,15 +7,79 @@ special-casing one by name. `provider_for()` is the first step of that: it maps
 a model id to the module that owns it (OpenRouter is the fallback).
 """
 
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import ModuleType
+from typing import Protocol, cast
 
 from web.providers import openrouter, pollo, pollo_models, venice
+from web.types import ChatChunk, JsonValue, VideoJob
 from web.uploads import file_to_data_url
 
 # Dispatch order for the model catalogue (Pollo first, OpenRouter last). Each
 # exposes the uniform surface: NAME, is_configured(), list_models(kind, refresh).
 PROVIDERS = (pollo, venice, openrouter)
+
+
+class _TextProvider(Protocol):
+    def stream_chat(
+        self,
+        model: str,
+        messages: list[dict[str, JsonValue]],
+        tools: list[dict[str, JsonValue]] | None = None,
+        session_id: str | None = None,
+        max_seconds: float | None = None,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> Iterator[ChatChunk]: ...
+
+
+class _VideoProvider(Protocol):
+    def submit_video(
+        self,
+        model: str,
+        prompt: str,
+        *,
+        duration: int | None = None,
+        aspect_ratio: str | None = None,
+        resolution: str | None = None,
+        generate_audio: bool | None = None,
+        first_frame: Path | str | None = None,
+        last_frame: Path | None = None,
+        source_video: Path | None = None,
+        source_audio: Path | None = None,
+        mode: str | None = None,
+        refs: list[Path] | None = None,
+        ref_items: list[dict[str, object]] | None = None,
+        session_id: str | None = None,
+    ) -> VideoJob: ...
+
+
+def stream_chat(
+    model: str,
+    messages: list[dict[str, JsonValue]],
+    tools: list[dict[str, JsonValue]] | None = None,
+    session_id: str | None = None,
+    max_seconds: float | None = None,
+    should_stop: Callable[[], bool] | None = None,
+) -> Iterator[ChatChunk]:
+    """Stream chat chunks from the provider that owns `model`."""
+    provider = cast("_TextProvider", provider_for(model))
+    if tools is None:
+        return provider.stream_chat(
+            model,
+            messages,
+            session_id=session_id,
+            max_seconds=max_seconds,
+            should_stop=should_stop,
+        )
+    return provider.stream_chat(
+        model,
+        messages,
+        tools=tools,
+        session_id=session_id,
+        max_seconds=max_seconds,
+        should_stop=should_stop,
+    )
 
 
 def provider_for(model_id: str | None) -> ModuleType:
@@ -47,9 +111,9 @@ def generate_image(
     aspect_ratio: str | None = None,
     resolution: str | None = None,
     ref_paths: list[Path] | None = None,
-    context: list[dict] | None = None,
+    context: list[dict[str, JsonValue]] | None = None,
     session_id: str | None = None,
-) -> tuple[list[tuple[bytes, str]], float | None, int | None, dict]:
+) -> tuple[list[tuple[bytes, str]], float | None, int | None, dict[str, JsonValue]]:
     """Generate images on whichever provider owns `model`, and wait for them.
 
     Returns ([(bytes, media type)], cost in USD, Pollo credits, the settings
@@ -66,12 +130,12 @@ def generate_image(
         images, credits, sent = pollo.generate_image(
             model, prompt, aspect_ratio=aspect_ratio, resolution=resolution, ref_paths=refs
         )
-        return images, None, credits, sent
+        return images, None, credits, cast("dict[str, JsonValue]", sent)
     if owner is venice:
         images, cost, sent = venice.generate_image(
             model, prompt, aspect_ratio=aspect_ratio, resolution=resolution, ref_paths=refs
         )
-        return images, cost, None, sent
+        return images, cost, None, cast("dict[str, JsonValue]", sent)
     if context is not None:
         images, cost = openrouter.generate_image_chat(model, context, aspect_ratio=aspect_ratio, session_id=session_id)
         return images, cost, None, {}
@@ -101,9 +165,9 @@ def submit_video(
     source_audio: Path | None = None,
     mode: str | None = None,
     refs: list[Path] | None = None,
-    ref_items: list[dict] | None = None,
+    ref_items: list[dict[str, object]] | None = None,
     session_id: str | None = None,
-) -> dict:
+) -> VideoJob:
     """Start a video job on whichever provider owns `model`.
 
     Returns the job (``{"id", "params"}``), which the chat poller follows by id.
@@ -114,17 +178,15 @@ def submit_video(
     use.
     """
     owner = provider_for(model)
-    shared = {
-        "duration": duration,
-        "aspect_ratio": aspect_ratio,
-        "resolution": resolution,
-        "generate_audio": generate_audio,
-    }
+    video_provider = cast("_VideoProvider", owner)
     if owner is pollo:
-        return pollo.submit_video(
+        return video_provider.submit_video(
             model,
             prompt,
-            **shared,
+            duration=duration,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
+            generate_audio=generate_audio,
             first_frame=first_frame,
             source_video=source_video,
             source_audio=source_audio,
@@ -132,19 +194,25 @@ def submit_video(
             ref_items=list(ref_items or []),
         )
     if owner is venice:
-        return venice.submit_video(
+        return video_provider.submit_video(
             model,
             prompt,
-            **shared,
+            duration=duration,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
+            generate_audio=generate_audio,
             first_frame=first_frame,
             last_frame=last_frame,
             refs=list(refs or []),
             source_video=source_video,
         )
-    return openrouter.submit_video(
+    return video_provider.submit_video(
         model,
         prompt,
-        **shared,
+        duration=duration,
+        aspect_ratio=aspect_ratio,
+        resolution=resolution,
+        generate_audio=generate_audio,
         # OpenRouter takes the first frame inline, not as a path
         first_frame=file_to_data_url(first_frame) if first_frame else None,
         session_id=session_id,

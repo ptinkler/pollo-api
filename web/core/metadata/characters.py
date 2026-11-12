@@ -4,11 +4,12 @@ from datetime import datetime
 
 from sqlalchemy import func
 
+from web.core.metadata._base import DBBase
 from web.core.metadata.models import Character, ChatConversation, ChatSettings, ChatSpace
 from web.types import JsonValue
 
 
-class CharacterMixin:
+class CharacterMixin(DBBase):
     """Provide CRUD operations for reusable and chat-specific characters."""
 
     def create_character(self, name: str, description: str = "", conversation_id: str | None = None) -> Character:

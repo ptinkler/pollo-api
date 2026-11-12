@@ -1,13 +1,15 @@
 """User accounts (OAuth + local admin) and tenant-ownership claiming."""
 
 import uuid
+from collections.abc import Mapping
 from datetime import datetime
 
+from web.core.metadata._base import DBBase
 from web.core.metadata.models import User
 from web.core.metadata.tenant import TENANT_MODELS
 
 
-class UserMixin:
+class UserMixin(DBBase):
     """Provide user-account and tenant-ownership operations."""
 
     def get_user(self, user_id: str) -> User | None:
@@ -26,36 +28,36 @@ class UserMixin:
                 session.expunge(user)
             return user
 
-    def upsert_oauth_user(self, profile: dict, is_admin: bool = False) -> User:
+    def upsert_oauth_user(self, profile: Mapping[str, str | None], is_admin: bool = False) -> User:
         """Create or refresh a user from an OAuth profile.
 
         The profile contains ``provider``, ``sub``, ``email``, ``name``, and
         ``avatar``. Users match on ``(provider, sub)`` first, then email.
         """
+        provider, sub, email = (profile.get(key) for key in ("provider", "sub", "email"))
+        if not isinstance(provider, str) or not isinstance(sub, str) or not isinstance(email, str):
+            raise TypeError(profile)
+
         with self._session() as session:
-            user = (
-                session.query(User)
-                .filter(User.provider == profile["provider"], User.provider_sub == profile["sub"])
-                .first()
-            )
-            if not user and profile.get("email"):
-                user = session.query(User).filter(User.email == profile["email"]).first()
+            user = session.query(User).filter(User.provider == provider, User.provider_sub == sub).first()
+            if not user:
+                user = session.query(User).filter(User.email == email).first()
             if user:
                 user.name = profile.get("name") or user.name
                 user.avatar_url = profile.get("avatar") or user.avatar_url
-                user.provider = profile["provider"]
-                user.provider_sub = profile["sub"]
+                user.provider = provider
+                user.provider_sub = sub
                 user.last_login_at = datetime.now().astimezone().replace(tzinfo=None)
                 if is_admin:
                     user.is_admin = True
             else:
                 user = User(
                     id=uuid.uuid4().hex,
-                    email=profile["email"],
+                    email=email,
                     name=profile.get("name"),
                     avatar_url=profile.get("avatar"),
-                    provider=profile["provider"],
-                    provider_sub=profile["sub"],
+                    provider=provider,
+                    provider_sub=sub,
                     is_admin=is_admin,
                     last_login_at=datetime.now().astimezone().replace(tzinfo=None),
                 )
@@ -132,7 +134,7 @@ class UserMixin:
         Used to determine whether the database already contains encrypted keys.
         """
         with self._session() as session:
-            return [b for (b,) in session.query(User.api_keys_json).filter(User.api_keys_json.isnot(None)) if b]
+            return [user.api_keys_json for user in session.query(User) if user.api_keys_json]
 
     def create_local_admin(self, email: str, password_hash: str, name: str = "Admin") -> User:
         """Create or update a local email-and-password administrator.

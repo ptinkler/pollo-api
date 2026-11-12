@@ -41,7 +41,7 @@ from web.caches import on_keys_changed
 from web.core.cache import MISS, TTLCache
 from web.core.metadata import current_tenant
 from web.providers.openrouter import CHAT_TIMEOUT, IMAGE_TIMEOUT, OpenRouterError, keepalive_socket_options
-from web.types import JsonValue
+from web.types import ChatChunk, JsonValue
 
 VENICE_BASE = os.getenv("VENICE_BASE_URL", "https://api.venice.ai/api/v1").rstrip("/")
 PREFIX = "venice/"
@@ -592,7 +592,7 @@ def stream_chat(
     session_id: str | None = None,
     max_seconds: float | None = None,
     should_stop: Callable[[], bool] | None = None,
-) -> Iterator[dict]:
+) -> Iterator[ChatChunk]:
     """Yield chat-completion chunks with usage cost in USD.
 
     Cost comes from Venice's reported value or token counts and model prices.

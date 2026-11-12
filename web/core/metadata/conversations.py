@@ -1,16 +1,16 @@
 """Conversation (chat thread) CRUD, listing, search, forks and deletion."""
 
-import json
 import re
 import uuid
 from datetime import datetime
 
+from web.core.metadata._base import DBBase
 from web.core.metadata.models import ChatConversation, ChatImportSkip, ChatLibraryItem, ChatMessage
 from web.core.metadata.tenant import reset_tenant, set_tenant
 from web.types import JsonValue
 
 
-class ConversationMixin:
+class ConversationMixin(DBBase):
     """Provide conversation creation, lookup, search, and deletion operations."""
 
     def create_conversation(self, title: str = "New chat", **fields: JsonValue) -> ChatConversation:
@@ -75,20 +75,17 @@ class ConversationMixin:
             return out
         with self._session() as session:
             rows = (
-                session.query(ChatMessage.conversation_id, ChatMessage.media_json)
+                session.query(ChatMessage)
                 .filter(ChatMessage.conversation_id.in_(conv_ids), ChatMessage.media_json.isnot(None))
                 .order_by(ChatMessage.id.desc())
             )
-            for conv_id, media_json in rows:
-                if conv_id in out:
+            for msg in rows:
+                if msg.conversation_id in out:
                     continue
-                try:
-                    media = json.loads(media_json)
-                except (json.JSONDecodeError, TypeError):
-                    continue
-                for item in media:
-                    if item.get("kind") == "image" and item.get("status") == "done" and item.get("file"):
-                        out[conv_id] = item["file"]
+                for item in msg.media:
+                    file = item.get("file")
+                    if item.get("kind") == "image" and item.get("status") == "done" and isinstance(file, str):
+                        out[msg.conversation_id] = file
                         break
         return out
 
@@ -102,12 +99,12 @@ class ConversationMixin:
         pattern = "%" + re.sub(r"([\\%_])", r"\\\1", query) + "%"
         with self._session() as session:
             snippets: dict[str, str] = {}
-            for conv_id, content in (
-                session.query(ChatMessage.conversation_id, ChatMessage.content)
+            for msg in (
+                session.query(ChatMessage)
                 .filter(ChatMessage.content.ilike(pattern, escape="\\"))
                 .order_by(ChatMessage.id)
             ):
-                snippets.setdefault(conv_id, content)
+                snippets.setdefault(msg.conversation_id, msg.content)
             convs = (
                 session.query(ChatConversation)
                 .filter(

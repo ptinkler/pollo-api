@@ -2,11 +2,12 @@
 
 from datetime import datetime
 
+from web.core.metadata._base import DBBase
 from web.core.metadata.models import ChatConversation, ChatInstruction, ChatInstructionGroup, ChatSettings, ChatSpace
 from web.types import JsonValue
 
 
-class InstructionMixin:
+class InstructionMixin(DBBase):
     """Manage instruction snippets, groups, defaults, and chat spaces."""
 
     def list_instructions(self) -> list[ChatInstruction]:

@@ -5,7 +5,6 @@ This module also provides the process-wide database singleton accessor.
 
 import threading
 
-from web.core.metadata._base import _DBBase
 from web.core.metadata.characters import CharacterMixin
 from web.core.metadata.conversations import ConversationMixin
 from web.core.metadata.imports import ImportMixin
@@ -16,7 +15,6 @@ from web.core.metadata.users import UserMixin
 
 
 class MetadataDB(
-    _DBBase,
     UserMixin,
     ConversationMixin,
     InstructionMixin,
@@ -27,7 +25,7 @@ class MetadataDB(
 ):
     """Manage metadata through a SQLAlchemy engine.
 
-    The engine, schema catch-up, and locked session live on ``_DBBase``; domain
+    The engine, schema catch-up, and locked session live on ``DBBase``; domain
     methods come from the mixins.
     """
 

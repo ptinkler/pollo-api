@@ -7,11 +7,11 @@ JSON-backed lists. Alembic owns the schema; see ``schema.py``.
 
 import sqlite3
 import threading
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TypeVar, cast
 
 import sqlalchemy as sa
 from sqlalchemy import create_engine, event
@@ -24,9 +24,10 @@ from web.core.metadata.models import Base
 from web.types import JsonValue
 
 ModelT = TypeVar("ModelT", bound=Base)
+OrderByT = TypeVar("OrderByT")
 
 
-class _DBBase:
+class DBBase:
     """Provide the engine and locked sessions used by domain mixins.
 
     Also handles fresh-database initialization and shared ORM helpers.
@@ -64,7 +65,7 @@ class _DBBase:
         self._fresh = fresh
 
     @contextmanager
-    def _session(self) -> Iterator[Session]:
+    def _session(self) -> Generator[Session]:
         """Yield a Session while holding the thread lock.
 
         Because StaticPool shares one raw connection across threads, we
@@ -78,7 +79,9 @@ class _DBBase:
     #    one thing, and detaches what it returns so callers hold plain objects.
 
     def _list(
-        self, model: type[ModelT], order_by: ColumnElement[Any] | InstrumentedAttribute | None = None
+        self,
+        model: type[ModelT],
+        order_by: ColumnElement[OrderByT] | InstrumentedAttribute[OrderByT] | None = None,
     ) -> list[ModelT]:
         with self._session() as session:
             query = session.query(model)
@@ -106,7 +109,7 @@ class _DBBase:
                     return None
                 for key, value in fields.items():
                     setattr(item, key, value)
-                item.updated_at = datetime.now().astimezone().replace(tzinfo=None)
+                setattr(item, "updated_at", datetime.now().astimezone().replace(tzinfo=None))  # noqa: B010
             session.commit()
             session.refresh(item)
             session.expunge(item)
@@ -115,8 +118,8 @@ class _DBBase:
     @staticmethod
     def _detach_id(
         session: Session,
-        model: type[Base],
-        json_column: InstrumentedAttribute,
+        model: type[ModelT],
+        json_column: InstrumentedAttribute[OrderByT],
         list_attr: str,
         target_id: int,
     ) -> None:
@@ -126,6 +129,6 @@ class _DBBase:
         before the id is removed.
         """
         for row in session.query(model).filter(json_column.like(f"%{target_id}%")).all():
-            ids = getattr(row, list_attr)
+            ids = cast("list[int]", getattr(row, list_attr))
             if target_id in ids:
                 setattr(row, list_attr, [i for i in ids if i != target_id])

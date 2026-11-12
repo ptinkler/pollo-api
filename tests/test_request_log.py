@@ -5,7 +5,12 @@ from web.core import metadata
 
 
 def _prompts():
-    return [e["request"]["prompt"] for e in request_log.recent()]
+    prompts: list[str] = []
+    for entry in request_log.recent():
+        request = entry.get("request")
+        if isinstance(request, dict) and isinstance((prompt := request.get("prompt")), str):
+            prompts.append(prompt)
+    return prompts
 
 
 def test_log_is_per_tenant():

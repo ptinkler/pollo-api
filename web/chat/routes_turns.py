@@ -8,7 +8,7 @@ import json
 import queue
 import threading
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any
 
 from fastapi import HTTPException
@@ -51,6 +51,7 @@ from web.core.metadata import get_db, iso
 from web.core.metadata.models import ChatMessage
 from web.media_types import kind_of
 from web.providers import openrouter, pollo
+from web.types import JsonValue
 from web.uploads import safe_filename
 
 # Live turns' cancel flags, keyed by the assistant message id (set by the
@@ -508,30 +509,40 @@ def api_active_generations(data: ActiveQuery) -> dict[str, list[dict[str, Any]]]
 
 
 @with_owner_keys
-def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) -> None:
+def _regenerate_worker(conv_id: str, message_id: int, item: Mapping[str, JsonValue], model: str) -> None:
     db = get_db()
-    media_id = item["id"]
-    params = dict(item.get("params") or {})
+    media_id = item.get("id")
+    prompt = item.get("prompt")
+    kind = item.get("kind")
+    if not isinstance(media_id, str) or not isinstance(prompt, str) or not isinstance(kind, str):
+        raise TypeError("Invalid media item for regeneration")  # noqa: TRY003
+    raw_params = item.get("params")
+    params: dict[str, JsonValue] = dict(raw_params) if isinstance(raw_params, Mapping) else {}
     try:
-        if item["kind"] == "image":
+        if kind == "image":
             context = None
             if is_conversational(model):
                 msg = db.get_chat_message(message_id)
                 history = branch_to(db.get_chat_messages(conv_id), message_id)[:-1]
-                direct = params.get("direct", False)
+                direct = params.get("direct") is True
+                history_limit = params.get("history_limit")
+                refs = params.get("refs")
+                image_limit = params.get("image_limit")
                 context = image_context(
                     conv_id,
                     history,
-                    params.get("history_limit"),
+                    history_limit if isinstance(history_limit, int) and not isinstance(history_limit, bool) else None,
                     msg.content if msg else "",
-                    None if direct else item["prompt"],
-                    params.get("refs") or [],
+                    None if direct else prompt,
+                    [ref for ref in refs if isinstance(ref, str)] if isinstance(refs, list) else [],
                     conversation_instructions(conv_id),
                     param_characters(params),
-                    params.get("image_limit", DEFAULT_IMAGE_LIMIT),
+                    image_limit
+                    if isinstance(image_limit, int) and not isinstance(image_limit, bool)
+                    else DEFAULT_IMAGE_LIMIT,
                 )
             params["context"] = context is not None
-            names, cost, credits, sent = run_image_generation(conv_id, model, item["prompt"], params, context)
+            names, cost, credits, sent = run_image_generation(conv_id, model, prompt, params, context)
             sent, exchange = take_log(sent)
             db.update_chat_media_item(
                 message_id,
@@ -545,11 +556,11 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
             )
             for extra in names[1:]:
                 db.append_chat_media_item(
-                    message_id, saved_media("image", "generated", extra, prompt=item["prompt"], model=model)
+                    message_id, saved_media("image", "generated", extra, prompt=prompt, model=model)
                 )
             add_message_cost(message_id, cost)
-        elif item["kind"] == "audio":
-            job = submit_audio_generation(conv_id, model, item["prompt"], params)
+        elif kind == "audio":
+            job = submit_audio_generation(conv_id, model, prompt, params)
             db.update_chat_media_item(
                 message_id,
                 media_id,
@@ -560,10 +571,16 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
             polling.start_video_poller(conv_id, message_id, media_id, job["id"])
         else:
             # A different model may support different durations/ratios
+            duration = params.get("duration")
+            aspect_ratio = params.get("aspect_ratio")
+            resolution = params.get("resolution")
             params["duration"], params["aspect_ratio"], params["resolution"] = fit_video_params(
-                model, params.get("duration"), params.get("aspect_ratio"), params.get("resolution")
+                model,
+                duration if isinstance(duration, int) and not isinstance(duration, bool) else None,
+                aspect_ratio if isinstance(aspect_ratio, str) else None,
+                resolution if isinstance(resolution, str) else None,
             )
-            job = submit_video_generation(conv_id, model, item["prompt"], params)
+            job = submit_video_generation(conv_id, model, prompt, params)
             db.update_chat_media_item(
                 message_id,
                 media_id,

@@ -8,8 +8,9 @@ tenant is unset (startup, migrations, system tasks) there is no filter — those
 contexts are not user-facing.
 """
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from contextvars import ContextVar, Token
+from typing import cast
 
 from sqlalchemy import event
 from sqlalchemy.orm import ORMExecuteState, Session, with_loader_criteria
@@ -76,6 +77,6 @@ def _stamp_new_rows_with_tenant(
     uid = _tenant.get()
     if uid is None:
         return
-    for obj in session.new:
+    for obj in cast("Iterable[Base]", session.new):
         if isinstance(obj, TENANT_MODELS) and getattr(obj, "user_id", None) is None:
             obj.user_id = uid

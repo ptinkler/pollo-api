@@ -9,7 +9,7 @@ import uuid
 from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from fastapi import File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
@@ -57,6 +57,14 @@ from web.media_types import VIDEO_SUFFIXES
 from web.providers import openrouter, venice
 from web.types import JsonValue
 from web.uploads import read_audio_upload, read_image_upload, read_video_upload, safe_filename, store_deduped
+
+
+class _SpendGroup(TypedDict):
+    model: str
+    kind: str
+    usd: float
+    credits: int
+    count: int
 
 
 @router.get("/status")
@@ -182,14 +190,14 @@ def api_create_conversation(data: ConversationCreate) -> dict[str, Any]:
     return conv.to_dict()
 
 
-def _require_hidden_defaults(value: dict | None) -> dict[str, list[int]]:
+def _require_hidden_defaults(value: dict[str, list[int]] | None) -> dict[str, list[int]]:
     unknown = set(value or {}) - set(KINDS)
     if unknown:
         raise HTTPException(400, f"Unknown kind of default: {', '.join(sorted(unknown))}")
     return {k: list(dict.fromkeys(ids)) for k, ids in (value or {}).items()}
 
 
-def _require_paused(value: dict | None) -> dict[str, list[int]]:
+def _require_paused(value: dict[str, list[int]] | None) -> dict[str, list[int]]:
     unknown = set(value or {}) - set(PAUSE_KINDS)
     if unknown:
         raise HTTPException(400, f"Can't pause kind: {', '.join(sorted(unknown))}")
@@ -263,7 +271,10 @@ def api_list_instructions() -> dict[str, Any]:
 @router.post("/instructions")
 def api_create_instruction(data: InstructionIn) -> dict[str, Any]:
     """Create an instruction snippet."""
-    return get_db().save_instruction(name=data.name.strip(), content=data.content).to_dict()
+    item = get_db().save_instruction(name=data.name.strip(), content=data.content)
+    if not item:
+        raise HTTPException(500, "Could not create instruction")
+    return item.to_dict()
 
 
 @router.put("/instructions/{instruction_id}")
@@ -286,11 +297,10 @@ def api_delete_instruction(instruction_id: int) -> dict[str, int]:
 @router.post("/instruction-groups")
 def api_create_instruction_group(data: InstructionGroupIn) -> dict[str, Any]:
     """Create a group from validated instruction snippet IDs."""
-    return (
-        get_db()
-        .save_instruction_group(name=data.name.strip(), snippet_ids=_require_instructions(data.snippet_ids))
-        .to_dict()
-    )
+    group = get_db().save_instruction_group(name=data.name.strip(), snippet_ids=_require_instructions(data.snippet_ids))
+    if not group:
+        raise HTTPException(500, "Could not create instruction group")
+    return group.to_dict()
 
 
 @router.put("/instruction-groups/{group_id}")
@@ -321,7 +331,10 @@ def api_list_spaces() -> dict[str, Any]:
 @router.post("/spaces")
 def api_create_space(data: SpaceIn) -> dict[str, Any]:
     """Create a chat space with validated defaults."""
-    return get_db().save_space(name=data.name.strip(), **_defaults_fields(data)).to_dict()
+    space = get_db().save_space(None, name=data.name.strip(), **_defaults_fields(data))
+    if not space:
+        raise HTTPException(500, "Could not create space")
+    return space.to_dict()
 
 
 @router.put("/spaces/{space_id}")
@@ -355,8 +368,10 @@ def api_get_conversation(conv_id: str) -> dict[str, Any]:
             "message_id": conv.forked_from_message_id,
             "exists": parent is not None,
         }
-    forks: dict[int, list[dict]] = {}
+    forks: dict[int, list[dict[str, JsonValue]]] = {}
     for f in db.list_conversation_forks(conv_id):
+        if f.forked_from_message_id is None:
+            continue
         forks.setdefault(f.forked_from_message_id, []).append({"id": f.id, "title": f.title})
     return {
         "conversation": {**conv.to_dict(), "forked_from": origin, "spend": spend(conv)},
@@ -373,13 +388,19 @@ def api_spend_breakdown(days: int = 0) -> dict[str, Any]:
     """
     db = get_db()
     cutoff = datetime.now().astimezone().replace(tzinfo=None) - timedelta(days=days) if days > 0 else None
-    groups: dict[tuple[str, str], dict] = {}
+    groups: dict[tuple[str, str], _SpendGroup] = {}
     for r in db.spend_rows([c.id for c in db.list_conversations(limit=None)]):
         if cutoff and r["at"] and r["at"] < cutoff:
             continue
         g = groups.setdefault(
             (r["model"] or "unknown", r["kind"]),
-            {"model": r["model"] or "unknown", "kind": r["kind"], "usd": 0.0, "credits": 0, "count": 0},
+            {
+                "model": r["model"] or "unknown",
+                "kind": r["kind"],
+                "usd": 0.0,
+                "credits": 0,
+                "count": 0,
+            },
         )
         g["usd"] += r["usd"] + r["credits"] * config.POLLO_USD_PER_CREDIT
         g["credits"] += r["credits"]
@@ -489,7 +510,10 @@ def api_fork_conversation(conv_id: str, data: ForkConversation) -> dict[str, Any
             for msg in path
         ],
     )
-    return db.get_conversation(new.id).to_dict()
+    forked = db.get_conversation(new.id)
+    if not forked:
+        raise HTTPException(500, "Could not load forked conversation")
+    return forked.to_dict()
 
 
 def _media_character_ids(params: dict[str, JsonValue]) -> set[int]:
@@ -588,17 +612,23 @@ def _clean_conv_update(fields: dict) -> None:
 
 
 @router.patch("/conversations/{conv_id}")
-def api_update_conversation(conv_id: str, data: ConversationUpdate) -> dict[str, Any]:
+def api_update_conversation(conv_id: str, data: ConversationUpdate) -> dict[str, JsonValue]:
     """Update a conversation's mutable fields and return its saved record."""
     require_conv(conv_id)
-    fields = data.model_dump(exclude_unset=True)
+    fields: dict[str, JsonValue] = data.model_dump(exclude_unset=True)
     _clean_conv_update(fields)
     if "pinned" in fields:
         # Not an edit: the chat keeps its place among the rest
         get_db().set_conversation_pinned(conv_id, bool(fields.pop("pinned")))
     if not fields:
-        return get_db().get_conversation(conv_id).to_dict()
-    return get_db().update_conversation(conv_id, **fields).to_dict()
+        conversation = get_db().get_conversation(conv_id)
+        if not conversation:
+            raise HTTPException(404, "Conversation not found")
+        return conversation.to_dict()
+    conversation = get_db().update_conversation(conv_id, **fields)
+    if not conversation:
+        raise HTTPException(404, "Conversation not found")
+    return conversation.to_dict()
 
 
 @router.delete("/conversations/{conv_id}")
@@ -816,10 +846,14 @@ def api_delete_exchange(message_id: int, delete_media: bool = False) -> dict[str
     detached = db.delete_chat_exchange(msg.conversation_id, message_id)
     if delete_media:
         for item in detached:
-            if item.get("file"):
-                (conversation_dir(msg.conversation_id) / safe_filename(item["file"])).unlink(missing_ok=True)
-            db.delete_chat_library_item(item["id"])
-    return {
-        "conversation": db.get_conversation(msg.conversation_id).to_dict(),
-        "messages": shown_branch(msg.conversation_id),
-    }
+            file = item.get("file")
+            if isinstance(file, str):
+                (conversation_dir(msg.conversation_id) / safe_filename(file)).unlink(missing_ok=True)
+            media_id = item.get("id")
+            if not isinstance(media_id, str):
+                raise TypeError(media_id)
+            db.delete_chat_library_item(media_id)
+    conversation = db.get_conversation(msg.conversation_id)
+    if not conversation:
+        raise HTTPException(404, "Conversation not found")
+    return {"conversation": conversation.to_dict(), "messages": shown_branch(msg.conversation_id)}

@@ -15,8 +15,9 @@ its media item rather than adding to the OpenRouter `cost`.
 """
 
 import time
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 import requests
@@ -201,7 +202,9 @@ def list_voices(page: int = 1, page_size: int = 50, **filters: str) -> dict[str,
     return {"voices": voices, "total": body.get("total", len(voices))}
 
 
-def submit_audio(model_id: str, prompt: str, source_audio: Path | None = None, **opts: JsonValue) -> dict:
+def submit_audio(
+    model_id: str, prompt: str, source_audio: Path | None = None, **opts: JsonValue
+) -> dict[str, JsonValue]:
     """Start a Pollo speech or music job.
 
     Returns the job id and settings actually sent, like ``submit_video``.
@@ -477,7 +480,7 @@ def estimate_cost(
     generate_audio: bool | None = None,
     n_images: int = 0,
     prompt: str = "",
-    audio: dict[str, object] | None = None,
+    audio: Mapping[str, object] | None = None,
 ) -> dict | None:
     """Return Pollo's credit estimate, or ``None`` when it cannot be priced.
 
@@ -525,7 +528,7 @@ def estimate_cost(
         return None
 
 
-def _job(generator: PolloGenerator, params: dict | None = None) -> dict:
+def _job(generator: PolloGenerator, params: dict[str, JsonValue] | None = None) -> dict[str, JsonValue]:
     """Submit a job and describe its id and sent settings.
 
     ``params`` overrides the video/image view of them (audio reports its own).
@@ -533,7 +536,7 @@ def _job(generator: PolloGenerator, params: dict | None = None) -> dict:
     return {"id": JOB_PREFIX + _submit(generator), "params": params or _sent_params(generator)}
 
 
-def _sent_params(generator: PolloGenerator) -> dict[str, Any]:
+def _sent_params(generator: PolloGenerator) -> dict[str, JsonValue]:
     """Return sent settings in chat's parameter names for display in the UI.
 
     The settings include any defaults filled in by the generator. A ``None``
@@ -542,12 +545,15 @@ def _sent_params(generator: PolloGenerator) -> dict[str, Any]:
     resolution, the way it's picked.
     """
     attrs = generator.payload_attrs or {}
-    return {
-        "aspect_ratio": attrs.get("aspectRatio"),
-        "resolution": attrs.get("resolution") or attrs.get("mode"),
-        "duration": attrs.get("duration") or attrs.get("length"),
-        "generate_audio": attrs.get("generateAudio"),
-    }
+    return cast(
+        "dict[str, JsonValue]",
+        {
+            "aspect_ratio": attrs.get("aspectRatio"),
+            "resolution": attrs.get("resolution") or attrs.get("mode"),
+            "duration": attrs.get("duration") or attrs.get("length"),
+            "generate_audio": attrs.get("generateAudio"),
+        },
+    )
 
 
 def _ratio_for_image(path: Path, ratios: list[str]) -> str | None:
@@ -605,7 +611,7 @@ def _payload(generator: PolloGenerator) -> dict[str, Any] | None:
         return None
 
 
-def _submit_logged(generator: PolloGenerator, outcome: dict[str, object]) -> str:
+def _submit_logged(generator: PolloGenerator, outcome: request_log.LogOutcome) -> str:
     try:
         resp = generator.send_request()
     except (ConnectionError, ValueError) as e:

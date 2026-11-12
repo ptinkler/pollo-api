@@ -11,14 +11,14 @@ import logging
 import os
 import re
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime
-from typing import Any
+from typing import Any, TypedDict, cast
 
 from web import characters
 from web.chat import generation, polling
 from web.chat.audio import audio_params, submit_audio_generation
-from web.chat.catalogue import auto_ratio, fit_video_params, model_info
+from web.chat.catalogue import ModelInfo, RefMode, auto_ratio, fit_video_params, model_info
 from web.chat.constants import (
     CHAT_ROUND_SECONDS,
     CONSISTENCY_REFS,
@@ -57,11 +57,29 @@ from web.chat.tools import (
 )
 from web.chat.workers import ctx_thread
 from web.core.metadata import get_db
-from web.core.metadata.models import ChatMessage
-from web.providers import openrouter, provider_for
+from web.core.metadata.models import Character, ChatMessage
+from web.providers import openrouter, provider_for, stream_chat
 from web.types import JsonValue
 
 log = logging.getLogger(__name__)
+
+
+class _TitleJob(TypedDict):
+    prompt: str
+    title: str | None
+    cost: float
+    thread: threading.Thread | None
+
+
+class _ToolFunction(TypedDict):
+    name: str
+    arguments: str
+
+
+class _ToolCall(TypedDict):
+    id: str
+    type: str
+    function: _ToolFunction
 
 
 class Turn:
@@ -87,7 +105,7 @@ class Turn:
         self.history = branch_to(self.db.get_chat_messages(conv_id), message_id)[:-1]
         self.instructions = conversation_instructions(conv_id)
         conv = self.db.get_conversation(conv_id)
-        self.characters = []  # attached (to the chat, or by its defaults); the only ones a turn uses
+        self.characters: list[Character] = []  # attached (to the chat, or by its defaults); the only ones a turn uses
         if self._characters_usable():  # attached ones stay attached, just unused, otherwise
             self.characters = characters.load(effective_ids(conv, "character"), self.db)
         self.content = ""
@@ -159,7 +177,7 @@ class Turn:
         self._generate_image(prompt, self.s.image_options.aspect_ratio, refs, chars=chars, dropped=dropped)
         return None
 
-    def _direct_image_tool(self, user: ChatMessage | None, prompt: str, info: dict) -> None:
+    def _direct_image_tool(self, user: ChatMessage | None, prompt: str, info: ModelInfo) -> None:
         """An image tool (upscale, background remover…): the attached image is the whole input.
 
         The model's name stands in for the prompt, so the
@@ -207,7 +225,7 @@ class Turn:
             ref_items=ref_items,
         )
 
-    def _ref_items(self, ref_mode: dict) -> list[dict]:
+    def _ref_items(self, ref_mode: RefMode) -> list[dict[str, str]]:
         """Build the named reference list for a reference-to-video model.
 
         Supported attachments receive [@name] handles, subject to per-type and
@@ -218,11 +236,11 @@ class Turn:
         limits = ref_mode.get("limits") or {}
         total_max = ref_mode.get("max")
         counts: dict[str, int] = {}
-        items: list[dict] = []
+        items: list[dict[str, str]] = []
         for m in user.media if user else []:
             kind = m.get("kind")
             file = m.get("file")
-            if not isinstance(file, str) or kind not in types:
+            if not isinstance(kind, str) or not isinstance(file, str) or kind not in types:
                 continue
             counts[kind] = counts.get(kind, 0) + 1
             if limits.get(kind) and counts[kind] > limits[kind]:
@@ -261,7 +279,8 @@ class Turn:
     def _chat(self, tools_enabled: bool) -> None:
         if not self.s.text_model:
             raise openrouter.OpenRouterError("No text model selected")  # noqa: TRY003
-        info = model_info("text", self.s.text_model)
+        model = self.s.text_model
+        info = model_info("text", model)
         use_tools = tools_enabled and (info is None or info.get("supports_tools"))
         vision = info is None or "image" in (info.get("input_modalities") or [])
         messages = self._build_llm_messages(vision, as_tool_calls=bool(use_tools and self._tools()))
@@ -272,11 +291,13 @@ class Turn:
             # each round: a character created mid-turn joins the name lists.
             tools = self._tools() if use_tools else []
             round_tools = (tools or None) if offer_tools and round_no < MAX_TOOL_ROUNDS - 1 else None
-            text, tool_calls = self._stream_round(messages, round_tools)
+            text, tool_calls = self._stream_round(model, messages, round_tools)
             if self.cancel.is_set() or not tool_calls:
                 return
-            messages.append({"role": "assistant", "content": text or None, "tool_calls": tool_calls})
-            results = []
+            messages.append(
+                cast("dict[str, JsonValue]", {"role": "assistant", "content": text or None, "tool_calls": tool_calls})
+            )
+            results: list[dict[str, JsonValue]] = []
             for call in tool_calls:
                 result = self._run_tool(call)
                 results.append(result)
@@ -301,27 +322,32 @@ class Turn:
             # (After a non-moderation failure the model keeps its tools and
             # can explain or try again.)
 
-    def _tools(self) -> list[dict]:
+    def _tools(self) -> list[dict[str, JsonValue]]:
         names = [c.name for c in self.characters]
-        tools = [TOOLS_CREATE_CHARACTER] if self.s.image_model else []
+        tools: list[dict[str, JsonValue]] = (
+            [cast("dict[str, JsonValue]", TOOLS_CREATE_CHARACTER)] if self.s.image_model else []
+        )
         if self.s.image_model:
             tools.insert(0, with_character_arg(TOOLS_IMAGE, names))
         if self.s.video_model:
             tools.append(with_character_arg(TOOLS_VIDEO, names))
         if self.s.audio_model:
-            tools.append(TOOLS_AUDIO)
-        tools.append(TOOLS_CREATE_INSTRUCTION)  # needs no media model: applies to the chat model itself
+            tools.append(cast("dict[str, JsonValue]", TOOLS_AUDIO))
+        # Needs no media model: applies to the chat model itself.
+        tools.append(cast("dict[str, JsonValue]", TOOLS_CREATE_INSTRUCTION))
         return tools
 
-    def _stream_round(self, messages: list[dict], tools: list[dict] | None) -> tuple[str, list[dict]]:
+    def _stream_round(
+        self, model: str, messages: list[dict[str, JsonValue]], tools: list[dict[str, JsonValue]] | None
+    ) -> tuple[str, list[_ToolCall]]:
         """One chat completion, streamed to the UI."""
         text = ""
-        calls: dict[int, dict] = {}
+        calls: dict[int, _ToolCall] = {}
         finish = None
         if self.content and not self.content.endswith("\n\n"):
             self._append("\n\n")
-        for chunk in provider_for(self.s.text_model).stream_chat(
-            self.s.text_model,
+        for chunk in stream_chat(
+            model,
             messages,
             tools,
             session_id=self.conv_id,
@@ -331,23 +357,29 @@ class Turn:
             if self.cancel.is_set():
                 break
             usage = chunk.get("usage")
-            if usage and usage.get("cost"):
-                self.cost += float(usage["cost"])
+            chunk_cost = usage.get("cost") if usage else None
+            if isinstance(chunk_cost, int | float | str) and not isinstance(chunk_cost, bool):
+                self.cost += float(chunk_cost)
             for choice in chunk.get("choices") or []:
                 finish = choice.get("finish_reason") or finish
                 delta = choice.get("delta") or {}
-                if delta.get("content"):
-                    text += delta["content"]
-                    self._append(delta["content"])
+                content = delta.get("content")
+                if isinstance(content, str) and content:
+                    text += content
+                    self._append(content)
                 for tc in delta.get("tool_calls") or []:
+                    index = tc.get("index", 0)
                     slot = calls.setdefault(
-                        tc.get("index", 0), {"id": "", "type": "function", "function": {"name": "", "arguments": ""}}
+                        index,
+                        {"id": "", "type": "function", "function": {"name": "", "arguments": ""}},
                     )
-                    if tc.get("id"):
-                        slot["id"] = tc["id"]
+                    call_id = tc.get("id")
+                    if isinstance(call_id, str):
+                        slot["id"] = call_id
                     fn = tc.get("function") or {}
-                    slot["function"]["name"] += fn.get("name") or ""
-                    slot["function"]["arguments"] += fn.get("arguments") or ""
+                    fn_name, arguments = fn.get("name"), fn.get("arguments")
+                    slot["function"]["name"] += fn_name if isinstance(fn_name, str) else ""
+                    slot["function"]["arguments"] += arguments if isinstance(arguments, str) else ""
         tool_calls = [c for _, c in sorted(calls.items()) if c["function"]["name"]]
         for i, c in enumerate(tool_calls):
             c["id"] = c["id"] or f"call_{i}"
@@ -369,12 +401,11 @@ class Turn:
         self.content += text
         self.emit({"type": "delta", "text": text})
 
-    def _run_tool(self, call: dict) -> dict:
+    def _run_tool(self, call: _ToolCall) -> dict[str, JsonValue]:
         name = call["function"]["name"]
-        try:
-            args = json.loads(call["function"]["arguments"] or "{}")
-        except json.JSONDecodeError:
-            return {"ok": False, "error": "Arguments were not valid JSON"}
+        args, error = self._parse_tool_arguments(call["function"]["arguments"])
+        if args is None:
+            return {"ok": False, "error": error or "Arguments were not valid JSON"}
         if name == "create_character":
             return self._create_character(args)
         if name == "create_instruction":
@@ -389,7 +420,9 @@ class Turn:
         source = self._latest_image() if args.get("source_image") == "latest" else None
         if args.get("source_image") == "latest" and not source:
             return {"ok": False, "error": "There is no earlier image in the conversation to use"}
-        chars = self._pick_characters(args.get("characters"), prompt)
+        raw_names = args.get("characters")
+        names = [name for name in raw_names if isinstance(name, str)] if isinstance(raw_names, list) else []
+        chars = self._pick_characters(names, prompt)
         try:
             if name == "generate_image":
                 return self._image_tool(prompt, args, source, chars)
@@ -397,7 +430,17 @@ class Turn:
         except openrouter.OpenRouterError as e:
             return {"ok": False, "error": str(e), "moderated": is_moderation_error(e)}
 
-    def _audio_tool(self, args: dict) -> dict:
+    @staticmethod
+    def _parse_tool_arguments(arguments: str) -> tuple[Mapping[str, JsonValue] | None, str | None]:
+        try:
+            parsed = cast("object", json.loads(arguments or "{}"))
+        except json.JSONDecodeError:
+            return None, "Arguments were not valid JSON"
+        if not isinstance(parsed, dict):
+            return None, "Arguments must be a JSON object"
+        return cast("Mapping[str, JsonValue]", parsed), None
+
+    def _audio_tool(self, args: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
         prompt = str(args.get("prompt") or "").strip()
         if not prompt:
             return {"ok": False, "error": "prompt is required"}
@@ -407,7 +450,9 @@ class Turn:
             return {"ok": False, "error": str(e), "moderated": is_moderation_error(e)}
         return {"ok": True, "result": AUDIO_TOOL_RESULT}
 
-    def _image_tool(self, prompt: str, args: dict, source: str | None, chars: list) -> dict:
+    def _image_tool(
+        self, prompt: str, args: Mapping[str, JsonValue], source: str | None, chars: list[Character]
+    ) -> dict[str, JsonValue]:
         # Aspect ratio is the composer's to set, not the chat model's. A ratio
         # picked there wins; left on "auto" it becomes the image model's own
         # "auto" value if it has one, else nothing — the model's natural shape.
@@ -429,17 +474,24 @@ class Turn:
             result["note"] = "The selected image model can't take reference images, so none were sent."
         return result
 
-    def _video_tool(self, prompt: str, args: dict, source: str | None, chars: list) -> dict:
+    def _video_tool(
+        self, prompt: str, args: Mapping[str, JsonValue], source: str | None, chars: list[Character]
+    ) -> dict[str, JsonValue]:
         # The composer's settings beat the model's guesses; an animated image's own shape does too
         opts = self.s.video_options
-        ratio = opts.aspect_ratio or (None if source else args.get("aspect_ratio"))
+        ratio_arg = args.get("aspect_ratio")
+        ratio = opts.aspect_ratio or (ratio_arg if isinstance(ratio_arg, str) and not source else None)
+        duration_arg = args.get("duration")
+        duration = opts.duration or (
+            duration_arg if isinstance(duration_arg, int) and not isinstance(duration_arg, bool) else None
+        )
         last = None
         if "last_frame" in ((model_info("video", self.s.video_model) or {}).get("frame_images") or []):
             # First+last-frame models: the two most recent images, older one first
             recent = self._latest_images(2)
             if len(recent) == 2:
                 source, last = recent[1], recent[0]
-        self._generate_video(prompt, opts.duration or args.get("duration"), ratio, source, chars, last_frame=last)
+        self._generate_video(prompt, duration, ratio, source, chars, last_frame=last)
         return {"ok": True, "result": VIDEO_TOOL_RESULT}
 
     def _latest_image(self) -> str | None:
@@ -475,7 +527,7 @@ class Turn:
             and isinstance((file := item.get("file")), str)
         ]
 
-    def _pick_characters(self, names: list[str], prompt: str) -> list:
+    def _pick_characters(self, names: list[str], prompt: str) -> list[Character]:
         """Select attached characters named in the tool call or prompt.
 
         Unattached characters are never included.
@@ -485,7 +537,7 @@ class Turn:
         mentioned = characters.mentioned(self.characters, prompt, prefer=named)
         return list({c.id: c for c in named + mentioned}.values())
 
-    def _attach(self, chars: list) -> None:
+    def _attach(self, chars: list[Character]) -> None:
         """Attach characters to the chat (they stay for later turns) and tell the UI."""
         new = [c for c in chars if c.id not in {a.id for a in self.characters}]
         if not new:
@@ -503,7 +555,7 @@ class Turn:
             }
         )
 
-    def _create_character(self, args: dict) -> dict:
+    def _create_character(self, args: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
         name = str(args.get("name") or "").strip()[:100]
         if not name:
             return {"ok": False, "error": "name is required"}
@@ -517,8 +569,9 @@ class Turn:
                 else "the user can attach it to this chat with the characters button"
             )
             return {"ok": False, "error": f"There's already a character called {name}; {how}"}
+        images = args.get("images")
         try:
-            n = max(1, min(4, int(args.get("images") or 1)))
+            n = max(1, min(4, int(images or 1))) if isinstance(images, str | int | float) else 1
         except (TypeError, ValueError):
             n = 1
         files = [p for p in (conversation_dir(self.conv_id) / f for f in self._latest_images(n)) if p.is_file()]
@@ -534,7 +587,7 @@ class Turn:
             f"to this chat. Name them in generate_image's `characters` to use them.",
         }
 
-    def _create_instruction(self, args: dict) -> dict:
+    def _create_instruction(self, args: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
         """Save an instruction snippet and attach it to this chat.
 
         Keep existing snippets and groups; the new instruction takes effect
@@ -587,7 +640,9 @@ class Turn:
         """How many reference images the image model takes (None = unknown)."""
         return (model_info("image", self.s.image_model) or {}).get("max_refs")
 
-    def _image_refs(self, args: dict, source: str | None, chars: list) -> tuple[list[str], list[str]]:
+    def _image_refs(
+        self, args: Mapping[str, JsonValue], source: str | None, chars: list[Character]
+    ) -> tuple[list[str], list[str]]:
         """Choose reference images for image generation and report any omitted.
 
         Priority is the edit source, selected characters, pinned images, then
@@ -624,13 +679,17 @@ class Turn:
         aspect_ratio: str | None,
         ref_files: list[str],
         ref_args: dict | None = None,
-        chars: list | None = None,
+        chars: list[Character] | None = None,
         dropped: list[str] | None = None,
     ) -> None:
         if not self.s.image_model:
             raise openrouter.OpenRouterError("No image model selected")  # noqa: TRY003
         # Params are stored on the item so a failed image can be retried as-is
-        params = {"aspect_ratio": aspect_ratio, "resolution": self.s.image_options.resolution, "refs": ref_files}
+        params: dict[str, JsonValue] = {
+            "aspect_ratio": aspect_ratio,
+            "resolution": self.s.image_options.resolution,
+            "refs": ref_files,
+        }
         if dropped:
             params["refs_dropped"] = dropped  # more than the image model takes
         if ref_args:
@@ -686,7 +745,7 @@ class Turn:
         duration: int | None,
         aspect_ratio: str | None,
         first_frame: str | None,
-        chars: list | None = None,
+        chars: list[Character] | None = None,
         last_frame: str | None = None,
         attached: list[str] | None = None,
         ref_items: list[dict] | None = None,
@@ -700,7 +759,7 @@ class Turn:
         # all ride in the named refs list instead.
         if ref_items:
             first_frame = None
-        params = {
+        params: dict[str, JsonValue] = {
             "duration": duration,
             # Remembered so reusing a generation's settings puts Length back on
             # Auto rather than pinning whatever Auto resolved to (never sent).
@@ -728,14 +787,16 @@ class Turn:
         )
         polling.start_video_poller(self.conv_id, self.message_id, item["id"], job["id"])
 
-    def _video_inputs(self, first_frame: str | None, last_frame: str | None, attached: list[str], chars: list) -> dict:
+    def _video_inputs(
+        self, first_frame: str | None, last_frame: str | None, attached: list[str], chars: list[Character]
+    ) -> dict[str, JsonValue]:
         """The extra inputs the video model's family takes (Venice): reference.
 
         images (attached ones, the frame, characters' images and pins), a
         last frame, or the chat's latest video.
         """
         info = model_info("video", self.s.video_model) or {}
-        out: dict[str, Any] = {}
+        out: dict[str, JsonValue] = {}
         if info.get("reference_images") or info.get("family") == "motion":
             own = dedupe([*attached, *([first_frame] if first_frame else []), *self._pinned_images()])
             out["refs"], _ = plan_refs(
@@ -772,8 +833,8 @@ class Turn:
         return None
 
     # ― history → OpenRouter messages ―
-    def _build_llm_messages(self, vision: bool, as_tool_calls: bool = False) -> list[dict]:
-        messages = [
+    def _build_llm_messages(self, vision: bool, as_tool_calls: bool = False) -> list[dict[str, JsonValue]]:
+        messages: list[dict[str, JsonValue]] = [
             {
                 "role": "system",
                 "content": SYSTEM_PROMPT.format(today=datetime.now().astimezone().strftime("%A %d %B %Y")),
@@ -790,7 +851,7 @@ class Turn:
         )
 
     # ― title ―
-    def _start_title(self) -> dict | None:
+    def _start_title(self) -> _TitleJob | None:
         """A new chat's first turn asks a text model for a short title while.
 
         the reply is made (CHAT_TITLE_MODEL, else the chat model).
@@ -801,7 +862,7 @@ class Turn:
         first = next((m for m in self.history if m.role == "user" and m.content), None)
         if not first:
             return None
-        job: dict[str, Any] = {"prompt": first.content, "title": None, "cost": 0.0, "thread": None}
+        job: _TitleJob = {"prompt": first.content, "title": None, "cost": 0.0, "thread": None}
         # The user's title model (Settings), else CHAT_TITLE_MODEL, else the chat model
         chosen = self.db.get_settings().title_model or os.environ.get("CHAT_TITLE_MODEL")
         model = chosen or self.s.text_model
@@ -819,7 +880,7 @@ class Turn:
             job["thread"].start()
         return job
 
-    def _finish_title(self, job: dict | None) -> None:
+    def _finish_title(self, job: _TitleJob | None) -> None:
         """Title the chat: the model's title if it came back in time, else the start of the first prompt.
 
         Its cost goes on this reply.

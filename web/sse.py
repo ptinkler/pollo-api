@@ -6,6 +6,9 @@ Shared by the OpenRouter and Venice clients.
 import json
 import time
 from collections.abc import Callable, Iterable, Iterator
+from typing import cast
+
+from web.types import ChatChunk, JsonValue
 
 
 def chat_chunks(
@@ -13,7 +16,7 @@ def chat_chunks(
     error: Callable[[str, int | None], Exception],
     max_seconds: float | None = None,
     should_stop: Callable[[], bool] | None = None,
-) -> Iterator[dict]:
+) -> Iterator[ChatChunk]:
     """The parsed chunk dicts from a response's lines, until "[DONE]".
 
     Blank separators and ":" keep-alives are skipped but still checked
@@ -33,10 +36,13 @@ def chat_chunks(
         if payload == "[DONE]":
             return
         try:
-            chunk = json.loads(payload)
+            chunk = cast("dict[str, JsonValue]", json.loads(payload))
         except json.JSONDecodeError:
             continue
-        if chunk.get("error"):
-            err = chunk["error"]
-            raise error(err.get("message") if isinstance(err, dict) else str(err), None)
-        yield chunk
+        err = chunk.get("error")
+        if err:
+            if isinstance(err, dict):
+                message = err.get("message")
+                raise error(message if isinstance(message, str) else str(message), None)
+            raise error(str(err), None)
+        yield cast("ChatChunk", chunk)

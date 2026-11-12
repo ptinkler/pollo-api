@@ -4,6 +4,9 @@ real assets, the developer's .env, or the network.
 """
 
 import types
+from collections.abc import Iterator
+from pathlib import Path
+from typing import NoReturn
 
 import pytest
 import requests
@@ -47,14 +50,14 @@ _APP_ENV = (
 
 
 @pytest.fixture(autouse=True)
-def _clean_env(monkeypatch):
+def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run every test against a bare environment, whatever is in .env."""
     for name in _APP_ENV:
         monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)
-def _guard_real_db(monkeypatch, tmp_path):
+def _guard_real_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Redirect config paths to a temp directory so no test can accidentally.
 
     create files in the real data/assets directories.
@@ -72,27 +75,31 @@ _TEST_PROVIDER_KEYS: dict[str, str | None] = {}
 
 
 @pytest.fixture(autouse=True)
-def provider_keys(monkeypatch):
+def provider_keys(monkeypatch: pytest.MonkeyPatch) -> dict[str, str | None]:
     """Inject per-user provider keys for a test via an in-memory dict, patching.
 
     only the resolver seam. No API key is read from the environment.
     """
     _TEST_PROVIDER_KEYS.clear()
+
+    def provider_key(provider: str) -> str | None:
+        return _TEST_PROVIDER_KEYS.get(provider) or None
+
     monkeypatch.setattr(
         "web.keyctx.provider_key",
-        lambda provider: _TEST_PROVIDER_KEYS.get(provider) or None,
+        provider_key,
         raising=False,
     )
     return _TEST_PROVIDER_KEYS
 
 
-def pytest_configure(config):
+def pytest_configure(config: pytest.Config) -> None:
     """Document the pytest configure test helper."""
     config.addinivalue_line("markers", "no_tenant: run without a bound tenant (schema/migration tests on old DBs)")
 
 
 @pytest.fixture(autouse=True)
-def _tenant(request, monkeypatch):
+def _tenant(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> Iterator[types.SimpleNamespace | None]:
     """Bind one test tenant so multi-tenant ORM scoping is consistent: rows.
 
     created directly via the db and via the API (middleware) all belong to it,
@@ -105,8 +112,9 @@ def _tenant(request, monkeypatch):
         yield None
         return
 
+    admin_id = "test-user"
     admin = types.SimpleNamespace(
-        id="test-user",
+        id=admin_id,
         is_admin=True,
         email="admin@local",
         name="Admin",
@@ -118,7 +126,7 @@ def _tenant(request, monkeypatch):
     # Patch every module that imported the name, not just where it is defined:
     # `from .users import resolve_current_user` binds at import, so patching
     # web.users alone would leave web.api's middleware calling the real one.
-    def resolve(user_cookie=None):
+    def resolve(user_cookie: str | None = None) -> types.SimpleNamespace:
         return admin
 
     # Patch every module that imported the name, not just where it is defined:
@@ -126,7 +134,7 @@ def _tenant(request, monkeypatch):
     # web.users alone would leave web.api's middleware calling the real one.
     for module in (web.users, web.api):
         monkeypatch.setattr(module, "resolve_current_user", resolve)
-    token = metadata.set_tenant(admin.id)
+    token = metadata.set_tenant(admin_id)
     try:
         yield admin
     finally:
@@ -134,7 +142,7 @@ def _tenant(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_outbound_http(monkeypatch):
+def _no_outbound_http(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail loudly instead of reaching a real API.
 
     Everything a test needs is mocked, so a real request means something is
@@ -144,7 +152,7 @@ def _no_outbound_http(monkeypatch):
     which is very hard to trace back; this names it on the spot.
     """
 
-    def blocked(*args, **kwargs):
+    def blocked(*args: object, **kwargs: object) -> NoReturn:
         target = args[1] if len(args) > 1 else (args[0] if args else kwargs.get("url", "?"))
         raise AssertionError(f"a test tried to reach the network: {target}")  # noqa: TRY003
 

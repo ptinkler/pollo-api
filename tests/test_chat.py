@@ -3163,7 +3163,9 @@ class TestOpenRouterImageStream:
         assert entry["provider"] == "openrouter"
         assert entry["model"] == "i/model"
         assert entry["status"] == 200
-        assert "flagged" in entry["error"]
+        error = entry["error"]
+        assert isinstance(error, str)
+        assert "flagged" in error
         assert item["request"] == entry["request"]
         assert item["request"]["prompt"] == "a fox"
 
@@ -3174,8 +3176,11 @@ class TestOpenRouterImageStream:
         request_log.forget_last()
         openrouter.generate_image("x/img", "a fox", input_images=["data:image/png;base64," + "A" * 4096])
         last = request_log.take_last()
+        assert last is not None
         assert last["response"] == {"images": ["image/png"], "cost": None}
-        refs = last["request"]["input_references"]
+        request = last.get("request")
+        assert isinstance(request, dict)
+        refs = request["input_references"]
         assert refs == [{"type": "image_url", "image_url": {"url": "data:image/png;base64,… (3 KB)"}}]
 
     def test_event_name_alone_identifies_the_final_image(self, chat, monkeypatch):

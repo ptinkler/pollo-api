@@ -5,7 +5,7 @@ and the per-model lookups used to validate and auto-fit media params.
 
 import threading
 import time
-from typing import Any
+from typing import Any, TypedDict, cast
 
 from web.caches import on_keys_changed
 from web.chat.constants import MODELS_CACHE_TTL
@@ -21,6 +21,34 @@ _models_cache: dict[str, dict[str, Any]] = {}
 _models_lock = threading.Lock()
 _MAX_CACHED_TENANTS = 32
 _NEVER = 9e18  # an "at" that can't expire (seed_models)
+
+
+class RefMode(TypedDict, total=False):
+    """Describe the media types and limits accepted as video references."""
+
+    types: list[str]
+    limits: dict[str, int]
+    max: int
+
+
+class ModelInfo(TypedDict, total=False):
+    """Represent the capabilities relevant to chat generation."""
+
+    aspect_ratios: list[str] | None
+    audio_input: bool
+    conversational: bool
+    durations: list[int] | None
+    family: str
+    frame_images: list[str]
+    input_modalities: list[str]
+    max_refs: int
+    name: str
+    no_prompt: bool
+    reference_images: bool
+    ref_mode: RefMode | None
+    resolutions: list[str] | None
+    supports_tools: bool
+    tool: str | None
 
 
 def _prune(now: float) -> None:
@@ -91,7 +119,7 @@ def get_models(refresh: bool = False) -> dict[str, Any]:
         return data
 
 
-def model_info(kind: str, model_id: str | None) -> dict | None:
+def model_info(kind: str, model_id: str | None) -> ModelInfo | None:
     """Look up cached catalogue info without fetching every provider's list.
 
     That cache is empty after a restart or when any list failed to load;
@@ -104,10 +132,10 @@ def model_info(kind: str, model_id: str | None) -> dict | None:
     info = next((m for m in data.get(kind, []) if m["id"] == model_id), None) if data else None
     if info is None and venice.is_venice(model_id) and venice.is_configured():
         try:
-            return venice.model_info(kind, model_id)
+            return cast("ModelInfo", venice.model_info(kind, model_id))
         except Exception:  # noqa: BLE001 — unknown model or unreachable Venice is unknown
             return None
-    return info
+    return cast("ModelInfo", info) if info is not None else None
 
 
 # Values a model exposes that mean "you decide" — mapped to from an unset ratio
@@ -133,10 +161,14 @@ def fit_video_params(
     if not info:
         return duration, aspect_ratio, resolution
     durations = info.get("durations") or []
-    if duration and durations and duration not in durations:
-        duration = min(durations, key=lambda d: abs(d - duration))
-    if aspect_ratio and info.get("aspect_ratios") and aspect_ratio not in info["aspect_ratios"]:
+    if duration and durations:
+        requested_duration = duration
+        if requested_duration not in durations:
+            duration = min(durations, key=lambda d: abs(d - requested_duration))
+    aspect_ratios = info.get("aspect_ratios") or []
+    if aspect_ratio and aspect_ratios and aspect_ratio not in aspect_ratios:
         aspect_ratio = None
-    if resolution and info.get("resolutions") and resolution not in info["resolutions"]:
+    resolutions = info.get("resolutions") or []
+    if resolution and resolutions and resolution not in resolutions:
         resolution = None
     return duration, aspect_ratio, resolution

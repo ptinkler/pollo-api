@@ -494,13 +494,17 @@ class TestImages:
         assert entry["path"] == "/image/multi-edit"
         assert entry["model"] == "seedream-v5-pro-edit"
         assert entry["status"] == 422
-        assert "content policy" in entry["error"]
-        assert entry["request"]["prompt"] == "a fox"
-        assert entry["request"]["safe_mode"] is False
-        assert entry["request"]["images"] == ["data:image/png;base64,… (0 KB)"]
-        assert entry["response"] == {
-            "error": "Your prompt violates the content policy of Venice.ai or the model provider"
-        }
+        error = entry["error"]
+        assert isinstance(error, str)
+        assert "content policy" in error
+        request = entry["request"]
+        assert isinstance(request, dict)
+        assert request["prompt"] == "a fox"
+        assert request["safe_mode"] is False
+        assert request["images"] == ["data:image/png;base64,… (0 KB)"]
+        response = entry["response"]
+        assert isinstance(response, dict)
+        assert response == {"error": "Your prompt violates the content policy of Venice.ai or the model provider"}
         assert e.value.log_entry == entry
 
     def test_failed_card_keeps_the_request_and_the_log_is_readable(self, client, conv, chat, venice):
@@ -666,9 +670,11 @@ class TestText:
         entry = request_log.recent()[0]
         assert entry["path"] == "/chat/completions"
         assert entry["status"] == 200
-        assert entry["response"]["content"] == "Here you go"
-        assert entry["response"]["tool_calls"] == [{"name": "generate_image", "arguments": '{"prompt": "a fox"}'}]
-        assert entry["response"]["finish_reason"] == "tool_calls"
+        response = entry["response"]
+        assert isinstance(response, dict)
+        assert response["content"] == "Here you go"
+        assert response["tool_calls"] == [{"name": "generate_image", "arguments": '{"prompt": "a fox"}'}]
+        assert response["finish_reason"] == "tool_calls"
 
     def test_reported_cost_object_wins(self, venice):
         """Test that reported cost object wins."""

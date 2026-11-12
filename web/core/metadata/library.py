@@ -1,9 +1,10 @@
 """The chat library: media detached from its message (edits/retries)."""
 
+from web.core.metadata._base import DBBase
 from web.core.metadata.models import ChatLibraryItem
 
 
-class LibraryMixin:
+class LibraryMixin(DBBase):
     """Provide lookup and deletion operations for detached chat media."""
 
     def list_chat_library(self) -> list[ChatLibraryItem]:
