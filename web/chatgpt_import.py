@@ -34,7 +34,7 @@ import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -46,6 +46,7 @@ from web.core import config
 from web.core.metadata import current_tenant, get_db
 from web.core.metadata.models import ChatConversation
 from web.media_types import IMAGE_EXTS, VIDEO_EXTS
+from web.types import JsonValue
 from web.uploads import safe_filename
 from web.users import require_user
 
@@ -259,7 +260,7 @@ class _ChatMedia:
 
 
 def _when(ts: float | None) -> datetime | None:
-    return datetime.fromtimestamp(ts) if ts else None
+    return datetime.fromtimestamp(ts).astimezone().replace(tzinfo=None) if ts else None
 
 
 class _Merge:
@@ -276,7 +277,7 @@ class _Merge:
         self.updates: dict[int, dict] = {}
         self.parent: dict[str, Any] = {"parent_id": None}
 
-    def _add(self, import_id: str, **row: object) -> None:
+    def _add(self, import_id: str, **row: JsonValue | datetime) -> None:
         self.rows.append({**self.parent, "import_id": import_id, **row})
         self.parent = {"parent_import_id": import_id}
 
@@ -289,7 +290,7 @@ class _Merge:
             role="user",
             content=turn.prompt,
             media=[self.media.item(f, "upload") for f in turn.uploads],
-            created_at=_when(turn.time) or datetime.now(),
+            created_at=_when(turn.time) or datetime.now().astimezone().replace(tzinfo=None),
         )
 
     def reply(self, turn: _Turn) -> None:
@@ -317,7 +318,7 @@ class _Merge:
                 content=content,
                 media=items,
                 model=f"{SOURCE}/{turn.model}" if turn.model else None,
-                created_at=_when(turn.reply_time or turn.time) or datetime.now(),
+                created_at=_when(turn.reply_time or turn.time) or datetime.now().astimezone().replace(tzinfo=None),
             )
 
 
@@ -345,7 +346,7 @@ def _import_conversation(export: _Export, data: dict, conv: ChatConversation | N
             made["id"],
             import_source=SOURCE,
             import_id=data["id"],
-            created_at=_when(data.get("create_time")) or datetime.now(),
+            created_at=_when(data.get("create_time")) or datetime.now().astimezone().replace(tzinfo=None),
         )
     known = {} if fresh else db.get_chat_import_ids(conv.id)
     leaf = None if fresh else db.get_chat_leaf_id(conv.id)
@@ -392,7 +393,7 @@ def run_import(path: Path, progress: dict[str, object] | None = None) -> dict[st
     db = get_db()
     with zipfile.ZipFile(path) as zf:
         if "conversations.json" not in zf.namelist():
-            raise ValueError("Not a ChatGPT export: there's no conversations.json in it")
+            raise ValueError("Not a ChatGPT export: there's no conversations.json in it")  # noqa: TRY003
         export = _Export(zf)
         stats["total"] = len(export.conversations)
         imported = db.get_imported_conversations(SOURCE)
@@ -410,7 +411,7 @@ def run_import(path: Path, progress: dict[str, object] | None = None) -> dict[st
             else:
                 try:
                     outcome = _import_conversation(export, data, conv, stats)
-                except Exception as e:  # one bad chat shouldn't stop the rest
+                except Exception as e:  # noqa: BLE001 — one bad chat shouldn't stop the rest
                     outcome = None
                     stats["failed"].append({"title": data.get("title"), "error": str(e)})
             if outcome:
@@ -463,7 +464,7 @@ def api_import_status() -> dict[str, Any]:
             {
                 "name": p.name,
                 "size": p.stat().st_size,
-                "modified": datetime.fromtimestamp(p.stat().st_mtime).isoformat(),
+                "modified": datetime.fromtimestamp(p.stat().st_mtime).astimezone().replace(tzinfo=None).isoformat(),
             }
             for p in files
         ],
@@ -481,7 +482,11 @@ def api_start_import(data: StartImport) -> dict[str, Any]:
     with _job_lock:
         if _jobs.get(key, {}).get("state") == "running":
             raise HTTPException(409, "An import is already running")
-        job = {"state": "running", "file": path.name, "started_at": datetime.now().isoformat()}
+        job = {
+            "state": "running",
+            "file": path.name,
+            "started_at": datetime.now().astimezone().replace(tzinfo=None).isoformat(),
+        }
         _jobs[key] = job
     # Copy the request context so imported rows belong to the signed-in user
     ctx = contextvars.copy_context()
@@ -493,7 +498,7 @@ def _run_job(path: Path, job: dict[str, object]) -> None:
     try:
         run_import(path, job)
         job["state"] = "done"
-    except Exception as e:  # reported to the UI
+    except Exception as e:  # noqa: BLE001 — report unexpected worker failures to the UI
         job.update(state="error", error=str(e))
 
 
@@ -541,7 +546,9 @@ def api_start_upload(data: StartUpload) -> dict[str, int | str]:
 
 @router.post("/chatgpt/uploads/{upload_id}")
 async def api_upload_chunk(
-    upload_id: str, offset: int = Form(..., ge=0), chunk: UploadFile = File(...)
+    upload_id: str,
+    offset: Annotated[int, Form(..., ge=0)],
+    chunk: Annotated[UploadFile, File(...)],
 ) -> dict[str, int | str]:
     """Write one chunk at `offset`.
 

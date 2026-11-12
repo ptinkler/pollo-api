@@ -12,9 +12,15 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from web.core.metadata.models import ChatConversation, ChatLibraryItem, ChatMessage
+from web.types import JsonValue
+
 
 # add_chat_message's default parent: continue the branch being shown
-_APPEND = object()
+class _AppendParent:
+    """Sentinel for appending to the currently shown branch."""
+
+
+_APPEND = _AppendParent()
 
 
 def _media_row(conv_id: str, at: datetime, item: dict[str, object]) -> dict[str, Any]:
@@ -36,10 +42,10 @@ class MessageMixin:
         conversation_id: str,
         role: str,
         content: str = "",
-        media: list[dict[str, object]] | None = None,
+        media: list[dict[str, JsonValue]] | None = None,
         model: str | None = None,
         status: str = "done",
-        parent_id: object = _APPEND,
+        parent_id: int | _AppendParent | None = _APPEND,
         mode: str | None = None,
         lane: str | None = None,
     ) -> ChatMessage:
@@ -68,7 +74,7 @@ class MessageMixin:
             session.add(msg)
             session.flush()
             if conv:
-                conv.updated_at = datetime.now()
+                conv.updated_at = datetime.now().astimezone().replace(tzinfo=None)
                 if not lane:
                     conv.current_leaf_id = msg.id
             session.commit()
@@ -94,7 +100,7 @@ class MessageMixin:
                 parent_id = msg.id
             if conv and parent_id is not None:
                 conv.current_leaf_id = parent_id
-                conv.updated_at = datetime.now()
+                conv.updated_at = datetime.now().astimezone().replace(tzinfo=None)
             session.commit()
 
     @staticmethod
@@ -143,8 +149,8 @@ class MessageMixin:
     def update_chat_message(
         self,
         message_id: int,
-        media: list[dict[str, object]] | None = None,
-        **fields: object,
+        media: list[dict[str, JsonValue]] | None = None,
+        **fields: JsonValue,
     ) -> ChatMessage | None:
         """Update a message's fields and optional media, or return ``None``."""
         with self._session() as session:
@@ -161,7 +167,7 @@ class MessageMixin:
             session.expunge(msg)
             return msg
 
-    def update_chat_media_item(self, message_id: int, media_id: str, **fields: object) -> ChatMessage | None:
+    def update_chat_media_item(self, message_id: int, media_id: str, **fields: JsonValue) -> ChatMessage | None:
         """Atomically merge `fields` into one media item.
 
         Looks in the message first, then the library (the message may have
@@ -199,7 +205,7 @@ class MessageMixin:
             lib = session.query(ChatLibraryItem).filter(ChatLibraryItem.media_id == media_id).first()
             return lib.item if lib else None
 
-    def append_chat_media_item(self, message_id: int, item: dict[str, object]) -> ChatMessage | None:
+    def append_chat_media_item(self, message_id: int, item: dict[str, JsonValue]) -> ChatMessage | None:
         """Atomically append one media item to a message."""
         with self._session() as session:
             msg = session.get(ChatMessage, message_id)

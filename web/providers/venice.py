@@ -41,6 +41,7 @@ from web.caches import on_keys_changed
 from web.core.cache import MISS, TTLCache
 from web.core.metadata import current_tenant
 from web.providers.openrouter import CHAT_TIMEOUT, IMAGE_TIMEOUT, OpenRouterError, keepalive_socket_options
+from web.types import JsonValue
 
 VENICE_BASE = os.getenv("VENICE_BASE_URL", "https://api.venice.ai/api/v1").rstrip("/")
 PREFIX = "venice/"
@@ -163,7 +164,7 @@ def _request(
     timeout: httpx.Timeout = DEFAULT_TIMEOUT,
     waiting_for: str = "response",
     log: bool = False,
-    **kw: object,
+    **kw: JsonValue,
 ) -> httpx.Response:
     """One Venice call. `log`: record it in the request log (web/request_log.py)."""
     if not log:
@@ -183,7 +184,7 @@ def _send(
     timeout: httpx.Timeout,
     waiting_for: str,
     check: bool = True,
-    **kw: object,
+    **kw: JsonValue,
 ) -> httpx.Response:
     start = time.monotonic()
     try:
@@ -214,7 +215,7 @@ def _fetch_models(kind: str) -> list[dict]:
     ]
 
 
-def _usd(price: float | int | str | dict[str, object] | None) -> float | None:
+def _usd(price: float | str | dict[str, object] | None) -> float | None:
     if isinstance(price, dict):
         price = price.get("usd")
     try:
@@ -638,7 +639,7 @@ def _stream_error(message: str, status: int | None) -> VeniceError:
 def _chat_cost(
     model_id: str,
     usage: dict,
-    top_level_cost: float | int | str | dict[str, object] | None = None,
+    top_level_cost: float | str | dict[str, object] | None = None,
 ) -> float | None:
     cost = _usd(usage.get("cost")) if usage.get("cost") is not None else _usd(top_level_cost)
     if cost is not None:
@@ -953,7 +954,7 @@ def get_video(job_id: str) -> dict:
             if (resp.headers.get("content-type") or "").startswith("video/"):
                 _VIDEO_DIR.mkdir(parents=True, exist_ok=True)
                 part = _video_file(job_id).with_suffix(".part")
-                with open(part, "wb") as f:
+                with part.open("wb") as f:
                     f.writelines(resp.iter_bytes())
                 part.replace(_video_file(job_id))
                 return {"status": "completed", "usage": {"cost": _video_quotes.get(job_id)}}
@@ -983,7 +984,7 @@ def download_video(job_id: str, dest: Path, index: int = 0) -> None:
                 if resp.status_code >= 400:
                     resp.read()
                     raise VeniceError(f"Couldn't download the Venice video (HTTP {resp.status_code})")
-                with open(tmp, "wb") as f:
+                with tmp.open("wb") as f:
                     f.writelines(resp.iter_bytes())
             tmp.replace(dest)
             return

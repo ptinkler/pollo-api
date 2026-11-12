@@ -304,7 +304,7 @@ def api_reword(conv_id: str, data: RewordMessage) -> StreamingResponse:
     # Only the words are generated again, whatever mode the composer is in.
     settings = data.model_copy(update={"mode": "text"})
     # Its pictures keep their cost; the words it had are replaced by new ones.
-    media_cost = sum(float(i.get("cost") or 0) for i in msg.media)
+    media_cost = sum(float(cost) for item in msg.media if isinstance((cost := item.get("cost")), (int, float, str)))
     previous = msg.content
     db.update_chat_message(data.message_id, content="", status="streaming", error=None)
     start = {"type": "start", "user_message": None, "assistant_message": message_out(msg), "replaces": msg.id}
@@ -574,7 +574,7 @@ def _regenerate_worker(conv_id: str, message_id: int, item: dict, model: str) ->
             polling.start_video_poller(conv_id, message_id, media_id, job["id"])
     except openrouter.OpenRouterError as e:
         db.update_chat_media_item(message_id, media_id, **failure_fields(e))
-    except Exception as e:  # never leave the card stuck on "pending"
+    except Exception as e:  # noqa: BLE001 — never leave the card stuck on "pending"
         db.update_chat_media_item(
             message_id, media_id, status="error", error=f"{type(e).__name__}: {e}", moderated=False
         )

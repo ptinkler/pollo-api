@@ -9,6 +9,7 @@ import requests
 
 from web.core.cloudflare import is_cloudflare_block
 from web.core.config import POLLO_API_TIMEOUT, POLLO_PLATFORM_BASE, POLLO_TASK_BASE
+from web.types import JsonValue
 
 log = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ def _error_message(response: requests.Response) -> str:
     return f"HTTP {response.status_code}"
 
 
-def _credit(value: object) -> int | None:
+def _credit(value: JsonValue) -> int | None:
     """A credit count from the API (a string or an int), None if missing or unreadable."""
     try:
         return int(value) if value is not None else None
@@ -89,6 +90,6 @@ def get_credit_balance(api_key: str) -> dict[str, int] | None:
                 "totalCredits": data.get("totalCredits", 0),
             }
         log.warning("credit balance fetch returned HTTP %s from %s: %s", response.status_code, url, response.text[:300])
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — task failures must be recorded for every provider
         log.warning("could not fetch the credit balance: %s", e)
     return None

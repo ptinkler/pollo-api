@@ -39,6 +39,22 @@ select = [
     "TC",       # imports only needed for type checking
     "UP",       # pyupgrade: modern syntax for the target version
     "W",        # pycodestyle warnings
+    "PYI",      # Enforce clean, modern typing conventions (e.g., `X | Y` instead of `Union`)
+    "PGH003",   # Require specific error codes on `# type: ignore` comments (prevents blanket ignores)
+    "ARG",      # flake8-unused-arguments: catches unused function parameters
+    "BLE",      # flake8-blind-except: prevents broad `except Exception:`
+    "DTZ",      # flake8-datetimez: requires timezone-aware datetimes
+    "FAST",     # FastAPI-specific lint rules
+    "PTH",      # flake8-use-pathlib: enforces pathlib over os.path
+    "TRY",      # tryceratops: clean exception handling patterns
+]
+
+ignore = [
+    "ISC001",   # Conflicts with Ruff's formatter
+    "COM812",   # Conflicts with Ruff's formatter
+    "D100",     # Don't require docstrings at the top of every module
+    "D104",     # Don't require docstrings in __init__.py files
+    "D107",     # Don't require docstrings in __init__ methods (document the class instead)
 ]
 
 [tool.ruff.lint.mccabe]
@@ -53,13 +69,40 @@ convention = "google"  # Standardized docstring formatting
 allow-star-arg-any = false
 suppress-dummy-args = true
 
+[tool.ruff.lint.flake8-type-checking]
+# Stops Ruff from moving Pydantic models & FastAPI dependencies into `if TYPE_CHECKING:`
+# (which would crash FastAPI at runtime when building OpenAPI schemas)
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]
+runtime-evaluated-decorators = [
+    "fastapi.APIRouter.get",
+    "fastapi.APIRouter.post",
+    "fastapi.APIRouter.put",
+    "fastapi.APIRouter.patch",
+    "fastapi.APIRouter.delete",
+    "fastapi.FastAPI.get",
+    "fastapi.FastAPI.post",
+    "fastapi.FastAPI.put",
+    "fastapi.FastAPI.patch",
+    "fastapi.FastAPI.delete",
+]
+
 [tool.ruff.lint.flake8-bugbear]
-extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Query", "fastapi.Cookie", "fastapi.Form"]
+# Tells Ruff that FastAPI's `Depends()`, `Query()`, `Body()`, etc. are valid default arguments
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.Form",
+    "fastapi.File",
+]
 
 [tool.ruff.lint.per-file-ignores]
 # Asserts are the point of a test; annotations add noise to fixtures and cases.
 # SLF: a unit test of a private helper has to name it.
-"tests/*" = ["S101", "ANN", "SLF"]
+"tests/*" = ["S101", "ANN", "SLF", "D", "ARG"]
 # These are command-line tools: their printed output IS the product, and the
 # one subprocess call runs a fixed `ruff format` argv, not anything user-supplied.
 "scripts/*" = ["T20", "S603"]
@@ -68,6 +111,10 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Query", "f
 "alembic/versions/*" = ["S608"]
 # Authlib's `access_token_url` is an endpoint URL; S106 only matches the name.
 "web/oauth.py" = ["S106"]
+# Provider-facing errors include the actionable context returned to chat users.
+"web/providers/pollo.py" = ["TRY003", "ARG001"]
+"web/providers/venice.py" = ["TRY003", "ARG001"]
+"web/providers/pollo_engine/*.py" = ["TRY003", "ARG001"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["web", "tests"]
@@ -76,3 +123,14 @@ known-third-party = ["alembic"]
 [tool.ruff.format]
 quote-style = "double"
 line-ending = "lf"
+
+# Keep strict diagnostics enabled. The baseline captures existing typing debt;
+# new diagnostics fail lint and baseline updates should be reviewed deliberately.
+[tool.basedpyright]
+typeCheckingMode = "strict"
+baselineFile = "pyright-baseline.json"
+reportExplicitAny = "error"
+reportAny = "error"
+reportUnknownVariableType = "error"
+reportUnknownMemberType = "error"
+reportUnusedFunction = "none"

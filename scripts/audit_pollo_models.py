@@ -39,12 +39,16 @@ import shutil
 import subprocess
 import sys
 import urllib.request
-from datetime import date
+from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from scripts.probe_pollo_models import _probe_estimate
 from web.providers.pollo_engine.video import VIDEO_MODELS
 from web.providers.pollo_models import MODEL_INFO
+
+if TYPE_CHECKING:
+    from web.types import JsonValue
 
 SPEC_URL = "https://docs.pollo.ai/openapi.json"
 # Per-type ref caps live in the free-text "constraints" of the refs description;
@@ -58,7 +62,7 @@ _LIMIT_PATTERNS = {
 
 def _load_spec(path_or_none: str | None) -> dict:
     if path_or_none:
-        with open(path_or_none, encoding="utf-8") as f:
+        with Path(path_or_none).open(encoding="utf-8") as f:
             return json.load(f)
     print(f"Fetching {SPEC_URL} (~10 MB)…", file=sys.stderr)
     with urllib.request.urlopen(SPEC_URL, timeout=60) as resp:
@@ -166,15 +170,15 @@ def _enablement(keys: list[str], api_key: str) -> dict[str, str]:
 # labels, deliberate "Superseded" hides, ref_mode's own quirks like
 # `no_audio_with_video` — are merged around, never overwritten.
 _REMOVE = object()
-_REPO = str(Path(__file__).resolve().parent.parent)  # repo root
+_REPO = Path(__file__).resolve().parent.parent  # repo root
 _RUFF = shutil.which("ruff")
-MODELS_FILE = os.path.join(_REPO, "web", "providers", "pollo_models.py")
-ENGINE_FILE = os.path.join(_REPO, "web", "providers", "pollo_engine", "v1_video.py")
+MODELS_FILE = _REPO / "web" / "providers" / "pollo_models.py"
+ENGINE_FILE = _REPO / "web" / "providers" / "pollo_engine" / "v1_video.py"
 # A hide we may clear is one justified by enablement; a deliberate hide is kept.
 _ENABLEMENT_HIDE = re.compile(r"enabled|403|404|unavailable|access", re.IGNORECASE)
 
 
-def py_literal(v: object) -> str:
+def py_literal(v: JsonValue) -> str:
     """A Python literal using double quotes and True/False (ruff-style)."""
     if isinstance(v, bool):
         return "True" if v else "False"
@@ -249,7 +253,7 @@ def apply_edits(path: str, edits: dict[str, dict], warnings: list[str]) -> int:
         for field, val in fields.items():
             blk = _block_range(lines, key)
             if not blk:
-                warnings.append(f"{os.path.basename(path)}: {key!r} not found — skipped {field}")
+                warnings.append(f"{Path(path).name}: {key!r} not found — skipped {field}")
                 continue
             s, e = blk
             if s == e:  # one-line inline entry
@@ -285,7 +289,7 @@ def plan_writes(ours: dict, docs: dict[str, dict], enabled: dict[str, str]) -> t
     models_edits: dict[str, dict] = {}
     engine_edits: dict[str, dict] = {}
     notes: list[str] = []
-    today = date.today().isoformat()
+    today = datetime.now().astimezone().date().isoformat()
     for slug, o in ours.items():
         key, info, d = o["key"], o["info"], docs.get(slug)
         # Enablement → hidden (needs the probe)
@@ -316,7 +320,7 @@ def _write(ours: dict, docs: dict, enabled: dict) -> None:
     """Apply the mechanical fixes to our source, then report; you review the diff."""
     models_edits, engine_edits, notes = plan_writes(ours, docs, enabled)
     warnings: list[str] = []
-    n = apply_edits(MODELS_FILE, models_edits, warnings) + apply_edits(ENGINE_FILE, engine_edits, warnings)
+    n = apply_edits(str(MODELS_FILE), models_edits, warnings) + apply_edits(str(ENGINE_FILE), engine_edits, warnings)
     for w in warnings:
         print(f"  ! {w}")
     if notes:
@@ -326,7 +330,7 @@ def _write(ours: dict, docs: dict, enabled: dict) -> None:
     # Re-flow to our formatting; harmless if ruff isn't installed.
     with contextlib.suppress(Exception):
         subprocess.run(
-            [_RUFF or "ruff", "format", MODELS_FILE, ENGINE_FILE], cwd=_REPO, check=False, capture_output=True
+            [_RUFF or "ruff", "format", str(MODELS_FILE), str(ENGINE_FILE)], cwd=_REPO, check=False, capture_output=True
         )
     print(f"\nApplied {n} edit(s) to pollo_models.py / v1_video.py. Review with `git diff` before committing.")
 

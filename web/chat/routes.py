@@ -6,7 +6,7 @@ Turn, media-generation, and SSE routes are defined in `routes_turns.py`.
 import shutil
 import threading
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -55,6 +55,7 @@ from web.core.metadata import get_db, iso
 from web.core.metadata.models import ChatSpace
 from web.media_types import VIDEO_SUFFIXES
 from web.providers import openrouter, venice
+from web.types import JsonValue
 from web.uploads import read_audio_upload, read_image_upload, read_video_upload, safe_filename, store_deduped
 
 
@@ -371,7 +372,7 @@ def api_spend_breakdown(days: int = 0) -> dict[str, Any]:
     so everything adds up in one currency; the credits stay alongside.
     """
     db = get_db()
-    cutoff = datetime.now() - timedelta(days=days) if days > 0 else None
+    cutoff = datetime.now().astimezone().replace(tzinfo=None) - timedelta(days=days) if days > 0 else None
     groups: dict[tuple[str, str], dict] = {}
     for r in db.spend_rows([c.id for c in db.list_conversations(limit=None)]):
         if cutoff and r["at"] and r["at"] < cutoff:
@@ -448,14 +449,22 @@ def api_fork_conversation(conv_id: str, data: ForkConversation) -> dict[str, Any
         forked_from_id=conv_id,
         forked_from_message_id=at.id,
         inherited_cost=round(sum(m.cost or 0 for m in path), 6) or None,
-        inherited_credits=sum(i.get("credits") or 0 for m in path for i in m.media) or None,
+        inherited_credits=sum(
+            credits
+            for msg in path
+            for item in msg.media
+            if isinstance((credits := item.get("credits")), int) and not isinstance(credits, bool)
+        )
+        or None,
     )
     # This chat's own characters, attached or used by the copied media, get
     # copies owned by the new chat; saved characters are shared as they are
     used = set(conv.character_ids)
     for msg in path:
         for item in msg.media:
-            used.update(_media_character_ids(item.get("params") or {}))
+            params = item.get("params")
+            if isinstance(params, dict):
+                used.update(_media_character_ids(params))
     char_map = {
         c.id: characters.copy_to_conversation(c, new.id, db).id
         for c in characters.load(sorted(used), db)
@@ -483,14 +492,19 @@ def api_fork_conversation(conv_id: str, data: ForkConversation) -> dict[str, Any
     return db.get_conversation(new.id).to_dict()
 
 
-def _media_character_ids(params: dict) -> set[int]:
+def _media_character_ids(params: dict[str, JsonValue]) -> set[int]:
     """Characters a media item was made with: by id, or through their images."""
-    ids = {i for i in params.get("characters") or [] if isinstance(i, int)}
-    for ref in [*(params.get("refs") or []), *(params.get(k) for k in PARAM_FILES)]:
-        if isinstance(ref, str) and ref.startswith(characters.REF_PREFIX):
-            cid = ref[len(characters.REF_PREFIX) :].partition("/")[0]
-            if cid.isdigit():
-                ids.add(int(cid))
+    character_ids = params.get("characters")
+    ids: set[int] = set()
+    if isinstance(character_ids, Sequence) and not isinstance(character_ids, str):
+        ids.update(item for item in character_ids if isinstance(item, int) and not isinstance(item, bool))
+    for value in (params.get("refs"), *(params.get(key) for key in PARAM_FILES)):
+        refs = value if isinstance(value, Sequence) and not isinstance(value, str) else [value]
+        for ref in refs:
+            if isinstance(ref, str) and ref.startswith(characters.REF_PREFIX):
+                cid = ref[len(characters.REF_PREFIX) :].partition("/")[0]
+                if cid.isdigit():
+                    ids.add(int(cid))
     return ids
 
 
@@ -756,8 +770,9 @@ def api_delete_library_item(media_id: str) -> dict[str, str]:
     if not lib:
         raise HTTPException(404, "Not in the library (only unattached items can be deleted here)")
     db.delete_chat_library_item(media_id)
-    if lib.item.get("file"):
-        (chat_root() / lib.conversation_id / safe_filename(lib.item["file"])).unlink(missing_ok=True)
+    file = lib.item.get("file")
+    if isinstance(file, str):
+        (chat_root() / lib.conversation_id / safe_filename(file)).unlink(missing_ok=True)
     return {"deleted": media_id}
 
 

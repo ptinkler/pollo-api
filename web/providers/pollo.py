@@ -40,6 +40,7 @@ from web.providers.pollo_engine import image_generator as get_image_generator
 from web.providers.pollo_engine import video_generator as get_video_generator
 from web.providers.pollo_engine.registry import PolloGenerator
 from web.providers.pollo_models import MODEL_INFO
+from web.types import JsonValue
 
 
 class PolloError(OpenRouterError):
@@ -200,7 +201,7 @@ def list_voices(page: int = 1, page_size: int = 50, **filters: str) -> dict[str,
     return {"voices": voices, "total": body.get("total", len(voices))}
 
 
-def submit_audio(model_id: str, prompt: str, source_audio: Path | None = None, **opts: object) -> dict:
+def submit_audio(model_id: str, prompt: str, source_audio: Path | None = None, **opts: JsonValue) -> dict:
     """Start a Pollo speech or music job.
 
     Returns the job id and settings actually sent, like ``submit_video``.
@@ -520,7 +521,7 @@ def estimate_cost(
                 generate_audio=generate_audio,
             )
         return pollo_estimate.estimate(generator)
-    except Exception:  # an estimate is a nicety; never fail the composer over it
+    except Exception:  # noqa: BLE001 — estimates must not block the composer
         return None
 
 
@@ -582,7 +583,7 @@ def download_video(job_id: str, dest: Path, index: int = 0) -> None:
     try:
         with requests.get(task["urls"][index], stream=True, timeout=DOWNLOAD_TIMEOUT) as resp:
             resp.raise_for_status()
-            with open(tmp, "wb") as f:
+            with tmp.open("wb") as f:
                 f.writelines(resp.iter_content(chunk_size=1 << 16))
     except requests.RequestException as e:
         raise PolloError(f"Couldn't download the Pollo video: {e}") from e
@@ -600,7 +601,7 @@ def _payload(generator: PolloGenerator) -> dict[str, Any] | None:
     """What the generator will send (None if it refuses to build one)."""
     try:
         return generator.get_payload()
-    except Exception:  # send_request reports the real problem
+    except Exception:  # noqa: BLE001 — send_request reports the real problem
         return None
 
 
@@ -641,7 +642,7 @@ def _task_state(task_id: str) -> dict:
     """
     try:
         results = get_task_status(task_id, keyctx.provider_key("pollo"))
-    except Exception as e:  # network/VPN hiccups
+    except Exception as e:  # noqa: BLE001 — retry network/VPN hiccups
         return {"status": "transient", "error": f"Pollo: {e}"}
     status, fail_msg = results[0][0], results[0][1]
     if status == "cloudflare_blocked" or (status == "error" and (fail_msg or "").startswith("HTTP ")):

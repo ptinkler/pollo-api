@@ -15,8 +15,12 @@ The redirect/callback URI registered with each provider must be
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING, Protocol
 
 from authlib.integrations.starlette_client import OAuth
+
+if TYPE_CHECKING:
+    from web.types import JsonValue
 
 oauth = OAuth()
 
@@ -72,7 +76,24 @@ def configured_providers() -> list[str]:
     return [p for p in ("google", "microsoft", "x") if _env(p, "CLIENT_ID")]
 
 
-async def normalize_profile(provider: str, client: object, token: dict[str, object]) -> dict[str, str | None]:
+class OAuthResponse(Protocol):
+    """Response shape needed from an OAuth provider client."""
+
+    def json(self) -> dict[str, JsonValue]:
+        """Decode the provider response body."""
+
+
+class OAuthClient(Protocol):
+    """Provider client operations used during profile normalization."""
+
+    async def userinfo(self, *, token: dict[str, JsonValue]) -> dict[str, JsonValue]:
+        """Fetch the provider's user-info document."""
+
+    async def get(self, url: str, *, token: dict[str, JsonValue]) -> OAuthResponse:
+        """Perform an authenticated provider request."""
+
+
+async def normalize_profile(provider: str, client: OAuthClient, token: dict[str, JsonValue]) -> dict[str, str | None]:
     """Normalize a provider's user-info response.
 
     The returned keys are ``provider``, ``sub``, ``email``, ``name``, and
@@ -82,7 +103,9 @@ async def normalize_profile(provider: str, client: object, token: dict[str, obje
         ValueError: If ``provider`` is not supported.
     """
     if provider in ("google", "microsoft"):
-        info = token.get("userinfo") or await client.userinfo(token=token)
+        info = token.get("userinfo")
+        if not isinstance(info, dict):
+            info = await client.userinfo(token=token)
         email = (info.get("email") or info.get("preferred_username") or "").lower() or None
         return {
             "provider": provider,
@@ -103,4 +126,4 @@ async def normalize_profile(provider: str, client: object, token: dict[str, obje
             "name": data.get("name"),
             "avatar": data.get("profile_image_url"),
         }
-    raise ValueError(f"Unknown provider: {provider}")
+    raise ValueError(f"Unknown provider: {provider}")  # noqa: TRY003

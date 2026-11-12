@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy import func
 
 from web.core.metadata.models import Character, ChatConversation, ChatSettings, ChatSpace
+from web.types import JsonValue
 
 
 class CharacterMixin:
@@ -36,7 +37,7 @@ class CharacterMixin:
                 session.expunge(c)
             return chars
 
-    def update_character(self, character_id: int, **fields: object) -> Character | None:
+    def update_character(self, character_id: int, **fields: JsonValue) -> Character | None:
         """Set name / description / images (list of filenames) / conversation_id."""
         with self._session() as session:
             char = session.get(Character, character_id)
@@ -44,7 +45,7 @@ class CharacterMixin:
                 return None
             for key, value in fields.items():
                 setattr(char, key, value)
-            char.updated_at = datetime.now()
+            char.updated_at = datetime.now().astimezone().replace(tzinfo=None)
             session.commit()
             session.refresh(char)
             session.expunge(char)

@@ -7,12 +7,13 @@ from datetime import datetime
 
 from web.core.metadata.models import ChatConversation, ChatImportSkip, ChatLibraryItem, ChatMessage
 from web.core.metadata.tenant import reset_tenant, set_tenant
+from web.types import JsonValue
 
 
 class ConversationMixin:
     """Provide conversation creation, lookup, search, and deletion operations."""
 
-    def create_conversation(self, title: str = "New chat", **fields: object) -> ChatConversation:
+    def create_conversation(self, title: str = "New chat", **fields: JsonValue) -> ChatConversation:
         """Create a conversation with a generated id."""
         with self._session() as session:
             conv = ChatConversation(id=uuid.uuid4().hex, title=title, **fields)
@@ -141,7 +142,7 @@ class ConversationMixin:
             )
             session.commit()
 
-    def update_conversation(self, conv_id: str, **fields: object) -> ChatConversation | None:
+    def update_conversation(self, conv_id: str, **fields: JsonValue | datetime) -> ChatConversation | None:
         """Update supported conversation fields, or return ``None`` if missing."""
         with self._session() as session:
             conv = session.get(ChatConversation, conv_id)
@@ -150,7 +151,7 @@ class ConversationMixin:
             for key, value in fields.items():
                 if hasattr(conv, key):
                     setattr(conv, key, value)
-            conv.updated_at = datetime.now()
+            conv.updated_at = datetime.now().astimezone().replace(tzinfo=None)
             session.commit()
             session.refresh(conv)
             session.expunge(conv)

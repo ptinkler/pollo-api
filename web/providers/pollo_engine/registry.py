@@ -9,7 +9,7 @@ prices the request.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import requests
 
@@ -18,6 +18,9 @@ from web.core.config import POLLO_API_TIMEOUT
 from web.providers.pollo_engine.audio import AUDIO_MODELS, audio_model_url, audio_payload
 from web.providers.pollo_engine.image import IMAGE_MODELS, image_model_url, image_payload, img_cfg
 from web.providers.pollo_engine.video import VIDEO_MODELS, cfg, video_model_url, video_payload
+
+if TYPE_CHECKING:
+    from web.types import JsonValue
 
 # A video row's builder name -> the family a ModelSpec carries. They differ only
 # for the catch-all builder, whose family is the plain "video".
@@ -44,12 +47,12 @@ class ModelSpec:
     ACCEPTS_IMAGES: bool = True
     MAX_IMAGES: int = 0
 
-    def __call__(self, **kwargs: object) -> PolloGenerator:
+    def __call__(self, **kwargs: JsonValue) -> PolloGenerator:
         """Create a runtime generator for this model."""
         return PolloGenerator(self, **kwargs)
 
 
-def _build_payload(spec: ModelSpec, prompt: str, image_url: str | None, **kw: object) -> dict[str, Any]:
+def _build_payload(spec: ModelSpec, prompt: str, image_url: str | None, **kw: JsonValue) -> dict[str, Any]:
     if spec.kind == "audio":
         return audio_payload(spec.model_id, prompt=prompt, **kw)
     build = image_payload if spec.kind == "image" else video_payload
@@ -63,7 +66,7 @@ class PolloGenerator:
     submits or estimates the request.
     """
 
-    def __init__(self, spec: ModelSpec, **kwargs: object) -> None:
+    def __init__(self, spec: ModelSpec, **kwargs: JsonValue) -> None:
         """Bind this generator to one model's spec and the call's parameters."""
         self.spec = spec
         self.model_url = spec.model_url
@@ -146,7 +149,7 @@ AUDIO_GENERATORS: dict[str, ModelSpec] = {
 }
 
 
-def audio_generator(model_id: str, **kwargs: object) -> PolloGenerator:
+def audio_generator(model_id: str, **kwargs: JsonValue) -> PolloGenerator:
     """Create a generator for a supported audio model."""
     try:
         return AUDIO_GENERATORS[model_id](**kwargs)
@@ -154,7 +157,7 @@ def audio_generator(model_id: str, **kwargs: object) -> PolloGenerator:
         raise ValueError(f"Unsupported audio model: {model_id}. Available: {', '.join(AUDIO_GENERATORS)}") from None
 
 
-def video_generator(model_id: str, **kwargs: object) -> PolloGenerator:
+def video_generator(model_id: str, **kwargs: JsonValue) -> PolloGenerator:
     """Create a generator for a supported video model."""
     try:
         return VIDEO_GENERATORS[model_id](**kwargs)
@@ -162,7 +165,7 @@ def video_generator(model_id: str, **kwargs: object) -> PolloGenerator:
         raise ValueError(f"Unsupported model: {model_id}. Available: {', '.join(VIDEO_GENERATORS)}") from None
 
 
-def image_generator(model_id: str, **kwargs: object) -> PolloGenerator:
+def image_generator(model_id: str, **kwargs: JsonValue) -> PolloGenerator:
     """Create a generator for a supported image model."""
     try:
         return IMAGE_GENERATORS[model_id](**kwargs)

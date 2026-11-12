@@ -3,6 +3,7 @@
 from datetime import datetime
 
 from web.core.metadata.models import ChatConversation, ChatInstruction, ChatInstructionGroup, ChatSettings, ChatSpace
+from web.types import JsonValue
 
 
 class InstructionMixin:
@@ -27,7 +28,7 @@ class InstructionMixin:
                 session.expunge(i)
             return items
 
-    def save_instruction(self, instruction_id: int | None = None, **fields: object) -> ChatInstruction | None:
+    def save_instruction(self, instruction_id: int | None = None, **fields: JsonValue) -> ChatInstruction | None:
         """Create (id None) or update a snippet."""
         return self._save(ChatInstruction, instruction_id, **fields)
 
@@ -65,7 +66,7 @@ class InstructionMixin:
         """Return a group by id, or ``None`` if it does not exist."""
         return self._get(ChatInstructionGroup, group_id)
 
-    def save_instruction_group(self, group_id: int | None = None, **fields: object) -> ChatInstructionGroup | None:
+    def save_instruction_group(self, group_id: int | None = None, **fields: JsonValue) -> ChatInstructionGroup | None:
         """Create (id None) or update a group."""
         return self._save(ChatInstructionGroup, group_id, **fields)
 
@@ -119,14 +120,14 @@ class InstructionMixin:
             session.expunge(item)
             return item
 
-    def save_settings(self, **fields: object) -> ChatSettings:
+    def save_settings(self, **fields: JsonValue) -> ChatSettings:
         """Update the current user's defaults row and return it."""
         with self._session() as session:
             item = session.query(ChatSettings).first() or ChatSettings()
             session.add(item)
             for key, value in fields.items():
                 setattr(item, key, value)
-            item.updated_at = datetime.now()
+            item.updated_at = datetime.now().astimezone().replace(tzinfo=None)
             session.commit()
             session.refresh(item)
             session.expunge(item)
@@ -140,7 +141,7 @@ class InstructionMixin:
         """Return a space by id, or ``None`` if it does not exist."""
         return self._get(ChatSpace, space_id)
 
-    def save_space(self, space_id: int | None = None, **fields: object) -> ChatSpace | None:
+    def save_space(self, space_id: int | None = None, **fields: JsonValue) -> ChatSpace | None:
         """Create (id None) or update a space."""
         return self._save(ChatSpace, space_id, **fields)
 

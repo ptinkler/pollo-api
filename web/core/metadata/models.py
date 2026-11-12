@@ -4,12 +4,22 @@ The module includes an ISO timestamp helper and descriptors for JSON-backed id
 lists and chat defaults.
 """
 
+from __future__ import annotations
+
 import json
 from datetime import datetime
-from typing import Any
+from typing import Self, overload
 
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+from web.types import JsonValue
+
+_JSON_IDS = TypeAdapter(list[int])
+_JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
+_JSON_ID_GROUPS = TypeAdapter(dict[str, list[int]])
+_JSON_MEDIA = TypeAdapter(list[dict[str, JsonValue]])
 
 
 def iso(dt: datetime | None) -> str | None:
@@ -53,7 +63,7 @@ class User(Base):
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
-class JsonIds:
+class JsonIds[OwnerT]:
     """Store an attribute's list as JSON in its corresponding text column.
 
     The backing column name appends ``_json`` (for example,
@@ -65,21 +75,26 @@ class JsonIds:
         """Set whether writes drop repeated items."""
         self.unique = unique
 
-    def __set_name__(self, owner: type[object], name: str) -> None:
+    def __set_name__(self, owner: type[OwnerT], name: str) -> None:
         """Record the backing column's name, which is the attribute's plus `_json`."""
         self.column = f"{name}_json"
 
-    def __get__(self, obj: object, owner: type[object] | None = None) -> object:
+    @overload
+    def __get__(self, obj: None, owner: type[OwnerT]) -> Self: ...
+
+    @overload
+    def __get__(self, obj: OwnerT, owner: type[OwnerT] | None = None) -> list[int]: ...
+
+    def __get__(self, obj: OwnerT | None, owner: type[OwnerT] | None = None) -> Self | list[int]:
         """Decode the backing column, or [] when it is empty or unreadable."""
         if obj is None:
             return self
-        raw = getattr(obj, self.column)
         try:
-            return json.loads(raw) if raw else []
-        except json.JSONDecodeError:
+            return _JSON_IDS.validate_json(getattr(obj, self.column) or "[]")
+        except ValidationError:
             return []
 
-    def __set__(self, obj: object, value: object) -> None:
+    def __set__(self, obj: OwnerT, value: list[int] | None) -> None:
         """Encode `value` into the backing column as JSON."""
         items = list(value or [])
         setattr(obj, self.column, json.dumps(list(dict.fromkeys(items)) if self.unique else items))
@@ -95,9 +110,9 @@ class DefaultsBucket:
     default_character_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     default_instruction_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     default_instruction_group_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    default_character_ids = JsonIds()
-    default_instruction_ids = JsonIds()
-    default_instruction_group_ids = JsonIds()
+    default_character_ids: JsonIds[DefaultsBucket] = JsonIds()
+    default_instruction_ids: JsonIds[DefaultsBucket] = JsonIds()
+    default_instruction_group_ids: JsonIds[DefaultsBucket] = JsonIds()
 
     def defaults_dict(self) -> dict[str, list[int]]:
         """Return the default lists keyed by their public field names."""
@@ -167,17 +182,17 @@ class ChatConversation(Base):
     import_updated_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
-    messages: Mapped[list["ChatMessage"]] = relationship(
+    messages: Mapped[list[ChatMessage]] = relationship(
         back_populates="conversation",
         cascade="all, delete-orphan",
         order_by="ChatMessage.id",
     )
-    library_items: Mapped[list["ChatLibraryItem"]] = relationship(
+    library_items: Mapped[list[ChatLibraryItem]] = relationship(
         back_populates="conversation",
         cascade="all, delete-orphan",
     )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, JsonValue]:
         """Serialize the conversation and its public settings."""
         return {
             "id": self.id,
@@ -206,8 +221,8 @@ class ChatConversation(Base):
     def hidden_defaults(self) -> dict[str, list[int]]:
         """Return hidden default ids grouped by resource type."""
         try:
-            raw = json.loads(self.hidden_defaults_json) if self.hidden_defaults_json else {}
-        except json.JSONDecodeError:
+            raw = _JSON_ID_GROUPS.validate_json(self.hidden_defaults_json or "{}")
+        except ValidationError:
             raw = {}
         return {k: raw.get(k) or [] for k in ("character", "instruction", "instruction_group")}
 
@@ -221,8 +236,8 @@ class ChatConversation(Base):
     def paused_instructions(self) -> dict[str, list[int]]:
         """Return paused instruction ids grouped by resource type."""
         try:
-            raw = json.loads(self.paused_instructions_json) if self.paused_instructions_json else {}
-        except json.JSONDecodeError:
+            raw = _JSON_ID_GROUPS.validate_json(self.paused_instructions_json or "{}")
+        except ValidationError:
             raw = {}
         return {k: raw.get(k) or [] for k in ("instruction", "instruction_group")}
 
@@ -233,21 +248,21 @@ class ChatConversation(Base):
         self.paused_instructions_json = json.dumps(kept) if kept else None
 
     @property
-    def settings(self) -> dict[str, Any] | None:
+    def settings(self) -> dict[str, JsonValue] | None:
         """Decode composer settings, or return ``None`` if absent or invalid."""
         try:
-            return json.loads(self.settings_json) if self.settings_json else None
-        except json.JSONDecodeError:
+            return _JSON_OBJECT.validate_json(self.settings_json) if self.settings_json else None
+        except ValidationError:
             return None
 
     @settings.setter
-    def settings(self, value: dict[str, object] | None) -> None:
+    def settings(self, value: dict[str, JsonValue] | None) -> None:
         """Encode composer settings, clearing the column for an empty value."""
         self.settings_json = json.dumps(value) if value else None
 
-    character_ids = JsonIds()
-    instruction_ids = JsonIds()
-    instruction_group_ids = JsonIds()
+    character_ids: JsonIds[ChatConversation] = JsonIds()
+    instruction_ids: JsonIds[ChatConversation] = JsonIds()
+    instruction_group_ids: JsonIds[ChatConversation] = JsonIds()
 
 
 class Character(Base):
@@ -269,9 +284,9 @@ class Character(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
 
-    images = JsonIds(unique=False)  # in the order shown
+    images: JsonIds[Character] = JsonIds(unique=False)  # in the order shown
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, JsonValue]:
         """Serialize the character and its image metadata."""
         return {
             "id": self.id,
@@ -301,7 +316,7 @@ class ChatInstruction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, JsonValue]:
         """Serialize the instruction snippet."""
         return {
             "id": self.id,
@@ -328,9 +343,9 @@ class ChatInstructionGroup(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
 
-    snippet_ids = JsonIds()
+    snippet_ids: JsonIds[ChatInstructionGroup] = JsonIds()
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, JsonValue]:
         """Serialize the group and its snippet ids."""
         return {
             "id": self.id,
@@ -356,7 +371,7 @@ class ChatSpace(DefaultsBucket, Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, JsonValue]:
         """Serialize the space and its default lists."""
         return {
             "id": self.id,
@@ -382,7 +397,7 @@ class ChatSettings(DefaultsBucket, Base):
     # The text model that names new chats (None = the chat's own model)
     title_model: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, JsonValue]:
         """Serialize the default lists and title model."""
         return {**self.defaults_dict(), "title_model": self.title_model}
 
@@ -422,19 +437,19 @@ class ChatMessage(Base):
     # The message it was imported from (see ChatConversation.import_id)
     import_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    conversation: Mapped["ChatConversation"] = relationship(back_populates="messages")
+    conversation: Mapped[ChatConversation] = relationship(back_populates="messages")
 
     @property
-    def media(self) -> list[dict[str, Any]]:
+    def media(self) -> list[dict[str, JsonValue]]:
         """Decode attached media, returning an empty list for invalid JSON."""
         if not self.media_json:
             return []
         try:
-            return json.loads(self.media_json)
-        except json.JSONDecodeError:
+            return _JSON_MEDIA.validate_json(self.media_json)
+        except ValidationError:
             return []
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, JsonValue]:
         """Serialize the message and its attached media."""
         return {
             "id": self.id,
@@ -484,12 +499,12 @@ class ChatLibraryItem(Base):
     item_json: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     detached_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    conversation: Mapped["ChatConversation"] = relationship(back_populates="library_items")
+    conversation: Mapped[ChatConversation] = relationship(back_populates="library_items")
 
     @property
-    def item(self) -> dict[str, Any]:
+    def item(self) -> dict[str, JsonValue]:
         """Decode the media item, returning an empty mapping for invalid JSON."""
         try:
-            return json.loads(self.item_json)
-        except json.JSONDecodeError:
+            return _JSON_OBJECT.validate_json(self.item_json)
+        except ValidationError:
             return {}

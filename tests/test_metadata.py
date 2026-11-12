@@ -43,6 +43,7 @@ def test_timestamps_carry_the_servers_utc_offset(tmp_path, monkeypatch, tz):
         db = MetadataDB(db_path=tmp_path / "m.db")
         conv = db.create_conversation()
         stamp = db.add_chat_message(conv.id, "user", "hi").to_dict()["created_at"]
+        assert isinstance(stamp, str)
         parsed = datetime.fromisoformat(stamp)
         assert parsed.tzinfo is not None
         assert abs((datetime.now(UTC) - parsed).total_seconds()) < 5

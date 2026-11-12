@@ -58,7 +58,7 @@ def _poll_video(conv_id: str, message_id: int, media_id: str, job_id: str) -> No
         try:
             job = source.get_video(job_id)
             errors = 0
-        except Exception as e:  # transient network/VPN hiccups
+        except Exception as e:  # noqa: BLE001 — provider adapters may raise transport-specific errors
             errors += 1
             log.warning("video %s: poll error %d/%d: %s", job_id, errors, VIDEO_MAX_POLL_ERRORS, e)
             if errors >= VIDEO_MAX_POLL_ERRORS:
@@ -71,7 +71,7 @@ def _poll_video(conv_id: str, message_id: int, media_id: str, job_id: str) -> No
             name = _result_name(item.get("kind"), job)
             try:
                 source.download_video(job_id, conversation_dir(conv_id) / name)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — convert download failures into a terminal media state
                 db.update_chat_media_item(message_id, media_id, status="error", error=f"Download failed: {e}")
                 return
             cost = (job.get("usage") or {}).get("cost")
@@ -109,16 +109,19 @@ def startup_resume_chat() -> None:
         for item in msg.media:
             if item.get("status") != "pending":
                 continue
-            if item.get("job_id"):
-                start_video_poller(msg.conversation_id, msg.id, item["id"], item["job_id"])
+            media_id, job_id = item.get("id"), item.get("job_id")
+            if isinstance(media_id, str) and isinstance(job_id, str):
+                start_video_poller(msg.conversation_id, msg.id, media_id, job_id)
                 resumed += 1
             else:
-                db.update_chat_media_item(msg.id, item["id"], status="error", error="Interrupted by server restart")
+                if isinstance(media_id, str):
+                    db.update_chat_media_item(msg.id, media_id, status="error", error="Interrupted by server restart")
     for lib in db.list_chat_library():
         item = lib.item
-        if item.get("status") == "pending" and item.get("job_id"):
+        media_id, job_id = item.get("id"), item.get("job_id")
+        if item.get("status") == "pending" and isinstance(media_id, str) and isinstance(job_id, str):
             # message_id 0 never exists, so updates go straight to the library row
-            start_video_poller(lib.conversation_id, 0, item["id"], item["job_id"])
+            start_video_poller(lib.conversation_id, 0, media_id, job_id)
             resumed += 1
     for msg in db.get_chat_messages_by_status("streaming"):
         db.update_chat_message(msg.id, status="error", error="Interrupted by server restart")

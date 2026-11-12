@@ -29,8 +29,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import requests
+
 from web.core import config
 from web.core.metadata import current_tenant
+from web.types import JsonValue
 
 MAX_BYTES = 5 * 1024 * 1024
 _lock = threading.Lock()
@@ -49,7 +52,7 @@ def log_path() -> Path:
     return base / uid / "requests.jsonl" if uid else base / "requests.jsonl"
 
 
-def redact(value: object) -> object:
+def redact(value: JsonValue) -> JsonValue:
     """Return a log-safe representation of a request body.
 
     Data URLs and long base64 strings are represented by type and size;
@@ -67,7 +70,7 @@ def redact(value: object) -> object:
     return value
 
 
-def response_of(resp: object) -> object:
+def response_of(resp: requests.Response) -> JsonValue:
     """Return a log-safe representation of a fully read HTTP response.
 
     JSON, text, and binary responses are represented by their contents or
@@ -119,7 +122,7 @@ def record(
     error: str | None = None,
     flags: dict | None = None,
     model: str | None = None,
-    response: object = None,
+    response: JsonValue = None,
 ) -> dict:
     """Append and return a provider-call log entry.
 
@@ -127,7 +130,7 @@ def record(
     are ignored so a full disk cannot fail a generation.
     """
     entry = {
-        "at": datetime.now().isoformat(timespec="seconds"),
+        "at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "provider": provider,
         "method": method,
         "path": path,
@@ -152,7 +155,7 @@ def record(
     return entry
 
 
-def _jsonable(value: object) -> object:
+def _jsonable(value: JsonValue) -> JsonValue:
     """Convert indexed chat tool calls to a JSON-friendly list."""
     if isinstance(value, dict) and isinstance(value.get("tool_calls"), dict):
         return {**value, "tool_calls": list(value["tool_calls"].values()) or None}
@@ -178,7 +181,7 @@ def recent(limit: int = 100) -> list[dict]:
 
 
 @contextlib.contextmanager
-def logged(provider: str, method: str, path: str, body: object, model: str | None = None) -> Iterator[dict]:
+def logged(provider: str, method: str, path: str, body: JsonValue, model: str | None = None) -> Iterator[dict]:
     """Record one provider call made inside the block.
 
     Yields a dict the caller fills in with ``status`` (HTTP status), ``flags``

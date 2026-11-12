@@ -59,6 +59,7 @@ from web.chat.workers import ctx_thread
 from web.core.metadata import get_db
 from web.core.metadata.models import ChatMessage
 from web.providers import openrouter, provider_for
+from web.types import JsonValue
 
 log = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ class Turn:
         # What this reply has already cost (its pictures, when only the words
         # are being generated again), so the total stays right.
         self.cost = initial_cost
-        self.media: list[dict] = []
+        self.media: list[dict[str, JsonValue]] = []
 
     # ― entry point ―
     def run(self) -> None:
@@ -111,7 +112,7 @@ class Turn:
             status, error = ("done", None)
         except openrouter.OpenRouterError as e:
             status, error = "error", str(e)
-        except Exception as e:  # never leave a message stuck in "streaming"
+        except Exception as e:  # noqa: BLE001 — never leave a message stuck in "streaming"
             status, error = "error", f"{type(e).__name__}: {e}"
         if self.cancel.is_set() and status == "done":
             self.content = self.content.rstrip() + ("\n\n" if self.content else "") + "*(stopped)*"
@@ -138,10 +139,14 @@ class Turn:
         if info.get("tool"):
             return self._direct_image_tool(user, prompt, info)
         if not prompt:
-            raise openrouter.OpenRouterError("Image mode needs a text prompt")
+            raise openrouter.OpenRouterError("Image mode needs a text prompt")  # noqa: TRY003
         chars = self.characters  # every attached character
         dropped: list[str] = []
-        refs = [m["file"] for m in (user.media if user else []) if m["kind"] == "image" and m.get("file")]
+        refs = [
+            file
+            for media in (user.media if user else [])
+            if media.get("kind") == "image" and isinstance((file := media.get("file")), str)
+        ]
         if self._accepts_refs():
             refs, dropped = plan_refs(
                 refs + self._pinned_images(),
@@ -160,15 +165,23 @@ class Turn:
         The model's name stands in for the prompt, so the
         card can be retried.
         """
-        files = [m["file"] for m in (user.media if user else []) if m["kind"] == "image" and m.get("file")]
+        files = [
+            file
+            for media in (user.media if user else [])
+            if media.get("kind") == "image" and isinstance((file := media.get("file")), str)
+        ]
         if not files:
-            raise openrouter.OpenRouterError("This tool needs an image — attach one")
+            raise openrouter.OpenRouterError("This tool needs an image — attach one")  # noqa: TRY003
         self._generate_image(prompt or info.get("name") or "Image tool", None, files[:1])
 
     def _direct_video(self) -> None:
         user = self._last_user()
         prompt = (user.content if user else "").strip()
-        frames = [m["file"] for m in (user.media if user else []) if m["kind"] == "image" and m.get("file")]
+        frames = [
+            file
+            for media in (user.media if user else [])
+            if media.get("kind") == "image" and isinstance((file := media.get("file")), str)
+        ]
         info = model_info("video", self.s.video_model) or {}
         if not prompt and info.get("no_prompt"):
             prompt = info.get("name") or "Video tool"  # the source file is the whole input
@@ -180,7 +193,7 @@ class Turn:
         has_av = any(m.get("file") and m["kind"] in ("video", "audio") for m in (user.media if user else []))
         ref_items = self._ref_items(ref_mode) if ref_mode and ("[@" in prompt or has_av) else None
         if not prompt and not frames and not ref_items:
-            raise openrouter.OpenRouterError("Video mode needs a prompt or an image")
+            raise openrouter.OpenRouterError("Video mode needs a prompt or an image")  # noqa: TRY003
         # Attached images: the first frame, the last frame (first+last-frame
         # models) and, for reference models, all of them are references
         self._generate_video(
@@ -208,12 +221,13 @@ class Turn:
         items: list[dict] = []
         for m in user.media if user else []:
             kind = m.get("kind")
-            if not m.get("file") or kind not in types:
+            file = m.get("file")
+            if not isinstance(file, str) or kind not in types:
                 continue
             counts[kind] = counts.get(kind, 0) + 1
             if limits.get(kind) and counts[kind] > limits[kind]:
                 continue  # over this type's cap — leave it out (its [@name] won't resolve)
-            items.append({"file": m["file"], "name": f"{kind}{counts[kind]}", "type": kind})
+            items.append({"file": file, "name": f"{kind}{counts[kind]}", "type": kind})
             if total_max and len(items) >= total_max:
                 break
         return items
@@ -222,12 +236,12 @@ class Turn:
         user = self._last_user()
         prompt = (user.content if user else "").strip()
         if not prompt:
-            raise openrouter.OpenRouterError("Audio mode needs a text prompt")
+            raise openrouter.OpenRouterError("Audio mode needs a text prompt")  # noqa: TRY003
         self._generate_audio(prompt)
 
     def _generate_audio(self, prompt: str) -> None:
         if not self.s.audio_model:
-            raise openrouter.OpenRouterError("No audio model selected")
+            raise openrouter.OpenRouterError("No audio model selected")  # noqa: TRY003
         params = audio_params(self.s.audio_options)
         if (model_info("audio", self.s.audio_model) or {}).get("audio_input"):
             params["source_audio"] = self._latest_audio()  # the clip to clone the voice from
@@ -246,7 +260,7 @@ class Turn:
     # ― chat with tools ―
     def _chat(self, tools_enabled: bool) -> None:
         if not self.s.text_model:
-            raise openrouter.OpenRouterError("No text model selected")
+            raise openrouter.OpenRouterError("No text model selected")  # noqa: TRY003
         info = model_info("text", self.s.text_model)
         use_tools = tools_enabled and (info is None or info.get("supports_tools"))
         vision = info is None or "image" in (info.get("input_modalities") or [])
@@ -435,11 +449,13 @@ class Turn:
     def _latest_images(self, n: int) -> list[str]:
         """The n most recent finished images (this turn first, then history)."""
 
-        def done_images(media: list[dict]) -> list[str]:
+        def done_images(media: list[dict[str, JsonValue]]) -> list[str]:
             return [
-                item["file"]
+                file
                 for item in reversed(media)
-                if item["kind"] == "image" and item.get("status") == "done" and item.get("file")
+                if item["kind"] == "image"
+                and item.get("status") == "done"
+                and isinstance((file := item.get("file")), str)
             ]
 
         found = done_images(self.media)
@@ -450,13 +466,13 @@ class Turn:
     def _pinned_images(self) -> list[str]:
         """Images the user pinned on this branch, oldest first."""
         return [
-            item["file"]
+            file
             for msg in self.history
             for item in msg.media
             if item.get("pinned")
             and item["kind"] == "image"
             and item.get("status", "done") == "done"
-            and item.get("file")
+            and isinstance((file := item.get("file")), str)
         ]
 
     def _pick_characters(self, names: list[str], prompt: str) -> list:
@@ -590,14 +606,16 @@ class Turn:
         )
 
     # ― generation ―
-    def _add_media(self, item: dict) -> None:
+    def _add_media(self, item: dict[str, JsonValue]) -> None:
         self.media.append(item)
         self.db.append_chat_media_item(self.message_id, item)
         self.emit({"type": "media", "message_id": self.message_id, "item": dict(item)})
 
-    def _update_media(self, item: dict, **fields: object) -> None:
+    def _update_media(self, item: dict[str, JsonValue], **fields: JsonValue) -> None:
         item.update(fields)
-        self.db.update_chat_media_item(self.message_id, item["id"], **fields)
+        media_id = item.get("id")
+        if isinstance(media_id, str):
+            self.db.update_chat_media_item(self.message_id, media_id, **fields)
         self.emit({"type": "media", "message_id": self.message_id, "item": dict(item)})
 
     def _generate_image(
@@ -610,7 +628,7 @@ class Turn:
         dropped: list[str] | None = None,
     ) -> None:
         if not self.s.image_model:
-            raise openrouter.OpenRouterError("No image model selected")
+            raise openrouter.OpenRouterError("No image model selected")  # noqa: TRY003
         # Params are stored on the item so a failed image can be retried as-is
         params = {"aspect_ratio": aspect_ratio, "resolution": self.s.image_options.resolution, "refs": ref_files}
         if dropped:
@@ -674,7 +692,7 @@ class Turn:
         ref_items: list[dict] | None = None,
     ) -> None:
         if not self.s.video_model:
-            raise openrouter.OpenRouterError("No video model selected")
+            raise openrouter.OpenRouterError("No video model selected")  # noqa: TRY003
         duration, aspect_ratio, resolution = fit_video_params(
             self.s.video_model, duration, aspect_ratio, self.s.video_options.resolution
         )
@@ -749,13 +767,18 @@ class Turn:
 
     def _latest_media_file(self, kind: str) -> str | None:
         for item in [*reversed(self.media), *(i for m in reversed(self.history) for i in reversed(m.media))]:
-            if item["kind"] == kind and item.get("status") == "done" and item.get("file"):
-                return item["file"]
+            if item["kind"] == kind and item.get("status") == "done" and isinstance((file := item.get("file")), str):
+                return file
         return None
 
     # ― history → OpenRouter messages ―
     def _build_llm_messages(self, vision: bool, as_tool_calls: bool = False) -> list[dict]:
-        messages = [{"role": "system", "content": SYSTEM_PROMPT.format(today=datetime.now().strftime("%A %d %B %Y"))}]
+        messages = [
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT.format(today=datetime.now().astimezone().strftime("%A %d %B %Y")),
+            }
+        ]
         if self.instructions:
             # The user's own custom instructions, verbatim
             messages.append({"role": "system", "content": self.instructions})

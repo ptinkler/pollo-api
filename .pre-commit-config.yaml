@@ -10,6 +10,8 @@ repos:
       - id: check-yaml
       - id: check-added-large-files
         args: [--maxkb=1024]
+        # The generated type baseline can exceed the source-file size cap.
+        exclude: ^pyright-baseline\.json$
       - id: end-of-file-fixer
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
@@ -25,6 +27,12 @@ repos:
   # The frontend's own ESLint and Prettier (run `npm install` in web/frontend first)
   - repo: local
     hooks:
+      - id: basedpyright
+        name: basedpyright
+        entry: .venv/bin/basedpyright
+        language: system
+        pass_filenames: false
+        always_run: true
       - id: eslint
         name: eslint
         entry: web/frontend/node_modules/.bin/eslint --fix

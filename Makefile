@@ -32,6 +32,7 @@ dev:
 lint:
 	.venv/bin/ruff check .
 	.venv/bin/ruff format --check .
+	.venv/bin/basedpyright
 	cd web/frontend && npm run lint && npm run format:check
 
 format:

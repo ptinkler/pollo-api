@@ -14,10 +14,14 @@ anything another user must not see belongs under a per-tenant key.
 import threading
 import time
 from collections import OrderedDict
-from typing import Any
+
 
 # Tells a cached None apart from a miss, for callers that cache "no answer".
-MISS: Any = object()
+class _Missing:
+    """Sentinel returned for cache misses that differ from a cached None."""
+
+
+MISS = _Missing()
 
 
 class TTLCache[K, V]:

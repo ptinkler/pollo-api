@@ -30,6 +30,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.engine import Connection
 
+type _JsonValue = str | int | float | bool | list[_JsonValue] | dict[str, _JsonValue] | None
+
 revision: str = "0027"
 down_revision: str | Sequence[str] | None = "0026"
 branch_labels: str | Sequence[str] | None = None
@@ -54,7 +56,7 @@ _JSON_COLUMNS = [
 _JSON_KEYS = ("model", "audio_model", "text_model", "image_model", "video_model")
 
 
-def _renamed(value: object, to_v1: bool) -> object:
+def _renamed(value: _JsonValue, to_v1: bool) -> _JsonValue:
     """One model id, with the v1 suffix stripped (or put back on a downgrade).
 
     Anything that isn't a suffixed Pollo id is returned unchanged.
@@ -67,7 +69,7 @@ def _renamed(value: object, to_v1: bool) -> object:
     return f"{PREFIX}{key[: -len(SUFFIX)]}" if key.endswith(SUFFIX) else value
 
 
-def _walk(data: object, to_v1: bool) -> bool:
+def _walk(data: _JsonValue, to_v1: bool) -> bool:
     """Rewrite every model id in a decoded JSON value; True if anything changed."""
     changed = False
     if isinstance(data, list):

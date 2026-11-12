@@ -15,13 +15,13 @@ from web import keyctx, user_keys
 from web.core.metadata import get_db
 
 
-def ctx_thread(target: Callable[..., object], *args: object, name: str | None = None) -> threading.Thread:
+def ctx_thread(target: Callable[[], None], *, name: str | None = None) -> threading.Thread:
     """Create a daemon thread that inherits the current request context.
 
     The copied context carries tenant and provider-key values into the worker.
     """
     ctx = contextvars.copy_context()
-    return threading.Thread(target=lambda: ctx.run(target, *args), daemon=True, name=name)
+    return threading.Thread(target=lambda: ctx.run(target), daemon=True, name=name)
 
 
 @contextlib.contextmanager

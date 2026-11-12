@@ -8,12 +8,15 @@ tenant is unset (startup, migrations, system tasks) there is no filter — those
 contexts are not user-facing.
 """
 
+from collections.abc import Sequence
 from contextvars import ContextVar, Token
 
 from sqlalchemy import event
-from sqlalchemy.orm import Session, with_loader_criteria
+from sqlalchemy.orm import ORMExecuteState, Session, with_loader_criteria
+from sqlalchemy.orm.unitofwork import UOWTransaction
 
 from web.core.metadata.models import (
+    Base,
     Character,
     ChatConversation,
     ChatImportSkip,
@@ -56,7 +59,7 @@ def current_tenant() -> str | None:
 
 
 @event.listens_for(Session, "do_orm_execute")
-def _scope_selects_to_tenant(execute_state: object) -> None:
+def _scope_selects_to_tenant(execute_state: ORMExecuteState) -> None:
     uid = _tenant.get()
     if uid is None or not execute_state.is_select:
         return
@@ -67,7 +70,9 @@ def _scope_selects_to_tenant(execute_state: object) -> None:
 
 
 @event.listens_for(Session, "before_flush")
-def _stamp_new_rows_with_tenant(session: Session, flush_context: object, instances: object) -> None:
+def _stamp_new_rows_with_tenant(
+    session: Session, _flush_context: UOWTransaction, _instances: Sequence[Base] | None
+) -> None:
     uid = _tenant.get()
     if uid is None:
         return

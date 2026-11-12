@@ -40,7 +40,7 @@ def db_path() -> Path:
     return config.ROOT_DIR / "cache" / "media-cache.sqlite"
 
 
-def _with_db(work: Callable[[sqlite3.Connection], object], default: object = None) -> object:
+def _with_db[T](work: Callable[[sqlite3.Connection], T], default: T | None = None) -> T | None:
     """Run `work` against the cache, or return `default` if it can't be used.
 
     The connection is opened per call: these happen once per process, once per
@@ -57,10 +57,11 @@ def _with_db(work: Callable[[sqlite3.Connection], object], default: object = Non
         conn.execute(_SCHEMA)
         result = work(conn)
         conn.commit()
-        return result
-    except Exception as e:  # see above
+    except Exception as e:  # noqa: BLE001 — cache failures must not break the request
         log.warning("media cache unusable (%s) — lengths will be read from the files", e)
         return default
+    else:
+        return result
     finally:
         if conn is not None:
             conn.close()
