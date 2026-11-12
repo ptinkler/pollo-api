@@ -21,7 +21,7 @@ def _model_info(src: str) -> dict:
             isinstance(target, ast.Name) and target.id == "MODEL_INFO" for target in node.targets
         ):
             return ast.literal_eval(node.value)
-    raise AssertionError("generated source defines no MODEL_INFO")
+    raise AssertionError("generated source defines no MODEL_INFO")  # noqa: TRY003
 
 
 pytestmark = pytest.mark.no_tenant

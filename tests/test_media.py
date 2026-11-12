@@ -345,7 +345,7 @@ class TestBlocked:
         monkeypatch.setattr(media_mod, "_blank_cache", None)  # as after a restart
 
         def no_decoding(data):
-            raise AssertionError("decoded again")
+            raise AssertionError("decoded again")  # noqa: TRY003
 
         monkeypatch.setattr(media_mod, "is_blank_image", no_decoding)
         assert client.get("/api/media/blocked").json()["black"] == 1

@@ -30,7 +30,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import anyio
 import cv2
@@ -111,12 +111,12 @@ def first_frame_jpeg(video_path: Path) -> bytes | None:
             return None
         _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         return jpeg.tobytes()
-    except Exception:  # an unreadable video simply has no frame
+    except Exception:  # noqa: BLE001 — unreadable videos have no frame
         return None
 
 
 @functools.lru_cache(maxsize=4096)
-def _video_seconds(path: str, mtime_ns: int) -> float | None:
+def _video_seconds(path: str, _mtime_ns: int) -> float | None:
     """A video's length in seconds, from its header (cached per file version)."""
     cap = cv2.VideoCapture(path)
     try:
@@ -305,9 +305,10 @@ def make_thumb(path: Path, size: int = THUMB_SIZE) -> Path | None:
         tmp = out.with_suffix(".part")
         img.save(tmp, "JPEG", quality=80)
         tmp.replace(out)
-        return out
-    except Exception:  # a broken file just has no thumbnail
+    except Exception:  # noqa: BLE001 — broken files simply have no thumbnail
         return None
+    else:
+        return out
 
 
 # New thumbnails are made on their own small pool, THUMB_WORKERS at a time
@@ -546,7 +547,7 @@ def api_library_file(filename: str) -> FileResponse:
 
 
 @router.post("/upload")
-async def api_upload_media(file: UploadFile = File(...)) -> dict[str, Any]:
+async def api_upload_media(file: Annotated[UploadFile, File()]) -> dict[str, object]:
     """Upload an image or video directly to the library.
 
     Audio uploads remain limited to chats.

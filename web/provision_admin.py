@@ -33,7 +33,7 @@ def main() -> None:
     if args.set_password:
         pw = args.password or getpass.getpass("New admin password: ")
         if len(pw) < 10:
-            raise SystemExit("Password must be at least 10 characters.")
+            raise SystemExit("Password must be at least 10 characters.")  # noqa: TRY003
         admin = db.create_local_admin(args.email, hash_password(pw), name=args.name)
     else:
         admin = db.ensure_admin(args.email, args.name)

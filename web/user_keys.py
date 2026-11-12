@@ -12,6 +12,7 @@ import base64
 import hashlib
 import json
 import os
+from typing import Annotated
 
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends
@@ -81,13 +82,15 @@ class KeysUpdate(BaseModel):
 
 
 @router.get("")
-async def get_keys(user: User = Depends(require_user)) -> dict[str, dict[str, dict[str, str | bool]]]:
+async def get_keys(user: Annotated[User, Depends(require_user)]) -> dict[str, dict[str, dict[str, str | bool]]]:
     """Return whether each provider key is set and its masked hint."""
     return {"keys": _masked(user)}
 
 
 @router.put("")
-async def set_keys(data: KeysUpdate, user: User = Depends(require_user)) -> dict[str, dict[str, dict[str, str | bool]]]:
+async def set_keys(
+    data: KeysUpdate, user: Annotated[User, Depends(require_user)]
+) -> dict[str, dict[str, dict[str, str | bool]]]:
     """Update the signed-in user's provider keys."""
     current = get_user_keys(user)
     for provider, value in data.keys.items():

@@ -146,7 +146,7 @@ def _no_outbound_http(monkeypatch):
 
     def blocked(*args, **kwargs):
         target = args[1] if len(args) > 1 else (args[0] if args else kwargs.get("url", "?"))
-        raise AssertionError(f"a test tried to reach the network: {target}")
+        raise AssertionError(f"a test tried to reach the network: {target}")  # noqa: TRY003
 
     for name in ("request", "get", "post", "put", "delete", "head"):
         monkeypatch.setattr(requests, name, blocked, raising=False)

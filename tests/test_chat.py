@@ -406,7 +406,7 @@ class TestTurns:
         )
 
         def boom(*a, **k):
-            raise openrouter.OpenRouterError("[Seed] overloaded")
+            raise openrouter.OpenRouterError("[Seed] overloaded")  # noqa: TRY003
 
         monkeypatch.setattr(openrouter, "generate_image", boom)
 
@@ -571,7 +571,7 @@ class TestTurns:
         """Test that openrouter error marks message."""
 
         def boom(*a, **k):
-            raise openrouter.OpenRouterError("Insufficient credits", 402)
+            raise openrouter.OpenRouterError("Insufficient credits", 402)  # noqa: TRY003
 
         monkeypatch.setattr(openrouter, "stream_chat", boom)
         ev = _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "hi", **SETTINGS}))
@@ -1787,7 +1787,7 @@ class TestModelDecides:
             )
         )
 
-        today = datetime.now().strftime("%A %d %B %Y")
+        today = datetime.now().astimezone().strftime("%A %d %B %Y")
         assert seen["msgs"][0]["content"] == chat.tools.SYSTEM_PROMPT.format(today=today)
 
 
@@ -2090,7 +2090,7 @@ class TestFollowUpRounds:
         def image(model, prompt, **kw):
             attempts.append(prompt)
             if len(attempts) == 1:
-                raise openrouter.OpenRouterError("Upstream timed out", 502)
+                raise openrouter.OpenRouterError("Upstream timed out", 502)  # noqa: TRY003
             return [(_png_bytes(), "image/png")], None
 
         rounds = iter(
@@ -3078,7 +3078,7 @@ class TestOpenRouterConnection:
         """httpx.RemoteProtocolError used to escape as a raw error and leave the image pending."""
 
         def drop(*a, **k):
-            raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+            raise httpx.RemoteProtocolError("Server disconnected without sending a response.")  # noqa: TRY003
 
         monkeypatch.setattr(openrouter._client, "stream", drop)
         monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: pytest.fail("no LLM in image mode"))

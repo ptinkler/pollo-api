@@ -40,18 +40,18 @@ def assert_public_url(url: str) -> None:
     """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        raise UnsafeURLError(f"Unsupported URL scheme: {parsed.scheme!r}")
+        raise UnsafeURLError(f"Unsupported URL scheme: {parsed.scheme!r}")  # noqa: TRY003
     host = parsed.hostname
     if not host:
-        raise UnsafeURLError("URL has no host")
+        raise UnsafeURLError("URL has no host")  # noqa: TRY003
     try:
         infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80))
     except socket.gaierror as exc:
-        raise UnsafeURLError(f"Cannot resolve host {host!r}: {exc}") from exc
+        raise UnsafeURLError(f"Cannot resolve host {host!r}: {exc}") from exc  # noqa: TRY003
     for info in infos:
         ip = info[4][0]
         if not _is_public_ip(ip):
-            raise UnsafeURLError(f"Host {host!r} resolves to non-public address {ip}")
+            raise UnsafeURLError(f"Host {host!r} resolves to non-public address {ip}")  # noqa: TRY003
 
 
 def get_public(
@@ -82,4 +82,4 @@ def get_public(
             url = str(resp.next_request.url) if resp.next_request else resp.headers["location"]
             continue
         return resp
-    raise UnsafeURLError("Too many redirects")
+    raise UnsafeURLError("Too many redirects")  # noqa: TRY003

@@ -45,7 +45,7 @@ class UserMixin:
                 user.avatar_url = profile.get("avatar") or user.avatar_url
                 user.provider = profile["provider"]
                 user.provider_sub = profile["sub"]
-                user.last_login_at = datetime.now()
+                user.last_login_at = datetime.now().astimezone().replace(tzinfo=None)
                 if is_admin:
                     user.is_admin = True
             else:
@@ -57,7 +57,7 @@ class UserMixin:
                     provider=profile["provider"],
                     provider_sub=profile["sub"],
                     is_admin=is_admin,
-                    last_login_at=datetime.now(),
+                    last_login_at=datetime.now().astimezone().replace(tzinfo=None),
                 )
                 session.add(user)
             session.commit()

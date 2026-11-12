@@ -75,7 +75,7 @@ def get_models(refresh: bool = False) -> dict[str, Any]:
             for prov in PROVIDERS:
                 try:
                     models += prov.list_models(kind, refresh)
-                except Exception as e:  # surface any failure per provider/kind
+                except Exception as e:  # noqa: BLE001 — capture provider errors independently
                     data["errors"][f"{prov.NAME}_{kind}"] = str(e)
             # Capability tags, derived uniformly so every provider is consistent;
             # the picker filters on these. Set once here rather than in each
@@ -105,7 +105,7 @@ def model_info(kind: str, model_id: str | None) -> dict | None:
     if info is None and venice.is_venice(model_id) and venice.is_configured():
         try:
             return venice.model_info(kind, model_id)
-        except Exception:  # unknown model or Venice unreachable: treat as unknown
+        except Exception:  # noqa: BLE001 — unknown model or unreachable Venice is unknown
             return None
     return info
 

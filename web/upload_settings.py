@@ -13,6 +13,7 @@ import contextlib
 import json
 import os
 import secrets
+from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends
@@ -123,13 +124,13 @@ def _meta() -> dict[str, object]:
 
 
 @router.get("")
-async def get_upload_prefs(user: User = Depends(require_user)) -> dict[str, object]:
+async def get_upload_prefs(user: Annotated[User, Depends(require_user)]) -> dict[str, object]:
     """Return the user's upload preferences and available choices."""
     return {"prefs": resolve_prefs(user), **_meta()}
 
 
 @router.put("")
-async def set_upload_prefs(data: UploadPrefsUpdate, user: User = Depends(require_user)) -> dict[str, object]:
+async def set_upload_prefs(data: UploadPrefsUpdate, user: Annotated[User, Depends(require_user)]) -> dict[str, object]:
     """Save the user's upload preferences."""
     merged = _sanitize({k: v for k, v in data.model_dump().items() if v is not None}, resolve_prefs(user))
     get_db().set_user_upload_prefs(user.id, json.dumps(merged))
@@ -143,7 +144,7 @@ class SelfhostTest(BaseModel):
 
 
 @router.post("/test-selfhost")
-async def check_selfhost(data: SelfhostTest, user: User = Depends(require_user)) -> dict[str, bool | str]:
+async def check_selfhost(data: SelfhostTest, user: Annotated[User, Depends(require_user)]) -> dict[str, bool | str]:
     """Check that the configured self-host URL can serve media externally.
 
     Stage a small file, fetch its signed public URL and verify the returned bytes.
@@ -162,7 +163,6 @@ async def check_selfhost(data: SelfhostTest, user: User = Depends(require_user))
             return {"ok": False, "detail": f"The URL returned HTTP {resp.status_code} — check the base URL and proxy."}
         if resp.text.strip() != token:
             return {"ok": False, "detail": "The URL was reachable but served the wrong content (proxy/caching?)."}
-        return {"ok": True, "detail": f"Reachable — Pollo can fetch source media from {base}."}
     except ValueError as e:
         return {"ok": False, "detail": str(e)}
     except UnsafeURLError as e:
@@ -173,3 +173,4 @@ async def check_selfhost(data: SelfhostTest, user: User = Depends(require_user))
         test_file.unlink(missing_ok=True)
         with contextlib.suppress(OSError):
             test_dir.rmdir()  # remove the staging dir when empty
+    return {"ok": True, "detail": f"Reachable — Pollo can fetch source media from {base}."}

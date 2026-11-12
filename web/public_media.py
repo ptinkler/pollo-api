@@ -85,7 +85,7 @@ def selfhost_url(filepath: Path, base_url: str, ttl_seconds: int) -> str:
     """
     base = (base_url or "").strip().rstrip("/")
     if not base.startswith(("http://", "https://")):
-        raise ValueError(
+        raise ValueError(  # noqa: TRY003
             "Self-host upload needs a public base URL — set it in Settings → Media uploads "
             "(or PUBLIC_BASE_URL). It must be the https address this instance is reachable at."
         )

@@ -154,7 +154,7 @@ class FakeVenice:
             )
         handler = self.routes.get(path)
         if handler is None:
-            raise AssertionError(f"unexpected Venice call {method} {path}")
+            raise AssertionError(f"unexpected Venice call {method} {path}")  # noqa: TRY003
         return handler(kw) if callable(handler) else handler
 
     def request(self, method, url, **kw):

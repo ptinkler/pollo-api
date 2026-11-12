@@ -7,6 +7,7 @@ API-key session and the user session).
 from __future__ import annotations
 
 import os
+from typing import Annotated
 
 from fastapi import APIRouter, Cookie, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -43,7 +44,7 @@ def _redirect_uri(request: Request, provider: str) -> str:
 
 
 @router.get("/providers")
-async def providers(user_session: str | None = Cookie(None)) -> dict[str, object]:
+async def providers(user_session: Annotated[str | None, Cookie()] = None) -> dict[str, object]:
     """Return configured sign-in providers and the current user, if any."""
     user = users.resolve_current_user(user_session)
     return {
@@ -55,7 +56,7 @@ async def providers(user_session: str | None = Cookie(None)) -> dict[str, object
 
 
 @router.get("/me")
-async def me(user_session: str | None = Cookie(None)) -> dict[str, object]:
+async def me(user_session: Annotated[str | None, Cookie()] = None) -> dict[str, object]:
     """Return the signed-in user, if any."""
     user = users.resolve_current_user(user_session)
     return {"user": _user_dict(user) if user else None}

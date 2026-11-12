@@ -188,7 +188,7 @@ class TestServedCheck:
         monkeypatch.setattr(image_hosts, "_upload_to_tmpfiles", lambda p, e=60: "https://tmp/x.mp4")
 
         def boom(url, **kw):
-            raise image_hosts.requests.ConnectionError("no route")
+            raise image_hosts.requests.ConnectionError("no route")  # noqa: TRY003
 
         monkeypatch.setattr(image_hosts.requests, "get", boom)
         prefs = {"primary": "tmpfiles", "backup": None, "expiry_minutes": 60}

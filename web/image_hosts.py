@@ -7,13 +7,16 @@ retention; the primary host is tried before the backup.
 import logging
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TypedDict
 
 import requests
 from bs4 import BeautifulSoup
+from pydantic import TypeAdapter
 
 from web.public_media import selfhost_url
+from web.types import JsonValue
 from web.upload_settings import current_upload_prefs
 
 log = logging.getLogger(__name__)
@@ -23,6 +26,7 @@ TMPFILES_URL = "https://tmpfiles.org/api/v1/upload"
 # Litterbox only offers these fixed retentions; map any requested span to the
 # nearest. Keys are minutes.
 _LITTERBOX_BUCKETS = {60: "1h", 720: "12h", 1440: "24h", 4320: "72h"}
+_TMPFILES_RESPONSE = TypeAdapter(dict[str, JsonValue])
 
 # A retry (or a second model on the same source media) re-runs the whole submit
 # and would otherwise re-upload the same local file — pure wasted bandwidth,
@@ -109,10 +113,11 @@ def upload_file(filepath: Path, prefs: _UploadPrefs | None = None) -> str:
             _verify_served(host, url, filepath)
             _store_url(key, url, expiry)
             log.info("%s: uploaded %s", host, url)
-            return url
         except ValueError as exc:
             log.warning("%s failed (%s), trying the next host", host, exc)
             errors.append(f"{host}: {exc}")
+        else:
+            return url
     raise ValueError("All upload hosts failed — " + "; ".join(errors))
 
 
@@ -135,13 +140,15 @@ def _verify_served(host: str, url: str, filepath: Path) -> None:
         content_type = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
         resp.close()
     except requests.RequestException as exc:
-        raise ValueError(f"hosted file isn't reachable ({type(exc).__name__})") from exc
+        raise ValueError(f"hosted file isn't reachable ({type(exc).__name__})") from exc  # noqa: TRY003
     if resp.status_code not in (200, 206):
-        raise ValueError(f"hosted file answered HTTP {resp.status_code}")
+        raise ValueError(f"hosted file answered HTTP {resp.status_code}")  # noqa: TRY003
     # Only an HTML answer is treated as wrong: hosts serve files as all sorts of
     # octet-stream/text types, and rejecting those would break working uploads.
     if content_type in ("text/html", "application/xhtml+xml"):
-        raise ValueError(f"hosted file served a web page, not {filepath.suffix.lstrip('.') or 'the file'}")
+        raise ValueError(  # noqa: TRY003
+            f"hosted file served a web page, not {filepath.suffix.lstrip('.') or 'the file'}"
+        )
 
 
 def _dispatch(host: str, filepath: Path, prefs: _UploadPrefs) -> str:
@@ -152,7 +159,7 @@ def _dispatch(host: str, filepath: Path, prefs: _UploadPrefs) -> str:
         return _upload_to_tmpfiles(filepath, expiry)
     if host == "selfhost":
         return selfhost_url(filepath, prefs.get("selfhost_base", ""), ttl_seconds=expiry * 60)
-    raise ValueError(f"Unknown upload host {host!r}")
+    raise ValueError(f"Unknown upload host {host!r}")  # noqa: TRY003
 
 
 def _http_failure(service: str, resp: requests.Response) -> ValueError:
@@ -171,7 +178,7 @@ def _upload_to_litterbox(filepath: Path, expiry_minutes: int = 60) -> str:
     Fails fast (no retry) so VPN/Cloudflare blocks surface immediately.
     """
     try:
-        with open(filepath, "rb") as f:
+        with filepath.open("rb") as f:
             resp = requests.post(
                 LITTERBOX_URL,
                 data={"reqtype": "fileupload", "time": _litterbox_time(expiry_minutes)},
@@ -180,10 +187,10 @@ def _upload_to_litterbox(filepath: Path, expiry_minutes: int = 60) -> str:
             )
     except requests.exceptions.Timeout as exc:
         log.warning("litterbox upload timed out (%s)", exc)
-        raise ValueError("Litterbox upload timed out — cycle VPN if blocked") from exc
+        raise ValueError("Litterbox upload timed out — cycle VPN if blocked") from exc  # noqa: TRY003
     except (requests.exceptions.SSLError, requests.exceptions.ConnectionError) as exc:
         log.warning("litterbox upload failed — %s: %s", type(exc).__name__, exc)
-        raise ValueError(f"Litterbox upload failed — {type(exc).__name__}: {exc}") from exc
+        raise ValueError(f"Litterbox upload failed — {type(exc).__name__}: {exc}") from exc  # noqa: TRY003
     if resp.status_code != 200 or not resp.text.startswith("https://"):
         err = _http_failure("Litterbox", resp)
         log.warning("%s", err)
@@ -197,23 +204,28 @@ def _upload_to_tmpfiles(filepath: Path, expiry_minutes: int = 60) -> str:
     tmpfiles applies its own retention; the requested span is passed as a hint.
     """
     try:
-        with open(filepath, "rb") as f:
+        with filepath.open("rb") as f:
             resp = requests.post(
                 TMPFILES_URL,
                 data={"expire": expiry_minutes * 60},
                 files={"file": (filepath.name, f)},
                 timeout=(8, 30),
             )
-        if resp.status_code != 200:
-            raise _http_failure("tmpfiles.org", resp)
-        data = resp.json()
-        if data.get("status") != "success":
-            raise ValueError(f"tmpfiles.org upload failed — {data}")
-        return _tmpfiles_direct_url(data["data"]["url"])
-    except ValueError:
-        raise
-    except Exception as exc:
-        raise ValueError(f"tmpfiles.org upload failed — {exc}") from exc
+        data = _TMPFILES_RESPONSE.validate_json(resp.text)
+    except (requests.RequestException, ValueError) as exc:
+        raise ValueError(f"tmpfiles.org upload failed — {exc}") from exc  # noqa: TRY003
+    if resp.status_code != 200:
+        raise _http_failure("tmpfiles.org", resp)
+    if data.get("status") != "success":
+        raise ValueError(f"tmpfiles.org upload failed — {data}")  # noqa: TRY003
+    upload_data = data.get("data")
+    url = upload_data.get("url") if isinstance(upload_data, Mapping) else None
+    if not isinstance(url, str):
+        raise TypeError("tmpfiles.org upload response has no URL")  # noqa: TRY003
+    try:
+        return _tmpfiles_direct_url(url)
+    except requests.RequestException as exc:
+        raise ValueError(f"tmpfiles.org upload failed — {exc}") from exc  # noqa: TRY003
 
 
 def _tmpfiles_direct_url(page_url: str) -> str:
@@ -227,5 +239,7 @@ def _tmpfiles_direct_url(page_url: str) -> str:
     link = soup.find("a", class_="download") or soup.find("img", id="img_preview")
     direct_url = (link.get("href") or link.get("src")) if link else None
     if not direct_url:
-        raise ValueError(f"tmpfiles.org upload succeeded but no direct download link found on {page_url}")
+        raise ValueError(  # noqa: TRY003
+            f"tmpfiles.org upload succeeded but no direct download link found on {page_url}"
+        )
     return direct_url

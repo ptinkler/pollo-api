@@ -75,7 +75,7 @@ class ImportMixin:
             conv.import_updated_at = import_updated_at
             if show and last is not None:
                 conv.current_leaf_id = last
-            conv.updated_at = updated_at or datetime.now()
+            conv.updated_at = updated_at or datetime.now().astimezone().replace(tzinfo=None)
             session.commit()
 
     def get_chat_import_ids(self, conversation_id: str) -> dict[str, ChatMessage]:

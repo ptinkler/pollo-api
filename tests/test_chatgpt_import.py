@@ -179,8 +179,10 @@ class TestFirstImport:
         """Test that keeps chatgpt dates."""
         imp.run_import(story_zip)
         conv = _imported(client)[0]
-        assert conv["updated_at"].startswith(datetime.fromtimestamp(T0 + 200).isoformat()[:19])
-        assert _shown(client, conv["id"])[2]["created_at"].startswith(datetime.fromtimestamp(T0 + 100).isoformat()[:19])
+        assert conv["updated_at"].startswith(datetime.fromtimestamp(T0 + 200).astimezone().isoformat()[:19])
+        assert _shown(client, conv["id"])[2]["created_at"].startswith(
+            datetime.fromtimestamp(T0 + 100).astimezone().isoformat()[:19]
+        )
 
     def test_older_exports_with_image_tool_messages(self, imp, client, tmp_path):
         """Test that older exports with image tool messages."""

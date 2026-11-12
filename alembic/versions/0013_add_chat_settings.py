@@ -52,7 +52,7 @@ def upgrade() -> None:
     placeholders = ", ".join(["1", ":updated_at", *(f":{k}" for k in values)])
     bind.execute(
         sa.text(f"INSERT INTO chat_settings ({cols}) VALUES ({placeholders})"),
-        {"updated_at": datetime.now(), **values},
+        {"updated_at": datetime.now().astimezone().replace(tzinfo=None), **values},
     )
 
 

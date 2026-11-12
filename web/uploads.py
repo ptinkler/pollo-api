@@ -62,7 +62,7 @@ def is_blank_image(data: bytes) -> bool:
             im = im.convert("L")
             im.thumbnail((64, 64))
             return im.getextrema()[1] <= 4
-    except Exception:
+    except Exception:  # noqa: BLE001 — Pillow rejects corrupt or non-image bytes this way
         return False  # not an image Pillow reads; leave it to the caller
 
 
@@ -70,7 +70,7 @@ def _is_real_image(content: bytes) -> bool:
     """The bytes really are an image, whatever content type the client claimed."""
     try:
         Image.open(io.BytesIO(content)).verify()
-    except Exception:  # anything Pillow rejects is not an image
+    except Exception:  # noqa: BLE001 — anything Pillow rejects is not an image
         return False
     return True
 

@@ -26,7 +26,7 @@ def chat_chunks(
         if should_stop and should_stop():
             return
         if deadline and time.monotonic() > deadline:
-            raise error(f"The model didn't finish within {int(max_seconds)}s", 504)
+            raise error(f"The model didn't finish within {int(max_seconds)}s", 504)  # noqa: TRY003
         if not line.startswith("data:"):
             continue
         payload = line[5:].strip()

@@ -29,12 +29,13 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import requests
 
 # Run from the repo root so `web` imports resolve.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from web.providers.pollo_engine import VIDEO_GENERATORS
 from web.providers.pollo_engine import video_generator as get_video_generator
@@ -101,7 +102,7 @@ def _probe_estimate(key: str, api_key: str) -> tuple[str, str]:
     try:
         gen = _build(key, api_key)
         payload = gen.get_payload()
-    except Exception as e:  # a model whose probe body we can't build
+    except Exception as e:  # noqa: BLE001 — probe reports model-specific body construction errors
         return "N/A", f"can't build a probe request: {e}"
     url = getattr(gen, "estimate_url", None)
     if not url:
@@ -127,7 +128,7 @@ def _probe_live(key: str, api_key: str) -> tuple[str, str]:
     gen = _build(key, api_key)
     try:
         resp = gen.send_request()
-    except Exception as e:  # report whatever the generator raised
+    except Exception as e:  # noqa: BLE001 — display provider-specific probe failure
         return "ERR", str(e)[:140]
     try:
         body = resp.json()

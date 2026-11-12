@@ -53,7 +53,7 @@ def _admin_id(conn: Connection) -> str:
             "INSERT INTO users (id, email, name, provider, provider_sub, is_admin, created_at) "
             "VALUES (:id, :email, 'Admin', 'local', 'admin', 1, :now)"
         ),
-        {"id": admin_id, "email": email, "now": datetime.now()},
+        {"id": admin_id, "email": email, "now": datetime.now().astimezone().replace(tzinfo=None)},
     )
     return admin_id
 

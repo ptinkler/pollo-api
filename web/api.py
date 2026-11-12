@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from http.cookies import SimpleCookie
 from pathlib import Path
+from typing import Annotated
 
 import uvicorn
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Request
@@ -48,7 +49,7 @@ WEB_DIR = Path(__file__).parent.resolve()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001 — ASGI lifespan signature
     """Lifespan context manager for startup/shutdown events."""
     # Startup: announce the auth posture so a misconfigured deploy is obvious
     admins = admin_emails()
@@ -226,7 +227,7 @@ async def api_auth_logout(response: Response) -> dict[str, bool]:
 
 @app.get("/api/auth/status")
 async def api_auth_status(
-    user_session: str | None = Cookie(None),
+    user_session: Annotated[str | None, Cookie()] = None,
 ) -> dict[str, bool | dict[str, str | bool | None] | None]:
     """Return whether a user is signed in and their public account details.
 
@@ -248,7 +249,7 @@ IMMUTABLE_CACHE = {"Cache-Control": "public, max-age=31536000, immutable"}
 
 
 @app.get("/api/usage/balance")
-def api_usage_balance(_api_key: str = Depends(require_user)) -> dict[str, int]:
+def api_usage_balance(_api_key: Annotated[str, Depends(require_user)]) -> dict[str, int]:
     """Fetch current credit balance from the Pollo API."""
     api_key = keyctx.provider_key("pollo")
     if not api_key:

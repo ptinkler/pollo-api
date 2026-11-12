@@ -17,6 +17,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from web.types import JsonValue
 
 _JSON_IDS = TypeAdapter(list[int])
+_JSON_STRINGS = TypeAdapter(list[str])
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
 _JSON_ID_GROUPS = TypeAdapter(dict[str, list[int]])
 _JSON_MEDIA = TypeAdapter(list[dict[str, JsonValue]])
@@ -63,7 +64,7 @@ class User(Base):
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
-class JsonIds[OwnerT]:
+class JsonIds[OwnerT, ItemT]:
     """Store an attribute's list as JSON in its corresponding text column.
 
     The backing column name appends ``_json`` (for example,
@@ -71,8 +72,9 @@ class JsonIds[OwnerT]:
     writes remove duplicates unless ``unique=False``.
     """
 
-    def __init__(self, unique: bool = True) -> None:
-        """Set whether writes drop repeated items."""
+    def __init__(self, adapter: TypeAdapter[list[ItemT]], unique: bool = True) -> None:
+        """Set the JSON list adapter and whether writes drop repeated items."""
+        self.adapter = adapter
         self.unique = unique
 
     def __set_name__(self, owner: type[OwnerT], name: str) -> None:
@@ -83,18 +85,18 @@ class JsonIds[OwnerT]:
     def __get__(self, obj: None, owner: type[OwnerT]) -> Self: ...
 
     @overload
-    def __get__(self, obj: OwnerT, owner: type[OwnerT] | None = None) -> list[int]: ...
+    def __get__(self, obj: OwnerT, owner: type[OwnerT] | None = None) -> list[ItemT]: ...
 
-    def __get__(self, obj: OwnerT | None, owner: type[OwnerT] | None = None) -> Self | list[int]:
+    def __get__(self, obj: OwnerT | None, owner: type[OwnerT] | None = None) -> Self | list[ItemT]:
         """Decode the backing column, or [] when it is empty or unreadable."""
         if obj is None:
             return self
         try:
-            return _JSON_IDS.validate_json(getattr(obj, self.column) or "[]")
+            return self.adapter.validate_json(getattr(obj, self.column) or "[]")
         except ValidationError:
             return []
 
-    def __set__(self, obj: OwnerT, value: list[int] | None) -> None:
+    def __set__(self, obj: OwnerT, value: list[ItemT] | None) -> None:
         """Encode `value` into the backing column as JSON."""
         items = list(value or [])
         setattr(obj, self.column, json.dumps(list(dict.fromkeys(items)) if self.unique else items))
@@ -110,9 +112,9 @@ class DefaultsBucket:
     default_character_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     default_instruction_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     default_instruction_group_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    default_character_ids: JsonIds[DefaultsBucket] = JsonIds()
-    default_instruction_ids: JsonIds[DefaultsBucket] = JsonIds()
-    default_instruction_group_ids: JsonIds[DefaultsBucket] = JsonIds()
+    default_character_ids: JsonIds[DefaultsBucket, int] = JsonIds(_JSON_IDS)
+    default_instruction_ids: JsonIds[DefaultsBucket, int] = JsonIds(_JSON_IDS)
+    default_instruction_group_ids: JsonIds[DefaultsBucket, int] = JsonIds(_JSON_IDS)
 
     def defaults_dict(self) -> dict[str, list[int]]:
         """Return the default lists keyed by their public field names."""
@@ -260,9 +262,9 @@ class ChatConversation(Base):
         """Encode composer settings, clearing the column for an empty value."""
         self.settings_json = json.dumps(value) if value else None
 
-    character_ids: JsonIds[ChatConversation] = JsonIds()
-    instruction_ids: JsonIds[ChatConversation] = JsonIds()
-    instruction_group_ids: JsonIds[ChatConversation] = JsonIds()
+    character_ids: JsonIds[ChatConversation, int] = JsonIds(_JSON_IDS)
+    instruction_ids: JsonIds[ChatConversation, int] = JsonIds(_JSON_IDS)
+    instruction_group_ids: JsonIds[ChatConversation, int] = JsonIds(_JSON_IDS)
 
 
 class Character(Base):
@@ -284,7 +286,7 @@ class Character(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
 
-    images: JsonIds[Character] = JsonIds(unique=False)  # in the order shown
+    images: JsonIds[Character, str] = JsonIds(_JSON_STRINGS, unique=False)  # in the order shown
 
     def to_dict(self) -> dict[str, JsonValue]:
         """Serialize the character and its image metadata."""
@@ -343,7 +345,7 @@ class ChatInstructionGroup(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
 
-    snippet_ids: JsonIds[ChatInstructionGroup] = JsonIds()
+    snippet_ids: JsonIds[ChatInstructionGroup, int] = JsonIds(_JSON_IDS)
 
     def to_dict(self) -> dict[str, JsonValue]:
         """Serialize the group and its snippet ids."""

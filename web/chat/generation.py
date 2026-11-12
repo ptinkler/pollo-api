@@ -77,7 +77,7 @@ def enhance_prompt(model: str, prompt: str, kind: str) -> tuple[str, float]:
     text, cost = _ask(model, ENHANCE_PROMPT.format(kind=kind, prompt=prompt[:4000]), ENHANCE_SECONDS)
     text = _THINK.sub("", text).strip().strip("\"'`").strip()
     if not text:
-        raise ValueError("The model returned no prompt")
+        raise ValueError("The model returned no prompt")  # noqa: TRY003
     return text, cost
 
 

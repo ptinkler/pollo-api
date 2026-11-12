@@ -33,7 +33,7 @@ def audio_params(opts: AudioOptions) -> dict[str, Any]:
 def submit_audio_generation(conv_id: str, model: str, prompt: str, params: dict[str, Any]) -> dict:
     """Start the job. Returns the job plus "log": what was sent and answered."""
     if not pollo.is_pollo(model):
-        raise openrouter.OpenRouterError("Audio generation needs a Pollo model")
+        raise openrouter.OpenRouterError("Audio generation needs a Pollo model")  # noqa: TRY003
     request_log.forget_last()
     clip = conversation_dir(conv_id) / params["source_audio"] if params.get("source_audio") else None
     job = pollo.submit_audio(model, prompt, clip, **{k: params[k] for k in _OPTION_FIELDS if k in params})

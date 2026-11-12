@@ -72,7 +72,7 @@ def _connection_guard(waiting_for: str) -> Iterator[None]:
         yield
     except (httpx.RemoteProtocolError, httpx.ReadError, httpx.WriteError) as e:
         waited = round(time.monotonic() - start)
-        raise OpenRouterError(
+        raise OpenRouterError(  # noqa: TRY003
             f"The connection to OpenRouter dropped after {waited}s waiting for the {waiting_for} "
             f"({type(e).__name__}) — usually a network/VPN closing idle connections. "
             "It may still have been billed: check OpenRouter's activity before retrying."
@@ -92,7 +92,7 @@ def is_configured() -> bool:
 NAME = "openrouter"
 
 
-def list_models(kind: str, refresh: bool = False) -> list[dict]:
+def list_models(kind: str, refresh: bool = False) -> list[dict]:  # noqa: ARG001 — provider interface
     """Uniform provider interface: text/image/video models (empty without a key)."""
     if not is_configured():
         return []
@@ -103,7 +103,7 @@ def list_models(kind: str, refresh: bool = False) -> list[dict]:
 def _headers() -> dict[str, str]:
     key = get_api_key()
     if not key:
-        raise OpenRouterError("No OpenRouter API key set — add one in Settings → Keys", 503)
+        raise OpenRouterError("No OpenRouter API key set — add one in Settings → Keys", 503)  # noqa: TRY003
     return {
         "Authorization": f"Bearer {key}",
         # App attribution (https://openrouter.ai/docs/app-attribution). The URL
@@ -349,7 +349,7 @@ def _images_from_json(data: dict) -> tuple[list[tuple[bytes, str]], float | None
         if item.get("b64_json")
     ]
     if not images:
-        raise OpenRouterError("Image model returned no images")
+        raise OpenRouterError("Image model returned no images")  # noqa: TRY003
     return images, (data.get("usage") or {}).get("cost")
 
 
@@ -383,7 +383,7 @@ def _images_from_stream(lines: Iterator[str]) -> tuple[list[tuple[bytes, str]], 
             images.append((base64.b64decode(chunk["b64_json"]), chunk.get("media_type") or "image/png"))
             cost = (chunk.get("usage") or {}).get("cost", cost)
     if not images:
-        raise OpenRouterError("Image model returned no images")
+        raise OpenRouterError("Image model returned no images")  # noqa: TRY003
     return images, cost
 
 
@@ -420,7 +420,7 @@ def generate_image_chat(
             try:
                 r = net_guard.get_public(_client, url, timeout=IMAGE_TIMEOUT)
             except net_guard.UnsafeURLError as exc:
-                raise OpenRouterError(f"Refusing to fetch unsafe image URL: {exc}") from exc
+                raise OpenRouterError(f"Refusing to fetch unsafe image URL: {exc}") from exc  # noqa: TRY003
             r.raise_for_status()
             images.append((r.content, r.headers.get("content-type", "image/png").split(";")[0]))
     if not images:
@@ -483,6 +483,6 @@ def download_video(job_id: str, dest: Path, index: int = 0) -> None:
         if resp.status_code >= 400:
             resp.read()
             _raise_for_response(resp)
-        with open(tmp, "wb") as f:
+        with tmp.open("wb") as f:
             f.writelines(resp.iter_bytes())
     tmp.replace(dest)
