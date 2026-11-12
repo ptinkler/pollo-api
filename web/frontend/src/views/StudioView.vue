@@ -6,7 +6,7 @@
   components. Route: /studio — runs alongside the existing app during the build.
 -->
 <script setup>
-import { ref, reactive, computed, provide, inject, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, computed, provide, inject, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
 import { useComposerSettings, MODES } from '../composables/useComposerSettings'
@@ -378,13 +378,16 @@ function goMedia() {
 function openThreadView(id) {
   router.push(`/${id}`)
 }
-function newThreadView(kind = 'chat') {
+const composerRef = ref(null)
+async function newThreadView(kind = 'chat') {
   pendingKind = kind
   // ?new=gallery so the link opens as a gallery in a new tab too
   const to = kind === 'gallery' ? '/?new=gallery' : '/'
   if (route.name === 'studio')
     newThread(kind) // already on the home route: just reset
-  else router.push(to)
+  else await router.push(to)
+  await nextTick()
+  composerRef.value?.focusPrompt()
 }
 // One toggle does both jobs: it switches the view *and* makes that the view the
 // thread opens on next time (there is no separate "default view" switch).
@@ -558,7 +561,6 @@ onMounted(() => {
 
       <template v-else>
         <div class="top">
-          <div class="ttitle">{{ activeTitle }}</div>
           <div class="seg" role="group" aria-label="Thread view">
             <button
               :class="{ on: threadView === 'chat' }"
@@ -575,15 +577,9 @@ onMounted(() => {
               <svg class="ic"><use href="#s-image" /></svg>
             </button>
           </div>
+          <div class="ttitle">{{ activeTitle }}</div>
           <div class="spacer"></div>
           <StudioBalances :balances="balances" :spend="spend" :messages="messages" @usage="router.push('/usage')" />
-          <button
-            class="iconbtn"
-            :title="rightCollapsed ? 'Show inspector' : 'Hide inspector'"
-            @click="rightCollapsed = !rightCollapsed"
-          >
-            <svg class="ic"><use href="#s-cog" /></svg>
-          </button>
         </div>
 
         <StudioFeed
@@ -615,6 +611,7 @@ onMounted(() => {
         />
 
         <StudioComposer
+          ref="composerRef"
           v-model:draft="draft"
           v-model:mode="mode"
           :modes="composerModes"

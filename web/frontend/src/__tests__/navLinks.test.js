@@ -29,6 +29,21 @@ const hrefOf = (w, text) =>
     ?.attributes('href')
 
 describe('sidebar navigation is linkable', () => {
+  it('uses the entire collapsed rail as one expandable button', async () => {
+    const w = mount(StudioSidebar, {
+      props: { threads: [], spaces: [], collapsed: true, search: '', filter: 'all' },
+    })
+
+    expect(w.find('button.rail').attributes('aria-label')).toBe('Expand sidebar')
+    expect(w.findAll('button.rail svg use').map(use => use.attributes('href'))).toEqual([
+      '#s-chev',
+      '#s-plus',
+      '#s-chat',
+    ])
+    await w.find('button.rail').trigger('click')
+    expect(w.emitted('update:collapsed')).toEqual([[false]])
+  })
+
   it.each([
     ['New chat', '/'],
     ['New gallery', '/?new=gallery'],

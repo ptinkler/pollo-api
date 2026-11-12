@@ -308,6 +308,10 @@ function onDrop(e) {
   drag.value = false
   emit('files', e.dataTransfer?.files)
 }
+function focusPrompt() {
+  ed.value?.focus()
+}
+defineExpose({ focusPrompt })
 </script>
 
 <template>

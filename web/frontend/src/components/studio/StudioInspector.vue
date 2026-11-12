@@ -36,25 +36,22 @@ defineEmits([
 
 <template>
   <aside class="side" :class="{ collapsed }">
-    <!-- Collapsed: the whole rail expands on click (no stray icons). -->
-    <div
+    <!-- The collapsed rail expands on click. -->
+    <button
       class="rail"
-      role="button"
-      tabindex="0"
+      type="button"
       title="Expand inspector"
+      aria-label="Expand inspector"
       @click="$emit('update:collapsed', false)"
-      @keydown.enter="$emit('update:collapsed', false)"
     >
       <svg class="ic lg chev"><use href="#s-chevL" /></svg>
       <span class="rail-label">Inspector</span>
-    </div>
+    </button>
     <div class="panel">
-      <div class="panelhead">
-        <button class="iconbtn" title="Collapse" @click="$emit('update:collapsed', true)">
-          <svg class="ic"><use href="#s-chev" /></svg>
-        </button>
+      <button class="panelhead" type="button" title="Collapse inspector" @click="$emit('update:collapsed', true)">
         <span class="brand">Inspector</span>
-      </div>
+        <svg class="ic"><use href="#s-chev" /></svg>
+      </button>
       <div class="pbody">
         <StudioModelSection :models="models" :loading="modelsLoading" />
         <StudioMediaOptions />
@@ -101,63 +98,9 @@ defineEmits([
 
 <style scoped>
 .side {
-  position: relative;
-  flex: 0 0 auto;
   width: 288px;
   background: var(--sbg);
   border-left: 1px solid var(--sborder);
-  transition: width 0.2s;
-}
-.side.collapsed {
-  width: 54px;
-}
-.rail {
-  display: none;
-}
-.side.collapsed > .rail {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  height: 100%;
-  padding: 14px 0;
-  background: var(--srail);
-  cursor: pointer;
-  outline: none;
-}
-.side.collapsed > .rail:hover,
-.side.collapsed > .rail:focus-visible {
-  background: var(--shover);
-}
-.rail .chev {
-  color: var(--smuted);
-}
-.rail-label {
-  writing-mode: vertical-rl;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--smuted);
-}
-.side.collapsed > .rail:hover .chev,
-.side.collapsed > .rail:hover .rail-label {
-  color: var(--sfg);
-}
-.side.collapsed > .panel {
-  display: none;
-}
-.panel {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-.panelhead {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 52px;
-  padding: 10px 14px 10px 12px;
-  border-bottom: 1px solid var(--sborder2);
 }
 .brand {
   font-weight: 600;

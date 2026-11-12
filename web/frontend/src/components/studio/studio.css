@@ -4,7 +4,83 @@
    chrome every center pane and inspector section shares, so a page component
    only styles what is unique to it. */
 
-/* ---- Center-pane pages (Settings, Tools, Media, Usage, Characters…) */
+/* ---- Shared Studio shell and center-pane pages */
+.studio .side {
+  position: relative;
+  flex: 0 0 auto;
+  transition: width 0.2s;
+}
+.studio .side.collapsed {
+  width: 54px;
+}
+.studio .side > .rail {
+  display: none;
+}
+.studio .side.collapsed > .rail {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 100%;
+  padding: 14px 0;
+  border-radius: 0;
+  background: var(--srail);
+  cursor: pointer;
+  border: 0;
+  color: inherit;
+  font: inherit;
+}
+.studio .side.collapsed > .rail:hover,
+.studio .side.collapsed > .rail:focus-visible {
+  background: var(--shover);
+}
+.studio .side.collapsed > .rail .ic,
+.studio .side.collapsed > .rail .rail-label {
+  color: var(--smuted);
+}
+.studio .side.collapsed > .rail:hover .ic,
+.studio .side.collapsed > .rail:hover .rail-label,
+.studio .side.collapsed > .rail:focus-visible .ic,
+.studio .side.collapsed > .rail:focus-visible .rail-label {
+  color: var(--sfg);
+}
+.studio .rail-label {
+  writing-mode: vertical-rl;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.studio .side.collapsed > .panel {
+  display: none;
+}
+.studio .side > .panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.studio .side > .panel > .panelhead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--sborder2);
+  color: inherit;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.studio .side > .panel > .panelhead > .brand {
+  flex: 1;
+}
+.studio .side > .panel > .panelhead > .ic {
+  color: var(--smuted);
+}
 .studio .page {
   flex: 1;
   min-height: 0;

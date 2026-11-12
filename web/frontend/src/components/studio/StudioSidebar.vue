@@ -110,29 +110,28 @@ const bySpace = computed(() => {
 
 <template>
   <aside class="side" :class="{ collapsed }">
-    <div class="rail">
-      <button class="rail-btn" title="Expand" @click="emit('update:collapsed', false)">
-        <svg class="ic lg"><use href="#s-chev" /></svg>
-      </button>
-      <a class="rail-btn" title="New chat" href="/" @click.prevent="emit('new', 'chat')">
-        <svg class="ic lg"><use href="#s-plus" /></svg>
-      </a>
-      <button class="rail-btn" title="Threads" @click="emit('update:collapsed', false)">
-        <svg class="ic lg"><use href="#s-chat" /></svg>
-      </button>
-    </div>
+    <button
+      class="rail"
+      type="button"
+      title="Expand sidebar"
+      aria-label="Expand sidebar"
+      @click="emit('update:collapsed', false)"
+    >
+      <svg class="ic lg chev"><use href="#s-chev" /></svg>
+      <span class="rail-label">Studio</span>
+      <svg class="ic lg"><use href="#s-plus" /></svg>
+      <svg class="ic lg"><use href="#s-chat" /></svg>
+    </button>
     <div class="panel">
-      <div class="panelhead">
+      <button class="panelhead" type="button" title="Collapse sidebar" @click="emit('update:collapsed', true)">
         <span class="brand"
           ><span class="mk"
             ><svg class="ic"><use href="#s-spark" /></svg
           ></span>
           Studio</span
         >
-        <button class="iconbtn" title="Collapse" @click="emit('update:collapsed', true)">
-          <svg class="ic"><use href="#s-chevL" /></svg>
-        </button>
-      </div>
+        <svg class="ic"><use href="#s-chevL" /></svg>
+      </button>
       <div class="pbody">
         <div class="newrow">
           <a class="newbtn" href="/" @click.prevent="emit('new', 'chat')">
@@ -355,31 +354,12 @@ const bySpace = computed(() => {
 
 <style scoped>
 .side {
-  position: relative;
-  flex: 0 0 auto;
   width: 268px;
   background: var(--sbg);
   border-right: 1px solid var(--sborder);
-  transition: width 0.2s;
-}
-.side.collapsed {
-  width: 54px;
-}
-.rail {
-  display: none;
-}
-.side.collapsed > .rail {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  height: 100%;
-  padding: 12px 0;
-  background: var(--srail);
 }
 /* These are <a> so they can be opened in a new tab; they must still look and
    sit exactly like the buttons they replaced. */
-.rail-btn,
 .newbtn,
 .footbtn,
 .fmain,
@@ -388,44 +368,12 @@ const bySpace = computed(() => {
   box-sizing: border-box;
 }
 
-.rail-btn {
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  border-radius: 9px;
-  color: var(--smuted);
-  background: none;
-  border: none;
-  cursor: pointer;
-}
-.rail-btn:hover {
-  background: var(--shover);
-  color: var(--sfg);
-}
-.side.collapsed > .panel {
-  display: none;
-}
-.panel {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-.panelhead {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 52px;
-  padding: 10px 12px 10px 14px;
-  border-bottom: 1px solid var(--sborder2);
-}
 .brand {
   display: flex;
   align-items: center;
   gap: 9px;
   font-weight: 650;
   letter-spacing: -0.02em;
-  flex: 1;
 }
 .brand .mk {
   width: 24px;
