@@ -20,6 +20,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Add characters to conversations."""
     # MetadataDB() creates tables/columns on startup too, so skip what's there
     insp = sa.inspect(op.get_bind())
     if "characters" not in insp.get_table_names():
@@ -39,6 +40,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove characters from conversations."""
     op.drop_column("chat_conversations", "character_ids_json")
     op.drop_index("ix_characters_conversation_id", table_name="characters")
     op.drop_table("characters")

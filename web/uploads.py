@@ -1,11 +1,13 @@
-"""Reading and storing uploaded media, and encoding a stored file for a provider
-that wants it inline. Shared by the HTTP routes and the provider layer.
+"""Read, validate and store uploaded media.
+
+The HTTP routes and provider layer share these upload helpers.
 """
 
 import base64
 import hashlib
 import io
 import mimetypes
+from collections.abc import Callable
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile
@@ -51,8 +53,9 @@ def image_media_type(path: Path | str) -> str | None:
 
 
 def is_blank_image(data: bytes) -> bool:
-    """A solid black picture: what many providers' safety filters send instead
-    of the image they blocked. Even a night scene has some brighter pixels.
+    """Check whether an image is nearly solid black.
+
+    Providers sometimes return a black image when a safety filter blocks content.
     """
     try:
         with Image.open(io.BytesIO(data)) as im:
@@ -73,8 +76,9 @@ def _is_real_image(content: bytes) -> bool:
 
 
 def _is_real_video(content: bytes) -> bool:
-    """MP4/QuickTime files carry an "ftyp" box near the start — a cheap check
-    that the bytes are really a video, not a renamed file.
+    """Check whether a file has the MP4/QuickTime signature.
+
+    These formats carry an ``ftyp`` box near the beginning of the file.
     """
     return b"ftyp" in content[:64]
 
@@ -84,13 +88,12 @@ async def _read_upload(
     types: dict[str, str],
     max_bytes: int,
     accepted: str,
-    check=None,
+    check: Callable[[bytes], bool] | None = None,
     kind: str = "",
 ) -> tuple[bytes, str]:
-    """Validate one upload against its type map, size cap and (optionally) its
-    real content; returns (bytes, the extension to save it with). `accepted`
-    names the formats for the wrong-type message, `kind` the thing it should
-    have been for the bad-content one.
+    """Validate an upload and return its bytes and storage extension.
+
+    ``accepted`` and ``kind`` describe the formats used in validation errors.
     """
     ext = types.get(file.content_type or "")
     if not ext:
@@ -104,22 +107,26 @@ async def _read_upload(
 
 
 async def read_image_upload(file: UploadFile) -> tuple[bytes, str]:
+    """Validate and read an image upload."""
     return await _read_upload(
         file, IMAGE_UPLOAD_TYPES, MAX_IMAGE_UPLOAD_BYTES, "PNG, JPEG, WebP or GIF", _is_real_image, "image"
     )
 
 
 async def read_video_upload(file: UploadFile) -> tuple[bytes, str]:
+    """Validate and read an MP4 upload."""
     return await _read_upload(file, VIDEO_UPLOAD_TYPES, MAX_VIDEO_UPLOAD_BYTES, "MP4", _is_real_video, "MP4 video")
 
 
 async def read_audio_upload(file: UploadFile) -> tuple[bytes, str]:
+    """Read an audio upload with an accepted content type and size."""
     return await _read_upload(file, AUDIO_UPLOAD_TYPES, MAX_AUDIO_UPLOAD_BYTES, "MP3, WAV, M4A or AAC")
 
 
 def file_to_data_url(path: Path) -> str:
-    """Encode a local image as a data URL, downscaling big ones (and GIFs,
-    which several providers reject) so request bodies stay reasonable.
+    """Encode a local image as a data URL.
+
+    Large images and GIFs are downscaled because several providers reject them.
     """
     raw = path.read_bytes()
     mime = mimetypes.guess_type(path.name)[0] or "image/png"
@@ -134,9 +141,9 @@ def file_to_data_url(path: Path) -> str:
 
 
 def store_deduped(directory: Path, prefix: str, content: bytes, ext: str) -> str:
-    """Save `content` as `<prefix><content hash><ext>` in `directory` and return
-    the name. The same bytes always get the same name, so re-uploading or
-    re-importing an image reuses the file instead of storing another copy.
+    """Save content under a hash-derived name and return that name.
+
+    Identical content reuses the same file instead of storing another copy.
     """
     name = f"{prefix}{hashlib.sha256(content).hexdigest()[:16]}{ext}"
     path = directory / name

@@ -6,6 +6,7 @@ from web.core.cache import MISS, TTLCache
 
 
 def test_returns_what_was_put():
+    """Test that returns what was put."""
     c = TTLCache(ttl=60)
     c.put("k", 1)
     assert c.get("k") == 1
@@ -21,6 +22,7 @@ def test_a_cached_none_is_not_a_miss():
 
 
 def test_entries_expire():
+    """Test that entries expire."""
     c = TTLCache(ttl=0.01)
     c.put("k", 1)
     time.sleep(0.02)
@@ -28,6 +30,7 @@ def test_entries_expire():
 
 
 def test_maxsize_is_a_hard_cap_evicting_oldest_first():
+    """Test that maxsize is a hard cap evicting oldest first."""
     c = TTLCache(ttl=60, maxsize=3)
     for i in range(10):
         c.put(i, i)
@@ -37,6 +40,7 @@ def test_maxsize_is_a_hard_cap_evicting_oldest_first():
 
 
 def test_put_refreshes_an_existing_key():
+    """Test that put refreshes an existing key."""
     c = TTLCache(ttl=60, maxsize=2)
     c.put("a", 1)
     c.put("b", 2)
@@ -47,6 +51,7 @@ def test_put_refreshes_an_existing_key():
 
 
 def test_lapsed_entries_are_dropped_on_write():
+    """Test that lapsed entries are dropped on write."""
     c = TTLCache(ttl=0.01, maxsize=100)
     c.put("old", 1)
     time.sleep(0.02)
@@ -55,6 +60,7 @@ def test_lapsed_entries_are_dropped_on_write():
 
 
 def test_clear():
+    """Test that clear."""
     c = TTLCache(ttl=60)
     c.put("k", 1)
     c.clear()

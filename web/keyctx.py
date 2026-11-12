@@ -1,5 +1,7 @@
 """Request-scoped provider keys.
 
+The middleware binds per-user credentials for provider calls during a request.
+
 Provider keys (Pollo / Venice / OpenRouter) live ONLY in the database, encrypted
 per user — never in .env. The middleware in api.py binds the signed-in user's
 decrypted keys to a context variable per request; provider code calls
@@ -14,22 +16,24 @@ once jobs carry a user_id (the multi-tenant step).
 
 from __future__ import annotations
 
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 
 _current_keys: ContextVar[dict | None] = ContextVar("current_keys", default=None)
 
 
-def set_keys(keys: dict | None):
+def set_keys(keys: dict[str, str] | None) -> Token[dict[str, str] | None]:
     """Bind the current request's user keys; returns a token for reset_keys."""
     return _current_keys.set(keys or {})
 
 
-def reset_keys(token) -> None:
+def reset_keys(token: Token[dict[str, str] | None]) -> None:
+    """Restore the key context to the state captured by ``set_keys``."""
     _current_keys.reset(token)
 
 
 def provider_key(provider: str) -> str | None:
-    """The current user's key for a provider (from their encrypted DB keys), or
-    None. There is no .env fallback — keys are per user only.
+    """Return the current user's key for a provider, if set.
+
+    Keys are read from their encrypted database value with no .env fallback.
     """
     return (_current_keys.get() or {}).get(provider) or None

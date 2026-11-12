@@ -11,7 +11,10 @@ from web.core.metadata.tenant import reset_tenant, set_tenant
 
 
 class ConversationMixin:
+    """Provide conversation creation, lookup, search, and deletion operations."""
+
     def create_conversation(self, title: str = "New chat", **fields: Any) -> ChatConversation:
+        """Create a conversation with a generated id."""
         with self._session() as session:
             conv = ChatConversation(id=uuid.uuid4().hex, title=title, **fields)
             session.add(conv)
@@ -21,12 +24,14 @@ class ConversationMixin:
             return conv
 
     def conversation_titles(self) -> dict[str, str]:
-        """Every conversation's title, by id — for labelling media and
-        characters with the chat they came from.
+        """Return conversation titles keyed by id.
+
+        Used to label media and characters with the chat they came from.
         """
         return {c.id: c.title for c in self.list_conversations(limit=None)}
 
     def get_conversation(self, conv_id: str) -> ChatConversation | None:
+        """Return a conversation by id, or ``None`` if it does not exist."""
         with self._session() as session:
             conv = session.get(ChatConversation, conv_id)
             if conv:
@@ -34,10 +39,10 @@ class ConversationMixin:
             return conv
 
     def conversation_exists_any_tenant(self, conv_id: str) -> bool:
-        """Whether ANY user owns a conversation with this id (tenant scope
-        bypassed). Lets a caller tell a cross-tenant id (a real chat that isn't
-        the current user's) from a truly orphaned chat folder with no DB row at
-        all — only the former must be refused.
+        """Check whether a conversation id belongs to any tenant.
+
+        Bypasses tenant scope to distinguish another user's conversation from
+        an orphaned chat folder with no corresponding database row.
         """
         token = set_tenant(None)  # None disables the per-tenant select filter
         try:
@@ -47,8 +52,9 @@ class ConversationMixin:
             reset_tenant(token)
 
     def list_conversations(self, limit: int | None = 200) -> list[ChatConversation]:
-        """Pinned chats first, then the most recently active. `limit=None` is
-        every one of them.
+        """Return pinned conversations first, then recently active ones.
+
+        Pass ``limit=None`` to return every conversation.
         """
         with self._session() as session:
             query = session.query(ChatConversation).order_by(
@@ -60,8 +66,9 @@ class ConversationMixin:
             return convs
 
     def conversation_thumbs(self, conv_ids: list[str]) -> dict[str, str]:
-        """Newest done image file per conversation, for gallery cover thumbnails
-        (conversations without one are simply absent). One query over the ids.
+        """Return each conversation's newest completed image file.
+
+        Conversations without one are omitted; all ids are queried together.
         """
         out: dict[str, str] = {}
         if not conv_ids:
@@ -86,9 +93,11 @@ class ConversationMixin:
         return out
 
     def search_conversations(self, query: str, limit: int = 100) -> list[tuple[ChatConversation, str | None]]:
-        """Chats whose title or any message (on any branch) contains `query`,
-        ignoring case, most recently active first. Each comes with the first
-        matching message's text, or None when only the title matched.
+        """Find conversations whose title or messages contain a query.
+
+        Searches all branches without regard to case, returning most recently
+        active conversations first with the first matching message's text (or
+        ``None`` when only the title matched).
         """
         pattern = "%" + re.sub(r"([\\%_])", r"\\\1", query) + "%"
         with self._session() as session:
@@ -134,6 +143,7 @@ class ConversationMixin:
             session.commit()
 
     def update_conversation(self, conv_id: str, **fields: Any) -> ChatConversation | None:
+        """Update supported conversation fields, or return ``None`` if missing."""
         with self._session() as session:
             conv = session.get(ChatConversation, conv_id)
             if not conv:
@@ -148,6 +158,7 @@ class ConversationMixin:
             return conv
 
     def delete_conversation(self, conv_id: str) -> bool:
+        """Delete a conversation and its messages and library items."""
         with self._session() as session:
             conv = session.get(ChatConversation, conv_id)
             if not conv:

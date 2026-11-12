@@ -1,4 +1,6 @@
-"""VPN control — status, restart and server country, through Gluetun's
+"""Control VPN status and settings through Gluetun's API.
+
+The routes expose status, restart and server-country controls.
 control server.
 
 Docs: https://github.com/qdm12/gluetun-wiki/blob/main/setup/advanced/control-server.md
@@ -47,14 +49,16 @@ ALLOWED_VPN_COUNTRIES = [
 
 
 class VpnCountryRequest(BaseModel):
+    """Country requested for the VPN server."""
+
     country: str
 
 
-def _gluetun_get(path: str, timeout: int = 3):
+def _gluetun_get(path: str, timeout: int = 3) -> requests.Response:
     return requests.get(f"{GLUETUN_API}{path}", headers=_GLUETUN_HEADERS, timeout=timeout)
 
 
-def _gluetun_put(path: str, body: dict, timeout: int = 5):
+def _gluetun_put(path: str, body: dict[str, object], timeout: int = 5) -> requests.Response:
     return requests.put(f"{GLUETUN_API}{path}", json=body, headers=_GLUETUN_HEADERS, timeout=timeout)
 
 
@@ -84,7 +88,7 @@ def _egress_ip() -> str | None:
 
 
 @router.get("/status")
-def vpn_status(_admin=Depends(require_admin)):
+def vpn_status(_admin=Depends(require_admin)) -> dict[str, object]:
     """Current VPN status, public IP, and server country from Gluetun."""
     # Gluetun's /v1/publicip/ip returns the tunnel's exit IP under "public_ip"
     # (older builds used "ip"); normalise to {ip, country} for the UI.
@@ -104,7 +108,7 @@ def vpn_status(_admin=Depends(require_admin)):
 
 
 @router.post("/restart")
-def vpn_restart(_admin=Depends(require_admin)):
+def vpn_restart(_admin=Depends(require_admin)) -> dict[str, bool | str]:
     """Restart the VPN tunnel by cycling Gluetun's status off then on."""
     try:
         _gluetun_put("/v1/vpn/status", {"status": "stopped"})
@@ -118,7 +122,7 @@ def vpn_restart(_admin=Depends(require_admin)):
 
 
 @router.put("/country")
-def vpn_change_country(data: VpnCountryRequest, _admin=Depends(require_admin)):
+def vpn_change_country(data: VpnCountryRequest, _admin=Depends(require_admin)) -> dict[str, bool | str]:
     """Change VPN server country. Body: {"country": "United Kingdom"}."""
     country = data.country.strip()
     if not country:
@@ -135,6 +139,6 @@ def vpn_change_country(data: VpnCountryRequest, _admin=Depends(require_admin)):
 
 
 @router.get("/countries")
-def vpn_countries(_admin=Depends(require_admin)):
+def vpn_countries(_admin=Depends(require_admin)) -> dict[str, list[str]]:
     """The allowed VPN server countries."""
     return {"countries": ALLOWED_VPN_COUNTRIES}

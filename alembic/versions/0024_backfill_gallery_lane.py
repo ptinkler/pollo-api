@@ -16,6 +16,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.engine import Connection
 
 revision: str = "0024"
 down_revision: str | Sequence[str] | None = "0023"
@@ -23,8 +24,8 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-def backfill(conn) -> int:
-    """Returns how many conversations were converted."""
+def backfill(conn: Connection) -> int:
+    """Backfill pure-gallery conversations and return the converted count."""
     convs = conn.execute(sa.text("SELECT id FROM chat_conversations WHERE kind = 'gallery'")).scalars().all()
     done = 0
     for cid in convs:
@@ -46,6 +47,7 @@ def backfill(conn) -> int:
 
 
 def upgrade() -> None:
+    """Move pure-gallery exchanges into the gallery lane."""
     bind = op.get_bind()
     insp = sa.inspect(bind)
     if insp.has_table("chat_messages") and insp.has_table("chat_conversations"):
@@ -53,4 +55,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    pass
+    """Keep the backfill because original parent links are not retained."""

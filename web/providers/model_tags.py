@@ -1,5 +1,6 @@
-"""Capability tags for every model, derived uniformly from the shaped catalogue
-dicts so all three providers stay consistent.
+"""Capability tags for every model, derived from the shaped catalogue dicts.
+
+This keeps tags consistent across all three providers.
 
 One source of truth for the tag slugs and their human labels (`TAGS`), plus
 `tags_for(kind, model)` — called once per model by `web/chat/catalogue.py` as it
@@ -131,10 +132,17 @@ def _video_tags(m: dict[str, Any], add: Callable[..., None]) -> None:
     _video_img_tags(m, typ, fam, frames, add)
 
 
-def _video_img_tags(m: dict[str, Any], typ, fam, frames: list, add: Callable[..., None]) -> None:
-    """Whether the model can animate an image / do pure text-to-video. A
-    "first_frame" only means img2vid for a plain generator, not for an edit
-    family where the image plays a different role.
+def _video_img_tags(
+    m: dict[str, Any],
+    typ: str | None,
+    fam: str | None,
+    frames: list[str],
+    add: Callable[..., None],
+) -> None:
+    """Add image-to-video and text-to-video tags supported by the model.
+
+    ``first_frame`` means image-to-video only for plain generators, not edit
+    families where the image plays a different role.
     """
     special = typ in _EDIT_TYPES or fam in _VENICE_EDIT_FAMS
     if "first_frame" in frames and not special:

@@ -20,6 +20,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Create users."""
     # MetadataDB.create_all may add it on startup too — skip if present
     if "users" in sa.inspect(op.get_bind()).get_table_names():
         return
@@ -40,5 +41,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop users."""
     op.drop_index("ix_users_email", table_name="users")
     op.drop_table("users")

@@ -29,6 +29,7 @@ MESSAGE_COLUMNS = [sa.Column("import_id", sa.String(100), nullable=True)]
 
 
 def upgrade() -> None:
+    """Add chat import tracking."""
     # MetadataDB() adds these on startup too, so skip what's there
     insp = sa.inspect(op.get_bind())
     for table, columns in (("chat_conversations", CONVERSATION_COLUMNS), ("chat_messages", MESSAGE_COLUMNS)):
@@ -49,6 +50,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove chat import tracking."""
     op.drop_table("chat_import_skips")
     op.drop_index("ix_chat_conversations_import_id", table_name="chat_conversations")
     with op.batch_alter_table("chat_messages") as batch_op:

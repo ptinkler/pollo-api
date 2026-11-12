@@ -13,14 +13,14 @@ from fastapi.responses import RedirectResponse
 
 from web import users
 from web.auth import set_user_cookie
-from web.core.metadata import get_db
+from web.core.metadata import User, get_db
 from web.dev_login import dev_login_enabled
 from web.oauth import configured_providers, normalize_profile, oauth
 
 router = APIRouter(prefix="/api/auth")
 
 
-def _user_dict(u) -> dict:
+def _user_dict(u: User) -> dict[str, object]:
     return {
         "id": u.id,
         "email": u.email,
@@ -32,8 +32,9 @@ def _user_dict(u) -> dict:
 
 
 def _redirect_uri(request: Request, provider: str) -> str:
-    """The provider's callback URL. PUBLIC_BASE_URL pins the public https host
-    (needed behind a reverse proxy / NAS); otherwise it's derived from request.
+    """Build the provider's callback URL.
+
+    PUBLIC_BASE_URL pins the public HTTPS host; otherwise use the request URL.
     """
     base = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
     if base:
@@ -42,7 +43,8 @@ def _redirect_uri(request: Request, provider: str) -> str:
 
 
 @router.get("/providers")
-async def providers(user_session: str | None = Cookie(None)):
+async def providers(user_session: str | None = Cookie(None)) -> dict[str, object]:
+    """Return configured sign-in providers and the current user, if any."""
     user = users.resolve_current_user(user_session)
     return {
         "providers": configured_providers(),
@@ -53,13 +55,15 @@ async def providers(user_session: str | None = Cookie(None)):
 
 
 @router.get("/me")
-async def me(user_session: str | None = Cookie(None)):
+async def me(user_session: str | None = Cookie(None)) -> dict[str, object]:
+    """Return the signed-in user, if any."""
     user = users.resolve_current_user(user_session)
     return {"user": _user_dict(user) if user else None}
 
 
 @router.get("/login/{provider}", name="oauth_login")
-async def login(provider: str, request: Request):
+async def login(provider: str, request: Request) -> RedirectResponse:
+    """Redirect to the selected OAuth provider."""
     if provider not in configured_providers():
         raise HTTPException(status_code=404, detail="Unknown or unconfigured provider")
     client = oauth.create_client(provider)
@@ -67,7 +71,8 @@ async def login(provider: str, request: Request):
 
 
 @router.get("/callback/{provider}", name="oauth_callback")
-async def callback(provider: str, request: Request):
+async def callback(provider: str, request: Request) -> RedirectResponse:
+    """Complete an OAuth sign-in and redirect to the application."""
     if provider not in configured_providers():
         raise HTTPException(status_code=404, detail="Unknown or unconfigured provider")
     client = oauth.create_client(provider)

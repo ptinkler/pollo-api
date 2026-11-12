@@ -1,4 +1,5 @@
-"""One-click dev login (DEV_LOGIN): signs in a local admin with no password,
+"""One-click dev login (DEV_LOGIN): signs in a local admin with no password,.
+
 stores keys unencrypted, and is refused on an already-encrypted (prod) DB.
 """
 
@@ -18,13 +19,14 @@ pytestmark = pytest.mark.no_tenant
 
 @pytest.fixture
 def db(tmp_path):
+    """Provide the db fixture."""
     (tmp_path / "data").mkdir(parents=True, exist_ok=True)
     return MetadataDB(db_path=tmp_path / "data" / "metadata.db")
 
 
 @pytest.fixture
 def client(db, monkeypatch):
-
+    """Provide the client fixture."""
     monkeypatch.setattr(api_mod, "get_db", lambda: db)
     monkeypatch.setattr("web.users.get_db", lambda: db)
     monkeypatch.setattr("web.user_keys.get_db", lambda: db)
@@ -38,11 +40,13 @@ def client(db, monkeypatch):
 
 
 def test_disabled_is_404(client, monkeypatch):
+    """Test that disabled is 404."""
     monkeypatch.delenv("DEV_LOGIN", raising=False)
     assert client.post("/api/auth/dev-login").status_code == 404
 
 
 def test_signs_in_an_admin(client, monkeypatch):
+    """Test that signs in an admin."""
     monkeypatch.setenv("DEV_LOGIN", "true")
     r = client.post("/api/auth/dev-login")
     assert r.status_code == 200
@@ -54,6 +58,7 @@ def test_signs_in_an_admin(client, monkeypatch):
 
 
 def test_keys_stored_plaintext_in_dev(client, db, monkeypatch):
+    """Test that keys stored plaintext in dev."""
     monkeypatch.setenv("DEV_LOGIN", "true")
     client.post("/api/auth/dev-login")
     assert client.put("/api/keys", json={"keys": {"pollo": "sk-dev-123"}}).status_code == 200
@@ -65,6 +70,7 @@ def test_keys_stored_plaintext_in_dev(client, db, monkeypatch):
 
 
 def test_refused_on_encrypted_db(client, db, monkeypatch):
+    """Test that refused on encrypted db."""
     monkeypatch.setenv("DEV_LOGIN", "true")
 
     # A pre-existing user with an ENCRYPTED key blob makes this look like prod.

@@ -1,4 +1,5 @@
-"""Audio generation (speech / music): submit a Pollo job; the video poller
+"""Audio generation (speech / music): submit a Pollo job; the video poller.
+
 finishes it (audio rides the same job + download path, saved as .mp3).
 """
 

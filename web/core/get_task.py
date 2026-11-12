@@ -4,6 +4,7 @@ API Docs: https://docs.pollo.ai/task/get-task-status?playground=open
 """
 
 import logging
+from typing import Any
 
 import requests
 
@@ -20,8 +21,10 @@ CLOUDFLARE_MESSAGE = "Cloudflare blocked the request — check your VPN or switc
 
 
 def get_task_status(task_id: str, api_key: str) -> list[TaskResult]:
-    """One result per generation of the task; a single ("error", …) or
-    ("cloudflare_blocked", …) result when the status can't be read.
+    """Return one status result per task generation.
+
+    Return a single ``("error", ...)`` or ``("cloudflare_blocked", ...)`` result
+    when the status cannot be read.
     """
     url = f"{POLLO_TASK_BASE}/{task_id}/status"
     response = requests.request("GET", url, headers={"x-api-key": api_key}, timeout=POLLO_API_TIMEOUT)
@@ -61,7 +64,7 @@ def _error_message(response: requests.Response) -> str:
     return f"HTTP {response.status_code}"
 
 
-def _credit(value) -> int | None:
+def _credit(value: Any) -> int | None:
     """A credit count from the API (a string or an int), None if missing or unreadable."""
     try:
         return int(value) if value is not None else None

@@ -30,6 +30,7 @@ COLUMNS = [
 
 
 def upgrade() -> None:
+    """Add chat forks, pins, and settings fields."""
     # MetadataDB() adds these columns on startup too, so skip what's there
     insp = sa.inspect(op.get_bind())
     existing = {c["name"] for c in insp.get_columns("chat_conversations")}
@@ -42,6 +43,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove chat forks, pins, and settings fields."""
     op.drop_index("ix_chat_conversations_forked_from_id", table_name="chat_conversations")
     with op.batch_alter_table("chat_conversations") as batch_op:
         for col in reversed(COLUMNS):

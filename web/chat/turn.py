@@ -1,4 +1,6 @@
-"""The Turn: one chat turn run in a worker thread. Streams the chat model,
+"""The Turn: one chat turn run in a worker thread.
+
+Streams the chat model,
 runs its generate_image/generate_video/create_* tools via the generation
 module, persists everything, and starts video pollers for async jobs.
 """
@@ -9,6 +11,7 @@ import logging
 import os
 import re
 import threading
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -54,6 +57,7 @@ from web.chat.tools import (
 )
 from web.chat.workers import ctx_thread
 from web.core.metadata import get_db
+from web.core.metadata.models import ChatMessage
 from web.providers import openrouter, provider_for
 
 log = logging.getLogger(__name__)
@@ -67,7 +71,7 @@ class Turn:
         conv_id: str,
         settings: TurnSettings,
         message_id: int,
-        emit,
+        emit: Callable[[dict[str, Any]], None],
         cancel: threading.Event,
         initial_cost: float = 0.0,
     ) -> None:
@@ -93,6 +97,7 @@ class Turn:
 
     # ― entry point ―
     def run(self) -> None:
+        """Run this turn, persist its final state, and emit the completion event."""
         title_job = self._start_title()
         try:
             if self.s.mode == "image":
@@ -123,7 +128,7 @@ class Turn:
         self.emit({"type": "done", "message": message_out(msg) if msg else None})
 
     # ― explicit modes ―
-    def _last_user(self):
+    def _last_user(self) -> ChatMessage | None:
         return next((m for m in reversed(self.history) if m.role == "user"), None)
 
     def _direct_image(self) -> None:
@@ -149,9 +154,10 @@ class Turn:
         self._generate_image(prompt, self.s.image_options.aspect_ratio, refs, chars=chars, dropped=dropped)
         return None
 
-    def _direct_image_tool(self, user, prompt: str, info: dict) -> None:
-        """An image tool (upscale, background remover…): the attached image is
-        the whole input. The model's name stands in for the prompt, so the
+    def _direct_image_tool(self, user: ChatMessage | None, prompt: str, info: dict) -> None:
+        """An image tool (upscale, background remover…): the attached image is the whole input.
+
+        The model's name stands in for the prompt, so the
         card can be retried.
         """
         files = [m["file"] for m in (user.media if user else []) if m["kind"] == "image" and m.get("file")]
@@ -189,11 +195,10 @@ class Turn:
         )
 
     def _ref_items(self, ref_mode: dict) -> list[dict]:
-        """A named refs list from this turn's attachments for a reference-to-
-        video model: each image/video/audio becomes {file, name, type} with a
-        handle (image1, video1…) the prompt mentions as [@name], capped per the
-        model's ref_mode per-type limits and total max. Order matches the
-        composer, so [@video1] resolves to the same attachment on both sides.
+        """Build the named reference list for a reference-to-video model.
+
+        Supported attachments receive [@name] handles, subject to per-type and
+        total limits. Order matches the composer so each handle stays stable.
         """
         user = self._last_user()
         types = set(ref_mode.get("types") or ("image", "video", "audio"))
@@ -454,10 +459,10 @@ class Turn:
             and item.get("file")
         ]
 
-    def _pick_characters(self, names, prompt: str) -> list:
-        """The attached characters in a picture: those the model named in the
-        tool call, plus any whose name is in its prompt (models sometimes
-        forget the argument). Unattached characters are never used.
+    def _pick_characters(self, names: list[str], prompt: str) -> list:
+        """Select attached characters named in the tool call or prompt.
+
+        Unattached characters are never included.
         """
         named = characters.named(self.characters, names)  # "Chloe" can mean attached "Chloe Muscle"
         # "Chloe" in the prompt of a picture of "Chloe Muscle" is her, not an attached "Chloe"
@@ -514,10 +519,10 @@ class Turn:
         }
 
     def _create_instruction(self, args: dict) -> dict:
-        """Save a reusable instruction snippet and attach it to this chat — the
-        instruction counterpart of _create_character. It's added alongside any
-        snippets and groups already attached, and takes effect from the next
-        reply (this turn's system prompt is already built).
+        """Save an instruction snippet and attach it to this chat.
+
+        Keep existing snippets and groups; the new instruction takes effect
+        on the next reply because this turn's system prompt is already built.
         """
         name = str(args.get("name") or "").strip()[:255]
         content = str(args.get("content") or "").strip()[:20000]
@@ -540,11 +545,10 @@ class Turn:
         }
 
     def _characters_usable(self) -> bool:
-        """Whether this turn can use characters — mirrors characterSupport in
-        ChatView. Their point is reference images, so it takes an image model
-        that accepts them (and, in Auto, a chat model that can call it).
-        Chat mode just tells the chat model about them; Video mode only
-        uses them with video models that take reference images.
+        """Return whether this turn's selected models can use characters.
+
+        In Auto mode, the chat model must support tools and the image model
+        must accept references. Video mode requires a reference-capable model.
         """
         if self.s.mode == "text":
             return True
@@ -568,11 +572,10 @@ class Turn:
         return (model_info("image", self.s.image_model) or {}).get("max_refs")
 
     def _image_refs(self, args: dict, source: str | None, chars: list) -> tuple[list[str], list[str]]:
-        """Reference images for generate_image, and those that didn't fit
-        (see plan_refs for the priority): the edit source (source_image),
-        the images of the characters it named, the images the user pinned,
-        and the most recent images if the model asked (keep_consistent).
-        Pins are the user's choice; the app never adds references on its own.
+        """Choose reference images for image generation and report any omitted.
+
+        Priority is the edit source, selected characters, pinned images, then
+        recent images requested with `keep_consistent`. Pins are user-selected.
         """
         if not self._accepts_refs():
             return [], []  # this image model can't take references
@@ -708,7 +711,8 @@ class Turn:
         polling.start_video_poller(self.conv_id, self.message_id, item["id"], job["id"])
 
     def _video_inputs(self, first_frame: str | None, last_frame: str | None, attached: list[str], chars: list) -> dict:
-        """The extra inputs the video model's family takes (Venice): reference
+        """The extra inputs the video model's family takes (Venice): reference.
+
         images (attached ones, the frame, characters' images and pins), a
         last frame, or the chat's latest video.
         """
@@ -737,7 +741,8 @@ class Turn:
         return self._latest_media_file("video")
 
     def _latest_audio(self) -> str | None:
-        """The most recent audio attachment (this turn first, then history) —
+        """The most recent audio attachment (this turn first, then history) —.
+
         the uploaded track a lip-sync model drives a portrait with.
         """
         return self._latest_media_file("audio")
@@ -763,7 +768,8 @@ class Turn:
 
     # ― title ―
     def _start_title(self) -> dict | None:
-        """A new chat's first turn asks a text model for a short title while
+        """A new chat's first turn asks a text model for a short title while.
+
         the reply is made (CHAT_TITLE_MODEL, else the chat model).
         """
         conv = self.db.get_conversation(self.conv_id)
@@ -791,8 +797,9 @@ class Turn:
         return job
 
     def _finish_title(self, job: dict | None) -> None:
-        """Title the chat: the model's title if it came back in time, else the
-        start of the first prompt. Its cost goes on this reply.
+        """Title the chat: the model's title if it came back in time, else the start of the first prompt.
+
+        Its cost goes on this reply.
         """
         if not job:
             return

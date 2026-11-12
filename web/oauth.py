@@ -15,6 +15,7 @@ The redirect/callback URI registered with each provider must be
 from __future__ import annotations
 
 import os
+from typing import Any
 
 from authlib.integrations.starlette_client import OAuth
 
@@ -31,8 +32,9 @@ def _env(provider: str, field: str) -> str:
 
 
 def register_providers() -> None:
-    """Register every provider that has credentials configured. Idempotent-ish:
-    call once at startup.
+    """Register providers with configured credentials.
+
+    Call once during application startup.
     """
     if _env("google", "CLIENT_ID"):
         oauth.register(
@@ -71,9 +73,14 @@ def configured_providers() -> list[str]:
     return [p for p in ("google", "microsoft", "x") if _env(p, "CLIENT_ID")]
 
 
-async def normalize_profile(provider: str, client, token) -> dict:
-    """Provider's user info as {provider, sub, email, name, avatar}. Raises
-    ValueError when a required field (a stable id) is missing.
+async def normalize_profile(provider: str, client: Any, token: dict[str, Any]) -> dict[str, str | None]:
+    """Normalize a provider's user-info response.
+
+    The returned keys are ``provider``, ``sub``, ``email``, ``name``, and
+    ``avatar``. Provider clients use Authlib's dynamic interface.
+
+    Raises:
+        ValueError: If ``provider`` is not supported.
     """
     if provider in ("google", "microsoft"):
         info = token.get("userinfo") or await client.userinfo(token=token)

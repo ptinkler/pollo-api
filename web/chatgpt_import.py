@@ -1,5 +1,4 @@
-"""Importing chats from a ChatGPT data export (Settings → Data controls →
-Export data), to carry them on here.
+"""Importing chats from a ChatGPT data export (Settings → Data controls → Export data), to carry them on here.
 
 The export's zip goes in <data>/imports/: copied there, or uploaded from
 the browser in chunks (it's often gigabytes; nginx takes 25 MB a request).
@@ -45,6 +44,7 @@ from web import media
 from web.chat import CHAT_PREVIEW_SIZE, ConversationCreate, api_create_conversation, conversation_dir
 from web.core import config
 from web.core.metadata import current_tenant, get_db
+from web.core.metadata.models import ChatConversation
 from web.media_types import IMAGE_EXTS, VIDEO_EXTS
 from web.uploads import safe_filename
 from web.users import require_user
@@ -193,7 +193,8 @@ def _turns(data: dict, library: list[dict]) -> list[_Turn]:
 
 
 def _place_generated(turns: list[_Turn], library: list[dict]) -> None:
-    """Generated images, which the export doesn't link to a message: each goes
+    """Generated images, which the export doesn't link to a message: each goes.
+
     on the reply to the latest prompt sent before it was made.
     """
     shown = {f for t in turns for f in t.uploads} | {g["id"] for t in turns for g in t.generated}
@@ -262,7 +263,8 @@ def _when(ts: float | None) -> datetime | None:
 
 
 class _Merge:
-    """What one chat's import adds to it: new messages (`rows`, each after
+    """What one chat's import adds to it: new messages (`rows`, each after.
+
     the one before on the exported branch) and changes to replies imported
     before (`updates`).
     """
@@ -326,7 +328,7 @@ def _import_space_id() -> int:
     return (space or db.save_space(name=SPACE_NAME)).id
 
 
-def _import_conversation(export: _Export, data: dict, conv, stats: dict) -> str:
+def _import_conversation(export: _Export, data: dict, conv: ChatConversation | None, stats: dict) -> str:
     """Import one chat, or what's new in it: "new", "updated", "unchanged" or "empty"."""
     db = get_db()
     turns = _turns(data, export.library.get(data["id"], []))
@@ -367,8 +369,10 @@ def _import_conversation(export: _Export, data: dict, conv, stats: dict) -> str:
     return "updated" if changed else "unchanged"
 
 
-def run_import(path: Path, progress: dict | None = None) -> dict:
-    """Import the export at `path`. Returns (and keeps `progress` up to
+def run_import(path: Path, progress: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Import the export at `path`.
+
+    Returns (and keeps `progress` up to
     date with) how many chats were new, updated, unchanged or skipped.
     """
     stats = progress if progress is not None else {}
@@ -418,7 +422,8 @@ def run_import(path: Path, progress: dict | None = None) -> dict:
 
 
 def _warm_thumbnails(paths: list[Path]) -> None:
-    """Make the new images' grid thumbnails and chat previews now, one at a
+    """Make the new images' grid thumbnails and chat previews now, one at a.
+
     time in the background, so opening the chats and Media page later
     doesn't wait for hundreds of them to be made.
     """
@@ -442,11 +447,13 @@ def _current_job() -> dict[str, Any]:
 
 
 class StartImport(BaseModel):
+    """Name of an export zip already stored in the imports folder."""
+
     file: str  # a zip in the imports folder
 
 
 @router.get("/chatgpt")
-def api_import_status():
+def api_import_status() -> dict[str, Any]:
     """The exports in the imports folder (newest first) and this user's last import's progress."""
     folder = _import_dir()
     files = sorted(folder.glob("*.zip"), key=lambda p: p.stat().st_mtime, reverse=True) if folder.is_dir() else []
@@ -465,7 +472,7 @@ def api_import_status():
 
 
 @router.post("/chatgpt")
-def api_start_import(data: StartImport):
+def api_start_import(data: StartImport) -> dict[str, Any]:
     """Start importing an export in the background; progress is in GET."""
     path = _import_dir() / safe_filename(data.file)
     if not path.is_file() or not zipfile.is_zipfile(path):
@@ -496,6 +503,8 @@ def _run_job(path: Path, job: dict[str, Any]) -> None:
 
 
 class StartUpload(BaseModel):
+    """Original filename and total byte size for a chunked export upload."""
+
     name: str
     size: int = Field(gt=0)
 
@@ -515,7 +524,8 @@ def _clear_stale_uploads(folder: Path) -> None:
 
 
 @router.post("/chatgpt/uploads")
-def api_start_upload(data: StartUpload):
+def api_start_upload(data: StartUpload) -> dict[str, int | str]:
+    """Start a chunked upload and return its ID and chunk size."""
     name = Path(data.name.replace("\\", "/")).name
     if not name.lower().endswith(".zip") or name.startswith("."):
         raise HTTPException(400, "Choose the .zip that ChatGPT's export email links to")
@@ -530,8 +540,12 @@ def api_start_upload(data: StartUpload):
 
 
 @router.post("/chatgpt/uploads/{upload_id}")
-async def api_upload_chunk(upload_id: str, offset: int = Form(..., ge=0), chunk: UploadFile = File(...)):
-    """Write one chunk at `offset`. Returns how much has arrived, and once
+async def api_upload_chunk(
+    upload_id: str, offset: int = Form(..., ge=0), chunk: UploadFile = File(...)
+) -> dict[str, int | str]:
+    """Write one chunk at `offset`.
+
+    Returns how much has arrived, and once
     it's all there, the export's `file` name in the imports folder.
     """
     part, meta = _upload_paths(upload_id)
@@ -544,7 +558,7 @@ async def api_upload_chunk(upload_id: str, offset: int = Form(..., ge=0), chunk:
     return await run_in_threadpool(_write_chunk, part, meta, info, offset, raw)
 
 
-def _write_chunk(part: Path, meta: Path, info: dict, offset: int, raw: bytes) -> dict:
+def _write_chunk(part: Path, meta: Path, info: dict, offset: int, raw: bytes) -> dict[str, int | str]:
     received = part.stat().st_size
     if offset > received:
         raise HTTPException(409, f"Expected the chunk at {received}")
@@ -575,7 +589,8 @@ def _write_chunk(part: Path, meta: Path, info: dict, offset: int, raw: bytes) ->
 
 
 @router.delete("/chatgpt/uploads/{upload_id}")
-def api_cancel_upload(upload_id: str):
+def api_cancel_upload(upload_id: str) -> dict[str, str]:
+    """Cancel an unfinished upload and remove its temporary files."""
     for p in _upload_paths(upload_id):
         p.unlink(missing_ok=True)
     return {"cancelled": upload_id}

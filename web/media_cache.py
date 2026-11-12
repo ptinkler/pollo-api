@@ -36,6 +36,7 @@ _sweep_lock = threading.Lock()
 
 
 def db_path() -> Path:
+    """Return the SQLite file path used for cached media durations."""
     # Read config at call time so tests can redirect ROOT_DIR
     return config.ROOT_DIR / "cache" / "media-cache.sqlite"
 
@@ -103,8 +104,9 @@ def _still_there(path: str, mtime_ns: int) -> bool:
 
 
 def sweep_in_background() -> None:
-    """Sweep once per process, off the request that triggered it (it stats
-    every cached path, which on a NAS is worth not waiting for).
+    """Start the one-time stale-row sweep in a daemon thread.
+
+    The sweep stats every cached path, so requests do not wait for it.
     """
     global _swept
     with _sweep_lock:

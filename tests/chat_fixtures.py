@@ -1,4 +1,5 @@
-"""Fixtures and shared helpers for the chat-mode tests, loaded via
+"""Fixtures and shared helpers for the chat-mode tests, loaded via.
+
 `pytest_plugins`.
 
 A fixture plugin rather than a cross-module import: pytest resolves fixtures by
@@ -53,6 +54,7 @@ def _events(resp) -> list[dict]:
 
 @pytest.fixture
 def db(tmp_path):
+    """Provide the db fixture."""
     return MetadataDB(db_path=tmp_path / "data" / "metadata.db")
 
 
@@ -60,6 +62,7 @@ def db(tmp_path):
 def chat(monkeypatch, db, provider_keys):
     # Patch get_db wherever it was imported (chat is a package now: routes,
     # helpers and catalogue each resolve their own get_db).
+    """Provide the chat fixture."""
     for name, mod in list(sys.modules.items()):
         if name.startswith("web.") and getattr(mod, "get_db", None) is not None:
             monkeypatch.setattr(mod, "get_db", lambda: db)
@@ -74,9 +77,11 @@ def chat(monkeypatch, db, provider_keys):
 
 @pytest.fixture
 def client(chat):
+    """Provide the client fixture."""
     return TestClient(api_mod.app, raise_server_exceptions=False)
 
 
 @pytest.fixture
 def conv(client):
+    """Provide the conv fixture."""
     return client.post("/api/chat/conversations", json={}).json()

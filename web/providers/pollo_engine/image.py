@@ -205,10 +205,12 @@ IMAGE_MODELS: dict[str, dict[str, Any]] = {
 
 
 def img_cfg(model_id: str) -> dict[str, Any]:
+    """Return defaults and model-specific settings for an image model."""
     return {**_V1_IMAGE_DEFAULTS, **IMAGE_MODELS[model_id]}
 
 
 def image_model_url(model_id: str) -> str:
+    """Return the generation endpoint for an image model."""
     c = img_cfg(model_id)
     return c.get("V1_URL") or f"{POLLO_GENERATION_BASE}/{c['PROVIDER']}/{c['MODEL']}/image"
 
@@ -226,7 +228,7 @@ def _tool_payload(c: dict[str, Any], image_url: str | None, **kw: Any) -> dict[s
 
 
 def image_payload(model_id: str, *, prompt: str, image_url: str | None, **kw: Any) -> dict[str, Any]:
-    """Build the image API body."""
+    """Build the image API request body."""
     c = img_cfg(model_id)
     if c.get("TOOL"):
         return _tool_payload(c, image_url, **kw)

@@ -33,8 +33,10 @@ def _is_public_ip(ip: str) -> bool:
 
 
 def assert_public_url(url: str) -> None:
-    """Raise UnsafeURLError unless *url* is http(s) and every address its host
-    resolves to is public.
+    """Require an HTTP(S) URL whose resolved addresses are all public.
+
+    Raises:
+        UnsafeURLError: If the scheme, host, or any resolved address is unsafe.
     """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
@@ -52,9 +54,26 @@ def assert_public_url(url: str) -> None:
             raise UnsafeURLError(f"Host {host!r} resolves to non-public address {ip}")
 
 
-def get_public(client: httpx.Client, url: str, *, timeout, max_redirects: int = 3) -> httpx.Response:
-    """GET *url* with SSRF checks, following redirects manually so each hop's
-    target is validated too (httpx's own redirect handling would skip that).
+def get_public(
+    client: httpx.Client,
+    url: str,
+    *,
+    timeout: float | httpx.Timeout | None,
+    max_redirects: int = 3,
+) -> httpx.Response:
+    """GET a public URL and validate each redirect target.
+
+    Args:
+        client: HTTPX client used to make the request.
+        url: Initial URL to fetch.
+        timeout: HTTPX timeout configuration.
+        max_redirects: Maximum number of redirects to follow.
+
+    Returns:
+        The final HTTP response.
+
+    Raises:
+        UnsafeURLError: If a URL is unsafe or the redirect limit is exceeded.
     """
     for _ in range(max_redirects + 1):
         assert_public_url(url)

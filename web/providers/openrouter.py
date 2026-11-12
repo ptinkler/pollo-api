@@ -31,6 +31,8 @@ DEFAULT_TIMEOUT = httpx.Timeout(30)
 
 
 class OpenRouterError(Exception):
+    """An error returned or raised by an OpenRouter request."""
+
     def __init__(self, message: str, status: int | None = None) -> None:
         """Carry the message plus the HTTP status, when the call got that far."""
         super().__init__(message)
@@ -38,8 +40,10 @@ class OpenRouterError(Exception):
 
 
 def keepalive_socket_options() -> list[tuple[int, int, int]]:
-    """TCP keepalive probes every 5s while a request waits. Image and video
-    calls sit silent for a minute or more (Seedream 5.0 Pro with references:
+    """Enable TCP keepalive probes every 5 seconds while a request waits.
+
+    Image and video calls can sit silent for a minute or more
+    (Seedream 5.0 Pro with references:
     ~2 min), and some networks — VPNs, NAT routers, NAS/Docker hosts — drop
     connections idle that long, surfacing as httpx.RemoteProtocolError
     "Server disconnected without sending a response".
@@ -61,10 +65,8 @@ _client = httpx.Client(transport=httpx.HTTPTransport(socket_options=keepalive_so
 
 
 @contextmanager
-def _connection_guard(waiting_for: str):
-    """Turn a dropped connection into an OpenRouterError (so the chat marks the
-    media failed instead of leaving it pending), saying how long it waited.
-    """
+def _connection_guard(waiting_for: str) -> Iterator[None]:
+    """Translate dropped connections into errors that identify the wait duration."""
     start = time.monotonic()
     try:
         yield
@@ -78,10 +80,12 @@ def _connection_guard(waiting_for: str):
 
 
 def get_api_key() -> str:
+    """Return the configured OpenRouter API key, or an empty string."""
     return keyctx.provider_key("openrouter") or ""
 
 
 def is_configured() -> bool:
+    """Return whether an OpenRouter API key is configured."""
     return bool(get_api_key())
 
 
@@ -142,8 +146,9 @@ def _get(path: str, params: dict | None = None) -> dict:
 
 
 def get_credits() -> dict[str, float]:
-    """The account's balance in dollars: bought, used, and what's left. (Not
-    GET /key, which is only this key's own spending limit.).
+    """Return the account's total, used, and remaining credits in dollars.
+
+    This is distinct from GET /key, which reports only this key's spending limit.
     """
     data = _get("/credits").get("data") or {}
     total, used = float(data.get("total_credits") or 0), float(data.get("total_usage") or 0)
@@ -151,6 +156,7 @@ def get_credits() -> dict[str, float]:
 
 
 def list_text_models() -> list[dict[str, Any]]:
+    """Return OpenRouter text models and their supported capabilities."""
     data = _get("/models", {"output_modalities": "text"}).get("data", [])
     models = []
     for m in data:
@@ -173,10 +179,10 @@ def list_text_models() -> list[dict[str, Any]]:
 
 
 def list_image_models() -> list[dict[str, Any]]:
-    """Image models from the Images API, plus the *conversational* ones: chat
-    models that output both text and images (Gemini image, GPT-5 Image). Those
-    are marked `conversational` — they can be given the whole conversation,
-    as the Gemini app does, instead of a lone prompt.
+    """Return image API models and chat models that can also produce images.
+
+    Conversational models are marked as such and can receive the whole
+    conversation, as the Gemini app does, instead of a lone prompt.
     """
     data = _get("/images/models").get("data", [])
     models = []
@@ -219,6 +225,7 @@ def list_image_models() -> list[dict[str, Any]]:
 
 
 def list_video_models() -> list[dict[str, Any]]:
+    """Return OpenRouter video models that can generate videos from prompts."""
     data = _get("/videos/models").get("data", [])
     models = []
     for m in data:
@@ -248,8 +255,10 @@ def stream_chat(
     max_seconds: float | None = None,
     should_stop: Callable[[], bool] | None = None,
 ) -> Iterator[dict]:
-    """Yield parsed chat.completion.chunk dicts. Raises OpenRouterError on
-    pre-stream HTTP errors and on mid-stream error chunks.
+    """Yield parsed chat-completion chunks.
+
+    Raises OpenRouterError on pre-stream HTTP errors and on mid-stream error
+    chunks.
 
     OpenRouter sends ": OPENROUTER PROCESSING" keep-alives while a provider
     is slow, and each one resets httpx's read timeout — so a stalled upstream
@@ -290,7 +299,7 @@ def generate_image(
     input_images: list[str] | None = None,
     session_id: str | None = None,
 ) -> tuple[list[tuple[bytes, str]], float | None]:
-    """Returns ([(image_bytes, media_type), ...], cost_usd)."""
+    """Generate images and return their bytes, media types, and USD cost."""
     body: dict[str, Any] = {"model": model, "prompt": prompt}
     if aspect_ratio:
         body["aspect_ratio"] = aspect_ratio
@@ -345,9 +354,7 @@ def _images_from_json(data: dict) -> tuple[list[tuple[bytes, str]], float | None
 
 
 def _images_from_stream(lines: Iterator[str]) -> tuple[list[tuple[bytes, str]], float | None]:
-    """The finished images from an /images SSE stream (image_generation.completed
-    events; partial previews and ": OPENROUTER PROCESSING" keep-alives skipped).
-    """
+    """Extract completed images from an /images SSE stream, skipping previews and keep-alives."""
     images: list[tuple[bytes, str]] = []
     cost = None
     event = ""
@@ -383,9 +390,9 @@ def _images_from_stream(lines: Iterator[str]) -> tuple[list[tuple[bytes, str]], 
 def generate_image_chat(
     model: str, messages: list[dict], aspect_ratio: str | None = None, session_id: str | None = None
 ) -> tuple[list[tuple[bytes, str]], float | None]:
-    """Generate images with a conversational image model via /chat/completions
-    (modalities image+text), giving it the conversation as context.
-    Returns ([(image_bytes, media_type), ...], cost_usd).
+    """Generate images with a conversational model using chat context.
+
+    Returns image bytes and media types, plus the cost in USD.
     """
     body: dict[str, Any] = {"model": model, "messages": messages, "modalities": ["image", "text"]}
     if aspect_ratio:
@@ -463,6 +470,7 @@ def get_video(job_id: str) -> dict:
 
 
 def download_video(job_id: str, dest: Path, index: int = 0) -> None:
+    """Download a completed video job to ``dest``."""
     tmp = dest.with_suffix(dest.suffix + ".part")
     with _client.stream(
         "GET",

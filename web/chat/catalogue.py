@@ -1,4 +1,5 @@
-"""The chat model catalogue, cached: every provider's text/image/video models,
+"""The chat model catalogue, cached: every provider's text/image/video models,.
+
 and the per-model lookups used to validate and auto-fit media params.
 """
 
@@ -23,7 +24,9 @@ _NEVER = 9e18  # an "at" that can't expire (seed_models)
 
 
 def _prune(now: float) -> None:
-    """Caller holds the lock. Drop lapsed entries, then the oldest, so one
+    """Caller holds the lock.
+
+    Drop lapsed entries, then the oldest, so one
     process can't accumulate an entry per user who ever signed in.
     """
     for key in [k for k, e in _models_cache.items() if now - e["at"] > MODELS_CACHE_TTL]:
@@ -40,6 +43,7 @@ def cached_models() -> dict[str, Any] | None:
 
 def seed_models(data: dict[str, Any], stale: bool = False) -> None:
     """Put a ready-made catalogue in the current tenant's cache (tests).
+
     `stale` lets get_models() refetch while the per-model lookups still see it.
     """
     with _models_lock:
@@ -48,7 +52,8 @@ def seed_models(data: dict[str, Any], stale: bool = False) -> None:
 
 @on_keys_changed
 def clear_models() -> None:
-    """Forget every cached catalogue — called when a user's provider keys
+    """Forget every cached catalogue — called when a user's provider keys.
+
     change, since their keys decide what the catalogue contains.
     """
     with _models_lock:
@@ -56,6 +61,7 @@ def clear_models() -> None:
 
 
 def get_models(refresh: bool = False) -> dict[str, Any]:
+    """Return each provider's model catalogue, refreshing the tenant cache if requested."""
     tenant = current_tenant()
     with _models_lock:
         entry = _models_cache.get(tenant)
@@ -87,6 +93,7 @@ def get_models(refresh: bool = False) -> dict[str, Any]:
 
 def model_info(kind: str, model_id: str | None) -> dict | None:
     """Look up cached catalogue info without fetching every provider's list.
+
     That cache is empty after a restart or when any list failed to load;
     Venice models then come from Venice's own catalogue, so a model without
     vision isn't sent images (Venice rejects those requests).
@@ -118,7 +125,8 @@ def auto_ratio(kind: str, model_id: str | None) -> str | None:
 def fit_video_params(
     model_id: str, duration: int | None, aspect_ratio: str | None, resolution: str | None
 ) -> tuple[int | None, str | None, str | None]:
-    """Snap requested params onto what the video model supports (when known),
+    """Snap requested params onto what the video model supports (when known),.
+
     so a model-chosen "7 seconds" doesn't fail on a 5/10-only model.
     """
     info = model_info("video", model_id)

@@ -1,4 +1,5 @@
-"""The audit's --write editor: it must make only the intended surgical change
+"""The audit's --write editor: it must make only the intended surgical change.
+
 to a model entry and leave everything else (including curated fields) intact.
 """
 
@@ -55,12 +56,14 @@ def _write_apply(tmp_path, edits):
 
 
 def test_py_literal_double_quotes_and_bools():
+    """Test that py literal double quotes and bools."""
     assert audit.py_literal({"types": ["image"], "max": 7, "no_audio_with_video": True}) == (
         '{"types": ["image"], "max": 7, "no_audio_with_video": True}'
     )
 
 
 def test_remove_hidden_leaves_rest(tmp_path):
+    """Test that remove hidden leaves rest."""
     out, n, warns = _write_apply(tmp_path, {"alpha": {"hidden": audit._REMOVE}})
     assert n == 1
     assert not warns
@@ -70,6 +73,7 @@ def test_remove_hidden_leaves_rest(tmp_path):
 
 
 def test_insert_field(tmp_path):
+    """Test that insert field."""
     out, n, _ = _write_apply(tmp_path, {"alpha": {"ref_mode": '{"types": ["image"], "max": 3}'}})
     assert n == 1
     assert '"ref_mode": {"types": ["image"], "max": 3},' in out
@@ -79,6 +83,7 @@ def test_insert_field(tmp_path):
 
 def test_replace_multiline_refmode_preserving_curated(tmp_path):
     # The caller merges; here we just prove a multi-line value is replaced wholesale.
+    """Test that replace multiline refmode preserving curated."""
     merged = audit.py_literal(
         {"types": ["image", "video"], "max": 15, "limits": {"image": 10, "video": 5}, "no_audio_with_video": True}
     )
@@ -93,6 +98,7 @@ def test_replace_multiline_refmode_preserving_curated(tmp_path):
 
 def test_value_with_trailing_comment_stays_valid(tmp_path):
     # The comma must land before the comment, not inside it.
+    """Test that value with trailing comment stays valid."""
     val = '"Not enabled for API access (403)"  # 2026-11-09 probe'
     out, n, _ = _write_apply(tmp_path, {"alpha": {"hidden": val}})
     assert n == 1
@@ -101,6 +107,7 @@ def test_value_with_trailing_comment_stays_valid(tmp_path):
 
 
 def test_one_line_inline_entry(tmp_path):
+    """Test that one line inline entry."""
     src = 'MODEL_INFO = {\n    "inline": {"label": "In", "type": "motion", "video_input": True},\n}\n'
     f = tmp_path / "m.py"
     f.write_text(src, encoding="utf-8")
@@ -113,6 +120,7 @@ def test_one_line_inline_entry(tmp_path):
 
 
 def test_unknown_model_warns_and_skips(tmp_path):
+    """Test that unknown model warns and skips."""
     out, n, warns = _write_apply(tmp_path, {"missing": {"hidden": audit._REMOVE}})
     assert n == 0
     assert warns

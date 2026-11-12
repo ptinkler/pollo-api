@@ -16,8 +16,10 @@ def db(tmp_path):
 
 
 class TestGlobalDB:
-    def test_get_db_returns_singleton(self, tmp_path, monkeypatch):
+    """Tests for global db."""
 
+    def test_get_db_returns_singleton(self, tmp_path, monkeypatch):
+        """Test that get db returns singleton."""
         old = manager._db_instance
         monkeypatch.setattr(config_mod, "DB_PATH", tmp_path / "data" / "singleton.db")
         monkeypatch.setattr(_base, "DB_PATH", tmp_path / "data" / "singleton.db")
@@ -30,7 +32,8 @@ class TestGlobalDB:
 
 @pytest.mark.parametrize("tz", ["UTC", "Europe/London", "America/New_York"])
 def test_timestamps_carry_the_servers_utc_offset(tmp_path, monkeypatch, tz):
-    """Stored timestamps are naive server-local time. Serialised without an
+    """Stored timestamps are naive server-local time. Serialised without an.
+
     offset, a browser in another timezone misreads them (a UTC server and a
     UTC+1 browser showed a 1:20 render as 61:20).
     """

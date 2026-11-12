@@ -24,6 +24,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Create chat settings."""
     bind = op.get_bind()
     insp = sa.inspect(bind)
     if "chat_settings" not in insp.get_table_names():
@@ -56,4 +57,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop chat settings."""
     op.drop_table("chat_settings")

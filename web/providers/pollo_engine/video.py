@@ -694,6 +694,7 @@ VIDEO_MODELS: dict[str, dict[str, Any]] = {
 
 
 def cfg(model_id: str) -> dict[str, Any]:
+    """Return default and model-specific settings for a video model."""
     row = VIDEO_MODELS[model_id]
     base = {**_V1_VIDEO_DEFAULTS}
     if row.get("builder") == "kling":
@@ -702,6 +703,7 @@ def cfg(model_id: str) -> dict[str, Any]:
 
 
 def video_model_url(model_id: str) -> str:
+    """Return the generation endpoint for a video model."""
     c = cfg(model_id)
     if c.get("V1_URL"):
         return c["V1_URL"]
@@ -756,8 +758,9 @@ def _resolve_mode(c: dict[str, Any], resolution: str, mode: str | None) -> str |
 
 
 def _process_inputs(c: dict[str, Any], image_url: str | None, **kw: Any) -> dict[str, Any]:
-    """Resolve the request inputs against a model's config: the caller's value,
-    else the model's default. A field the model doesn't offer stays None.
+    """Resolve request inputs against a model's configuration.
+
+    Use the caller's value or the model default; unsupported fields stay None.
     """
     refs = _normalize_refs(kw.get("refs")) if c["HAS_REFS"] else None
     resolution = _resolve_resolution(c, **kw)
@@ -867,8 +870,9 @@ def _edit_payload(
 def _upscale_payload(
     c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw: Any
 ) -> dict[str, Any]:
-    """Video upscale: {video, scale, mode}. An unknown scale / mode (e.g. left over
-    from another model's picker) falls back to the model's default.
+    """Build a video-upscale body containing the source, scale, and mode.
+
+    Unknown scale or mode values fall back to the model defaults.
     """
     video_url = kw.get("video_url")
     if not video_url:
@@ -914,8 +918,9 @@ def _faceswap_payload(
 def _lipsync_payload(
     c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw: Any
 ) -> dict[str, Any]:
-    """Lip sync: a reference image driven by an audio track — {image, audio}
-    (+prompt where given / required, +resolution where the model offers one).
+    """Build a lip-sync body from a reference image and audio track.
+
+    Include a prompt when supplied or required, and resolution when supported.
     """
     audio_url = kw.get("audio_url")
     if not image_url:
@@ -935,9 +940,9 @@ def _lipsync_payload(
 def _motion_payload(
     c: dict[str, Any], prompt: str, image_url: str | None, s: dict[str, Any], **kw: Any
 ) -> dict[str, Any]:
-    """Motion / act models (Wan Animate, Kling Motion…) share this shape: a reference image animated by a
-    source video. `mode` (std/pro) is sent only when the model offers one — a
-    few (action-imitation, runway-act-two) take just image + video.
+    """Build a motion-transfer body from a reference image and source video.
+
+    ``mode`` is sent only when the model supports it.
     """
     video_url = kw.get("video_url")
     if not video_url:

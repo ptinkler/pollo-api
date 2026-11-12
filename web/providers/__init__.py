@@ -8,6 +8,7 @@ a model id to the module that owns it (OpenRouter is the fallback).
 """
 
 from pathlib import Path
+from types import ModuleType
 
 from web.providers import openrouter, pollo, pollo_models, venice
 from web.uploads import file_to_data_url
@@ -17,7 +18,7 @@ from web.uploads import file_to_data_url
 PROVIDERS = (pollo, venice, openrouter)
 
 
-def provider_for(model_id: str | None):
+def provider_for(model_id: str | None) -> ModuleType:
     """The provider module that owns `model_id` (OpenRouter is the default)."""
     if pollo.is_pollo(model_id):
         return pollo
@@ -26,9 +27,11 @@ def provider_for(model_id: str | None):
     return openrouter
 
 
-def provider_for_job(job_id: str | None):
-    """The provider module that owns an async job id — "pollo:…", "venice:…",
-    else OpenRouter. Used by the background pollers, which only have the id.
+def provider_for_job(job_id: str | None) -> ModuleType:
+    """The provider module that owns an async job id.
+
+    Pollo and Venice ids are prefixed with ``pollo:`` and ``venice:``; all
+    other ids belong to OpenRouter. Background pollers use this to route jobs.
     """
     if pollo.is_pollo_job(job_id):
         return pollo
@@ -101,8 +104,9 @@ def submit_video(
     ref_items: list[dict] | None = None,
     session_id: str | None = None,
 ) -> dict:
-    """Start a video job on whichever provider owns `model`; returns the job
-    ({"id", "params"}), which the chat poller then follows by job id.
+    """Start a video job on whichever provider owns `model`.
+
+    Returns the job (``{"id", "params"}``), which the chat poller follows by id.
 
     Every provider takes the first four inputs; the rest describe sources only
     some models accept (a last frame, a source video or audio track, an

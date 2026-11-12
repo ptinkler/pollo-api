@@ -8,7 +8,10 @@ from web.core.metadata.tenant import TENANT_MODELS
 
 
 class UserMixin:
+    """Provide user-account and tenant-ownership operations."""
+
     def get_user(self, user_id: str) -> User | None:
+        """Return a user by id, or ``None`` if it does not exist."""
         with self._session() as session:
             user = session.get(User, user_id)
             if user:
@@ -16,6 +19,7 @@ class UserMixin:
             return user
 
     def get_user_by_email(self, email: str) -> User | None:
+        """Return a user by case-insensitive email address, if present."""
         with self._session() as session:
             user = session.query(User).filter(User.email == email.lower()).first()
             if user:
@@ -23,8 +27,10 @@ class UserMixin:
             return user
 
     def upsert_oauth_user(self, profile: dict, is_admin: bool = False) -> User:
-        """Create or refresh a user from an OAuth profile {provider, sub, email,
-        name, avatar}. Matches on (provider, sub) first, then email.
+        """Create or refresh a user from an OAuth profile.
+
+        The profile contains ``provider``, ``sub``, ``email``, ``name``, and
+        ``avatar``. Users match on ``(provider, sub)`` first, then email.
         """
         with self._session() as session:
             user = (
@@ -60,12 +66,14 @@ class UserMixin:
             return user
 
     def count_users(self) -> int:
+        """Return the number of registered users."""
         with self._session() as session:
             return session.query(User).count()
 
     def ensure_admin(self, email: str, name: str = "Admin") -> User:
-        """Create the user with this email as admin, or promote an existing one
-        (without changing their sign-in provider).
+        """Create or promote an administrator account.
+
+        Promoting an existing user does not change their sign-in provider.
         """
         with self._session() as session:
             user = session.query(User).filter(User.email == email.lower()).first()
@@ -87,8 +95,10 @@ class UserMixin:
             return user
 
     def claim_orphans(self, user_id: str) -> int:
-        """Assign every tenant row that has no owner to this user. For setup /
-        after an import; runs with no tenant bound, so it sees all rows.
+        """Assign all unowned tenant rows to this user.
+
+        Used during setup or after an import; without a tenant bound, all rows
+        are visible.
         """
         count = 0
         with self._session() as session:
@@ -106,8 +116,9 @@ class UserMixin:
                 session.commit()
 
     def set_user_upload_prefs(self, user_id: str, upload_prefs_json: str | None) -> None:
-        """Store the user's source-media hosting preferences (plain JSON, or
-        None to fall back to the instance default).
+        """Store source-media hosting preferences for a user.
+
+        Pass ``None`` to use the instance default.
         """
         with self._session() as session:
             user = session.get(User, user_id)
@@ -116,15 +127,17 @@ class UserMixin:
                 session.commit()
 
     def list_api_key_blobs(self) -> list[str]:
-        """Every stored api_keys_json across all users (non-empty), for deciding
-        whether the DB already holds encrypted key material.
+        """Return non-empty API-key blobs stored for all users.
+
+        Used to determine whether the database already contains encrypted keys.
         """
         with self._session() as session:
             return [b for (b,) in session.query(User.api_keys_json).filter(User.api_keys_json.isnot(None)) if b]
 
     def create_local_admin(self, email: str, password_hash: str, name: str = "Admin") -> User:
-        """Create (or promote + set the password of) a local email+password admin
-        account. Caller enforces that the email is an allowed admin email.
+        """Create or update a local email-and-password administrator.
+
+        The caller enforces that the email is allowed for administration.
         """
         with self._session() as session:
             user = session.query(User).filter(User.email == email.lower()).first()

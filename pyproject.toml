@@ -55,19 +55,6 @@ ignore = [
     "D100",     # Don't force docstrings on every single module file
     "D104",     # Don't force docstrings in __init__.py files
 
-    # --- Being adopted incrementally (2026-11-11) -------------------------
-    # Every other rule in `select` is clean and stays that way. These four are
-    # a backlog of existing code, not a licence for new code: delete a line
-    # here and fix that rule's hits when you want to take it on. Counts at the
-    # time this was written, from `ruff check . --statistics`:
-    "D102",     # 454 undocumented public methods
-    "D103",     # 205 undocumented public functions
-    "D101",     # 103 undocumented public classes
-    "D205",     # 305 docstrings whose summary wraps instead of standing alone
-    "ANN001",   # 107 unannotated arguments
-    "ANN201",   # 108 unannotated return types (public)
-    "ANN202",   #  20 unannotated return types (private)
-    "ANN204",   #   2 unannotated return types (special methods)
 ]
 
 [tool.ruff.lint.mccabe]

@@ -20,6 +20,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Add a job type to jobs."""
     with op.batch_alter_table("jobs") as batch_op:
         batch_op.add_column(sa.Column("job_type", sa.String(20), nullable=False, server_default="video"))
     # Backfill: mark any job whose model is a known image model
@@ -27,5 +28,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove the job type from jobs."""
     with op.batch_alter_table("jobs") as batch_op:
         batch_op.drop_column("job_type")

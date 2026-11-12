@@ -19,6 +19,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Add chat instructions."""
     # MetadataDB() creates tables / adds this column on startup too, so each
     # step is skipped if it already happened.
     insp = sa.inspect(op.get_bind())
@@ -38,6 +39,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove chat instructions."""
     with op.batch_alter_table("chat_conversations") as batch_op:
         batch_op.drop_column("instruction_id")
     op.drop_table("chat_instructions")

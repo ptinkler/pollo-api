@@ -1,4 +1,5 @@
-"""Background video polling: start a poller thread for a submitted job, poll it
+"""Background video polling: start a poller thread for a submitted job, poll it.
+
 to completion (downloading the finished file), and resume unfinished jobs +
 warm missing thumbnails at startup.
 """
@@ -25,7 +26,8 @@ _RESULT_EXTS = VIDEO_SUFFIXES | AUDIO_SUFFIXES
 
 
 def _result_name(kind: str | None, job: dict) -> str:
-    """A fresh file name; the extension follows the result's URL (tools return
+    """A fresh file name; the extension follows the result's URL (tools return.
+
     .webm / .mov, speech may be .wav), else .mp3 for audio and .mp4 for video.
     """
     audio = kind == "audio"
@@ -36,6 +38,7 @@ def _result_name(kind: str | None, job: dict) -> str:
 
 
 def start_video_poller(conv_id: str, message_id: int, media_id: str, job_id: str) -> None:
+    """Start a background poller for a submitted media job."""
     threading.Thread(
         target=_poll_video, args=(conv_id, message_id, media_id, job_id), daemon=True, name=f"chat-video-{media_id}"
     ).start()
@@ -125,9 +128,9 @@ def startup_resume_chat() -> None:
 
 
 def _warm_missing_thumbnails() -> None:
-    """Make any missing grid thumbnails and chat previews for chat images, one
-    at a time in the background, so the Media page and big chats (imports)
-    don't wait for them on first view. Ones already made are skipped quickly.
+    """Create missing grid thumbnails and chat previews for stored images.
+
+    Existing thumbnails are skipped; images are processed in the background.
     """
     root = chat_root()
     if not root.is_dir():

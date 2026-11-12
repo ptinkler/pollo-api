@@ -39,6 +39,7 @@ MAX_TEXT = 4000  # a non-JSON response body is kept up to this many characters
 
 
 def log_path() -> Path:
+    """Return the request-log path for the current tenant, if any."""
     # Read config at call time so tests can redirect ROOT_DIR. Per-tenant
     # (<data>/logs/<user_id>/) so one user's provider calls never surface in
     # another's Request log; calls made outside a request (startup) fall back
@@ -49,8 +50,10 @@ def log_path() -> Path:
 
 
 def redact(value: Any) -> Any:
-    """A request body as it can be shown and logged: images (data URLs) cut
-    down to their type and size, everything else exactly as sent.
+    """Return a log-safe representation of a request body.
+
+    Data URLs and long base64 strings are represented by type and size;
+    other values are preserved.
     """
     if isinstance(value, dict):
         return {k: redact(v) for k, v in value.items()}
@@ -65,8 +68,10 @@ def redact(value: Any) -> Any:
 
 
 def response_of(resp: Any) -> Any:
-    """What an HTTP response (httpx or requests, already read) said, for the
-    log: its JSON (images cut short), its text, or a file's type and size.
+    """Return a log-safe representation of a fully read HTTP response.
+
+    JSON, text, and binary responses are represented by their contents or
+    their content type and size, respectively.
     """
     content_type = ((getattr(resp, "headers", None) or {}).get("content-type") or "").split(";")[0].strip()
     if "json" in content_type or not content_type:
@@ -81,9 +86,10 @@ def response_of(resp: Any) -> Any:
 
 
 def chat_reply(chunks: Iterator[dict], outcome: dict) -> Iterator[dict]:
-    """Pass a streamed chat reply's chunks through, building its response for
-    the log as they go (so a reply cut short still shows how far it got):
-    the text, the tool calls, why it finished, and the usage.
+    """Pass through chat chunks while assembling their logged reply.
+
+    The accumulated response includes text, tool calls, finish reason, and
+    usage, including partial data when the stream ends early.
     """
     reply: dict[str, Any] = {"content": "", "tool_calls": {}, "finish_reason": None, "usage": None}
     outcome["response"] = reply
@@ -115,8 +121,10 @@ def record(
     model: str | None = None,
     response: Any = None,
 ) -> dict:
-    """Append one entry and return it. `request` and `response` should
-    already be redacted. Never raises: a full disk mustn't fail a generation.
+    """Append and return a provider-call log entry.
+
+    ``request`` and ``response`` should already be redacted. Logging failures
+    are ignored so a full disk cannot fail a generation.
     """
     entry = {
         "at": datetime.now().isoformat(timespec="seconds"),
@@ -145,7 +153,7 @@ def record(
 
 
 def _jsonable(value: Any) -> Any:
-    """Chat replies collect tool calls by index (int keys): list them instead."""
+    """Convert indexed chat tool calls to a JSON-friendly list."""
     if isinstance(value, dict) and isinstance(value.get("tool_calls"), dict):
         return {**value, "tool_calls": list(value["tool_calls"].values()) or None}
     return value
@@ -171,7 +179,8 @@ def recent(limit: int = 100) -> list[dict]:
 
 @contextlib.contextmanager
 def logged(provider: str, method: str, path: str, body: Any, model: str | None = None) -> Iterator[dict]:
-    """Record one provider call made inside the block. Yields a dict the
+    """Record one provider call made inside the block. Yields a dict the.
+
     caller fills in: "status" (HTTP status), "flags" (headers worth keeping)
     and "response" (see response_of / chat_reply) — set it before raising on
     an error response, so the log shows what the provider said. An exception

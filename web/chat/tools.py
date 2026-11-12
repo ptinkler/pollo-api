@@ -1,4 +1,5 @@
-"""The system/title prompts and the generate_* / create_* tool schemas the
+"""The system/title prompts and the generate_* / create_* tool schemas the.
+
 chat model is given, plus the helper that adds the `characters` argument.
 """
 

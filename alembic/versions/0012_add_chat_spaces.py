@@ -22,6 +22,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Add chat spaces."""
     # MetadataDB() creates this table / adds this column on startup too, so
     # each step is skipped if it already happened.
     insp = sa.inspect(op.get_bind())
@@ -44,6 +45,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove chat spaces."""
     op.drop_index("ix_chat_conversations_space_id", table_name="chat_conversations")
     with op.batch_alter_table("chat_conversations") as batch_op:
         batch_op.drop_column("space_id")

@@ -20,6 +20,7 @@ from web.passwords import hash_password
 
 
 def main() -> None:
+    """Create or promote an admin account from the command-line options."""
     ap = argparse.ArgumentParser(description="Create or promote the admin account.")
     ap.add_argument("--email", required=True, help="the owner's email (match your login address)")
     ap.add_argument("--name", default="Admin")

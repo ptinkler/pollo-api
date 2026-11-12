@@ -9,7 +9,8 @@ def _prompts():
 
 
 def test_log_is_per_tenant():
-    """Two users' provider calls go to separate per-tenant logs, so the
+    """Two users' provider calls go to separate per-tenant logs, so the.
+
     Request log never shows one user another user's prompts/content.
     """
     token = metadata.set_tenant("user-a")

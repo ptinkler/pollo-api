@@ -1,5 +1,7 @@
-"""Imported chats (web/chatgpt_import.py): tracking what came from where, and
-applying one chat's import in a single transaction.
+"""Track imported chats and apply their message updates.
+
+The importer in ``web/chatgpt_import.py`` uses these methods to preserve source
+ids and apply each chat's changes in a single transaction.
 """
 
 import json
@@ -10,6 +12,8 @@ from web.core.metadata.models import ChatConversation, ChatImportSkip, ChatMessa
 
 
 class ImportMixin:
+    """Provide database operations for imported conversations."""
+
     def get_imported_conversations(self, source: str) -> dict[str, ChatConversation]:
         """Chats imported from `source`, by their id there."""
         with self._session() as session:
@@ -32,7 +36,9 @@ class ImportMixin:
         updated_at: datetime | None,
         show: bool,
     ) -> None:
-        """Apply one chat's import in one transaction. `rows` are new
+        """Apply one chat's import in one transaction.
+
+        ``rows`` are new
         messages in order, each with its `import_id` and either `parent_id`
         or `parent_import_id` (a message imported earlier in `rows`);
         `updates` maps existing message ids to new `content`/`media`. With

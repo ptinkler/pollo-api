@@ -1,4 +1,5 @@
-"""Building the model request and running generation: the chat-title helper,
+"""Building the model request and running generation: the chat-title helper,.
+
 conversation/history shaping, reference planning, moderation handling, and the
 image/video submit primitives shared by turns and media retries.
 """
@@ -6,6 +7,7 @@ image/video submit primitives shared by turns and media retries.
 import json
 import re
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +18,7 @@ from web.chat.helpers import conversation_dir, effective_ids
 from web.chat.models import RefChoices
 from web.chat.tools import AUDIO_TOOL_RESULT, IMAGE_TOOL_RESULT, TITLE_PROMPT, VIDEO_TOOL_RESULT
 from web.core.metadata import get_db
+from web.core.metadata.models import ChatMessage
 from web.providers import openrouter, pollo, provider_for
 from web.uploads import file_to_data_url, is_blank_image
 
@@ -32,8 +35,9 @@ _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
 def _ask(model: str, prompt: str, max_seconds: float) -> tuple[str, float]:
-    """One short, non-streamed-to-the-UI completion: (the whole reply, its cost
-    in USD). For the asides a turn makes on its own — naming a chat, rewriting
+    """One short, non-streamed-to-the-UI completion: (the whole reply, its cost in USD).
+
+    For the asides a turn makes on its own — naming a chat, rewriting
     a prompt — not for the chat itself, which streams (see Turn._stream_round).
     """
     text, cost = "", 0.0
@@ -62,8 +66,13 @@ ENHANCE_PROMPT = (
 
 
 def enhance_prompt(model: str, prompt: str, kind: str) -> tuple[str, float]:
-    """(the prompt rewritten by the chat model, its cost in USD). Raises
-    ValueError when the model returns nothing usable.
+    """Rewrite a media prompt and return its cost.
+
+    Returns:
+        The rewritten prompt and its cost in USD.
+
+    Raises:
+        ValueError: If the model returns no usable prompt.
     """
     text, cost = _ask(model, ENHANCE_PROMPT.format(kind=kind, prompt=prompt[:4000]), ENHANCE_SECONDS)
     text = _THINK.sub("", text).strip().strip("\"'`").strip()
@@ -73,8 +82,9 @@ def enhance_prompt(model: str, prompt: str, kind: str) -> tuple[str, float]:
 
 
 def _clean_title(text: str) -> str | None:
-    """The model's reply as a title: its first line, without a "Title:" label,
-    quotes, markdown or a full stop. None if nothing usable is left.
+    """Normalize a model reply into a short chat title.
+
+    Return None if no usable title remains after cleanup.
     """
     text = _THINK.sub("", text)
     line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
@@ -106,8 +116,9 @@ def plan_refs(
     max_refs: int | None = None,
     choices: RefChoices | None = None,
 ) -> tuple[list[str], list[str]]:
-    """The reference images to send, and those left out because the model
-    takes fewer (`max_refs`, None = unknown). Chat images are capped at
+    """The reference images to send, and those left out because the model takes fewer (`max_refs`, None = unknown).
+
+    Chat images are capped at
     `image_limit` (None = all); character images aren't.
 
     They're sent in priority order, so a model that trims the list itself
@@ -141,7 +152,8 @@ def _ref_file(conv_id: str, ref: str) -> Path:
 
 
 def _history_window(history: list, limit: int | None) -> list:
-    """The last `limit` messages (None = all), starting on a user message so
+    """The last `limit` messages (None = all), starting on a user message so.
+
     the model never sees a reply without the prompt that caused it.
     """
     if not limit or len(history) <= limit:
@@ -160,9 +172,9 @@ def conversation(
     as_tool_calls: bool = False,
     image_limit: int | None = DEFAULT_IMAGE_LIMIT,
 ) -> list[dict]:
-    """The chat history as OpenRouter messages (no system prompt): the last
-    `history_limit` messages, with the `image_limit` most recent images as
-    pixels (None = all).
+    """Convert chat history into OpenRouter messages.
+
+    Include recent images as pixels according to `image_limit` (None = all).
     Shared by the chat model and conversational image models.
 
     `as_tool_calls` (only when tools are offered — providers reject tool
@@ -188,7 +200,8 @@ def conversation(
 
 
 def _pixel_files(history: list, budget: int | None) -> set[str]:
-    """The most recent `budget` images (None = all) — uploaded or generated —
+    """The most recent `budget` images (None = all) — uploaded or generated —.
+
     which go over as pixels so the model can see what's in them; older ones
     are described by a note instead.
     """
@@ -201,10 +214,10 @@ def _pixel_files(history: list, budget: int | None) -> set[str]:
     return set(images if budget is None else images[:budget])
 
 
-def _pixels_for(conv_dir: Path, files: set[str]):
+def _pixels_for(conv_dir: Path, files: set[str]) -> Callable[[dict[str, Any]], dict[str, Any] | None]:
     """A function giving an image item's pixels as a message part (None if it doesn't go as pixels)."""
 
-    def pixels(item: dict) -> dict | None:
+    def pixels(item: dict[str, Any]) -> dict[str, Any] | None:
         f = item.get("file")
         if f in files and (conv_dir / f).is_file():
             return {"type": "image_url", "image_url": {"url": file_to_data_url(conv_dir / f)}}
@@ -213,12 +226,12 @@ def _pixels_for(conv_dir: Path, files: set[str]):
     return pixels
 
 
-def _user_parts(msg, pixels) -> list[dict]:
+def _user_parts(msg: ChatMessage, pixels: Callable[[dict[str, Any]], dict[str, Any] | None]) -> list[dict[str, Any]]:
     parts = [{"type": "text", "text": msg.content}] if msg.content else []
     return parts + [pixels(item) or {"type": "text", "text": "[user attached an image]"} for item in msg.media]
 
 
-def _assistant_messages(msg, as_tool_calls: bool) -> list[dict]:
+def _assistant_messages(msg: ChatMessage, as_tool_calls: bool) -> list[dict[str, Any]]:
     """A reply as messages: with its media as the tool calls that made it, or as notes in the text."""
     generated = [i for i in msg.media if i.get("source") == "generated" and i.get("prompt")]
     if as_tool_calls and generated:
@@ -250,10 +263,10 @@ def image_context(
     chars: list | None = None,
     image_limit: int | None = DEFAULT_IMAGE_LIMIT,
 ) -> list[dict]:
-    """What a conversational image model is sent: the conversation, then —
-    when the chat model called the tool — its reply so far and its prompt,
-    verbatim, with any reference images it asked for. In Image mode
-    (prompt=None) the user's own message is already the last one.
+    """Build the conversation context sent to an image model.
+
+    For tool calls, append the chat reply, prompt, and requested references.
+    In Image mode (`prompt=None`), the user's message is already last.
     """
     messages = conversation(conv_id, history, history_limit, vision=True, image_limit=image_limit)
     system = [s for s in (instructions, characters.describe(chars or [])) if s]
@@ -278,10 +291,10 @@ def image_context(
 
 
 def conversation_instructions(conv_id: str) -> str | None:
-    """The instructions a chat uses — its defaults' and its own — flattened for
-    the model (user's text, verbatim): every snippet from the groups (in group
-    order), then the single snippets — each sent once — joined by blank lines.
-    None when nothing with content is attached.
+    """Return the chat's active instructions as text for the model.
+
+    Group snippets precede individual snippets; each is included once.
+    Return None when no attached instruction has content.
     """
     db = get_db()
     conv = db.get_conversation(conv_id)
@@ -304,11 +317,13 @@ def conversation_instructions(conv_id: str) -> str | None:
 
 
 def is_conversational(image_model: str | None) -> bool:
+    """Return whether the selected image model accepts conversation context."""
     info = model_info("image", image_model)
     return bool(info and info.get("conversational"))
 
 
 def dedupe(files: list[str]) -> list[str]:
+    """Remove duplicate filenames while preserving their original order."""
     return list(dict.fromkeys(files))
 
 
@@ -360,10 +375,10 @@ MODERATION = re.compile(
 
 
 def is_moderation_error(e: openrouter.OpenRouterError) -> bool:
-    """OpenRouter's own moderation returns 403; providers phrase their
-    content-policy refusals in many ways, so also match on the message.
-    Pollo's 403 means "model not enabled for API access", so for Pollo only
-    the message counts.
+    """Identify provider errors that represent a content moderation refusal.
+
+    OpenRouter moderation returns 403. Pollo uses 403 for disabled models, so
+    its error message must match the moderation terms instead.
     """
     if isinstance(e, pollo.PolloError):
         return bool(MODERATION.search(str(e)))
@@ -371,7 +386,9 @@ def is_moderation_error(e: openrouter.OpenRouterError) -> bool:
 
 
 def failure_fields(e: openrouter.OpenRouterError) -> dict[str, Any]:
-    """A failed media item's fields. Called right after the generation call,
+    """A failed media item's fields.
+
+    Called right after the generation call,
     on its thread: what it sent and got back comes from the error, or — when
     the call itself worked but the result didn't (a Pollo task that failed, a
     black image) — from the request log.
@@ -381,7 +398,8 @@ def failure_fields(e: openrouter.OpenRouterError) -> dict[str, Any]:
 
 
 def exchange_fields(entry: dict | None) -> dict[str, Any]:
-    """A request-log entry as media item fields: the body sent to the provider
+    """A request-log entry as media item fields: the body sent to the provider.
+
     and what it answered, for the UI's "Request" view.
     """
     return {"request": entry.get("request"), "response": entry.get("response")} if entry else {}
@@ -403,10 +421,10 @@ BLACK_IMAGE_ERROR = (
 def run_image_generation(
     conv_id: str, model: str, prompt: str, params: dict[str, Any], context: list[dict] | None = None
 ) -> tuple[list[str], float | None, int | None, dict[str, Any]]:
-    """Generate and save images; returns (filenames, dollar cost, Pollo credits,
-    the params actually sent — Pollo and Venice, defaults included — for display).
-    With `context` (conversational models) the model gets the conversation;
-    otherwise the Images API — or Pollo, or Venice — gets the prompt plus any reference images.
+    """Generate images and return saved files, cost, credits, and sent parameters.
+
+    Conversational models receive `context`; other providers receive the prompt
+    and any reference images.
     """
     conv_dir = conversation_dir(conv_id)
     refs = [p for p in (_ref_file(conv_id, f) for f in params.get("refs") or []) if p.is_file()]
@@ -437,7 +455,9 @@ def run_image_generation(
 
 
 def submit_video_generation(conv_id: str, model: str, prompt: str, params: dict[str, Any]) -> dict:
-    """Start a video job on the model's provider. Returns the job plus
+    """Start a video job on the model's provider.
+
+    Returns the job plus
     "log": what was sent and answered (from the request log).
     """
     request_log.forget_last()

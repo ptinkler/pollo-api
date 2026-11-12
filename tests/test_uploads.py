@@ -11,12 +11,15 @@ from web.uploads import image_media_type, read_image_upload, safe_filename
 
 
 class FakeUpload:
+    """Tests for fake upload."""
+
     def __init__(self, content: bytes, content_type: str):
         """Hold the bytes and content type the fake upload will report."""
         self._content = content
         self.content_type = content_type
 
     async def read(self) -> bytes:
+        """Document the read test helper."""
         return self._content
 
 
@@ -28,22 +31,26 @@ def _png() -> bytes:
 
 @pytest.mark.parametrize("name", ["", "a/b.png", "..", "x..png", "a\\b.png", ".env", "../x"])
 def test_safe_filename_rejects(name):
+    """Test that safe filename rejects."""
     with pytest.raises(HTTPException) as e:
         safe_filename(name)
     assert e.value.status_code == 400
 
 
 def test_safe_filename_accepts_plain_names():
+    """Test that safe filename accepts plain names."""
     assert safe_filename("img_abc123.png") == "img_abc123.png"
 
 
 def test_image_media_type():
+    """Test that image media type."""
     assert image_media_type("a.JPG") == "image/jpeg"
     assert image_media_type("a.webp") == "image/webp"
     assert image_media_type("a.mp4") is None
 
 
 def test_read_image_upload_ok():
+    """Test that read image upload ok."""
     content, ext = asyncio.run(read_image_upload(FakeUpload(_png(), "image/png")))
     assert ext == ".png"
     assert content.startswith(b"\x89PNG")
@@ -57,6 +64,7 @@ def test_read_image_upload_ok():
     ],
 )
 def test_read_image_upload_rejects(content, content_type, msg):
+    """Test that read image upload rejects."""
     with pytest.raises(HTTPException) as e:
         asyncio.run(read_image_upload(FakeUpload(content, content_type)))
     assert e.value.status_code == 400

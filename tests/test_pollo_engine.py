@@ -37,6 +37,7 @@ def test_golden_covers_every_registered_model():
 
 @pytest.mark.parametrize(("kind", "model_id"), _PARAMS)
 def test_engine_payload_matches_golden(kind, model_id):
+    """Test that engine payload matches golden."""
     build, model_url = _FN[kind]
     data = GOLDEN[kind][model_id]
     assert model_url(model_id) == data["url"], f"url mismatch: {model_id}"

@@ -1,4 +1,5 @@
-"""Global test fixtures — prevent tests from touching the real database, the
+"""Global test fixtures — prevent tests from touching the real database, the.
+
 real assets, the developer's .env, or the network.
 """
 
@@ -54,7 +55,8 @@ def _clean_env(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _guard_real_db(monkeypatch, tmp_path):
-    """Redirect config paths to a temp directory so no test can accidentally
+    """Redirect config paths to a temp directory so no test can accidentally.
+
     create files in the real data/assets directories.
     """
     monkeypatch.setattr(config_mod, "ROOT_DIR", tmp_path)
@@ -71,7 +73,8 @@ _TEST_PROVIDER_KEYS: dict[str, str | None] = {}
 
 @pytest.fixture(autouse=True)
 def provider_keys(monkeypatch):
-    """Inject per-user provider keys for a test via an in-memory dict, patching
+    """Inject per-user provider keys for a test via an in-memory dict, patching.
+
     only the resolver seam. No API key is read from the environment.
     """
     _TEST_PROVIDER_KEYS.clear()
@@ -84,12 +87,14 @@ def provider_keys(monkeypatch):
 
 
 def pytest_configure(config):
+    """Document the pytest configure test helper."""
     config.addinivalue_line("markers", "no_tenant: run without a bound tenant (schema/migration tests on old DBs)")
 
 
 @pytest.fixture(autouse=True)
 def _tenant(request, monkeypatch):
-    """Bind one test tenant so multi-tenant ORM scoping is consistent: rows
+    """Bind one test tenant so multi-tenant ORM scoping is consistent: rows.
+
     created directly via the db and via the API (middleware) all belong to it,
     and the middleware resolves this same admin without touching the real DB.
 

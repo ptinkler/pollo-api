@@ -73,10 +73,12 @@ AUDIO_MODELS: dict[str, dict[str, Any]] = {
 
 
 def cfg(model_id: str) -> dict[str, Any]:
+    """Return the defaults and model-specific settings for an audio model."""
     return {**_AUDIO_DEFAULTS, **AUDIO_MODELS[model_id]}
 
 
 def audio_model_url(model_id: str) -> str:
+    """Return the generation endpoint for an audio model."""
     c = cfg(model_id)
     return f"{POLLO_GENERATION_BASE}/{c['PROVIDER']}/{c['MODEL']}/{c['endpoint']}"
 
@@ -126,6 +128,7 @@ def _music_payload(c: dict[str, Any], prompt: str, **kw: Any) -> dict[str, Any]:
 
 
 def audio_payload(model_id: str, *, prompt: str, **kw: Any) -> dict[str, Any]:
+    """Build and validate a speech or music generation request body."""
     c = cfg(model_id)
     prompt = (prompt or "").strip()
     if not prompt:

@@ -41,6 +41,7 @@ import sys
 import urllib.request
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from scripts.probe_pollo_models import _probe_estimate
 from web.providers.pollo_engine.video import VIDEO_MODELS
@@ -174,7 +175,7 @@ ENGINE_FILE = os.path.join(_REPO, "web", "providers", "pollo_engine", "v1_video.
 _ENABLEMENT_HIDE = re.compile(r"enabled|403|404|unavailable|access", re.IGNORECASE)
 
 
-def py_literal(v) -> str:
+def py_literal(v: Any) -> str:
     """A Python literal using double quotes and True/False (ruff-style)."""
     if isinstance(v, bool):
         return "True" if v else "False"
@@ -188,8 +189,9 @@ def py_literal(v) -> str:
 
 
 def _block_range(lines: list[str], key: str) -> tuple[int, int] | None:
-    """(first, last) line index of a `    "key": {` … `    },` entry. A one-line
-    inline entry (`    "key": {…},`) returns (i, i).
+    """Find a block's first and last line indices.
+
+    A one-line `    "key": {…},` entry returns (i, i).
     """
     opener = re.compile(r'^    "' + re.escape(key) + r'": \{')
     for i, ln in enumerate(lines):
@@ -204,8 +206,9 @@ def _block_range(lines: list[str], key: str) -> tuple[int, int] | None:
 
 
 def _edit_inline(line: str, field: str, val: str) -> str:
-    """Add/replace a member inside a one-line entry `    "key": {…},` (an inline
-    value can't carry a comment, so any comment is dropped).
+    """Add or replace a member inside a one-line dictionary entry.
+
+    Inline values cannot carry comments, so any comment is dropped.
     """
     val = re.sub(r"\s+#.*$", "", val)
     m = re.match(r'^(\s*".*?": \{)(.*?)(\},?\s*)$', line)
@@ -219,8 +222,9 @@ def _edit_inline(line: str, field: str, val: str) -> str:
 
 
 def _field_range(lines: list[str], start: int, end: int, field: str) -> tuple[int, int] | None:
-    """(first, last) line index of a `        "field": …,` member, following a
-    multi-line dict/list value to its closing line via brace balance.
+    """Find a field's first and last line indices.
+
+    Multi-line dict and list values are followed to their closing line by brace balance.
     """
     pat = re.compile(r'^        "' + re.escape(field) + r'":')
     for i in range(start + 1, end):
@@ -236,8 +240,9 @@ def _field_range(lines: list[str], start: int, end: int, field: str) -> tuple[in
 
 
 def apply_edits(path: str, edits: dict[str, dict], warnings: list[str]) -> int:
-    """Apply {model_key: {field: literal-str | _REMOVE}} to a source file,
-    re-scanning after each change so indices stay valid. Returns edit count.
+    """Apply model-field edits to a source file and return the edit count.
+
+    Re-scan after each change so line indices stay valid.
     """
     lines = Path(path).read_text(encoding="utf-8").split("\n")
     n = 0
@@ -273,9 +278,10 @@ def apply_edits(path: str, edits: dict[str, dict], warnings: list[str]) -> int:
 
 
 def plan_writes(ours: dict, docs: dict[str, dict], enabled: dict[str, str]) -> tuple[dict, dict, list[str]]:
-    """(pollo_models.py edits, v1_video.py edits, human-only notes). ref_mode is
-    only ever added/updated from the docs, never removed (the spec is
-    incomplete); hides are only cleared when they were enablement-justified.
+    """Plan source edits and human-only notes from the model audit.
+
+    Add or update ``ref_mode`` from docs but never remove it because the spec is
+    incomplete; clear hides only when they were justified by enablement.
     """
     models_edits: dict[str, dict] = {}
     engine_edits: dict[str, dict] = {}
@@ -327,6 +333,7 @@ def _write(ours: dict, docs: dict, enabled: dict) -> None:
 
 
 def main() -> int:
+    """Audit the local model catalogue against Pollo's docs and API key."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--spec", help="path to a saved openapi.json (else fetched from docs.pollo.ai)")
     ap.add_argument("--key", default=os.getenv("POLLO_API_KEY"), help="probe live availability (or POLLO_API_KEY)")

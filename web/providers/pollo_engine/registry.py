@@ -28,9 +28,10 @@ _VIDEO_ONLY_FAMILIES = ("extend", "edit", "upscale", "bgremove", "subtitle")
 
 @dataclass
 class ModelSpec:
-    """A model's static data + a factory for its runtime generator: the VALID_*
-    /ACCEPTS_IMAGES/MAX_IMAGES the catalogue and validation read, and the
-    endpoint + family the payload builders dispatch on.
+    """Static model data and a factory for its runtime generator.
+
+    The catalogue and validation read the ``VALID_*``, ``ACCEPTS_IMAGES`` and
+    ``MAX_IMAGES`` fields; payload builders use the endpoint and family.
     """
 
     model_id: str
@@ -44,6 +45,7 @@ class ModelSpec:
     MAX_IMAGES: int = 0
 
     def __call__(self, **kwargs: Any) -> PolloGenerator:
+        """Create a runtime generator for this model."""
         return PolloGenerator(self, **kwargs)
 
 
@@ -55,8 +57,10 @@ def _build_payload(spec: ModelSpec, prompt: str, image_url: str | None, **kw: An
 
 
 class PolloGenerator:
-    """Runtime generator for one request: resolves inputs, builds the payload via
-    the engine's family functions, and submits/prices it.
+    """Generate one runtime Pollo request.
+
+    Resolves inputs, builds the payload with the engine's family functions, and
+    submits or estimates the request.
     """
 
     def __init__(self, spec: ModelSpec, **kwargs: Any) -> None:
@@ -76,6 +80,7 @@ class PolloGenerator:
         self.payload_attrs: dict[str, Any] = {}
 
     def get_payload(self) -> dict[str, Any]:
+        """Build and cache the request body for this generation."""
         if self._payload is None:
             self._payload = _build_payload(self.spec, self.prompt, self.image_url, **self._kwargs)
         self.payload_attrs = self._payload["input"]
@@ -87,6 +92,7 @@ class PolloGenerator:
         return f"{self.model_url}/estimate" if self.model_url else None
 
     def send_request(self) -> requests.Response:
+        """Submit the built request to Pollo and return its HTTP response."""
         if not self.model_url:
             raise ValueError(f"No endpoint configured for {self.spec.model_id}")
         payload = self.get_payload()
@@ -141,6 +147,7 @@ AUDIO_GENERATORS: dict[str, ModelSpec] = {
 
 
 def audio_generator(model_id: str, **kwargs: Any) -> PolloGenerator:
+    """Create a generator for a supported audio model."""
     try:
         return AUDIO_GENERATORS[model_id](**kwargs)
     except KeyError:
@@ -148,6 +155,7 @@ def audio_generator(model_id: str, **kwargs: Any) -> PolloGenerator:
 
 
 def video_generator(model_id: str, **kwargs: Any) -> PolloGenerator:
+    """Create a generator for a supported video model."""
     try:
         return VIDEO_GENERATORS[model_id](**kwargs)
     except KeyError:
@@ -155,6 +163,7 @@ def video_generator(model_id: str, **kwargs: Any) -> PolloGenerator:
 
 
 def image_generator(model_id: str, **kwargs: Any) -> PolloGenerator:
+    """Create a generator for a supported image model."""
     try:
         return IMAGE_GENERATORS[model_id](**kwargs)
     except KeyError:

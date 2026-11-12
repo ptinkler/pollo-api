@@ -25,10 +25,11 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Drop media durations."""
     if sa.inspect(op.get_bind()).has_table("media_durations"):
         op.drop_table("media_durations")
 
 
 def downgrade() -> None:
+    """Keep media durations removed because their cache is gone."""
     # Nothing recreates it: the cache it belonged to is gone.
-    pass

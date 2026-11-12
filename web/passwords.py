@@ -39,7 +39,8 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(stored_hash: str | None, password: str) -> bool:
-    """Whether `password` matches the stored hash. False (never raises) for a
+    """Whether `password` matches the stored hash. False (never raises) for a.
+
     missing hash, a wrong password, or a malformed/foreign hash string.
     """
     if not stored_hash:
@@ -51,7 +52,8 @@ def verify_password(stored_hash: str | None, password: str) -> bool:
 
 
 def needs_rehash(stored_hash: str) -> bool:
-    """Whether a stored hash was made with weaker-than-current argon2 params
+    """Whether a stored hash was made with weaker-than-current argon2 params.
+
     (so it can be transparently upgraded on the next successful login).
     """
     try:

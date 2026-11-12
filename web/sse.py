@@ -1,5 +1,6 @@
-"""Reading OpenAI-style streamed chat completions (server-sent events), shared
-by the OpenRouter and Venice clients.
+"""Parse OpenAI-style server-sent chat completion streams.
+
+Shared by the OpenRouter and Venice clients.
 """
 
 import json

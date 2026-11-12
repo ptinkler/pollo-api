@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 
 from web.auth import set_user_cookie
 from web.core.env import bool_env
-from web.core.metadata import get_db
+from web.core.metadata import User, get_db
 
 log = logging.getLogger(__name__)
 
@@ -29,16 +29,19 @@ DEV_USER = {"provider": "local", "sub": "dev", "name": "Dev", "avatar": None}
 
 
 def dev_login_enabled() -> bool:
+    """Return whether local development sign-in is enabled."""
     return bool_env("DEV_LOGIN")
 
 
 def dev_email() -> str:
+    """Return the normalized email address for the development account."""
     return os.getenv("DEV_EMAIL", "dev@local").strip().lower() or "dev@local"
 
 
-def dev_user():
-    """The dev account, created on first use as an admin (so owner/VPN controls
-    are testable). Matched by email, like the local admin.
+def dev_user() -> User:
+    """Return the dev account, creating it as an admin if needed.
+
+    It is matched by email, like the local admin, so owner controls are testable.
     """
     db = get_db()
     existing = db.get_user_by_email(dev_email())
@@ -58,22 +61,25 @@ def _looks_encrypted(blob: str | None) -> bool:
 
 
 def db_has_encrypted_keys() -> bool:
-    """Any user's keys are encrypted at rest — i.e. a real/prod DB. You can't
-    un-encrypt those, so dev no-encryption mode must refuse to touch it.
+    """Check whether any user's keys are encrypted at rest.
+
+    Dev no-encryption mode must not touch a database whose keys cannot be decrypted.
     """
     return any(_looks_encrypted(b) for b in get_db().list_api_key_blobs())
 
 
 def store_keys_plaintext() -> bool:
-    """Whether provider keys should be stored unencrypted: dev only, and only on
-    a DB that was never encrypted (so prod is never silently downgraded).
+    """Check whether dev mode may store provider keys as plaintext.
+
+    This is allowed only for a database that has never stored encrypted keys.
     """
     return dev_login_enabled() and not db_has_encrypted_keys()
 
 
 def seed_dev_user() -> None:
-    """Ensure the dev account exists at startup, when enabled and safe. A no-op
-    otherwise (so this never runs in production).
+    """Create the development account at startup when enabled and safe.
+
+    This is a no-op otherwise, so it never runs in production.
     """
     if not dev_login_enabled():
         return
@@ -85,10 +91,10 @@ def seed_dev_user() -> None:
 
 
 @router.post("/dev-login")
-async def dev_login(response: Response, request: Request):
-    """One-click sign-in as the local dev account — no password or OAuth. 404
-    unless DEV_LOGIN is set; refused (403) on a DB that already holds encrypted
-    keys (can't un-encrypt a prod database).
+async def dev_login(response: Response, request: Request) -> dict[str, str | bool | None]:
+    """Sign in as the local development account without a password or OAuth.
+
+    The route returns 404 when disabled and refuses databases with encrypted keys.
     """
     if not dev_login_enabled():
         raise HTTPException(status_code=404, detail="Not found")

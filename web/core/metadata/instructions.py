@@ -7,10 +7,14 @@ from web.core.metadata.models import ChatConversation, ChatInstruction, ChatInst
 
 
 class InstructionMixin:
+    """Manage instruction snippets, groups, defaults, and chat spaces."""
+
     def list_instructions(self) -> list[ChatInstruction]:
+        """Return instruction snippets ordered by name."""
         return self._list(ChatInstruction, ChatInstruction.name)
 
     def get_instruction(self, instruction_id: int) -> ChatInstruction | None:
+        """Return a snippet by id, or ``None`` if it does not exist."""
         return self._get(ChatInstruction, instruction_id)
 
     def get_instructions(self, ids: list[int]) -> list[ChatInstruction]:
@@ -29,7 +33,7 @@ class InstructionMixin:
         return self._save(ChatInstruction, instruction_id, **fields)
 
     def delete_instruction(self, instruction_id: int) -> bool:
-        """Delete a snippet and remove it from any chats and groups using it."""
+        """Delete a snippet and detach it from chats, groups, and defaults."""
         with self._session() as session:
             item = session.get(ChatInstruction, instruction_id)
             if not item:
@@ -55,9 +59,11 @@ class InstructionMixin:
             return True
 
     def list_instruction_groups(self) -> list[ChatInstructionGroup]:
+        """Return instruction groups ordered by name."""
         return self._list(ChatInstructionGroup, ChatInstructionGroup.name)
 
     def get_instruction_group(self, group_id: int) -> ChatInstructionGroup | None:
+        """Return a group by id, or ``None`` if it does not exist."""
         return self._get(ChatInstructionGroup, group_id)
 
     def save_instruction_group(self, group_id: int | None = None, **fields: Any) -> ChatInstructionGroup | None:
@@ -65,7 +71,10 @@ class InstructionMixin:
         return self._save(ChatInstructionGroup, group_id, **fields)
 
     def delete_instruction_group(self, group_id: int) -> bool:
-        """Delete a group and detach it from any chats using it (its snippets stay)."""
+        """Delete a group and detach it from chats and defaults.
+
+        The group's snippets are not deleted.
+        """
         with self._session() as session:
             item = session.get(ChatInstructionGroup, group_id)
             if not item:
@@ -112,6 +121,7 @@ class InstructionMixin:
             return item
 
     def save_settings(self, **fields: Any) -> ChatSettings:
+        """Update the current user's defaults row and return it."""
         with self._session() as session:
             item = session.query(ChatSettings).first() or ChatSettings()
             session.add(item)
@@ -124,9 +134,11 @@ class InstructionMixin:
             return item
 
     def list_spaces(self) -> list[ChatSpace]:
+        """Return chat spaces ordered by name."""
         return self._list(ChatSpace, ChatSpace.name)
 
     def get_space(self, space_id: int) -> ChatSpace | None:
+        """Return a space by id, or ``None`` if it does not exist."""
         return self._get(ChatSpace, space_id)
 
     def save_space(self, space_id: int | None = None, **fields: Any) -> ChatSpace | None:

@@ -23,16 +23,13 @@ def _setup_env(tmp_path, monkeypatch, provider_keys):
 
 @pytest.fixture
 def db(tmp_path):
+    """Provide the db fixture."""
     return MetadataDB(db_path=tmp_path / "data" / "metadata.db")
 
 
 @pytest.fixture
 def client(db, monkeypatch):
-    """A test client with the DB patched everywhere it's resolved: every
-    already-imported web.* module that pulled in `get_db` (importing web.api
-    loads the whole app graph), so it doesn't matter which submodule a route
-    lives in.
-    """
+    """Provide a test client whose API modules all resolve the temporary database."""
     for name, mod in list(sys.modules.items()):
         if name.startswith("web.") and getattr(mod, "get_db", None) is not None:
             monkeypatch.setattr(mod, "get_db", lambda: db)

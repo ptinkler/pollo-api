@@ -95,17 +95,21 @@ class VeniceError(OpenRouterError):
 
 
 def get_api_key() -> str:
+    """Return the configured Venice API key, or an empty string."""
     return keyctx.provider_key("venice") or ""
 
 
 def _tenant() -> str:
-    """Who the per-account caches below belong to. The signed-in user, or ""
-    outside a request (a background poller works on one job's owner's key).
+    """Return the signed-in user that owns the per-account caches.
+
+    Outside a request, return an empty string; background pollers use the
+    owner's key for each job.
     """
     return current_tenant()
 
 
 def is_configured() -> bool:
+    """Return whether a Venice API key is configured."""
     return bool(get_api_key())
 
 
@@ -113,10 +117,12 @@ NAME = "venice"
 
 
 def is_venice(model_id: str | None) -> bool:
+    """Return whether ``model_id`` belongs to Venice."""
     return bool(model_id and model_id.startswith(PREFIX))
 
 
 def is_venice_job(job_id: str | None) -> bool:
+    """Return whether ``job_id`` belongs to Venice."""
     return bool(job_id and job_id.startswith(JOB_PREFIX))
 
 
@@ -151,7 +157,13 @@ def _raise_for_response(resp: httpx.Response) -> None:
 
 
 def _request(
-    method: str, path: str, *, timeout=DEFAULT_TIMEOUT, waiting_for: str = "response", log: bool = False, **kw: Any
+    method: str,
+    path: str,
+    *,
+    timeout: httpx.Timeout = DEFAULT_TIMEOUT,
+    waiting_for: str = "response",
+    log: bool = False,
+    **kw: Any,
 ) -> httpx.Response:
     """One Venice call. `log`: record it in the request log (web/request_log.py)."""
     if not log:
@@ -165,7 +177,14 @@ def _request(
     return resp
 
 
-def _send(method: str, path: str, timeout, waiting_for: str, check: bool = True, **kw: Any) -> httpx.Response:
+def _send(
+    method: str,
+    path: str,
+    timeout: httpx.Timeout,
+    waiting_for: str,
+    check: bool = True,
+    **kw: Any,
+) -> httpx.Response:
     start = time.monotonic()
     try:
         resp = _client.request(method, f"{VENICE_BASE}{path}", headers=_headers(), timeout=timeout, **kw)
@@ -195,7 +214,7 @@ def _fetch_models(kind: str) -> list[dict]:
     ]
 
 
-def _usd(price) -> float | None:
+def _usd(price: float | int | str | dict[str, Any] | None) -> float | None:
     if isinstance(price, dict):
         price = price.get("usd")
     try:
@@ -204,7 +223,7 @@ def _usd(price) -> float | None:
         return None
 
 
-def _seconds(values) -> list[int]:
+def _seconds(values: list[str | int] | None) -> list[int]:
     out = []
     for v in values or []:
         with contextlib.suppress(ValueError):  # "auto", "1 gen" — not a length chat can ask for
@@ -218,17 +237,19 @@ def _uncensored(*models: dict | None) -> bool | None:
 
 
 def _privacy(*models: dict | None) -> str | None:
-    """Venice's privacy level: "private" (Venice's own servers, nothing kept)
-    or "anonymized" (a third-party provider, sent without your identity).
-    A pair is only as private as its less private half.
+    """Return the least-private level across a model pair.
+
+    Venice reports ``private`` for its own servers and ``anonymized`` for
+    third-party providers that receive requests without user identity.
     """
     levels = {(m.get("model_spec") or {}).get("privacy") for m in models if m} - {None}
     return "anonymized" if "anonymized" in levels else ("private" if levels else None)
 
 
 def _edit_model_for(image_id: str, edit_ids: set[str]) -> str | None:
-    """Venice's edit twin of an image model: "x" → "x-edit", or with "-image"
-    dropped ("grok-imagine-image-quality" → "grok-imagine-quality-edit").
+    """Find an image model's edit twin among the available inpaint models.
+
+    The match may drop ``-image`` before adding ``-edit``.
     """
     for candidate in (f"{image_id}-edit", image_id.replace("-image", "", 1) + "-edit"):
         if candidate in edit_ids:
@@ -356,7 +377,7 @@ def _build_catalogue() -> dict[str, Any]:
 def _by_price(models: list[dict]) -> list[dict]:
     """Uncensored first (as the user asked), then cheapest first; unpriced last."""
 
-    def key(m):
+    def key(m: dict[str, Any]) -> tuple[bool, bool, int | float, str]:
         usd = (m.get("price") or {}).get("usd")
         return (not m.get("uncensored"), usd is None, usd or 0, m["name"].lower())
 
@@ -390,9 +411,11 @@ def _res_rank(res: str) -> int:
 
 
 def _price_videos(video: list[dict]) -> None:
-    """Set each video entry's price from Venice's (free) quote endpoint, at
-    ~5s and its lowest resolution. Quotes are cached for a day; models that
-    work on a chat video (length unknown up front) stay unpriced.
+    """Set video prices from Venice quotes at about five seconds.
+
+    Quotes use each model's lowest resolution and are cached for a day.
+    Models that work on a chat video remain unpriced because its duration is
+    unknown up front.
     """
     jobs = []
     for m in video:
@@ -406,7 +429,7 @@ def _price_videos(video: list[dict]) -> None:
         res = min(c.get("resolutions") or [], key=_res_rank, default=None)
         jobs.append((m, model, duration, res))
 
-    def quote(job):
+    def quote(job: tuple[dict[str, Any], str, int | None, str | None]) -> float | None:
         _, model, duration, res = job
         key = (model, duration, res)
         cached = _quotes.get(key, MISS)
@@ -447,8 +470,10 @@ def _video_family(m: dict) -> str:
 
 
 def _video_entry(family: str, main: dict | None, i2v: dict | None) -> dict:
-    """One catalogue entry. For "standard", main is the text-to-video model
-    (None if there's only an image-to-video one) and i2v its twin.
+    """Build one catalogue entry from a video model family.
+
+    For ``standard``, ``main`` is the text-to-video model (or None if only an
+    image-to-video model exists), and ``i2v`` is its twin.
     """
     first = main or i2v
     spec = first.get("model_spec") or {}
@@ -501,8 +526,9 @@ def _get_catalogue(refresh: bool = False) -> dict[str, Any]:
 
 @on_keys_changed
 def clear_caches() -> None:
-    """Drop every in-process cache (catalogue, quotes, balances, job state).
-    Called when a user's keys change, and by tests between cases.
+    """Clear catalogue, quote, balance, and job-state caches.
+
+    Called when a user's keys change and by tests between cases.
     """
     with _catalogue_lock:
         _catalogue.clear()
@@ -536,9 +562,11 @@ def model_info(kind: str, model_id: str) -> dict[str, Any]:
 
 
 def get_balances() -> dict[str, float | None]:
-    """The account's USD balance and the plan's bundled credits (BUNDLED_CREDITS,
-    which Venice spends after DIEM and before USD), both from the rate-limits
-    endpoint in one call. /billing/balance needs an admin key, and the USD figure
+    """Return the account's USD balance and bundled credits.
+
+    Both values come from one rate-limits call. Venice spends BUNDLED_CREDITS
+    after DIEM and before USD. The admin-only /billing/balance endpoint is not
+    used; the USD figure
     lives in the body — not a response header, despite older API versions. If the
     endpoint can't be read, fall back to the balance a prior response's header
     reported for THIS user (via _note_balance) — never another account's.
@@ -564,8 +592,9 @@ def stream_chat(
     max_seconds: float | None = None,
     should_stop: Callable[[], bool] | None = None,
 ) -> Iterator[dict]:
-    """Like openrouter.stream_chat: yields chat.completion.chunk dicts, with
-    usage.cost in USD (from Venice's cost, or tokens × the model's prices).
+    """Yield chat-completion chunks with usage cost in USD.
+
+    Cost comes from Venice's reported value or token counts and model prices.
     """
     body: dict[str, Any] = {
         "model": model_id[len(PREFIX) :],
@@ -606,7 +635,11 @@ def _stream_error(message: str, status: int | None) -> VeniceError:
     return VeniceError(message if status else f"Venice: {message}", status)
 
 
-def _chat_cost(model_id: str, usage: dict, top_level_cost=None) -> float | None:
+def _chat_cost(
+    model_id: str,
+    usage: dict,
+    top_level_cost: float | int | str | dict[str, Any] | None = None,
+) -> float | None:
     cost = _usd(usage.get("cost")) if usage.get("cost") is not None else _usd(top_level_cost)
     if cost is not None:
         return cost
@@ -624,8 +657,9 @@ def _chat_cost(model_id: str, usage: dict, top_level_cost=None) -> float | None:
 
 
 def _check_violation(resp: httpx.Response) -> None:
-    """Venice flags images that break its terms (x-venice-is-content-violation);
-    what comes back then isn't the picture asked for.
+    """Reject images Venice marked as content violations.
+
+    The violation flag means the response is not the requested image.
     """
     if (resp.headers.get("x-venice-is-content-violation") or "").lower() == "true":
         raise VeniceError(
@@ -640,9 +674,10 @@ def generate_image(
     resolution: str | None = None,
     ref_paths: list[Path] | None = None,
 ) -> tuple[list[tuple[bytes, str]], float | None, dict]:
-    """Returns ([(bytes, media type)], cost in USD (from the catalogue's price),
-    the settings actually sent). With reference images it runs the model's
-    edit twin; without, the text-to-image model.
+    """Generate an image and return its bytes, cost, and sent settings.
+
+    Reference images use the model's edit twin; otherwise the text-to-image
+    model runs.
     """
     info = _entry("image", model_id)
     aspect_ratio = _snap(aspect_ratio, info.get("aspect_ratios") or [])
@@ -698,7 +733,7 @@ MAX_VIDEO_REFS = 30
 QUOTED_FIELDS = ("model", "duration", "aspect_ratio", "resolution", "audio", "upscale_factor")
 
 
-def _snap(value, allowed: list):
+def _snap(value: str | None, allowed: list[str]) -> str | None:
     """Value if allowed (or nothing is known), else None."""
     return value if value and (not allowed or value in allowed) else None
 
@@ -715,12 +750,11 @@ def submit_video(
     refs: list[Path] | None = None,
     source_video: Path | None = None,
 ) -> dict:
-    """Queue a video. Returns {"id": "venice:<model>:<queue_id>", "params":
-    the settings actually sent}, like openrouter.submit_video.
+    """Queue a video and return its id and sent settings.
 
-    What's used depends on the model's family: reference models take `refs`
-    (the first frame joins them if there are none), first/last-frame models
-    both frames, video models `source_video` (motion control also an image).
+    Reference models take ``refs`` (the first frame joins them if empty),
+    first/last-frame models take both frames, and video models take
+    ``source_video`` (motion control also takes an image).
     """
     info = _entry("video", model_id)
     family = info.get("family", "standard")
@@ -766,8 +800,10 @@ def submit_video(
 
 
 def _video_model(info: dict, family: str, first_frame: Path | None) -> tuple[str, dict]:
-    """(the Venice model to run, its constraints): standard families pair a
-    text-to-video model with an image-to-video one; the rest have one model.
+    """Select the Venice model and constraints for a video family.
+
+    Standard families pair text-to-video with image-to-video; others use one
+    model.
     """
     if family != "standard":
         return info["_image"], info["_constraints"]["image"]
@@ -840,8 +876,10 @@ _VIDEO_INPUTS = {
 
 
 def _video_duration(c: dict, duration: int | None) -> tuple[int | None, str]:
-    """(the duration in seconds, or None, the value to send): snapped to the
-    nearest allowed length (5s when unset); else the model's own setting.
+    """Return the selected duration and its API representation.
+
+    The requested value snaps to the nearest allowed length; unset values
+    default to five seconds when supported.
     """
     allowed = c.get("durations") or []
     seconds = _seconds(allowed)
@@ -886,9 +924,9 @@ def _video_file(job_id: str) -> Path:
 
 
 def get_video(job_id: str) -> dict:
-    """The job in openrouter.get_video's shape (status completed | failed |
-    in_progress, "error", "usage"). Venice hands the finished MP4 straight
-    back from retrieve, so it's kept until download_video collects it.
+    """Return Venice job status in OpenRouter's shape.
+
+    The finished MP4 is held until ``download_video`` collects it.
     Network trouble and 5xx raise, for the poller's error budget.
     """
     if _video_file(job_id).is_file():
@@ -935,6 +973,7 @@ def get_video(job_id: str) -> dict:
 
 
 def download_video(job_id: str, dest: Path, index: int = 0) -> None:
+    """Copy a completed Venice video to ``dest``."""
     src = _video_file(job_id)
     if not src.is_file():
         url = _download_urls.get(job_id)

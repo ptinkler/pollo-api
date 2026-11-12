@@ -21,6 +21,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Add paused instructions to conversations."""
     # MetadataDB() adds this column on startup too, so skip it if it's there
     existing = {c["name"] for c in sa.inspect(op.get_bind()).get_columns("chat_conversations")}
     if "paused_instructions_json" not in existing:
@@ -29,5 +30,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove paused instructions from conversations."""
     with op.batch_alter_table("chat_conversations") as batch_op:
         batch_op.drop_column("paused_instructions_json")

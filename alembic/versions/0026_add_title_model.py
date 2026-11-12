@@ -19,6 +19,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Add a title model to chat settings."""
     # MetadataDB() adds this column on startup too, so skip it if it's there
     existing = {c["name"] for c in sa.inspect(op.get_bind()).get_columns("chat_settings")}
     if "title_model" not in existing:
@@ -27,5 +28,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove the title model from chat settings."""
     with op.batch_alter_table("chat_settings") as batch_op:
         batch_op.drop_column("title_model")
