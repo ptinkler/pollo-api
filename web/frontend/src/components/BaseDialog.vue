@@ -1,3 +1,7 @@
+<script>
+const openStack = []
+</script>
+
 <script setup>
 import { onBeforeUnmount, watch } from 'vue'
 
@@ -14,15 +18,27 @@ const props = defineProps({
 })
 const emit = defineEmits(['close', 'submit'])
 
+// Open dialogs, newest last: Esc closes only the top one (a picker opened
+// from inside another dialog mustn't close both)
 function onKey(e) {
-  if (e.key === 'Escape') emit('close')
+  if (e.key === 'Escape' && openStack.at(-1) === onKey) emit('close')
+}
+function release() {
+  window.removeEventListener('keydown', onKey)
+  const i = openStack.indexOf(onKey)
+  if (i !== -1) openStack.splice(i, 1)
 }
 watch(
   () => props.open,
-  open => (open ? window.addEventListener('keydown', onKey) : window.removeEventListener('keydown', onKey)),
+  open => {
+    if (open) {
+      openStack.push(onKey)
+      window.addEventListener('keydown', onKey)
+    } else release()
+  },
   { immediate: true },
 )
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+onBeforeUnmount(release)
 </script>
 
 <template>

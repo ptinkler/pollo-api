@@ -1,5 +1,8 @@
 """Importing chats from a ChatGPT data export (Settings → Data controls → Export data), to carry them on here.
 
+The same upload and import also take this app's own chat export (see
+web/chat_export.py), told apart by what's in the zip.
+
 The export's zip goes in <data>/imports/: copied there, or uploaded from
 the browser in chunks (it's often gigabytes; nginx takes 25 MB a request).
 Inside it:
@@ -41,7 +44,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
-from web import media
+from web import chat_export, media
 from web.chat import CHAT_PREVIEW_SIZE, ConversationCreate, api_create_conversation, conversation_dir
 from web.core import config
 from web.core.metadata import current_tenant, get_db
@@ -81,6 +84,7 @@ SPACE_NAME = "ChatGPT"  # the space new imports go in
 UPLOAD_CHUNK = 16 * 1024 * 1024  # bytes per upload request, under nginx's 25 MB cap
 UPLOAD_STALE_SECONDS = 24 * 60 * 60  # unfinished uploads older than this are deleted
 DEFAULT_TITLE = "Imported chat"
+_NOT_AN_EXPORT = "Not a chat export: it has neither a ChatGPT conversations.json nor a pollo-chats.json"
 MISSING = "Not included in the ChatGPT export"
 
 # Search citations ChatGPT leaves in replies: citeturn0search1
@@ -510,8 +514,10 @@ def run_import(path: Path, progress: dict[str, JsonValue] | None = None) -> _Imp
     stats.pop("space_id", None)  # the space new chats went in, once there are some
     db = get_db()
     with zipfile.ZipFile(path) as zf:
+        if chat_export.is_native_export(zf):
+            return _run_native(zf, stats)
         if "conversations.json" not in zf.namelist():
-            raise ValueError("Not a ChatGPT export: there's no conversations.json in it")  # noqa: TRY003
+            raise ValueError(_NOT_AN_EXPORT)
         export = _Export(zf)
         stats["total"] = len(export.conversations)
         imported = db.get_imported_conversations(SOURCE)
@@ -538,6 +544,14 @@ def run_import(path: Path, progress: dict[str, JsonValue] | None = None) -> _Imp
             stats["processed"] += 1
     if export.new_files:
         threading.Thread(target=_warm_thumbnails, args=(export.new_files,), daemon=True).start()
+    return stats
+
+
+def _run_native(zf: zipfile.ZipFile, stats: _ImportStats) -> _ImportStats:
+    """This app's own export (from here or another server)."""
+    written = chat_export.import_native(zf, cast("dict[str, JsonValue]", stats))
+    if written:
+        threading.Thread(target=_warm_thumbnails, args=(written,), daemon=True).start()
     return stats
 
 
@@ -652,7 +666,7 @@ def api_start_upload(data: StartUpload) -> dict[str, int | str]:
     """Start a chunked upload and return its ID and chunk size."""
     name = Path(data.name.replace("\\", "/")).name
     if not name.lower().endswith(".zip") or name.startswith("."):
-        raise HTTPException(400, "Choose the .zip that ChatGPT's export email links to")
+        raise HTTPException(400, "Choose a .zip: a chat export from here, or the one ChatGPT's export email links to")
     folder = _import_dir()
     folder.mkdir(parents=True, exist_ok=True)
     _clear_stale_uploads(folder)
@@ -700,10 +714,10 @@ def _write_chunk(part: Path, meta: Path, info: _UploadMeta, offset: int, raw: by
         meta.unlink()
         raise HTTPException(400, "That isn't a zip file")
     with zipfile.ZipFile(part) as zf:
-        if "conversations.json" not in zf.namelist():
+        if "conversations.json" not in zf.namelist() and not chat_export.is_native_export(zf):
             part.unlink()
             meta.unlink()
-            raise HTTPException(400, "Not a ChatGPT export: there's no conversations.json in it")
+            raise HTTPException(400, _NOT_AN_EXPORT)
     target = part.parent / info["name"]
     n = 1
     while target.exists():

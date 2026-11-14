@@ -426,6 +426,10 @@ class ChatMessage(Base):
     role: Mapped[str] = mapped_column(String(20))  # 'user' | 'assistant'
     content: Mapped[str] = mapped_column(Text, default="")
     media_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Earlier wordings of a reply whose text alone was written again (Edit /
+    # Redo text): {"items": [{"content", "model"}], "shown": i}. `content` is
+    # always items[shown]; None until the text is first written again.
+    text_versions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # The composer mode the turn ran in (auto/text/image/video), so an edit or
     # retry reruns it the same way; None on messages from before it was kept
@@ -451,6 +455,28 @@ class ChatMessage(Base):
         except ValidationError:
             return []
 
+    @property
+    def text_versions(self) -> tuple[list[dict[str, JsonValue]], int]:
+        """The reply's wordings (oldest first) and which one is shown; ([], 0) if never rewritten."""
+        if not self.text_versions_json:
+            return [], 0
+        try:
+            data = _JSON_OBJECT.validate_json(self.text_versions_json)
+        except ValidationError:
+            return [], 0
+        raw = data.get("items")
+        items = [
+            i
+            for i in (raw if isinstance(raw, list) else [])
+            if isinstance(i, dict) and isinstance(i.get("content"), str)
+        ]
+        if not items:
+            return [], 0
+        shown = data.get("shown")
+        if not isinstance(shown, int) or isinstance(shown, bool) or not 0 <= shown < len(items):
+            shown = len(items) - 1
+        return items, shown
+
     def to_dict(self) -> dict[str, JsonValue]:
         """Serialize the message and its attached media."""
         return {
@@ -466,6 +492,9 @@ class ChatMessage(Base):
             "status": self.status,
             "error": self.error,
             "cost": self.cost,
+            # Only the count and position: the words themselves come with each switch
+            "text_versions": len(self.text_versions[0]),
+            "text_shown": self.text_versions[1],
             "created_at": iso(self.created_at),
         }
 

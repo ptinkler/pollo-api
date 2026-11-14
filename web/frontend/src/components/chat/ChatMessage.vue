@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, ref, nextTick, inject, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, nextTick, inject, onMounted, onBeforeUnmount } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { chatMediaPreviewUrl, chatMediaUrl } from '../../composables/useChat'
@@ -17,6 +17,7 @@ const props = defineProps({
   canEdit: { type: Boolean, default: false },
   canSwitch: { type: Boolean, default: false }, // ‹ › arrows usable (not mid-reply)
   canBranch: { type: Boolean, default: false }, // ⑂ Branch on a reply (prompts go with canEdit)
+  canReword: { type: Boolean, default: false }, // Edit / Redo a finished reply's text in place
 })
 const emit = defineEmits([
   'retry',
@@ -28,6 +29,8 @@ const emit = defineEmits([
   'branch',
   'use-image',
   'reword',
+  'text-version',
+  'media-version',
   'pin',
   'delete',
   'fork',
@@ -167,18 +170,17 @@ const bigView = item => ({
 const canRemake = item =>
   item.status === 'done' && item.source === 'generated' && !!item.prompt && props.message.status !== 'streaming'
 
-// Earlier pictures this card has shown, oldest first; the live one is last.
-// The arrows only change what you are looking at — the newest stays the real one.
+// A card's pictures, oldest first. The one showing is the real one — what
+// the chat sends as context and references from then on — so the arrows ask
+// the server to swap it in (`version_shown` is its place among them all; a
+// failed redo has no picture, so it isn't one of them).
 const versionsOf = item => item.versions || []
-const shownIndex = reactive({})
-const versionAt = item => shownIndex[item.id] ?? versionsOf(item).length
-const shownItem = item => {
-  const i = versionAt(item)
-  return i < versionsOf(item).length ? { ...item, ...versionsOf(item)[i] } : item
-}
+const versionCount = item => versionsOf(item).length + (item.file ? 1 : 0)
+const versionAt = item => item.version_shown ?? versionsOf(item).length
+const shownItem = item => item
 const stepVersion = (item, by) => {
   const next = versionAt(item) + by
-  if (next >= 0 && next <= versionsOf(item).length) shownIndex[item.id] = next
+  if (next >= 0 && next < versionCount(item)) emit('media-version', { mediaId: item.id, index: next })
 }
 
 // The box the pencil and Redo open: one prompt, applied to this picture alone.
@@ -189,7 +191,6 @@ function submitPrompt(item) {
   const box = promptBox.value
   if (!box?.text.trim()) return
   promptBox.value = null
-  delete shownIndex[item.id] // show the new picture, not whatever version was open
   emit('regenerate', {
     mediaId: item.id,
     model: item.model || null,
@@ -197,6 +198,25 @@ function submitPrompt(item) {
     edit: box.edit,
     replace: true,
   })
+}
+
+// The reply's text on its own: Edit (say how to change it) or Redo (write it
+// again) replaces just the words; the pictures stay. Each wording is kept and
+// the ‹ › under the text switch between them, apart from the pictures' own.
+const textVersions = computed(() => props.message.text_versions || 0)
+const textShown = computed(() => props.message.text_shown ?? textVersions.value - 1)
+const hasPendingMedia = computed(() => !!props.message.media?.some(m => m.status === 'pending'))
+const canRewordNow = computed(() => props.canReword && !hasPendingMedia.value)
+const textBox = ref(null) // { text } while the Edit text box is open
+function submitTextEdit() {
+  const text = textBox.value?.text.trim()
+  if (!text) return
+  textBox.value = null
+  emit('reword', text)
+}
+function stepText(by) {
+  const next = textShown.value + by
+  if (next >= 0 && next < textVersions.value) emit('text-version', next)
 }
 
 // Branches: other versions of this turn (from edits/retries)
@@ -375,6 +395,42 @@ const requestItem = ref(null)
           <span></span><span></span><span></span>
         </div>
         <span v-if="streaming && html" class="cursor"></span>
+        <div v-if="textVersions > 1 && !streaming" class="text-ver">
+          <button
+            class="meta-btn"
+            :disabled="!canSwitch || textShown <= 0"
+            title="Earlier wording (the pictures stay as they are)"
+            @click="stepText(-1)"
+          >
+            ‹
+          </button>
+          <span title="Wordings of this reply's text — the one shown is what the chat continues from"
+            >text {{ textShown + 1 }}/{{ textVersions }}</span
+          >
+          <button
+            class="meta-btn"
+            :disabled="!canSwitch || textShown >= textVersions - 1"
+            title="Later wording (the pictures stay as they are)"
+            @click="stepText(1)"
+          >
+            ›
+          </button>
+        </div>
+        <div v-if="textBox" class="prompt-box text-box">
+          <textarea
+            v-model="textBox.text"
+            v-focus-select
+            rows="2"
+            placeholder="How should the text change? e.g. shorter, funnier, in French…"
+            @keydown.enter.exact.prevent="submitTextEdit"
+            @keydown.esc="textBox = null"
+          ></textarea>
+          <div class="prompt-box-actions">
+            <span class="prompt-box-hint">Rewrites the text only — the pictures stay</span>
+            <button class="meta-btn" @click="textBox = null">Cancel</button>
+            <button class="edit-send" :disabled="!textBox.text.trim()" @click="submitTextEdit">Edit</button>
+          </div>
+        </div>
 
         <div v-if="message.media?.length" class="media-grid" :class="{ single: message.media.length === 1 }">
           <div
@@ -395,15 +451,19 @@ const requestItem = ref(null)
               <audio v-else-if="item.kind === 'audio'" :src="url(item)" class="media-audio" controls></audio>
               <video v-else :src="url(item)" controls loop playsinline preload="metadata"></video>
               <div v-if="versionsOf(item).length" class="ver-nav" @click.stop>
-                <button :disabled="versionAt(item) === 0" title="Earlier version" @click="stepVersion(item, -1)">
+                <button
+                  :disabled="!canSwitch || versionAt(item) === 0"
+                  title="Earlier version — it becomes the picture the chat uses"
+                  @click="stepVersion(item, -1)"
+                >
                   ‹
                 </button>
-                <span :title="versionAt(item) < versionsOf(item).length ? shownItem(item).prompt : 'Latest'">
-                  {{ versionAt(item) + 1 }}/{{ versionsOf(item).length + 1 }}
+                <span :title="`Version ${versionAt(item) + 1}: ${item.prompt || ''}`">
+                  {{ versionAt(item) + 1 }}/{{ versionCount(item) }}
                 </span>
                 <button
-                  :disabled="versionAt(item) === versionsOf(item).length"
-                  title="Later version"
+                  :disabled="!canSwitch || versionAt(item) >= versionCount(item) - 1"
+                  title="Later version — it becomes the picture the chat uses"
                   @click="stepVersion(item, 1)"
                 >
                   ›
@@ -464,6 +524,14 @@ const requestItem = ref(null)
                 v-if="item.source === 'generated' && item.prompt && message.status !== 'streaming'"
                 class="error-actions"
               >
+                <button
+                  v-if="versionsOf(item).length && canSwitch"
+                  class="retry-btn"
+                  title="Keep the picture this card had before the attempt that failed"
+                  @click="emit('media-version', { mediaId: item.id, index: versionsOf(item).length - 1 })"
+                >
+                  ‹ Back to the previous picture
+                </button>
                 <button
                   class="retry-btn primary"
                   title="Run the same prompt again, on the model selected now"
@@ -595,14 +663,24 @@ const requestItem = ref(null)
             <button v-if="displayText" class="meta-btn" title="Copy reply" @click="copy(displayText, 'reply')">
               {{ copiedKey === 'reply' ? '✓' : '⧉' }}
             </button>
-            <button
-              v-if="canRetry && message.media?.length"
-              class="meta-btn"
-              title="Rewrite: write these words again and replace them here. The pictures are kept as they are."
-              @click="emit('reword')"
-            >
-              <svg class="ic sm"><use href="#s-pencil" /></svg> Rewrite
-            </button>
+            <template v-if="canRewordNow">
+              <button
+                v-if="displayText"
+                class="meta-btn"
+                title="Edit text: say how to change these words and they are replaced here. The pictures stay; the old words are kept (‹ › on the text)."
+                @click="textBox = { text: '' }"
+              >
+                <svg class="ic sm"><use href="#s-pencil" /></svg> Edit text
+              </button>
+              <button
+                v-if="message.media?.length"
+                class="meta-btn"
+                title="Redo text: write these words again and replace them here. The pictures stay; the old words are kept (‹ › on the text)."
+                @click="emit('reword', '')"
+              >
+                <svg class="ic sm"><use href="#s-refresh" /></svg> Redo text
+              </button>
+            </template>
             <button
               v-if="canRetry"
               class="meta-btn"

@@ -54,8 +54,8 @@ const TOOLS = [
         </a>
         <button class="link" @click="$emit('import')">
           <span class="lmain"
-            ><span class="llabel">Import chats…</span
-            ><span class="lnote">Bring in an export from another instance</span></span
+            ><span class="llabel">Import / Export</span
+            ><span class="lnote">Move chats between instances, or bring in a ChatGPT export</span></span
           >
           <svg class="ic"><use href="#s-chev" /></svg>
         </button>

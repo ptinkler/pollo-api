@@ -105,6 +105,8 @@ const {
   enhanceDraft,
   useImage,
   reword,
+  showTextVersion,
+  showMediaVersion,
   toggleFav,
   renameThread,
   removeThread,
@@ -594,6 +596,8 @@ onMounted(() => {
           @branch="switchBranch"
           @use-image="useImage"
           @reword="reword"
+          @text-version="showTextVersion"
+          @media-version="showMediaVersion"
           @regenerate="regenerateMedia"
           @pin="pinMedia"
           @delete="deleteExchange"

@@ -17,6 +17,8 @@ import {
   retryChatMessage,
   editChatMessage,
   rewordChatMessage,
+  showChatTextVersion,
+  showChatMediaVersion,
   regenerateChatMedia,
   enhanceChatPrompt,
   estimateChatCost,
@@ -526,8 +528,21 @@ export function useStudio({ models, settings, showToast }) {
     return conv.id
   }
 
+  // Set from the moment Send is pressed until the turn is under way. `sending`
+  // only switches on inside runTurn, after ensureThread() (a network call for a
+  // new thread) — without this a second Enter/click in that gap passed
+  // canSend and sent, and paid for, the prompt twice.
+  let submitting = false
   async function send() {
-    if (!canSend.value) return
+    if (!canSend.value || submitting) return
+    submitting = true
+    try {
+      await sendNow()
+    } finally {
+      submitting = false
+    }
+  }
+  async function sendNow() {
     const content = draft.value.trim()
     const sent = attachments.value.filter(a => a.file && !unusedAttachments.value.has(a.key))
     const nImages = sent.filter(a => !a.video && !a.audio).length
@@ -554,12 +569,15 @@ export function useStudio({ models, settings, showToast }) {
     messages.value.push(tempUser)
     draft.value = ''
     clearAttachments()
-    await runTurn(
+    // Don't wait for the whole reply: once runTurn has started (chat turns are
+    // then guarded by `sending`) a gallery send can go again straight away.
+    const turn = runTurn(
       sendChatMessage,
       id,
       { ...turnSettings(), content, attachments: sent.map(a => a.file), lane: lane.value },
       tempUser,
     )
+    await Promise.race([turn, new Promise(r => setTimeout(r, 400))])
   }
 
   async function retry(msg) {
@@ -761,7 +779,12 @@ export function useStudio({ models, settings, showToast }) {
       enhancing.value = false
     }
   }
+  // Cards whose regenerate request is in flight: a double click on "Try
+  // again" would otherwise start (and pay for) two generations
+  const regenerating = new Set()
   async function regenerateMedia(msg, { mediaId, model, prompt, edit, replace }) {
+    if (regenerating.has(mediaId)) return
+    regenerating.add(mediaId)
     if (!model) {
       const kind = (msg.media || []).find(i => i.id === mediaId)?.kind
       if (kind && selected[kind]) model = selected[kind]
@@ -771,12 +794,39 @@ export function useStudio({ models, settings, showToast }) {
       polling.ensure()
     } catch (e) {
       showToast(e.message, 'error')
+    } finally {
+      regenerating.delete(mediaId)
     }
   }
-  // Write a reply's words again, keeping the pictures it already made
-  async function reword(msg) {
+  // Write a reply's words again, keeping the pictures it already made.
+  // With an instruction the model edits its words; without, it redoes them.
+  // The old words stay as a version (the ‹ › on the text).
+  async function reword(msg, instruction = '') {
     if (sending.value || messageIndex(msg.id) === -1) return
-    await runTurn(rewordChatMessage, active.value, { ...turnSettings(), message_id: msg.id }, null)
+    await runTurn(
+      rewordChatMessage,
+      active.value,
+      { ...turnSettings(), message_id: msg.id, instruction: instruction || '' },
+      null,
+    )
+  }
+  // Make another of a card's pictures the real one (free: nothing is generated)
+  async function showMediaVersion(msg, { mediaId, index }) {
+    if (sending.value) return
+    try {
+      replaceMessage(await showChatMediaVersion(msg.id, mediaId, index))
+    } catch (e) {
+      showToast(e.message, 'error')
+    }
+  }
+  // Flip a reply's text to another wording (free: nothing is generated)
+  async function showTextVersion(msg, index) {
+    if (sending.value) return
+    try {
+      replaceMessage(await showChatTextVersion(msg.id, index))
+    } catch (e) {
+      showToast(e.message, 'error')
+    }
   }
   async function pinMedia(msg, { mediaId, pinned: on }) {
     try {
@@ -991,6 +1041,8 @@ export function useStudio({ models, settings, showToast }) {
     deleteExchange,
     useImage,
     reword,
+    showTextVersion,
+    showMediaVersion,
     toggleFav,
     renameThread,
     removeThread,

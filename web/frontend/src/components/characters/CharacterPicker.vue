@@ -1,11 +1,13 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { characterAvatar } from '../../composables/useCharacters'
-import { useDropdown } from '../../composables/useDropdown'
 import { defaultIcon, defaultTitle as fromTitle } from '../../utils/defaults'
+import PickDialog from '../PickDialog.vue'
 
-// Attached characters as chips, plus a menu to attach more. Editing and
-// creating happen in CharacterEditor; this only emits 'edit' / 'create'.
+// Attached characters as chips, plus a dialog to pick more (a grid of
+// pictures: names aren't unique, so a chat's own "Linh" and a library "Linh"
+// are told apart by face and badge). Editing and creating happen in
+// CharacterEditor; this only emits 'edit' / 'create'.
 const props = defineProps({
   modelValue: { type: Array, default: () => [] }, // attached character ids
   characters: { type: Array, default: () => [] }, // what can be attached
@@ -19,7 +21,9 @@ const props = defineProps({
 // 'hide' / 'unhide': a default character's id, switched off / on in this chat only
 const emit = defineEmits(['update:modelValue', 'edit', 'create', 'hide', 'unhide'])
 
-const { open, root, toggle, close } = useDropdown()
+const open = ref(false)
+const close = () => (open.value = false)
+const toggle = () => (open.value = !open.value)
 
 const byId = computed(() => new Map(props.characters.map(c => [c.id, c])))
 const inheritedIds = computed(() => [...props.inherited, ...props.hidden].map(x => x.id))
@@ -29,7 +33,6 @@ const hiddenItems = computed(() =>
 
 function unhide(c) {
   emit('unhide', c.id)
-  close()
 }
 const fromDefaults = computed(() =>
   props.inherited.map(x => byId.value.get(x.id) && { ...byId.value.get(x.id), from: x.from }).filter(Boolean),
@@ -46,7 +49,6 @@ const available = computed(() =>
 
 function attach(c) {
   emit('update:modelValue', [...props.modelValue, c.id])
-  close()
 }
 
 function detach(c) {
@@ -60,10 +62,35 @@ function create() {
   close()
   emit('create')
 }
+
+// Every character as a card: in use (own, or from the defaults) or not
+const card = (c, on, from) => ({
+  key: `${from ? 'd' : ''}${c.id}`,
+  id: c.id,
+  name: c.name,
+  sub: c.description || '',
+  img: characterAvatar(c) || null,
+  badge: c.adhoc ? 'This chat' : 'Library',
+  from: from ? `${defaultIcon(from)} ${fromTitle(from)}` : undefined,
+  on,
+  kind: from ? 'default' : 'own',
+})
+const cards = computed(() => [
+  ...attached.value.map(c => card(c, true)),
+  ...fromDefaults.value.map(c => card(c, true, c.from)),
+  ...hiddenItems.value.map(c => card(c, false, c.from)),
+  ...available.value.map(c => card(c, false)),
+])
+function onToggle(item) {
+  const c = byId.value.get(item.id)
+  if (!c) return
+  if (item.kind === 'default') return item.on ? emit('hide', c.id) : unhide(c)
+  return item.on ? detach(c) : attach(c)
+}
 </script>
 
 <template>
-  <div ref="root" class="char-picker">
+  <div class="char-picker">
     <div class="chips">
       <span
         v-for="c in fromDefaults"
@@ -98,32 +125,19 @@ function create() {
       </button>
     </div>
 
-    <div v-if="open" class="menu">
-      <button v-for="c in available" :key="c.id" class="item" @click="attach(c)">
-        <img v-if="characterAvatar(c)" :src="characterAvatar(c)" alt="" />
-        <span v-else class="avatar-blank">👤</span>
-        <span class="item-name">{{ c.name }}</span>
-        <span v-if="c.adhoc" class="tag">this chat</span>
-      </button>
-      <template v-if="hiddenItems.length">
-        <p class="menu-head">Hidden in this chat</p>
-        <button
-          v-for="c in hiddenItems"
-          :key="`h${c.id}`"
-          class="item hidden-default"
-          :title="`Use ${c.name} here again`"
-          @click="unhide(c)"
-        >
-          <img v-if="characterAvatar(c)" :src="characterAvatar(c)" alt="" />
-          <span v-else class="avatar-blank">👤</span>
-          <span class="item-name">{{ c.name }}</span>
-        </button>
+    <PickDialog
+      :open="open"
+      title="Characters"
+      :items="cards"
+      empty="No characters yet"
+      search-placeholder="Search characters"
+      @toggle="onToggle"
+      @close="close"
+    >
+      <template v-if="allowCreate" #actions>
+        <button type="button" class="btn btn-secondary" @click="create">{{ createLabel }}</button>
       </template>
-      <p v-if="!available.length && !hiddenItems.length" class="empty">
-        {{ characters.length ? 'All attached' : 'No characters yet' }}
-      </p>
-      <button v-if="allowCreate" class="item create" @click="create">{{ createLabel }}</button>
-    </div>
+    </PickDialog>
   </div>
 </template>
 
@@ -164,19 +178,6 @@ function create() {
   opacity: 0.75;
 }
 
-.menu-head {
-  font-size: 0.65rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text2);
-  padding: 6px 8px 2px;
-}
-
-.item.hidden-default {
-  opacity: 0.6;
-  text-decoration: line-through;
-}
-
 .chip-main {
   display: inline-flex;
   align-items: center;
@@ -190,7 +191,6 @@ function create() {
 }
 
 .chip img,
-.item img,
 .avatar-blank {
   width: 22px;
   height: 22px;
@@ -229,67 +229,5 @@ function create() {
 .add:hover {
   color: var(--text);
   border-color: var(--accent);
-}
-
-.menu {
-  position: absolute;
-  z-index: 50;
-  top: calc(100% + 4px);
-  left: 0;
-  min-width: 220px;
-  max-height: 280px;
-  overflow-y: auto;
-  padding: 4px;
-  background: var(--spanel2);
-  border: 1px solid var(--sborder);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-pop);
-}
-
-.item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 8px;
-  border: none;
-  border-radius: 8px;
-  background: none;
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-
-.item:hover {
-  background: var(--surface2);
-}
-
-.item-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.item.create {
-  color: var(--accent2);
-  font-weight: 600;
-  border-top: 1px solid var(--border);
-  border-radius: 0 0 8px 8px;
-}
-
-.tag {
-  font-size: 0.65rem;
-  padding: 1px 6px;
-  border-radius: 6px;
-  background: var(--surface2);
-  color: var(--yellow);
-}
-
-.empty {
-  font-size: 0.8rem;
-  color: var(--text2);
-  padding: 6px 8px;
 }
 </style>

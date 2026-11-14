@@ -6,29 +6,58 @@ import CharacterEditor from '../components/characters/CharacterEditor.vue'
 const linh = { id: 1, name: 'Linh', description: 'red scarf', images: ['a.png'], adhoc: false }
 const bao = { id: 2, name: 'Bao', description: '', images: [], adhoc: true }
 
+// The picker's dialog is teleported to <body>: query the document, unmount after
+const cards = () => [...document.body.querySelectorAll('.dialog .card')]
+const cardNames = () => cards().map(c => c.querySelector('.name-text').textContent.trim())
+const click = async el => {
+  el.click()
+  await flushPromises()
+}
+
 describe('CharacterPicker', () => {
   it('shows attached characters and attaches / detaches', async () => {
-    const w = mount(CharacterPicker, { props: { modelValue: [1], characters: [linh, bao] } })
+    const w = mount(CharacterPicker, { props: { modelValue: [1], characters: [linh, bao] }, attachTo: document.body })
     expect(w.findAll('.chip').map(c => c.text())).toEqual([expect.stringContaining('Linh')])
     expect(w.find('.chip img').attributes('src')).toBe('/api/characters/1/images/a.png')
 
     await w.find('.add').trigger('click')
-    const items = w.findAll('.menu .item:not(.create)')
-    expect(items.map(i => i.text())).toEqual([expect.stringContaining('Bao')])
-    await items[0].trigger('click')
+    // Every character is a card; the attached one is on
+    expect(cardNames()).toEqual(['Linh', 'Bao'])
+    expect(cards().map(c => c.getAttribute('aria-pressed'))).toEqual(['true', 'false'])
+    await click(cards()[1])
     expect(w.emitted('update:modelValue')[0][0]).toEqual([1, 2])
+    await click(cards()[0]) // tapping an attached one detaches it
+    expect(w.emitted('update:modelValue')[1][0]).toEqual([])
 
     await w.find('.chip-x').trigger('click')
-    expect(w.emitted('update:modelValue')[1][0]).toEqual([])
+    expect(w.emitted('update:modelValue')[2][0]).toEqual([])
+    w.unmount()
+  })
+
+  it('tells same-named characters apart by where they live', async () => {
+    const ownLinh = { id: 3, name: 'Linh', description: 'short, blue coat', images: [], adhoc: true }
+    const w = mount(CharacterPicker, {
+      props: { modelValue: [], characters: [linh, ownLinh] },
+      attachTo: document.body,
+    })
+    await w.find('.add').trigger('click')
+    expect(cards().map(c => c.querySelector('.badge').textContent.trim())).toEqual(['Library', 'This chat'])
+    expect(cards()[1].querySelector('.sub').textContent).toContain('blue coat')
+    w.unmount()
   })
 
   it('emits edit and create', async () => {
-    const w = mount(CharacterPicker, { props: { modelValue: [1], characters: [linh] } })
+    const w = mount(CharacterPicker, { props: { modelValue: [1], characters: [linh] }, attachTo: document.body })
     await w.find('.chip-main').trigger('click')
     expect(w.emitted('edit')[0][0]).toEqual(linh)
     await w.find('.add').trigger('click')
-    await w.find('.item.create').trigger('click')
+    const create = [...document.body.querySelectorAll('.dialog .actions button')].find(b =>
+      b.textContent.includes('New character'),
+    )
+    await click(create)
     expect(w.emitted('create')).toHaveLength(1)
+    expect(cards()).toHaveLength(0) // the dialog closed for the editor
+    w.unmount()
   })
 })
 

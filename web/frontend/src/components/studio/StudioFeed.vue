@@ -17,6 +17,8 @@ defineEmits([
   'branch',
   'use-image',
   'reword',
+  'text-version',
+  'media-version',
   'regenerate',
   'pin',
   'delete',
@@ -65,12 +67,15 @@ watch(
         :can-edit="m.role === 'user' && typeof m.id === 'number' && !sending"
         :can-switch="!sending"
         :can-branch="typeof m.id === 'number' && !sending && m.status !== 'streaming'"
+        :can-reword="m.role === 'assistant' && typeof m.id === 'number' && !sending && m.status !== 'streaming'"
         @retry="$emit('retry', m)"
         @edit="content => $emit('edit', m, content)"
         @resend="$emit('resend', m)"
         @branch="$emit('branch', $event)"
         @use-image="$emit('use-image', $event)"
-        @reword="$emit('reword', m)"
+        @reword="instruction => $emit('reword', m, instruction)"
+        @text-version="index => $emit('text-version', m, index)"
+        @media-version="payload => $emit('media-version', m, payload)"
         @regenerate="payload => $emit('regenerate', m, payload)"
         @pin="payload => $emit('pin', m, payload)"
         @delete="$emit('delete', m)"

@@ -57,7 +57,7 @@ from web.chat.tools import (
 )
 from web.chat.workers import ctx_thread
 from web.core.metadata import get_db
-from web.core.metadata.models import Character, ChatMessage
+from web.core.metadata.models import Character, ChatInstruction, ChatMessage
 from web.providers import openrouter, provider_for, stream_chat
 from web.types import JsonValue
 
@@ -93,8 +93,13 @@ class Turn:
         emit: Callable[[dict[str, object]], None],
         cancel: threading.Event,
         initial_cost: float = 0.0,
+        rewrite: tuple[str, str] | None = None,
     ) -> None:
-        """Set up the turn: which conversation, which settings, which message row."""
+        """Set up the turn: which conversation, which settings, which message row.
+
+        `rewrite` is (the reply's current words, how to change them): the chat
+        model sees its reply and the instruction, and writes it again.
+        """
         self.conv_id = conv_id
         self.s = settings
         self.message_id = message_id
@@ -113,6 +118,10 @@ class Turn:
         # are being generated again), so the total stays right.
         self.cost = initial_cost
         self.media: list[dict[str, JsonValue]] = []
+        self.rewrite = rewrite
+        # Generation calls already run this turn: a model that repeats the
+        # exact same call (same tool, same arguments) isn't charged twice
+        self._calls_made: set[str] = set()
 
     # ― entry point ―
     def run(self) -> None:
@@ -323,7 +332,7 @@ class Turn:
             # can explain or try again.)
 
     def _tools(self) -> list[dict[str, JsonValue]]:
-        names = [c.name for c in self.characters]
+        names = list(dict.fromkeys(c.name for c in self.characters))  # a name shared by two is listed once
         tools: list[dict[str, JsonValue]] = (
             [cast("dict[str, JsonValue]", TOOLS_CREATE_CHARACTER)] if self.s.image_model else []
         )
@@ -410,10 +419,22 @@ class Turn:
             return self._create_character(args)
         if name == "create_instruction":
             return self._create_instruction(args)
-        if name == "generate_audio":
-            return self._audio_tool(args)
-        if name not in ("generate_image", "generate_video"):
+        if name not in ("generate_image", "generate_video", "generate_audio"):
             return {"ok": False, "error": f"Unknown tool {name}"}
+        # Models sometimes repeat a call word for word (twice in one response,
+        # or again next round). Each would be billed, so a call identical to
+        # one that already went through is answered without running it again.
+        # A failed call isn't remembered, so the model can still retry it.
+        fingerprint = f"{name}:{json.dumps(args, sort_keys=True)}"
+        if fingerprint in self._calls_made:
+            log.warning("msg %s: skipped a repeated %s call", self.message_id, name)
+            return {"ok": True, "note": "Already made exactly this earlier in this reply — not made again."}
+        result = self._audio_tool(args) if name == "generate_audio" else self._media_tool(name, args)
+        if result.get("ok"):
+            self._calls_made.add(fingerprint)
+        return result
+
+    def _media_tool(self, name: str, args: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
         prompt = str(args.get("prompt") or "").strip()
         if not prompt:
             return {"ok": False, "error": "prompt is required"}
@@ -559,16 +580,15 @@ class Turn:
         name = str(args.get("name") or "").strip()[:100]
         if not name:
             return {"ok": False, "error": "name is required"}
-        existing = next(
-            (c for c in characters.available(self.conv_id, self.db) if c.name.strip().lower() == name.lower()), None
-        )
+        # Names needn't be unique: only one already in this chat stops it (the
+        # model should use that one). A library character of the same name
+        # that isn't attached is someone else — this chat gets its own.
+        existing = next((c for c in self.characters if c.name.strip().lower() == name.lower()), None)
         if existing:
-            how = (
-                "use it by name"
-                if existing.id in {c.id for c in self.characters}
-                else "the user can attach it to this chat with the characters button"
-            )
-            return {"ok": False, "error": f"There's already a character called {name}; {how}"}
+            return {
+                "ok": False,
+                "error": f"{name} is already one of this chat's characters; name them in `characters` to use them",
+            }
         images = args.get("images")
         try:
             n = max(1, min(4, int(images or 1))) if isinstance(images, str | int | float) else 1
@@ -599,9 +619,10 @@ class Turn:
             return {"ok": False, "error": "name is required"}
         if not content:
             return {"ok": False, "error": "content is required"}
-        existing = next((i for i in self.db.list_instructions() if i.name.strip().lower() == name.lower()), None)
-        if existing:
-            return {"ok": False, "error": f"There's already an instruction called {name}; pick another name."}
+        # Only an instruction already applied to this chat stops it; the same
+        # name elsewhere in the library is a separate instruction.
+        if any(i.name.strip().lower() == name.lower() for i in self._chat_instructions()):
+            return {"ok": False, "error": f"This chat already has an instruction called {name}; pick another name."}
         item = self.db.save_instruction(name=name, content=content)
         conv = self.db.get_conversation(self.conv_id)
         ids = [*(conv.instruction_ids if conv else []), item.id]
@@ -612,6 +633,16 @@ class Turn:
             "result": f"Instruction “{name}” saved and attached to this chat; it applies from your next reply. "
             f"The user can edit it, group it, or attach it to other chats from the Instructions panel.",
         }
+
+    def _chat_instructions(self) -> list[ChatInstruction]:
+        """The instruction snippets applied to this chat: its own, its defaults', and those in its groups."""
+        conv = self.db.get_conversation(self.conv_id)
+        ids = set(effective_ids(conv, "instruction"))
+        group_ids = set(effective_ids(conv, "instruction_group"))
+        for group in self.db.list_instruction_groups():
+            if group.id in group_ids:
+                ids.update(group.snippet_ids)
+        return [i for i in self.db.list_instructions() if i.id in ids]
 
     def _characters_usable(self) -> bool:
         """Return whether this turn's selected models can use characters.
@@ -846,9 +877,24 @@ class Turn:
         note = characters_note(self.characters)
         if note:
             messages.append({"role": "system", "content": note})
-        return messages + conversation(
+        messages += conversation(
             self.conv_id, self.history, self.s.history_limit, vision, as_tool_calls, self.s.image_limit
         )
+        if self.rewrite:
+            previous, instruction = self.rewrite
+            rewrite_turn: list[dict[str, JsonValue]] = [
+                {"role": "assistant", "content": previous},
+                {
+                    "role": "user",
+                    "content": (
+                        "Rewrite your reply above with this change: "
+                        f"{instruction}\n\nReply with the complete rewritten reply only — no preamble, "
+                        "no comments on what changed."
+                    ),
+                },
+            ]
+            messages += rewrite_turn
+        return messages
 
     # ― title ―
     def _start_title(self) -> _TitleJob | None:

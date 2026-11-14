@@ -104,18 +104,25 @@ describe('StudioInstructionsPage', () => {
   })
 })
 
+// The picker's dialog is teleported to <body>: query the document
+const pickCards = () => [...document.body.querySelectorAll('.dialog .card')]
+const pickNames = () => pickCards().map(c => c.querySelector('.name-text').textContent.trim())
+const actionButton = text =>
+  [...document.body.querySelectorAll('.dialog .actions button')].find(b => b.textContent.includes(text))
+
 describe('InstructionPicker', () => {
-  it('opens the editor for a new snippet or group from the add menu', async () => {
-    const w = mount(InstructionPicker, { props: { instructions: [], groups: [], snippetIds: [], groupIds: [] } })
+  it('opens the editor for a new snippet or group from the dialog', async () => {
+    const w = mount(InstructionPicker, {
+      props: { instructions: [], groups: [], snippetIds: [], groupIds: [] },
+      attachTo: document.body,
+    })
     await w.find('.add').trigger('click')
-    const items = w.findAll('.menu .item')
-    await items.find(i => i.text().includes('New snippet')).trigger('click')
+    actionButton('New snippet').click()
+    await flushPromises()
     expect(w.emitted('edit')[0]).toEqual([{ kind: 'snippet', id: null }])
     await w.find('.add').trigger('click')
-    await w
-      .findAll('.menu .item')
-      .find(i => i.text().includes('New group'))
-      .trigger('click')
+    actionButton('New group').click()
+    await flushPromises()
     expect(w.emitted('edit')[1]).toEqual([{ kind: 'group', id: null }])
     w.unmount()
   })
@@ -141,6 +148,7 @@ describe('InstructionPicker', () => {
         inheritedGroups: [{ id: 7, from: 'All chats' }],
         hiddenSnippets: [{ id: 3, from: 'All chats' }],
       },
+      attachTo: document.body,
     })
     const inherited = w.findAll('.chip.inherited')
     expect(inherited.map(c => c.find('.chip-name').text())).toEqual(['📦 House style', 'Terse tone'])
@@ -149,14 +157,13 @@ describe('InstructionPicker', () => {
     expect(w.emitted('hide')).toEqual([[{ kind: 'snippet', id: 1 }]])
     // The hidden one is offered to switch back on, not to attach as the chat's own
     await w.find('.add').trigger('click')
-    expect(w.findAll('.menu .item').map(i => i.text())).toEqual([
-      'No emoji🌐',
-      '+ New snippet',
-      '+ New group',
-      'All instructions',
-    ])
-    await w.find('.menu .item.hidden-default').trigger('click')
+    const hidden = pickCards().find(c => c.querySelector('.name-text').textContent.trim() === 'No emoji')
+    expect(hidden.classList).toContain('default')
+    expect(hidden.getAttribute('aria-pressed')).toBe('false')
+    hidden.click()
+    await flushPromises()
     expect(w.emitted('unhide')).toEqual([[{ kind: 'snippet', id: 3 }]])
+    expect(w.emitted('update:snippetIds')).toBeUndefined()
     w.unmount()
   })
 
@@ -180,17 +187,21 @@ describe('InstructionPicker', () => {
     w.unmount()
   })
 
-  it('searches the add menu once there is a lot to pick from', async () => {
-    const many = Array.from({ length: 10 }, (_, i) => ({ id: 100 + i, name: `Snippet ${i}`, content: '' }))
-    const w = mount(InstructionPicker, { props: { instructions: many, groups: [], snippetIds: [], groupIds: [] } })
+  it('searches names and text, and attaches with a tap', async () => {
+    const many = Array.from({ length: 10 }, (_, i) => ({ id: 100 + i, name: `Snippet ${i}`, content: `body ${i}` }))
+    const w = mount(InstructionPicker, {
+      props: { instructions: many, groups: [], snippetIds: [], groupIds: [] },
+      attachTo: document.body,
+    })
     await w.find('.add').trigger('click')
-    await w.find('.menu-search').setValue('7')
-    expect(w.findAll('.menu .item').map(i => i.text())).toEqual([
-      'Snippet 7',
-      '+ New snippet',
-      '+ New group',
-      'All instructions',
-    ])
+    const search = document.body.querySelector('.dialog .search')
+    search.value = 'body 7'
+    search.dispatchEvent(new Event('input'))
+    await flushPromises()
+    expect(pickNames()).toEqual(['Snippet 7'])
+    pickCards()[0].click()
+    await flushPromises()
+    expect(w.emitted('update:snippetIds')).toEqual([[[107]]])
     w.unmount()
   })
 })

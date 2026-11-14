@@ -109,6 +109,9 @@ def mentioned(chars: list[Character], text: str, prefer: list[Character] = ()) -
     Match full names or unambiguous short names, preferring longer or explicit names.
     """
     found = [c for c in chars if _has_name(text, c.name)]
+    # Two with one name (a library one attached beside the chat's own): the chat's own
+    own_names = {c.name.strip().lower() for c in found if c.conversation_id is not None}
+    found = [c for c in found if c.conversation_id is not None or c.name.strip().lower() not in own_names]
     covering = found + list(prefer)
     found = [c for c in found if not any(_part_of(c, o) for o in covering)]
     short = [
@@ -121,11 +124,14 @@ def named(chars: list[Character], names: list[str] | None) -> list[Character]:
     """Resolve model-provided names to known characters.
 
     Names may match a full character name or an unambiguous short name.
+    Names aren't unique: if the user attached a library character with the
+    same name as one of this chat's own, the name means the chat's own.
     """
     out = []
     for n in names or []:
         n = str(n).strip().lower()
-        hit = next((c for c in chars if c.name.strip().lower() == n), None) or next(
+        same = sorted((c for c in chars if c.name.strip().lower() == n), key=lambda c: c.conversation_id is None)
+        hit = (same[0] if same else None) or next(
             (c for c in chars if (s := _short_name(c, chars)) and s.lower() == n), None
         )
         if hit and hit not in out:

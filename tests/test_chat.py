@@ -363,9 +363,10 @@ class TestTurns:
         # The model still wrote its reply after saving
         assert ev[-1]["message"]["content"] == "Aye, saving that.\n\nArr, done!"
 
-    def test_create_instruction_rejects_a_duplicate_name(self, client, conv, chat, monkeypatch, db):
-        """Test that create instruction rejects a duplicate name."""
-        db.save_instruction(name="Pirate", content="existing")
+    def test_create_instruction_rejects_a_name_already_in_this_chat(self, client, conv, chat, monkeypatch, db):
+        """A name already applied to this chat is refused; elsewhere in the library it's fine."""
+        existing = db.save_instruction(name="Pirate", content="existing")
+        db.update_conversation(conv["id"], instruction_ids=[existing.id])
         rounds = iter(
             [
                 _tool_chunks("create_instruction", {"name": "pirate", "content": "You are a pirate."}),
@@ -388,7 +389,15 @@ class TestTurns:
         assert len(db.list_instructions()) == 1
         result = json.loads(calls[1][-1]["content"])
         assert not result["ok"]
-        assert "already an instruction" in result["error"]
+        assert "already has an instruction" in result["error"]
+
+    def test_create_instruction_reuses_a_library_name(self, client, conv, chat, monkeypatch, db):
+        """A library instruction not on this chat doesn't block the name."""
+        db.save_instruction(name="Pirate", content="existing")
+        rounds = iter([_tool_chunks("create_instruction", {"name": "Pirate", "content": "Arr."}), _text_chunks("ok")])
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(rounds))
+        client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "x", "mode": "auto", **SETTINGS})
+        assert [i.name for i in db.list_instructions()] == ["Pirate", "Pirate"]
 
     def test_failed_tool_gets_follow_up_round(self, client, conv, chat, monkeypatch):
         """Test that failed tool gets follow up round."""
@@ -4167,6 +4176,61 @@ class TestEditAndRewordInPlace:
         # not an edit: the picture isn't sent back, the original reference stands
         assert db.get_chat_message(msg.id).media[0]["params"]["refs"] == ["img_ref.png"]
 
+    def test_the_picture_showing_is_the_real_one(self, client, conv, chat, db, monkeypatch):
+        """Going back to an earlier picture makes it the item's file, prompt and settings."""
+        msg = self._reply(db, conv)
+        self._inline(chat, monkeypatch)
+        self._capture(monkeypatch, {})
+        client.post(
+            f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={"prompt": "a fox, wider", "replace": True}
+        )
+        new_file = db.get_chat_message(msg.id).media[0]["file"]
+        out = client.post(f"/api/chat/messages/{msg.id}/media/m1/version", json={"index": 0}).json()
+        item = out["media"][0]
+        assert (item["file"], item["prompt"], item["version_shown"]) == ("img_old.png", "a fox", 0)
+        assert [v["file"] for v in item["versions"]] == [new_file]
+        # and forward again
+        item = client.post(f"/api/chat/messages/{msg.id}/media/m1/version", json={"index": 1}).json()["media"][0]
+        assert (item["file"], item["version_shown"]) == (new_file, 1)
+        assert [v["file"] for v in item["versions"]] == ["img_old.png"]
+
+    def test_a_redo_from_an_earlier_picture_goes_last(self, client, conv, chat, db, monkeypatch):
+        """With version 1 of 2 showing, a redo becomes version 3, keeping both."""
+        msg = self._reply(db, conv)
+        self._inline(chat, monkeypatch)
+        self._capture(monkeypatch, {})
+        client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={"prompt": "b", "replace": True})
+        second = db.get_chat_message(msg.id).media[0]["file"]
+        client.post(f"/api/chat/messages/{msg.id}/media/m1/version", json={"index": 0})
+        client.post(f"/api/chat/messages/{msg.id}/media/m1/regenerate", json={"prompt": "c", "replace": True})
+        item = db.get_chat_message(msg.id).media[0]
+        assert [v["file"] for v in item["versions"]] == ["img_old.png", second]
+        assert item["version_shown"] == 2
+        assert item["prompt"] == "c"
+
+    def test_switching_keeps_every_charge(self, client, conv, chat, db):
+        """Swapping which picture is live doesn't change what the chat spent."""
+        msg = self._reply(db, conv, credits=5, versions=[{"file": "img_a.png", "credits": 3}])
+        before = db.get_chat_spend(conv["id"])
+        client.post(f"/api/chat/messages/{msg.id}/media/m1/version", json={"index": 0})
+        assert db.get_chat_spend(conv["id"]) == before
+
+    def test_a_failed_attempt_still_counts_after_going_back(self, client, conv, chat, db):
+        """Pollo bills a failed generation: its credits stay in the spend when the card goes back."""
+        msg = self._reply(
+            db, conv, file=None, status="error", error="nope", credits=4, versions=[{"file": "img_a.png", "credits": 3}]
+        )
+        out = client.post(f"/api/chat/messages/{msg.id}/media/m1/version", json={"index": 0}).json()
+        assert out["media"][0]["file"] == "img_a.png"
+        assert out["media"][0]["status"] == "done"
+        assert db.get_chat_spend(conv["id"])[1] == 7
+
+    def test_no_switching_while_it_is_being_made(self, client, conv, chat, db):
+        """Test that a pending card can't be switched."""
+        msg = self._reply(db, conv, status="pending", versions=[{"file": "img_a.png"}])
+        r = client.post(f"/api/chat/messages/{msg.id}/media/m1/version", json={"index": 0})
+        assert r.status_code == 409
+
     def test_editing_without_a_picture_is_refused(self, client, conv, chat, db):
         """Test that editing without a picture is refused."""
         msg = self._reply(db, conv, file=None, status="error", error="nope")
@@ -4198,14 +4262,104 @@ class TestEditAndRewordInPlace:
         assert len(after.media) == 1
         assert after.media[0]["file"] == "img_old.png"
 
-    def test_reword_keeps_what_the_picture_cost(self, client, conv, chat, db, monkeypatch):
-        """Test that reword keeps what the picture cost."""
+    def test_reword_keeps_everything_the_reply_cost(self, client, conv, chat, db, monkeypatch):
+        """The old words were paid for (and stay as a version), so their cost stays in the total."""
         msg = self._reply(db, conv)
+        db.update_chat_message(msg.id, cost=0.03)  # 0.01 of words + the picture's 0.02
         monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: _text_chunks("Reworded."))
         _events(client.post(f"/api/chat/conversations/{conv['id']}/reword", json={"message_id": msg.id, **SETTINGS}))
-        # the image's 0.02 survives and the new words are added; crucially the
-        # old 0.01 of words is replaced, not kept (that would give 0.031)
-        assert db.get_chat_message(msg.id).cost == 0.021
+        assert db.get_chat_message(msg.id).cost == 0.031
+
+    def test_reword_keeps_the_old_words_as_a_version(self, client, conv, chat, db, monkeypatch):
+        """Redo text files both wordings, and the arrows switch between them."""
+        msg = self._reply(db, conv)
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: _text_chunks("A new telling."))
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/reword", json={"message_id": msg.id, **SETTINGS}))
+        after = db.get_chat_message(msg.id)
+        assert after.to_dict()["text_versions"] == 2
+        assert after.to_dict()["text_shown"] == 1
+        back = client.post(f"/api/chat/messages/{msg.id}/text-version", json={"index": 0}).json()
+        assert back["content"] == "Here is your fox."
+        assert back["text_shown"] == 0
+        # the picture is untouched by switching words
+        assert back["media"][0]["file"] == "img_old.png"
+        assert db.get_chat_message(msg.id).content == "Here is your fox."
+
+    def test_a_failed_reword_adds_no_version(self, client, conv, chat, db, monkeypatch):
+        """Nothing came back: the old words return and no empty version is filed."""
+        msg = self._reply(db, conv)
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: _text_chunks(""))
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/reword", json={"message_id": msg.id, **SETTINGS}))
+        assert db.get_chat_message(msg.id).to_dict()["text_versions"] == 0
+
+    def test_edit_text_sends_the_old_words_and_the_instruction(self, client, conv, chat, db, monkeypatch):
+        """Edit text: the model sees its reply and how to change it."""
+        msg = self._reply(db, conv)
+        sent = {}
+
+        def fake(model, messages, *a, **k):
+            sent["messages"] = messages
+            return _text_chunks("A shorter fox.")
+
+        monkeypatch.setattr(openrouter, "stream_chat", fake)
+        body = {"message_id": msg.id, "instruction": "make it shorter", **SETTINGS}
+        _events(client.post(f"/api/chat/conversations/{conv['id']}/reword", json=body))
+        assert sent["messages"][-2] == {"role": "assistant", "content": "Here is your fox."}
+        assert "make it shorter" in sent["messages"][-1]["content"]
+        assert db.get_chat_message(msg.id).content == "A shorter fox."
+
+    def test_switching_words_is_refused_mid_reply(self, client, conv, chat, db):
+        """Test that the wording can't be switched while the reply streams."""
+        msg = self._reply(db, conv)
+        db.update_chat_message(
+            msg.id, status="streaming", text_versions_json='{"items": [{"content": "a"}, {"content": "b"}], "shown": 1}'
+        )
+        r = client.post(f"/api/chat/messages/{msg.id}/text-version", json={"index": 0})
+        assert r.status_code == 409
+
+    def test_replaced_pictures_still_count_towards_spend(self, conv, db):
+        """A redone picture's credits move into `versions`; they were still billed."""
+        db.add_chat_message(conv["id"], "user", "draw")
+        db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "",
+            media=[
+                {
+                    "id": "m1",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "done",
+                    "file": "b.png",
+                    "credits": 5,
+                    "versions": [{"file": "a.png", "credits": 3}],
+                }
+            ],
+        )
+        assert db.get_chat_spend(conv["id"])[1] == 8
+
+    def test_a_pollo_charge_is_credits_or_dollars_not_both(self, conv, db):
+        """Pollo's costUsd is its credits converted: an item carrying both is charged once, in credits."""
+        db.add_chat_message(conv["id"], "user", "draw")
+        db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "",
+            media=[
+                {
+                    "id": "m1",
+                    "kind": "image",
+                    "source": "generated",
+                    "status": "done",
+                    "file": "b.png",
+                    "credits": 5,
+                    "cost": 0.3,
+                    "versions": [{"file": "a.png", "credits": 3, "cost": 0.18}],
+                }
+            ],
+        )
+        [row] = db.spend_rows([conv["id"]])
+        assert (row["usd"], row["credits"]) == (0.0, 8)
 
     def test_reword_puts_the_old_words_back_if_nothing_comes_out(self, client, conv, chat, db, monkeypatch):
         """Test that reword puts the old words back if nothing comes out."""
@@ -4322,3 +4476,49 @@ def test_a_webm_attachment_is_recorded_as_a_video(client, conv, chat, db):
     )
     user = next(m for m in db.get_chat_messages(conv["id"]) if m.role == "user")
     assert [i["kind"] for i in user.media] == ["video", "audio", "image"]
+
+
+class TestNoDoubleCharges:
+    """Guards against paying twice for one request."""
+
+    def test_a_second_send_while_a_reply_streams_is_refused(self, client, conv, db):
+        """A double-clicked Send (or a second tab) can't start a second paid turn."""
+        db.add_chat_message(conv["id"], "user", "hi")
+        db.add_chat_message(conv["id"], "assistant", "", status="streaming")
+        r = client.post(
+            f"/api/chat/conversations/{conv['id']}/messages", json={"content": "again", "mode": "auto", **SETTINGS}
+        )
+        assert r.status_code == 409
+
+    def test_gallery_sends_still_run_side_by_side(self, client, conv, db, monkeypatch):
+        """Gallery exchanges never wait on the chat."""
+        db.add_chat_message(conv["id"], "user", "hi")
+        db.add_chat_message(conv["id"], "assistant", "", status="streaming")
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: _text_chunks("ok"))
+        r = client.post(
+            f"/api/chat/conversations/{conv['id']}/messages",
+            json={"content": "x", "mode": "text", "lane": "gallery", **SETTINGS},
+        )
+        assert r.status_code == 200
+
+    def test_a_repeated_identical_tool_call_is_not_made_twice(self, client, conv, chat, monkeypatch):
+        """A model repeating the same generate_image call word for word is only billed once."""
+        args = {"prompt": "a cat"}
+        rounds = iter(
+            [_tool_chunks("generate_image", args), _tool_chunks("generate_image", args), _text_chunks("Done.")]
+        )
+        monkeypatch.setattr(openrouter, "stream_chat", lambda *a, **k: next(rounds))
+        made = []
+        monkeypatch.setattr(
+            openrouter,
+            "generate_image",
+            lambda model, prompt, **kw: (made.append(prompt), ([(_png_bytes(), "image/png")], 0.04))[1],
+        )
+        ev = _events(
+            client.post(
+                f"/api/chat/conversations/{conv['id']}/messages",
+                json={"content": "draw a cat", "mode": "auto", **SETTINGS},
+            )
+        )
+        assert made == ["a cat"]
+        assert len(ev[-1]["message"]["media"]) == 1

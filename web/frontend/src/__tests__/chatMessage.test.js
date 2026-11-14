@@ -523,38 +523,106 @@ describe('ChatMessage earlier versions of a picture', () => {
     expect(w.find('.ver-nav span').text()).toBe('2/2')
   })
 
-  it('flips back to the picture it replaced', async () => {
-    const w = mount(ChatMessage, reply([versioned]))
+  it('asks for the picture it replaced to become the real one', async () => {
+    const w = mount(ChatMessage, { props: { ...reply([versioned]).props, canSwitch: true } })
     const [back, forward] = w.findAll('.ver-nav button')
     expect(forward.attributes('disabled')).toBeDefined() // already on the newest
     await back.trigger('click')
+    expect(w.emitted('media-version')).toEqual([[{ mediaId: versioned.id, index: 0 }]])
+  })
+
+  it('shows where the live picture sits once an earlier one was chosen', () => {
+    const chosen = { ...versioned, file: 'img_a.png', versions: [{ file: 'img_new.png' }], version_shown: 0 }
+    const w = mount(ChatMessage, { props: { ...reply([chosen]).props, canSwitch: true } })
     expect(w.find('.ver-nav span').text()).toBe('1/2')
     expect(w.find('img').attributes('src')).toContain('img_a.png')
-    await w.findAll('.ver-nav button')[0].trigger('click') // can't go past the oldest
-    expect(w.find('.ver-nav span').text()).toBe('1/2')
+    const [back, forward] = w.findAll('.ver-nav button')
+    expect(back.attributes('disabled')).toBeDefined()
+    expect(forward.attributes('disabled')).toBeUndefined()
+  })
+
+  it('cannot switch mid-reply', () => {
+    const w = mount(ChatMessage, reply([versioned]))
+    for (const b of w.findAll('.ver-nav button')) expect(b.attributes('disabled')).toBeDefined()
+  })
+
+  it('offers the previous picture back after a failed redo', async () => {
+    const failed = { ...versioned, status: 'error', file: null, error: 'nope' }
+    const w = mount(ChatMessage, { props: { ...reply([failed]).props, canSwitch: true } })
+    await w.find('button[title^="Keep the picture this card had"]').trigger('click')
+    expect(w.emitted('media-version')).toEqual([[{ mediaId: failed.id, index: 0 }]])
   })
 })
 
-describe('ChatMessage reword a reply', () => {
-  // Rewording is offered where Retry is: on the newest reply of a branch
-  const latest = media => {
-    const r = reply(media)
-    return { props: { ...r.props, canRetry: true } }
+describe('ChatMessage edit and redo the text in place', () => {
+  // Offered on any finished reply (the feed passes canReword); the pictures stay
+  const rewordable = (media, extra = {}) => {
+    const r = reply(media, extra)
+    return { props: { ...r.props, canReword: true, canSwitch: true } }
   }
 
-  it('is offered on a reply that made media, and emits reword', async () => {
-    const w = mount(ChatMessage, latest([image]))
-    await w.find('button[title^="Rewrite"]').trigger('click')
-    expect(w.emitted('reword')).toHaveLength(1)
+  it('Redo text is offered on a reply that made media, and emits reword with no instruction', async () => {
+    const w = mount(ChatMessage, rewordable([image]))
+    await w.find('button[title^="Redo text"]').trigger('click')
+    expect(w.emitted('reword')).toEqual([['']])
   })
 
-  it('is not offered on a reply with no media to keep', () => {
-    expect(mount(ChatMessage, latest([])).find('button[title^="Rewrite"]').exists()).toBe(false)
+  it('Redo text is not offered on a reply with no media to keep (Retry covers it)', () => {
+    expect(mount(ChatMessage, rewordable([])).find('button[title^="Redo text"]').exists()).toBe(false)
   })
 
-  it('is not offered on an older reply, where Retry is not either', () => {
+  it('Edit text sends the instruction', async () => {
+    const w = mount(ChatMessage, rewordable([image]))
+    await w.find('button[title^="Edit text"]').trigger('click')
+    await w.find('.text-box textarea').setValue('make it shorter')
+    await w.find('.text-box .edit-send').trigger('click')
+    expect(w.emitted('reword')).toEqual([['make it shorter']])
+    expect(w.find('.text-box').exists()).toBe(false)
+  })
+
+  it('is not offered while the reply cannot be reworded', () => {
     const w = mount(ChatMessage, reply([image]))
-    expect(w.find('button[title^="Rewrite"]').exists()).toBe(false)
+    expect(w.find('button[title^="Redo text"]').exists()).toBe(false)
+    expect(w.find('button[title^="Edit text"]').exists()).toBe(false)
+  })
+
+  it('is not offered while a picture is still being made', () => {
+    const w = mount(ChatMessage, rewordable([{ ...image, status: 'pending', file: null }]))
+    expect(w.find('button[title^="Redo text"]').exists()).toBe(false)
+  })
+})
+
+describe('ChatMessage earlier wordings of the text', () => {
+  const worded = (shown, extra = {}) => ({
+    props: { ...reply([image]).props, canSwitch: true, ...extra },
+  })
+  const withVersions = (shown, props = {}) => {
+    const w = worded(shown, props)
+    w.props.message = { ...w.props.message, text_versions: 3, text_shown: shown }
+    return w
+  }
+
+  it('has no text arrows until the text has been rewritten', () => {
+    expect(mount(ChatMessage, worded()).find('.text-ver').exists()).toBe(false)
+  })
+
+  it('shows which wording is up, apart from the picture versions', () => {
+    const w = mount(ChatMessage, withVersions(1))
+    expect(w.find('.text-ver span').text()).toBe('text 2/3')
+    expect(w.find('.ver-nav').exists()).toBe(false) // the picture has no versions of its own
+  })
+
+  it('asks for the neighbouring wording', async () => {
+    const w = mount(ChatMessage, withVersions(1))
+    const [back, forward] = w.findAll('.text-ver button')
+    await back.trigger('click')
+    await forward.trigger('click')
+    expect(w.emitted('text-version')).toEqual([[0], [2]])
+  })
+
+  it('cannot switch mid-reply', () => {
+    const w = mount(ChatMessage, withVersions(1, { canSwitch: false }))
+    for (const b of w.findAll('.text-ver button')) expect(b.attributes('disabled')).toBeDefined()
   })
 })
 

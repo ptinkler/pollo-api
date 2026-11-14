@@ -28,6 +28,7 @@ from web import characters, keyctx, media, user_keys, vpn
 from web.auth import USER_COOKIE, set_user_cookie, user_secret
 from web.chat import router as chat_router
 from web.chat import startup_resume_chat
+from web.chat_export import router as chat_export_router
 from web.chatgpt_import import router as chatgpt_import_router
 from web.core.env import bool_env
 from web.core.get_task import get_credit_balance
@@ -270,6 +271,7 @@ app.include_router(public_media_router)
 app.include_router(dev_login_router)
 app.include_router(chat_router)
 app.include_router(chatgpt_import_router)
+app.include_router(chat_export_router)
 app.include_router(characters.router)
 app.include_router(media.router)
 app.include_router(vpn.router)

@@ -35,6 +35,12 @@ export const forkConversation = (convId, messageId) =>
 // and `replace` swaps it in place, keeping the old one as an earlier version.
 export const regenerateChatMedia = (messageId, mediaId, { model = null, prompt, edit, replace } = {}) =>
   apiPost(`/api/chat/messages/${messageId}/media/${enc(mediaId)}/regenerate`, { model, prompt, edit, replace })
+// Show one of a reply's wordings (0 = first); its pictures are untouched
+export const showChatTextVersion = (messageId, index) =>
+  apiPost(`/api/chat/messages/${messageId}/text-version`, { index })
+// Make one of a card's pictures the real one (0 = first): the chat uses it from then on
+export const showChatMediaVersion = (messageId, mediaId, index) =>
+  apiPost(`/api/chat/messages/${messageId}/media/${enc(mediaId)}/version`, { index })
 // Pinned images go to the image model as references with every new image on this branch
 export const pinChatMedia = (messageId, mediaId, pinned) =>
   apiPost(`/api/chat/messages/${messageId}/media/${enc(mediaId)}/pin`, { pinned })
@@ -88,6 +94,10 @@ export function sendChatGptUploadChunk(id, offset, blob) {
   form.append('chunk', blob, 'chunk')
   return apiPost(`/api/chat/import/chatgpt/uploads/${enc(id)}`, form)
 }
+// Chats as a zip the Import dialog (here or on another server) reads back; no ids = every chat
+export const chatExportUrl = (ids = []) => `/api/chat/export${ids.length ? `?ids=${enc(ids.join(','))}` : ''}`
+// Every chat, for picking which to export: { chats: [{ id, title, kind, space, updated_at }] }
+export const fetchExportableChats = () => apiGet('/api/chat/export/chats')
 export const cancelChatGptUpload = id => apiDelete(`/api/chat/import/chatgpt/uploads/${enc(id)}`)
 export const uploadChatAttachment = (convId, file) =>
   apiUpload(`/api/chat/conversations/${enc(convId)}/attachments`, file)
@@ -163,6 +173,7 @@ export const retryChatMessage = (convId, body, onEvent, signal) =>
 export const editChatMessage = (convId, body, onEvent, signal) =>
   streamTurn(`/api/chat/conversations/${enc(convId)}/edit`, body, onEvent, signal)
 
-// Write a reply's words again, keeping the pictures it already made
+// Write a reply's words again, keeping the pictures it already made.
+// Body: turn settings + message_id, and `instruction` to edit the words (empty = redo them)
 export const rewordChatMessage = (convId, body, onEvent, signal) =>
   streamTurn(`/api/chat/conversations/${enc(convId)}/reword`, body, onEvent, signal)

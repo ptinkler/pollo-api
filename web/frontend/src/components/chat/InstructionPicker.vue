@@ -2,10 +2,10 @@
 import { ref, computed } from 'vue'
 import { instructionColor } from '../../utils/format'
 import { defaultIcon as fromIcon, defaultTitle as fromTitle } from '../../utils/defaults'
-import { useDropdown } from '../../composables/useDropdown'
+import PickDialog from '../PickDialog.vue'
 
-// Attached instruction groups and snippets as chips, plus a menu to attach
-// more. Editing and creating happen in InstructionEditor (and the Instructions page); this
+// Attached instruction groups and snippets as chips, plus a dialog to pick
+// more (names aren't unique, so each card shows a preview of its text). Editing and creating happen in InstructionEditor (and the Instructions page); this
 // only attaches/detaches, and emits 'edit' ({ kind, id }: a chip was
 // clicked) or 'manage' to open that dialog.
 const props = defineProps({
@@ -37,11 +37,9 @@ const emit = defineEmits([
   'resume',
 ])
 
-const SEARCH_FROM = 8 // the menu gets a search box once there's this much to pick from
-
-const query = ref('')
-const searchInput = ref(null)
-const { open, root, toggle, close } = useDropdown({ focus: searchInput, onOpen: () => (query.value = '') })
+const open = ref(false)
+const close = () => (open.value = false)
+const toggle = () => (open.value = !open.value)
 
 const snippetById = computed(() => new Map(props.instructions.map(s => [s.id, s])))
 const groupById = computed(() => new Map(props.groups.map(g => [g.id, g])))
@@ -51,8 +49,8 @@ const fromDefaults = (list, byId) =>
   list.map(x => byId.get(x.id) && { ...byId.get(x.id), from: x.from }).filter(Boolean)
 const defaultGroups = computed(() => fromDefaults(props.inheritedGroups, groupById.value))
 const defaultSnippets = computed(() => fromDefaults(props.inheritedSnippets, snippetById.value))
-const hiddenGroupItems = computed(() => fromDefaults(props.hiddenGroups, groupById.value).filter(matches))
-const hiddenSnippetItems = computed(() => fromDefaults(props.hiddenSnippets, snippetById.value).filter(matches))
+const hiddenGroupItems = computed(() => fromDefaults(props.hiddenGroups, groupById.value))
+const hiddenSnippetItems = computed(() => fromDefaults(props.hiddenSnippets, snippetById.value))
 const attachedGroups = computed(() =>
   props.groupIds
     .filter(id => !inheritedGroupIds.value.includes(id))
@@ -72,27 +70,14 @@ const anyAttached = computed(
     attachedGroups.value.length ||
     attachedSnippets.value.length,
 )
-const matches = item => item.name.toLowerCase().includes(query.value.trim().toLowerCase())
 const unattachedGroups = computed(() =>
   props.groups.filter(g => !props.groupIds.includes(g.id) && !inheritedGroupIds.value.includes(g.id)),
 )
 const unattachedSnippets = computed(() =>
   props.instructions.filter(s => !props.snippetIds.includes(s.id) && !inheritedSnippetIds.value.includes(s.id)),
 )
-const searchable = computed(() => unattachedGroups.value.length + unattachedSnippets.value.length >= SEARCH_FROM)
-const availableGroups = computed(() => unattachedGroups.value.filter(matches))
-const availableSnippets = computed(() => unattachedSnippets.value.filter(matches))
-const nothingToAdd = computed(
-  () =>
-    !availableGroups.value.length &&
-    !availableSnippets.value.length &&
-    !hiddenGroupItems.value.length &&
-    !hiddenSnippetItems.value.length,
-)
-
 function unhide(kind, item) {
   emit('unhide', { kind, id: item.id })
-  close()
 }
 
 function groupTitle(g) {
@@ -102,7 +87,6 @@ function groupTitle(g) {
 
 function attachGroup(g) {
   emit('update:groupIds', [...props.groupIds, g.id])
-  close()
 }
 
 function detachGroup(g) {
@@ -114,7 +98,6 @@ function detachGroup(g) {
 
 function attachSnippet(s) {
   emit('update:snippetIds', [...props.snippetIds, s.id])
-  close()
 }
 
 function detachSnippet(s) {
@@ -139,10 +122,57 @@ function manage() {
   close()
   emit('manage')
 }
+
+// Every group and snippet as a card: in use (own, or from the defaults) or not
+const preview = text => (text || '').replace(/\s+/g, ' ').trim().slice(0, 140)
+const groupCard = (g, on, from) => ({
+  key: `g${from ? 'd' : ''}${g.id}`,
+  id: g.id,
+  type: 'group',
+  section: 'Groups',
+  icon: '📦',
+  name: g.name,
+  sub: groupTitle(g),
+  from: from ? `${fromIcon(from)} ${fromTitle(from)}` : undefined,
+  on,
+  kind: from ? 'default' : 'own',
+})
+const snippetCard = (sn, on, from) => ({
+  key: `s${from ? 'd' : ''}${sn.id}`,
+  id: sn.id,
+  type: 'snippet',
+  section: 'Snippets',
+  dot: instructionColor(sn.name),
+  name: sn.name,
+  sub: preview(sn.content),
+  from: from ? `${fromIcon(from)} ${fromTitle(from)}` : undefined,
+  on,
+  kind: from ? 'default' : 'own',
+})
+const cards = computed(() => [
+  ...attachedGroups.value.map(g => groupCard(g, true)),
+  ...defaultGroups.value.map(g => groupCard(g, true, g.from)),
+  ...hiddenGroupItems.value.map(g => groupCard(g, false, g.from)),
+  ...unattachedGroups.value.map(g => groupCard(g, false)),
+  ...attachedSnippets.value.map(sn => snippetCard(sn, true)),
+  ...defaultSnippets.value.map(sn => snippetCard(sn, true, sn.from)),
+  ...hiddenSnippetItems.value.map(sn => snippetCard(sn, false, sn.from)),
+  ...unattachedSnippets.value.map(sn => snippetCard(sn, false)),
+])
+function onToggle(item) {
+  const byId = item.type === 'group' ? groupById.value : snippetById.value
+  const it = byId.get(item.id)
+  if (!it) return
+  if (item.kind === 'default') {
+    return item.on ? emit('hide', { kind: item.type, id: it.id }) : unhide(item.type, it)
+  }
+  if (item.type === 'group') return item.on ? detachGroup(it) : attachGroup(it)
+  return item.on ? detachSnippet(it) : attachSnippet(it)
+}
 </script>
 
 <template>
-  <div ref="root" class="ins-picker">
+  <div class="ins-picker">
     <div class="chips">
       <span
         v-for="g in defaultGroups"
@@ -241,62 +271,21 @@ function manage() {
       </button>
     </div>
 
-    <div v-if="open" class="menu">
-      <input
-        v-if="searchable"
-        ref="searchInput"
-        v-model="query"
-        type="search"
-        class="menu-search"
-        placeholder="Search"
-        aria-label="Search instructions"
-        @keydown.esc="close"
-      />
-      <p v-if="availableGroups.length" class="menu-head">Groups</p>
-      <button v-for="g in availableGroups" :key="`g${g.id}`" class="item" @click="attachGroup(g)">
-        <span class="item-name">📦 {{ g.name }}</span>
-        <span class="tag">{{ g.snippet_ids?.length || 0 }}</span>
-      </button>
-      <p v-if="availableSnippets.length" class="menu-head">Snippets</p>
-      <button v-for="s in availableSnippets" :key="`s${s.id}`" class="item" :title="s.name" @click="attachSnippet(s)">
-        <span class="dot" :style="{ background: instructionColor(s.name) }"></span>
-        <span class="item-name">{{ s.name }}</span>
-      </button>
-      <template v-if="hiddenGroupItems.length || hiddenSnippetItems.length">
-        <p class="menu-head">Hidden in this chat</p>
-        <button
-          v-for="g in hiddenGroupItems"
-          :key="`hg${g.id}`"
-          class="item hidden-default"
-          :title="`Use ${g.name} here again (${fromTitle(g.from).toLowerCase()})`"
-          @click="unhide('group', g)"
-        >
-          <span class="item-name">📦 {{ g.name }}</span>
-          <span class="tag">{{ fromIcon(g.from) }}</span>
-        </button>
-        <button
-          v-for="s in hiddenSnippetItems"
-          :key="`hs${s.id}`"
-          class="item hidden-default"
-          :title="`Use ${s.name} here again (${fromTitle(s.from).toLowerCase()})`"
-          @click="unhide('snippet', s)"
-        >
-          <span class="dot" :style="{ background: instructionColor(s.name) }"></span>
-          <span class="item-name">{{ s.name }}</span>
-          <span class="tag">{{ fromIcon(s.from) }}</span>
-        </button>
+    <PickDialog
+      :open="open"
+      title="Instructions"
+      :items="cards"
+      empty="No instructions saved yet"
+      search-placeholder="Search instructions"
+      @toggle="onToggle"
+      @close="close"
+    >
+      <template v-if="manageable" #actions>
+        <button type="button" class="btn btn-secondary" @click="create('snippet')">+ New snippet</button>
+        <button type="button" class="btn btn-secondary" @click="create('group')">+ New group</button>
+        <button type="button" class="btn btn-secondary" @click="manage">All instructions</button>
       </template>
-      <p v-if="nothingToAdd" class="empty">
-        {{
-          query.trim() ? 'Nothing matches' : instructions.length || groups.length ? 'All attached' : 'None saved yet'
-        }}
-      </p>
-      <div v-if="manageable" class="menu-foot">
-        <button class="item action" @click="create('snippet')">+ New snippet</button>
-        <button class="item action" @click="create('group')">+ New group</button>
-        <button class="item action" @click="manage">All instructions</button>
-      </div>
-    </div>
+    </PickDialog>
   </div>
 </template>
 
@@ -369,11 +358,6 @@ function manage() {
   opacity: 0.75;
 }
 
-.item.hidden-default .item-name {
-  opacity: 0.6;
-  text-decoration: line-through;
-}
-
 .dot {
   flex-shrink: 0;
   width: 7px;
@@ -400,14 +384,6 @@ function manage() {
 
 .chip-main:hover {
   text-decoration: underline;
-}
-
-.menu-search {
-  width: 100%;
-  margin-bottom: 4px;
-  padding: 6px 9px;
-  border-radius: 7px;
-  font-size: 0.82rem;
 }
 
 .chip-x {
@@ -439,81 +415,10 @@ function manage() {
   border-color: var(--accent);
 }
 
-.menu {
-  position: absolute;
-  z-index: 50;
-  top: calc(100% + 4px);
-  left: 0;
-  min-width: 220px;
-  max-height: 300px;
-  overflow-y: auto;
-  padding: 4px;
-  background: var(--spanel2);
-  border: 1px solid var(--sborder);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-pop);
-}
-
-.menu-head {
-  font-size: 0.65rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text2);
-  padding: 6px 8px 2px;
-}
-
-.item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 8px;
-  border: none;
-  border-radius: 8px;
-  background: none;
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-
-.item:hover {
-  background: var(--surface2);
-}
-
-.item-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* Actions at the foot of the menu: quiet rows under a divider */
 .menu-foot {
   margin-top: 4px;
   padding-top: 4px;
   border-top: 1px solid var(--border);
-}
-
-.item.action {
-  color: var(--text2);
-}
-
-.item.action:hover {
-  color: var(--text);
-}
-
-.tag {
-  font-size: 0.65rem;
-  padding: 1px 6px;
-  border-radius: 6px;
-  background: var(--surface2);
-  color: var(--accent2);
-}
-
-.empty {
-  font-size: 0.8rem;
-  color: var(--text2);
-  padding: 6px 8px;
 }
 </style>

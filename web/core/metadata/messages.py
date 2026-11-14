@@ -5,6 +5,7 @@ deletion.
 """
 
 import json
+from collections.abc import Mapping
 from datetime import datetime
 from typing import TypedDict, cast
 
@@ -40,6 +41,31 @@ def _number(value: JsonValue) -> float:
     return float(value) if isinstance(value, int | float) else 0.0
 
 
+def _charge(item: Mapping[str, JsonValue]) -> tuple[float, float]:
+    """One generation's charge as (usd, credits): credits OR dollars, never both.
+
+    Pollo bills in credits (its `costUsd` is the same charge converted at a
+    fixed rate, and the usage page converts credits itself), so an item with
+    credits counts only those; anything else counts its dollar `cost`.
+    """
+    credits = _number(item.get("credits"))
+    return (0.0, credits) if credits else (_number(item.get("cost")), 0.0)
+
+
+def _item_charge(item: dict[str, JsonValue], key: str) -> float:
+    """An item's dollars (`key="cost"`) or credits, plus those of the pictures it replaced.
+
+    A replaced picture (Edit / Redo on a card) moves into `versions`, and a
+    failed attempt's charge into `spent`; both were paid for, so both still
+    count towards what the chat has spent.
+    """
+    replaced = item.get("versions")
+    spent = item.get("spent")  # failed attempts it no longer shows
+    earlier = [*(replaced if isinstance(replaced, list) else []), *(spent if isinstance(spent, list) else [])]
+    charges = [_charge(item)] + [_charge(v) for v in earlier if isinstance(v, dict)]
+    return sum(usd if key == "cost" else credits for usd, credits in charges)
+
+
 # add_chat_message's default parent: continue the branch being shown
 class _AppendParent:
     """Sentinel for appending to the currently shown branch."""
@@ -56,8 +82,8 @@ def _media_row(conv_id: str, at: datetime, item: dict[str, JsonValue]) -> SpendR
         "at": at,
         "model": model if isinstance(model, str) else None,
         "kind": kind if isinstance(kind, str) else "image",
-        "usd": _number(item.get("cost")),
-        "credits": int(_number(item.get("credits"))),
+        "usd": _item_charge(item, "cost"),
+        "credits": int(_item_charge(item, "credits")),
     }
 
 
@@ -272,10 +298,10 @@ class MessageMixin(DBBase):
             for msg in session.query(ChatMessage).filter(ChatMessage.conversation_id == conversation_id):
                 usd += msg.cost or 0
                 for item in msg.media:
-                    credits += int(_number(item.get("credits")))
+                    credits += int(_item_charge(item, "credits"))
             for lib in session.query(ChatLibraryItem).filter(ChatLibraryItem.conversation_id == conversation_id):
-                usd += _number(lib.item.get("cost"))
-                credits += int(_number(lib.item.get("credits")))
+                usd += _item_charge(lib.item, "cost")
+                credits += int(_item_charge(lib.item, "credits"))
             return round(usd, 6), int(credits)
 
     def spend_rows(self, conversation_ids: list[str]) -> list[SpendRow]:
@@ -304,13 +330,15 @@ class MessageMixin(DBBase):
                         }
                     )
                 rows.extend(
-                    _media_row(msg.conversation_id, msg.created_at, item) for item in msg.media if item.get("credits")
+                    _media_row(msg.conversation_id, msg.created_at, item)
+                    for item in msg.media
+                    if _item_charge(item, "credits")
                 )
             libs = session.query(ChatLibraryItem).filter(ChatLibraryItem.conversation_id.in_(conversation_ids))
             rows.extend(
                 _media_row(lib.conversation_id, lib.created_at, lib.item)
                 for lib in libs
-                if _number(lib.item.get("credits")) or _number(lib.item.get("cost"))
+                if _item_charge(lib.item, "credits") or _item_charge(lib.item, "cost")
             )
         return rows
 

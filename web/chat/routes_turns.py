@@ -8,8 +8,8 @@ import json
 import queue
 import threading
 import uuid
-from collections.abc import Iterator, Mapping
-from typing import Any
+from collections.abc import Callable, Iterator, Mapping
+from typing import Any, cast
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
@@ -57,6 +57,13 @@ from web.uploads import safe_filename
 # Live turns' cancel flags, keyed by the assistant message id (set by the
 # cancel route, checked by the running Turn).
 _cancel_events: dict[int, threading.Event] = {}
+
+# Starting a turn checks that the chat is idle and then marks a reply as
+# streaming; a media retry checks its card isn't already running and then
+# marks it pending. Each is a check-then-act, and FastAPI runs these routes on
+# a thread pool — so a double click (or two tabs) could slip both requests
+# past the check and pay twice. One lock makes each check-and-mark atomic.
+_start_lock = threading.Lock()
 
 
 @router.post("/enhance-prompt")
@@ -145,9 +152,14 @@ def api_send_message(conv_id: str, data: SendMessage) -> StreamingResponse:
 
     db = get_db()
     lane = "gallery" if data.lane == "gallery" else None
-    user_msg = db.add_chat_message(conv_id, "user", content, media=media, mode=data.mode, lane=lane)
-    remember_settings(conv, data)
-    return _start_turn(conv_id, data, user_msg, parent_id=user_msg.id, lane=lane)
+    with _start_lock:
+        # One reply at a time in the chat (gallery exchanges run side by side):
+        # a second send while one streams would be a double charge, and its
+        # reply would be written against a half-finished history.
+        require_idle(conv_id, lane)
+        user_msg = db.add_chat_message(conv_id, "user", content, media=media, mode=data.mode, lane=lane)
+        remember_settings(conv, data)
+        return _start_turn(conv_id, data, user_msg, parent_id=user_msg.id, lane=lane)
 
 
 @router.post("/conversations/{conv_id}/retry")
@@ -161,12 +173,13 @@ def api_retry(conv_id: str, data: RetryMessage) -> StreamingResponse:
     msg = get_db().get_chat_message(data.message_id)
     if not msg or msg.conversation_id != conv_id or msg.role != "assistant":
         raise HTTPException(400, "Can only retry an assistant message in this conversation")
-    require_idle(conv_id, msg.lane)
-    # The retry runs in the mode selected now; the prompt's mode tag follows it
-    if msg.parent_id:
-        get_db().update_chat_message(msg.parent_id, mode=data.mode)
-    remember_settings(conv, data)
-    return _start_turn(conv_id, data, None, parent_id=msg.parent_id, lane=msg.lane)
+    with _start_lock:
+        require_idle(conv_id, msg.lane)
+        # The retry runs in the mode selected now; the prompt's mode tag follows it
+        if msg.parent_id:
+            get_db().update_chat_message(msg.parent_id, mode=data.mode)
+        remember_settings(conv, data)
+        return _start_turn(conv_id, data, None, parent_id=msg.parent_id, lane=msg.lane)
 
 
 @router.post("/conversations/{conv_id}/edit")
@@ -182,16 +195,17 @@ def api_edit(conv_id: str, data: EditMessage) -> StreamingResponse:
     msg = db.get_chat_message(data.message_id)
     if not msg or msg.conversation_id != conv_id or msg.role != "user":
         raise HTTPException(400, "Can only edit a user message in this conversation")
-    require_idle(conv_id, msg.lane)
     content = data.content.strip()
     if not content and not msg.media:
         raise HTTPException(400, "Message is empty")
     media = [{**item, "id": uuid.uuid4().hex[:8]} for item in msg.media]
-    user_msg = db.add_chat_message(
-        conv_id, "user", content, media=media, parent_id=msg.parent_id, mode=data.mode, lane=msg.lane
-    )
-    remember_settings(conv, data)
-    return _start_turn(conv_id, data, user_msg, parent_id=user_msg.id, lane=msg.lane)
+    with _start_lock:
+        require_idle(conv_id, msg.lane)
+        user_msg = db.add_chat_message(
+            conv_id, "user", content, media=media, parent_id=msg.parent_id, mode=data.mode, lane=msg.lane
+        )
+        remember_settings(conv, data)
+        return _start_turn(conv_id, data, user_msg, parent_id=user_msg.id, lane=msg.lane)
 
 
 def _sse(event: dict[str, Any]) -> str:
@@ -221,16 +235,16 @@ def _stream_turn(
     assistant_id: int,
     start: dict[str, Any],
     initial_cost: float = 0.0,
-    restore: str | None = None,
+    rewrite: tuple[str, str] | None = None,
+    after: Callable[[], ChatMessage | None] | None = None,
 ) -> StreamingResponse:
     """Run a Turn against `assistant_id` and stream its events as SSE.
 
     Used
     both for a brand-new reply and for generating an existing one again.
 
-    `restore` is the text the message had before: if the run comes back with
-    nothing (it failed, or was stopped before a word arrived), it is put back,
-    so regenerating a reply's words can't lose the ones it had.
+    `after` runs once the Turn has finished and saved; if it returns a message
+    that goes out as a final "done", so the UI ends on its state.
     """
     events: queue.Queue = queue.Queue()
     cancel = threading.Event()
@@ -238,16 +252,9 @@ def _stream_turn(
 
     def worker() -> None:
         try:
-            Turn(conv_id, settings, assistant_id, events.put, cancel, initial_cost=initial_cost).run()
-            if restore:
-                msg = get_db().get_chat_message(assistant_id)
-                if msg and not (msg.content or "").strip():
-                    events.put(
-                        {
-                            "type": "done",
-                            "message": message_out(get_db().update_chat_message(assistant_id, content=restore)),
-                        }
-                    )
+            Turn(conv_id, settings, assistant_id, events.put, cancel, initial_cost=initial_cost, rewrite=rewrite).run()
+            if after and (msg := after()):
+                events.put({"type": "done", "message": message_out(msg)})
         finally:
             _cancel_events.pop(assistant_id, None)
             events.put(None)
@@ -278,6 +285,13 @@ class RewordMessage(TurnSettings):
     """Turn settings and assistant message ID for regenerating only its text."""
 
     message_id: int  # the assistant reply whose words to generate again
+    # Edit text: how to change the words ("shorter", "make it rhyme"). Empty =
+    # Redo text: write them again from the conversation alone.
+    instruction: str = ""
+
+
+def _text_versions_json(items: list[dict[str, JsonValue]], shown: int) -> str:
+    return json.dumps({"items": items, "shown": shown})
 
 
 @router.post("/conversations/{conv_id}/reword")
@@ -298,19 +312,82 @@ def api_reword(conv_id: str, data: RewordMessage) -> StreamingResponse:
         raise HTTPException(400, "Can only reword an assistant message in this conversation")
     if msg.status == "streaming":
         raise HTTPException(409, "Wait for the reply to finish first")
-    require_idle(conv_id, msg.lane)
     if any(i.get("status") == "pending" for i in msg.media):
         raise HTTPException(409, "Wait for this reply's media to finish first")
-    remember_settings(conv, data)
+    instruction = data.instruction.strip()
+    previous = msg.content or ""
+    if instruction and not previous.strip():
+        raise HTTPException(400, "This reply has no words to edit yet")
     # Only the words are generated again, whatever mode the composer is in.
     settings = data.model_copy(update={"mode": "text"})
-    # Its pictures keep their cost; the words it had are replaced by new ones.
-    media_cost = sum(float(cost) for item in msg.media if isinstance((cost := item.get("cost")), (int, float, str)))
-    previous = msg.content
-    db.update_chat_message(data.message_id, content="", status="streaming", error=None)
-    start = {"type": "start", "user_message": None, "assistant_message": message_out(msg), "replaces": msg.id}
-    start["assistant_message"] = {**start["assistant_message"], "content": "", "status": "streaming"}
-    return _stream_turn(conv_id, settings, msg.id, start, initial_cost=media_cost, restore=previous)
+    # The words being replaced were paid for too (and stay as a version you
+    # can switch back to), so the reply's cost keeps everything spent on it.
+    spent = msg.cost or 0.0
+    items: list[dict[str, JsonValue]] = msg.text_versions[0]
+    if not items:  # first rewrite: the words it has become version 1
+        items = [{"content": previous, "model": msg.model}]
+    message_id = msg.id
+
+    def after() -> ChatMessage | None:
+        """File the new words as the latest version — or, if none came, put the old ones back."""
+        done = db.get_chat_message(message_id)
+        if not done:
+            return None
+        if not (done.content or "").strip():
+            return db.update_chat_message(message_id, content=previous)
+        versions: list[dict[str, JsonValue]] = [*items, {"content": done.content, "model": settings.text_model}]
+        return db.update_chat_message(message_id, text_versions_json=_text_versions_json(versions, len(versions) - 1))
+
+    with _start_lock:
+        require_idle(conv_id, msg.lane)
+        if (db.get_chat_message(message_id) or msg).status == "streaming":
+            raise HTTPException(409, "Wait for the reply to finish first")
+        remember_settings(conv, data)
+        db.update_chat_message(message_id, content="", status="streaming", error=None)
+        start = {"type": "start", "user_message": None, "assistant_message": message_out(msg), "replaces": msg.id}
+        start["assistant_message"] = {**start["assistant_message"], "content": "", "status": "streaming"}
+        return _stream_turn(
+            conv_id,
+            settings,
+            message_id,
+            start,
+            initial_cost=spent,
+            rewrite=(previous, instruction) if instruction else None,
+            after=after,
+        )
+
+
+class ShowTextVersion(BaseModel):
+    """Which of a reply's wordings to show (0 = the first)."""
+
+    index: int
+
+
+@router.post("/messages/{message_id}/text-version")
+def api_show_text_version(message_id: int, data: ShowTextVersion) -> dict[str, Any]:
+    """Switch a reply to one of its earlier (or later) wordings.
+
+    The chosen words become the reply's text — what's shown and what the chat
+    model sees from then on. Its pictures are untouched; nothing is generated.
+    """
+    db = get_db()
+    msg = db.get_chat_message(message_id)
+    if not msg or msg.role != "assistant":
+        raise HTTPException(404, "Message not found")
+    if msg.status == "streaming":
+        raise HTTPException(409, "Wait for the reply to finish first")
+    items, _ = msg.text_versions
+    if not 0 <= data.index < len(items):
+        raise HTTPException(400, "No such version")
+    content = items[data.index]["content"]
+    updated = db.update_chat_message(
+        message_id,
+        content=content if isinstance(content, str) else "",
+        text_versions_json=_text_versions_json(items, data.index),
+    )
+    if not updated:
+        raise HTTPException(404, "Message not found")
+    return message_out(updated)
 
 
 class PinMedia(BaseModel):
@@ -369,10 +446,39 @@ class RegenerateMedia(BaseModel):
     replace: bool = False
 
 
-def _as_version(item: dict) -> dict:
+# A card's pictures: the live one is the item's own fields; the others are in
+# `versions`, and `version_shown` is where the live one sits among them all
+# (missing = last). Whichever is showing is the real one — what the chat sends
+# as context and references, pins, downloads — so the arrows swap it in.
+VERSION_FIELDS = ("file", "prompt", "model", "cost", "credits", "params", "request", "response")
+
+
+def _all_versions(item: Mapping[str, JsonValue]) -> tuple[list[dict[str, JsonValue]], int]:
+    """Every picture the card has had, in order, and which is live (None-file live ones left out)."""
+    raw = item.get("versions")
+    versions = [v for v in (raw if isinstance(raw, list) else []) if isinstance(v, dict)]
+    shown = item.get("version_shown")
+    at = (
+        shown
+        if isinstance(shown, int) and not isinstance(shown, bool) and 0 <= shown <= len(versions)
+        else len(versions)
+    )
+    live = [_as_version(item)] if item.get("file") else []
+    return [*versions[:at], *live, *versions[at:]], at
+
+
+def _spent(item: Mapping[str, JsonValue]) -> list[JsonValue]:
+    """Charges of failed attempts the card no longer shows (Pollo bills those too), so spend keeps them."""
+    raw = item.get("spent")
+    spent: list[JsonValue] = list(raw) if isinstance(raw, list) else []
+    if not item.get("file") and (item.get("cost") or item.get("credits")):
+        spent.append({"cost": item.get("cost"), "credits": item.get("credits")})
+    return spent
+
+
+def _as_version(item: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     """What a card keeps about a picture it has replaced."""
-    keep = ("file", "prompt", "model", "cost", "credits", "params", "request", "response")
-    return {k: item[k] for k in keep if item.get(k) is not None}
+    return {k: item[k] for k in VERSION_FIELDS if item.get(k) is not None}
 
 
 @router.post("/messages/{message_id}/media/{media_id}/regenerate")
@@ -381,6 +487,11 @@ def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia) 
 
     The retry runs in the background while the UI polls the message.
     """
+    with _start_lock:
+        return _regenerate_media(message_id, media_id, data)
+
+
+def _regenerate_media(message_id: int, media_id: str, data: RegenerateMedia) -> dict[str, Any]:
     db = get_db()
     msg = db.get_chat_message(message_id)
     if not msg:
@@ -407,20 +518,36 @@ def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia) 
         # Keep what it looked like before, then clear the result fields so the
         # worker fills them in on the same item. A failed attempt has no
         # picture to keep, so retrying one adds no version to flip back to.
-        old_versions = list(item.get("versions") or [])
-        versions = [*old_versions, _as_version(item)] if item.get("file") else old_versions
+        # The new picture goes last, whichever one was showing.
+        versions, _ = _all_versions(item)
+        spent = _spent(item)
         blank = dict.fromkeys(("file", "cost", "credits", "error", "job_id", "request", "response"))
         item = {**item, **blank, "status": "pending", "model": model, "prompt": prompt, "params": params}
-        item["versions"] = versions
+        item.update(versions=versions, version_shown=len(versions), spent=spent)
         msg = db.update_chat_media_item(
             message_id,
             media_id,
-            **{k: item[k] for k in (*blank, "status", "model", "prompt", "params", "versions")},
+            **{
+                k: item[k]
+                for k in (*blank, "status", "model", "prompt", "params", "versions", "version_shown", "spent")
+            },
             moderated=False,
         )
     elif item["status"] == "done":
         # Re-roll just this image/video: the original stays, a new one joins the reply
-        gone = ("file", "cost", "credits", "error", "job_id", "favourite", "pinned", "log", "versions")
+        gone = (
+            "file",
+            "cost",
+            "credits",
+            "error",
+            "job_id",
+            "favourite",
+            "pinned",
+            "log",
+            "versions",
+            "version_shown",
+            "spent",
+        )
         item = {k: v for k, v in item.items() if k not in gone}
         item = {
             **item,
@@ -452,6 +579,53 @@ def api_regenerate_media(message_id: int, media_id: str, data: RegenerateMedia) 
         name=f"chat-regen-{media_id}",
     ).start()
     return message_out(msg)
+
+
+class ShowMediaVersion(BaseModel):
+    """Which of a card's pictures to make the live one (0 = the first)."""
+
+    index: int
+
+
+@router.post("/messages/{message_id}/media/{media_id}/version")
+def api_show_media_version(message_id: int, media_id: str, data: ShowMediaVersion) -> dict[str, JsonValue]:
+    """Make one of a card's pictures the real one.
+
+    It becomes the item's file, prompt, model and settings — what the chat
+    sends from then on — and the one that was live becomes a version. Nothing
+    is generated; what each cost stays counted.
+    """
+    with _start_lock:
+        db = get_db()
+        msg = db.get_chat_message(message_id)
+        if not msg:
+            raise HTTPException(404, "Message not found")
+        if msg.status == "streaming":
+            raise HTTPException(409, "Wait for the reply to finish first")
+        item = find_media(msg, media_id)
+        if not item:
+            raise HTTPException(404, "Media not found")
+        if item.get("status") == "pending":
+            raise HTTPException(409, "Wait for the generation to finish first")
+        versions, _ = _all_versions(item)
+        if not 0 <= data.index < len(versions):
+            raise HTTPException(400, "No such version")
+        chosen = versions.pop(data.index)
+        fields: dict[str, JsonValue] = {k: chosen.get(k) for k in VERSION_FIELDS}
+        updated = db.update_chat_media_item(
+            message_id,
+            media_id,
+            **fields,
+            status="done",
+            error=None,
+            moderated=False,
+            versions=cast("JsonValue", versions),
+            version_shown=data.index,
+            spent=_spent(item),
+        )
+        if not updated:
+            raise HTTPException(404, "Message not found")
+        return message_out(updated)
 
 
 class ActiveQuery(BaseModel):

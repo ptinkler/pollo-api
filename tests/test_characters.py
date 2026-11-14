@@ -457,16 +457,18 @@ class TestUseByName:
         assert "Freckles" in got["prompt"]
         assert ev[-1]["message"]["media"][0]["params"]["refs"] == [f"char:{mai.id}/{mai.images[0]}"]
 
-    def test_create_character_needs_an_image_and_a_new_name(self, client, conv, chat, monkeypatch):
-        """Test that create character needs an image and a new name."""
-        _make(client, name="Linh")
-        replies = iter(
-            [
-                _tool_chunks("create_character", {"name": "Mai", "description": "x"}),
-                _tool_chunks("create_character", {"name": "linh", "description": "x"}, call_id="c2"),
-                _text_chunks("Sorry."),
-            ]
+    def _chat_image(self, chat, conv, db):
+        (chat.conversation_dir(conv["id"]) / "g.png").write_bytes(_png_bytes())
+        db.add_chat_message(conv["id"], "user", "draw a girl")
+        db.add_chat_message(
+            conv["id"],
+            "assistant",
+            "Here.",
+            media=[{"id": "g", "kind": "image", "source": "generated", "status": "done", "file": "g.png"}],
         )
+
+    def _run(self, client, conv, monkeypatch, *calls):
+        replies = iter([*calls, _text_chunks("Done.")])
         results = []
 
         def stream(model, messages, tools=None, **kw):
@@ -475,8 +477,39 @@ class TestUseByName:
 
         monkeypatch.setattr(openrouter, "stream_chat", stream)
         _events(client.post(f"/api/chat/conversations/{conv['id']}/messages", json={"content": "go", **SETTINGS}))
+        return results
+
+    def test_create_character_needs_an_image(self, client, conv, chat, monkeypatch):
+        """Test that create character needs an image."""
+        results = self._run(client, conv, monkeypatch, _tool_chunks("create_character", {"name": "Mai"}))
         assert "no image" in results[0]["error"]
-        assert "already a character called linh" in results[-1]["error"]
+
+    def test_a_library_name_doesnt_stop_a_chat_making_its_own(self, client, conv, chat, db, monkeypatch):
+        """Names needn't be unique: a library Linh not in this chat is someone else."""
+        library = _make(client, name="Linh")
+        self._chat_image(chat, conv, db)
+        results = self._run(client, conv, monkeypatch, _tool_chunks("create_character", {"name": "Linh"}))
+        assert results[0]["ok"]
+        linhs = [c for c in db.list_characters() if c.name == "Linh"]
+        assert len(linhs) == 2
+        own = next(c for c in linhs if c.id != library["id"])
+        assert own.conversation_id == conv["id"]
+
+    def test_a_name_already_in_this_chat_is_used_not_made_again(self, client, conv, chat, db, monkeypatch):
+        """Test that the model is told to use the chat's Linh rather than making another."""
+        linh = _make(client, name="Linh")
+        client.patch(f"/api/chat/conversations/{conv['id']}", json={"character_ids": [linh["id"]]})
+        self._chat_image(chat, conv, db)
+        results = self._run(client, conv, monkeypatch, _tool_chunks("create_character", {"name": "linh"}))
+        assert "already one of this chat's characters" in results[0]["error"]
+        assert len([c for c in db.list_characters() if c.name == "Linh"]) == 1
+
+    def test_a_shared_name_means_the_chats_own(self, db):
+        """A library Linh attached beside the chat's own Linh: "Linh" means the chat's."""
+        lib = db.create_character("Linh")
+        own = db.create_character("Linh", conversation_id="c1")
+        assert characters_mod.named([lib, own], ["linh"]) == [own]
+        assert characters_mod.mentioned([lib, own], "Linh waves") == [own]
 
 
 class TestReferenceCaps:
