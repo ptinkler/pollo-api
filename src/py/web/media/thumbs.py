@@ -3,7 +3,6 @@
 import asyncio
 import hashlib
 import io
-import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -11,6 +10,7 @@ from fastapi import HTTPException
 from fastapi.responses import FileResponse
 from PIL import Image, ImageOps
 
+from web.core.env import number_env
 from web.media import cache as media_cache
 from web.media.paths import library_kind, thumb_dir
 from web.media.video import first_frame_jpeg
@@ -21,15 +21,8 @@ THUMB_SIZE = 320  # px, the thumbnail's shorter side (grid tiles are square, cro
 DEFAULT_THUMB_WORKERS = 2
 
 
-def _thumb_workers() -> int:
-    """Thumbnails made at once (env THUMB_WORKERS, default 2): a grid asks for many together, each costs CPU."""
-    try:
-        return max(1, int(os.getenv("THUMB_WORKERS", "")))
-    except ValueError:
-        return DEFAULT_THUMB_WORKERS
-
-
-THUMB_WORKERS = _thumb_workers()
+# Thumbnails made at once (env THUMB_WORKERS, default 2): a grid asks for many together, each costs CPU
+THUMB_WORKERS = int(number_env("THUMB_WORKERS", DEFAULT_THUMB_WORKERS, minimum=1))
 
 
 def thumb_path(path: Path, size: int = THUMB_SIZE) -> Path:

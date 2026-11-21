@@ -6,13 +6,13 @@ A restored copy is unusable without the original KEYS_SECRET and PASSWORD_PEPPER
 """
 
 import logging
-import os
 import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 from web.core import config
+from web.core.env import number_env
 from web.core.metadata import get_db
 
 log = logging.getLogger(__name__)
@@ -23,21 +23,14 @@ DEFAULT_INTERVAL_HOURS = 24.0
 DEFAULT_KEEP = 7
 
 
-def _number_env(name: str, default: float) -> float:
-    try:
-        return max(0.0, float(os.getenv(name, "")))
-    except ValueError:
-        return default
-
-
 def interval_seconds() -> float:
     """Seconds between backups; 0 means backups are off."""
-    return _number_env("BACKUP_INTERVAL_HOURS", DEFAULT_INTERVAL_HOURS) * 3600
+    return number_env("BACKUP_INTERVAL_HOURS", DEFAULT_INTERVAL_HOURS) * 3600
 
 
 def keep_count() -> int:
     """How many backups to keep (at least 1)."""
-    return max(1, int(_number_env("BACKUP_KEEP", DEFAULT_KEEP)))
+    return int(number_env("BACKUP_KEEP", DEFAULT_KEEP, minimum=1))
 
 
 def list_backups(directory: Path | None = None) -> list[Path]:

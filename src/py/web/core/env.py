@@ -34,3 +34,11 @@ def email_set(name: str) -> set[str]:
 def id_set(name: str) -> set[str]:
     """A comma-separated list of ids (case kept: a provider's user ids are case-sensitive), blanks dropped."""
     return {e.strip() for e in os.getenv(name, "").split(",") if e.strip()}
+
+
+def number_env(name: str, default: float, *, minimum: float = 0.0) -> float:
+    """A number setting, at least `minimum`; `default` when it is unset or not a number."""
+    try:
+        return max(minimum, float(os.getenv(name, "")))
+    except ValueError:
+        return default

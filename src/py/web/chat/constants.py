@@ -1,7 +1,6 @@
 """Tunables and small constant tables shared across the chat package."""
 
-import os
-
+from web.core.env import number_env
 from web.media.kinds import IMAGE_EXTS
 
 __all__ = ["IMAGE_EXTS"]  # re-exported for the chat package
@@ -14,7 +13,8 @@ MAX_TOOL_ROUNDS = 4
 DEFAULT_IMAGE_LIMIT = 6
 MODELS_CACHE_TTL = 30 * 60
 CHAT_ROUND_SECONDS = 300  # cap on one LLM call (long stories stream for a while)
-VIDEO_POLL_INTERVAL = float(os.getenv("CYNO_VIDEO_POLL_SECONDS", "10"))  # the end-to-end tests poll faster
+# Seconds between video status checks (the end-to-end tests poll faster); a floor so a typo can't hammer a provider
+VIDEO_POLL_INTERVAL = number_env("CYNO_VIDEO_POLL_SECONDS", 10, minimum=0.1)
 VIDEO_POLL_TIMEOUT = 45 * 60
 VIDEO_MAX_POLL_ERRORS = 10
 DEFAULT_TITLE = "New chat"
